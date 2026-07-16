@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "tr_upper",
+      "seq": 46,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | tr a-z A-Z",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO\nWORLD\nFOO\nBAR\nBAZ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_delete",
+      "seq": 47,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | tr -d aeiou",
+      "expect": {
+        "exit": 0,
+        "stdout": "hll\nwrld\nf\nbr\nbz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_squeeze",
+      "seq": 234,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo aaabbbccc | tr -s a-z",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_complement",
+      "seq": 235,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | tr -c 'a-z\\n' '*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_delete_digits",
+      "seq": 236,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo abc123def | tr -d 0-9",
+      "expect": {
+        "exit": 0,
+        "stdout": "abcdef\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_to_newlines",
+      "seq": 237,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo 'a b c' | tr ' ' '\\n'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_no_input",
+      "seq": 556,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tr a-z A-Z",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

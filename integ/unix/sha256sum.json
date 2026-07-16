@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "sha256sum",
+      "seq": 55,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sha256sum /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1a88a6398be8b75991c1286e996ef9de20edc80b50dc704fd17b7e956c9a38ed  /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha256sum_multi",
+      "seq": 148,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sha256sum /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1a88a6398be8b75991c1286e996ef9de20edc80b50dc704fd17b7e956c9a38ed  /data/a.txt\n14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha256sum_no_input",
+      "seq": 558,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sha256sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

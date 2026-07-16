@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "lazy_exit_grep_match",
+      "seq": 567,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep hello /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lazy_exit_grep_no_match",
+      "seq": 568,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep zzz /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

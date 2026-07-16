@@ -43,7 +43,7 @@ export class Session {
   readonly sessionId: string
   cwd: string
   env: Record<string, string>
-  readonly createdAt: number
+  createdAt: number
   functions: Record<string, unknown>
   lastExitCode: number
   positionalArgs: string[]
@@ -52,7 +52,7 @@ export class Session {
   arrays: Record<string, string[]>
   stdinBuffer: AsyncLineIterator | null = null
   localVars: Map<string, string | null> | null = null
-  readonly mountModes: ReadonlyMap<string, MountMode> | null
+  mountModes: ReadonlyMap<string, MountMode> | null
   pipelineTimeoutSeconds: number | null
 
   constructor(init: SessionInit) {
@@ -97,30 +97,38 @@ export class Session {
     })
   }
 
+  /**
+   * The durable-field payload persisted by SessionStore and snapshots.
+   * Keys are snake_case, byte-identical to Python's `Session.to_dict`,
+   * so both languages can share one store (a py daemon creates the
+   * session, a node kernel tier binds it).
+   */
   toJSON(): Record<string, unknown> {
     const data: Record<string, unknown> = {
-      sessionId: this.sessionId,
+      session_id: this.sessionId,
       cwd: this.cwd,
       env: this.env,
-      createdAt: this.createdAt,
+      created_at: this.createdAt,
     }
     if (this.mountModes !== null) {
-      data.mountModes = Object.fromEntries(this.mountModes)
+      data.mount_modes = Object.fromEntries(this.mountModes)
     }
     return data
   }
 
   static fromJSON(data: {
-    sessionId: string
+    session_id: string
     cwd?: string
     env?: Record<string, string>
-    createdAt?: number
-    mountModes?: Record<string, MountMode> | null
+    created_at?: number
+    mount_modes?: Record<string, MountMode> | null
   }): Session {
-    const { mountModes, ...rest } = data
     return new Session({
-      ...rest,
-      mountModes: mountModes != null ? new Map(Object.entries(mountModes)) : null,
+      sessionId: data.session_id,
+      ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
+      ...(data.env !== undefined ? { env: data.env } : {}),
+      ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
+      mountModes: data.mount_modes != null ? new Map(Object.entries(data.mount_modes)) : null,
     })
   }
 }

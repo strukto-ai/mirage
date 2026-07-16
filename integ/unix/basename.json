@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "basename",
+      "seq": 59,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "basename /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "basename_suffix",
+      "seq": 60,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "basename /data/a.txt .txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "basename_trailing_slash",
+      "seq": 61,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "basename /data/sub/",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "basename_root",
+      "seq": 62,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "basename /",
+      "expect": {
+        "exit": 0,
+        "stdout": "/\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "basename_relative",
+      "seq": 63,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "basename data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

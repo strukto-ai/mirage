@@ -25,6 +25,7 @@ except ImportError:
 
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
+from mirage.workspace.session.session import Session
 
 
 def _prepare_mountpoint(mountpoint: str) -> None:
@@ -82,8 +83,9 @@ def _await_ready(thread: threading.Thread,
 
 def mount_background(ops: Ops,
                      mountpoint: str,
-                     root_prefix: str = "") -> threading.Thread:
-    fs = MirageFS(ops, root_prefix=root_prefix)
+                     root_prefix: str = "",
+                     session: Session | None = None) -> threading.Thread:
+    fs = MirageFS(ops, root_prefix=root_prefix, session=session)
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(target=_run_fuse,
                          args=(fs, mountpoint, True),

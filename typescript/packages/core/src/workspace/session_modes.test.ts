@@ -14,6 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
+import { RAMSessionStore } from './session/ram.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -168,5 +169,28 @@ describe('per-session mount grants', () => {
     const sess = ws.createSession('agent', { mounts: { '/a': 'rw' } })
     expect(sess.mountModes?.get('/a')).toBe(MountMode.WRITE)
     expect(() => ws.createSession('bits', { mounts: { '/a': 'w' } })).toThrow('invalid mount mode')
+  })
+})
+
+describe('sessions on a shared SessionStore', () => {
+  it('a session created by one workspace narrows a sibling on the same store', async () => {
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const store = new RAMSessionStore()
+    const wsA = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },
+    )
+    open.push(wsA)
+    wsA.createSession('narrow', { mounts: { '/data': MountMode.READ } })
+    await wsA.flushSessions()
+
+    const wsB = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },
+    )
+    open.push(wsB)
+    const denied = await wsB.execute('echo blocked > /data/x.txt', { sessionId: 'narrow' })
+    expect(denied.exitCode).not.toBe(0)
   })
 })

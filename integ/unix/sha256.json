@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "sha256_empty",
+      "seq": 124,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sha256sum /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /data/empty.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha256_stdin",
+      "seq": 160,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hello | sha256sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03  -\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha256_stdin_multi",
+      "seq": 366,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | sha256sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "1a88a6398be8b75991c1286e996ef9de20edc80b50dc704fd17b7e956c9a38ed  -\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

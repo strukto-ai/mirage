@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "gunzip_no_input",
+      "seq": 562,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "gunzip",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gunzip: (stdin): unexpected end of file"
+      }
+    }
+  ]
+}

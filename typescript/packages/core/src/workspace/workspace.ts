@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NOOPAccessor } from '../accessor/base.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import type { IndexConfig } from '../cache/index/config.ts'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import type { ByteSource } from '../io/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
-import { runWithRecording, runWithRevisions } from '../observe/context.ts'
+import { runWithRecording } from '../observe/context.ts'
 import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { ObserverStore } from '../observe/store.ts'
@@ -30,11 +29,7 @@ import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
-import {
-  applyOpSafeguard,
-  CommandTimeoutError,
-  runWithTimeout,
-} from '../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from '../commands/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
@@ -46,16 +41,16 @@ import { readFileBytes } from './snapshot/fs.ts'
 import { applyStateDict, buildMountArgs, toStateDict } from './snapshot/state.ts'
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
+import type { FileStat } from '../types.ts'
 import {
   type CommandSafeguard,
   ConsistencyPolicy,
   DEFAULT_AGENT_ID,
   DriftPolicy,
-  FileStat,
   FileType,
   MountMode,
   parseMountMode,
-  type PathSpec,
+  PathSpec,
 } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
@@ -77,15 +72,14 @@ import { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { provisionNode } from './node/provision_node.ts'
 import { runCommandTree } from './node/run_tree.ts'
+import type { ExecuteNodeDeps } from './node/execute_node.ts'
 import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
+import type { SessionStore } from './session/store.ts'
 import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { stripSlash } from '../utils/slash.ts'
-import { effectiveMountMode } from '../context/session_context.ts'
-
-const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
 /**
  * One mount entry: a bare resource takes the workspace default mode, a
@@ -124,6 +118,7 @@ export interface WorkspaceOptions {
   index?: IndexConfig
   observe?: ObserverStore
   namespaceStore?: NamespaceStore
+  sessionStore?: SessionStore
   python?: {
     autoLoadFromImports?: boolean
     bootstrapCode?: string
@@ -265,7 +260,7 @@ export class Workspace {
         resource.setIndex?.(options.index)
       }
     }
-    this.sessionManager = new SessionManager(options.sessionId ?? 'default')
+    this.sessionManager = new SessionManager(options.sessionId ?? 'default', options.sessionStore)
     this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
@@ -381,37 +376,37 @@ export class Workspace {
     return this.observer.commandEvents()
   }
 
+  // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
+  // Routes through `dispatch`, not the raw WorkspaceFS, so sandbox I/O
+  // takes the same path as shell commands — cache read-through on
+  // reads, post-write invalidation, and mount-mode enforcement narrowed
+  // by the current session all come from the Dispatcher. Reads are raw
+  // bytes (no filetype rendering), matching the Python GuestFs.
   private buildWorkspaceBridge(): BridgeDispatchFn {
     return async (op, path, bytes) => {
       switch (op) {
         case 'READ':
-          return await this.fs.readFile(path)
+          return (await this.dispatch('read', path)) as Uint8Array
         case 'WRITE': {
           if (bytes === undefined) throw new Error('WRITE op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
-          // Enforce the mount's mode, narrowed by the current session,
-          // the same way the command dispatch does. The bridge is the
-          // sole write path for the sandboxed runtimes, so a read-only
-          // mount (or a session narrowed to read) denies their writes.
-          const [, , mode] = await this.resolve(path)
-          const capPrefix = this.registry.mountFor(path)?.prefix ?? '/'
-          if (effectiveMountMode(capPrefix, mode) === MountMode.READ) {
-            throw new Error(`mount at '${path}' is read-only`)
-          }
-          await this.fs.writeFile(path, buf)
+          await this.dispatch('write', path, [buf])
           return undefined
         }
         case 'LIST': {
-          const entries = await this.fs.readdir(path)
-          const result: MirageEntry[] = []
-          for (const entry of entries) {
-            const stat = await this.fs.stat(entry)
-            const isDir = stat.type === FileType.DIRECTORY
-            const size = isDir ? 0 : (stat.size ?? 0)
-            result.push({ path: entry, size, isDir })
-          }
-          return result
+          const entries = ((await this.dispatch('readdir', path)) as string[] | null) ?? []
+          return await Promise.all(
+            entries.map(async (entry): Promise<MirageEntry> => {
+              // Backends that mark directories with a trailing slash
+              // skip the stat; unmarked entries (e.g. RAM) need one to
+              // learn dir-ness.
+              if (entry.endsWith('/')) return { path: entry, size: 0, isDir: true }
+              const stat = (await this.dispatch('stat', entry)) as FileStat
+              const isDir = stat.type === FileType.DIRECTORY
+              return { path: entry, size: isDir ? 0 : (stat.size ?? 0), isDir }
+            }),
+          )
         }
       }
     }
@@ -520,6 +515,16 @@ export class Workspace {
 
   closeAllSessions(): Promise<void> {
     return this.sessionManager.closeAll()
+  }
+
+  /** Hydrate sessions from the session store (idempotent). */
+  ensureSessionsLoaded(): Promise<void> {
+    return this.sessionManager.ensureLoaded()
+  }
+
+  /** Write every session's durable fields through to the session store. */
+  flushSessions(): Promise<void> {
+    return this.sessionManager.flush()
   }
 
   mounts(): readonly MountEntry[] {
@@ -728,50 +733,19 @@ export class Workspace {
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
-    const [resource, spec, mode] = await this.resolve(path)
-    const capPrefix = this.registry.mountFor(path)?.prefix ?? '/'
-    if (
-      effectiveMountMode(capPrefix, mode) === MountMode.READ &&
-      this.opsRegistry.find(opName, resource.kind)?.write === true
-    ) {
-      throw new Error(`mount at '${path}' is read-only`)
-    }
-    const fullKwargs: OpKwargs =
-      kwargs.index === undefined && resource.index !== undefined
-        ? { ...kwargs, index: resource.index }
-        : kwargs
-    const mount = this.registry.mountFor(path)
-    const opOverride = mount?.commandSafeguards.get(opName) ?? null
-    const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    let result
-    try {
-      result = await runWithRevisions(
-        mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
-        async () =>
-          runWithTimeout(
-            Promise.resolve(
-              this.opsRegistry.call(
-                opName,
-                resource.kind,
-                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-                spec,
-                args,
-                fullKwargs,
-              ),
-            ),
-            opTimeout,
-            opName,
-          ),
-      )
-    } catch (err) {
-      await this.dispatcher.reconciler.onOpMissing(opName, path, err)
-      throw err
-    }
-    const guarded = await applyOpSafeguard(result, opOverride)
-    if (opName === 'stat' && guarded instanceof FileStat) {
-      return mergeOverlayStat(this.namespace.metaFor(path), guarded)
-    }
-    return guarded
+    // The Dispatcher owns the rest — symlink follow, resolution (its
+    // resolveFn is Workspace.resolve, so lazy open and mount grants
+    // happen there), cache read-through, mode enforcement, per-op
+    // safeguards on the executing mount, revisions, overlay stat, and
+    // post-write invalidation — the same single path Python's
+    // Workspace.dispatch delegates to.
+    const [result] = await this.dispatcher.dispatch(
+      opName,
+      PathSpec.fromStrPath(path),
+      args,
+      kwargs,
+    )
+    return result
   }
 
   async resolve(path: string): Promise<[Resource, PathSpec, MountMode]> {
@@ -845,6 +819,7 @@ export class Workspace {
       throw makeAbortError()
     }
     await this.namespace.ensureLoaded()
+    await this.sessionManager.ensureLoaded()
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
@@ -908,6 +883,24 @@ export class Workspace {
     }
     const targetSessionId = options.sessionId ?? this.sessionManager.defaultId
     const targetSession = this.sessionManager.get(targetSessionId)
+    try {
+      return await this.executeParsed(command, options, rootNode, deps, targetSession, stdin)
+    } finally {
+      // Durable session fields (cwd, env, grants) flush at the end of
+      // every execute, success or failure, mirroring Python's finally.
+      await this.sessionManager.flush()
+    }
+  }
+
+  private async executeParsed(
+    command: string,
+    options: ExecuteOptions,
+    rootNode: TSNodeLike,
+    deps: ExecuteNodeDeps,
+    targetSession: Session,
+    stdin: ByteSource | null,
+  ): Promise<ExecuteResult> {
+    const callAgentId = options.agentId ?? this.agentId
     const useOverride = options.cwd !== undefined || options.env !== undefined
     const effectiveSession = useOverride
       ? targetSession.fork({
@@ -1083,6 +1076,7 @@ export class Workspace {
       await task
     }
     await this.namespace.close()
+    await this.sessionManager.closeStore()
     await this.cache.clear()
     for (const fn of this.closers.splice(0)) {
       try {

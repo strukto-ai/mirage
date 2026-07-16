@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SESSION_ID } from '../../types.ts'
+import { DEFAULT_SESSION_ID, MountMode } from '../../types.ts'
 import { SessionManager } from './manager.ts'
+import { RAMSessionStore } from './ram.ts'
 
 describe('SessionManager', () => {
   it('seeds the default session on construction', () => {
@@ -74,5 +75,63 @@ describe('SessionManager', () => {
     m.create('b')
     await m.closeAll()
     expect(m.list().map((x) => x.sessionId)).toEqual(['def'])
+  })
+})
+
+describe('SessionManager with a SessionStore', () => {
+  it('hydrates stored sessions on ensureLoaded', async () => {
+    const store = new RAMSessionStore()
+    await store.set('restored', {
+      session_id: 'restored',
+      cwd: '/w',
+      env: { K: 'v' },
+      created_at: 1.0,
+      mount_modes: { '/data': 'read' },
+    })
+    const m = new SessionManager('def', store)
+    await m.ensureLoaded()
+    const s = m.get('restored')
+    expect(s.cwd).toBe('/w')
+    expect(s.env).toEqual({ K: 'v' })
+    expect(s.mountModes?.get('/data')).toBe(MountMode.READ)
+  })
+
+  it('locally created sessions win a hydration conflict', async () => {
+    const store = new RAMSessionStore()
+    await store.set('s1', { session_id: 's1', cwd: '/stale' })
+    const m = new SessionManager('def', store)
+    const local = m.create('s1')
+    local.cwd = '/fresh'
+    await m.ensureLoaded()
+    expect(m.get('s1').cwd).toBe('/fresh')
+  })
+
+  it('default session adopts stored durable fields', async () => {
+    const store = new RAMSessionStore()
+    await store.set('def', { session_id: 'def', cwd: '/w', env: { A: '1' } })
+    const m = new SessionManager('def', store)
+    await m.ensureLoaded()
+    expect(m.cwd).toBe('/w')
+    expect(m.env).toEqual({ A: '1' })
+  })
+
+  it('flush writes every session through', async () => {
+    const store = new RAMSessionStore()
+    const m = new SessionManager('def', store)
+    m.create('agent', { mountModes: new Map([['/s3', MountMode.READ]]) })
+    m.cwd = '/moved'
+    await m.flush()
+    const entries = await store.load()
+    expect(entries.get('def')?.cwd).toBe('/moved')
+    expect(entries.get('agent')?.mount_modes).toEqual({ '/s3': 'read' })
+  })
+
+  it('close deletes the session from the store', async () => {
+    const store = new RAMSessionStore()
+    const m = new SessionManager('def', store)
+    m.create('gone')
+    await m.flush()
+    await m.close('gone')
+    expect((await store.load()).has('gone')).toBe(false)
   })
 })

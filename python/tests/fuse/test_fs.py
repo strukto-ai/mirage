@@ -644,3 +644,46 @@ async def test_getattr_honors_touch_mtime(seed_ws):
     fs = MirageFS(seed_ws.ops)
     stamp = datetime(2026, 3, 4, 12, 0, tzinfo=timezone.utc)
     assert fs.getattr("/a.txt")["st_mtime"] == int(stamp.timestamp()) * 10**9
+
+
+@pytest.mark.asyncio
+async def test_session_bound_fs_enforces_grants():
+    """A MirageFS bound to a session runs every op under its grants:
+    the granted mount answers, the ungranted one raises, exactly as a
+    shell command in that session would."""
+    ws = Workspace(
+        {
+            "/open": RAMResource(),
+            "/secret": RAMResource()
+        },
+        mode=MountMode.WRITE,
+    )
+    await ws.execute("tee /open/ok.txt", stdin=b"visible")
+    await ws.execute("tee /secret/no.txt", stdin=b"hidden")
+    session = ws.create_session("narrow", mounts=["/open"])
+
+    bound = MirageFS(ws.ops, session=session)
+    attrs = bound.getattr("/open/ok.txt")
+    assert attrs["st_mode"] & stat.S_IFREG
+    with pytest.raises(Exception) as excinfo:
+        bound.getattr("/secret/no.txt")
+    assert excinfo.value is not None
+
+    unbound = MirageFS(ws.ops)
+    assert unbound.getattr("/secret/no.txt")["st_mode"] & stat.S_IFREG
+
+
+@pytest.mark.asyncio
+async def test_session_bound_fs_read_narrowing():
+    """A session narrowed to read on a mount can read through its
+    bound FUSE tree but not write."""
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    await ws.execute("tee /data/f.txt", stdin=b"bytes")
+    session = ws.create_session("ro", mounts={"/data": "read"})
+
+    bound = MirageFS(ws.ops, session=session)
+    fh = bound.open("/data/f.txt", os.O_RDONLY)
+    assert bound.read("/data/f.txt", 100, 0, fh) == b"bytes"
+    bound.release("/data/f.txt", fh)
+    with pytest.raises(Exception):
+        bound.create("/data/new.txt", 0o644)

@@ -1,0 +1,3 @@
+alice 30 engineer
+bob 25 designer
+carol 40 manager

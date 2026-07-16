@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "sleep_invalid",
+      "seq": 619,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sleep abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sleep: invalid time interval 'abc'\n"
+      }
+    },
+    {
+      "id": "sleep_no_operand",
+      "seq": 620,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sleep",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sleep: missing operand\n"
+      }
+    },
+    {
+      "id": "sleep_negative",
+      "seq": 621,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sleep -1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sleep: invalid time interval '-1'\n"
+      }
+    },
+    {
+      "id": "sleep_infinity",
+      "seq": 622,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sleep Infinity",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sleep: invalid time interval 'Infinity'\n"
+      }
+    }
+  ]
+}

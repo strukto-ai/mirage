@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "unknown_command",
+      "seq": 648,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nosuchcmd /data/a.txt",
+      "expect": {
+        "exit": 127,
+        "stdout": "",
+        "stderr": "nosuchcmd: command not found\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_seed",
+      "seq": 688,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo cross | tee /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "cross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import {
   CommandSafeguard,
   MongoDBResource,
   MountMode,
+  PathSpec,
   RAMResource,
   RedisResource,
   S3Resource,
@@ -119,6 +120,17 @@ async function seedMongo(): Promise<void> {
   }
 }
 
+async function putS3(key: string, body: string): Promise<void> {
+  const client = new S3Client({
+    region: "us-east-1",
+    endpoint: S3_ENDPOINT,
+    forcePathStyle: true,
+    credentials: { accessKeyId: S3_KEY, secretAccessKey: S3_SECRET },
+  });
+  await client.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body }));
+  client.destroy();
+}
+
 async function seedS3(): Promise<void> {
   const client = new S3Client({
     region: "us-east-1",
@@ -131,10 +143,10 @@ async function seedS3(): Promise<void> {
   } catch {
     // bucket already exists from a prior run
   }
-  await client.send(
-    new PutObjectCommand({ Bucket: BUCKET, Key: "greeting.txt", Body: "hello from s3\n" }),
-  );
   client.destroy();
+  await putS3("greeting.txt", "hello from s3\n");
+  await putS3("cache_inval.txt", "seeded-cold\n");
+  await putS3("warm.txt", "cold-bytes\n");
 }
 
 function buildWorkspace(runId: string): Workspace {
@@ -181,6 +193,64 @@ async function main(): Promise<void> {
   await ws.execute("echo redis says hi > /redis/notes.txt");
   for (const [name, cmd] of CASES) await run(ws, name, cmd);
   for (const [name, cmd] of ERROR_CASES) await runError(ws, name, cmd);
+
+  // Sandbox I/O shares the shell file cache (s3 caches reads).
+  // Invalidate: prime the cache with cat (applyIo populates it after
+  // the command), then a sandbox write must drop the entry so the
+  // follow-up cat re-fetches the new bytes.
+  await run(ws, "s3_inval_prime", "cat /s3/cache_inval.txt");
+  await run(
+    ws,
+    "py3_s3_cache_invalidate",
+    "python3 -c \"from pathlib import Path; Path('/s3/cache_inval.txt').write_text('updated-by-sandbox')\" && cat /s3/cache_inval.txt",
+  );
+  // Warm read: prime, mutate the backend out of band, and the sandbox
+  // read (LAZY, never revalidated) must keep serving the cached bytes
+  // instead of hitting the backend.
+  await run(ws, "s3_warm_prime", "cat /s3/warm.txt");
+  await putS3("warm.txt", "hot-bytes\n");
+  await run(
+    ws,
+    "py3_s3_warm_read",
+    "python3 -c \"from pathlib import Path; print(Path('/s3/warm.txt').read_text().strip())\"",
+  );
+
+  // Op safeguards bind to the executing (post-symlink-follow) mount: a
+  // sandbox read through a link on an unsafeguarded mount still gets
+  // the target mount's byte cap.
+  const wsLink = new Workspace(
+    {
+      "/data": [
+        new RAMResource(),
+        MountMode.EXEC,
+        { read: new CommandSafeguard({ maxBytes: 8 }) },
+      ],
+      "/r": new RAMResource(),
+    },
+    { mode: MountMode.EXEC, pythonRuntime: "monty" },
+  );
+  await wsLink.execute("echo 0123456789abcdef > /data/big.txt");
+  await wsLink.execute("ln -s /data/big.txt /r/link");
+  await run(
+    wsLink,
+    "sbx_link_guard",
+    "python3 -c \"from pathlib import Path; print(Path('/r/link').read_text())\"",
+  );
+  await wsLink.close();
+
+  // Cross-mount rename through dispatch: both languages address the dst
+  // against the source mount, so the file lands on the source backend
+  // under the dst's virtual path (EXDEV follow-up).
+  const wsMv = new Workspace(
+    { "/a": new RAMResource(), "/b": new RAMResource() },
+    { mode: MountMode.EXEC, pythonRuntime: "monty" },
+  );
+  await wsMv.execute("echo moved-bytes > /a/x.txt");
+  await wsMv.dispatch("rename", "/a/x.txt", [PathSpec.fromStrPath("/b/y.txt")]);
+  await run(wsMv, "xmount_rename", "cat /a/b/y.txt");
+  await runError(wsMv, "xmount_rename_src", "cat /a/x.txt");
+  await runError(wsMv, "xmount_rename_dst_mount", "cat /b/y.txt");
+  await wsMv.close();
 
   const slowRam = new RAMResource();
   slowRam.store.files.set("/slow.py", ENC.encode(SLOW_SCRIPT));

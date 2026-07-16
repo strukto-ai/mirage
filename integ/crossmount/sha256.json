@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_sha256",
+      "seq": 731,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sha256sum /data/b.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt\n987921fe3926a34efd850ba3eed9ba30b12253def14c6ed02b51c1638f972cc4  /data2/xm.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

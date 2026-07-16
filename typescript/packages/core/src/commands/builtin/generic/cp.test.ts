@@ -134,4 +134,85 @@ describe('cpGeneric guards', () => {
       "'/a.txt' -> '/copy.txt'\n",
     )
   })
+
+  it('copies a single source into a directory', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(['/d']), ['/a.txt', '/d'])
+    expect(io.exitCode).toBe(0)
+    expect(files.has('/d/a.txt')).toBe(true)
+  })
+
+  it('copies multiple sources into a directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    await run(files, new Set(['/d']), ['/a.txt', '/b.txt', '/d'])
+    expect(files.has('/d/a.txt')).toBe(true)
+    expect(files.has('/d/b.txt')).toBe(true)
+  })
+
+  it('refuses multiple sources when the target is not a directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+      ['/dst.txt', new Uint8Array([3])],
+    ])
+    await expect(run(files, new Set(), ['/a.txt', '/b.txt', '/dst.txt'])).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+    expect(files.get('/dst.txt')).toEqual(new Uint8Array([3]))
+  })
+
+  it('no-clobber skips an existing target', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([9])],
+      ['/d/a.txt', new Uint8Array([1])],
+    ])
+    await run(files, new Set(['/d']), ['/a.txt', '/d'], { n: true })
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
+  })
+
+  it('no-clobber with duplicate basenames keeps the first', async () => {
+    const files = new Map([
+      ['/x/a.txt', new Uint8Array([1])],
+      ['/y/a.txt', new Uint8Array([2])],
+    ])
+    await run(files, new Set(['/d']), ['/x/a.txt', '/y/a.txt', '/d'], { n: true })
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
+  })
+
+  it('duplicate basenames without -n let the last win', async () => {
+    const files = new Map([
+      ['/x/a.txt', new Uint8Array([1])],
+      ['/y/a.txt', new Uint8Array([2])],
+    ])
+    await run(files, new Set(['/d']), ['/x/a.txt', '/y/a.txt', '/d'])
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([2]))
+  })
+
+  it('recursively copies a directory into a new path', async () => {
+    const files = new Map([
+      ['/src/x.txt', new Uint8Array([1])],
+      ['/src/sub/y.txt', new Uint8Array([2])],
+    ])
+    await run(files, new Set(['/src', '/src/sub']), ['/src', '/dst'], { recursive: true })
+    expect(files.has('/dst/x.txt')).toBe(true)
+    expect(files.has('/dst/sub/y.txt')).toBe(true)
+  })
+
+  it('records writes keyed by destination path', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const [, io] = await run(files, new Set(['/d']), ['/a.txt', '/b.txt', '/d'])
+    expect(new Set(Object.keys(io.writes))).toEqual(new Set(['/d/a.txt', '/d/b.txt']))
+  })
+
+  it('a native copy records no reads', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/copy.txt'])
+    expect(Object.keys(io.reads)).toEqual([])
+  })
 })

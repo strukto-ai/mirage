@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_cmp_differ",
+      "seq": 744,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cmp /data/xdiff.txt /data2/xdiff.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data/xdiff.txt /data2/xdiff.txt differ: char 6, line 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_cmp_equal",
+      "seq": 745,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/xdiff.txt /data2/xsame.txt && cmp /data/xdiff.txt /data2/xsame.txt && rm /data/xdiff.txt /data2/xdiff.txt /data2/xsame.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

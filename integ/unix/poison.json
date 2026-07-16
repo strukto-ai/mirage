@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "poison_concat",
+      "seq": 589,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\ncherry\nbanana\ndate\nelder\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "poison_first_intact",
+      "seq": 590,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\ncherry\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "poison_second_intact",
+      "seq": 591,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "banana\ndate\nelder\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

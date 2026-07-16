@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "id": "glob_unmatched_echo",
+      "seq": 380,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo /data/*.nope",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/*.nope\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_test_f",
+      "seq": 381,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "test -f /data/one_b* && echo yes",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_function_args",
+      "seq": 382,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "f() { echo $1 $#; }; f /data/sorted_*.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sorted_a.txt 3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_matched_echo",
+      "seq": 383,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo /data/sorted_*.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sorted_a.txt /data/sorted_b.txt /data/sorted_c.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_pattern_dup_word",
+      "seq": 384,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/g8 && printf 'x *.txt y\\n' | tee /data/g8/l1.txt > /dev/null && printf 'plain\\n' | tee /data/g8/l2.txt > /dev/null && cd /data/g8 && grep -F '*.txt' *.txt && cd / && rm -r /data/g8",
+      "expect": {
+        "exit": 0,
+        "stdout": "l1.txt:x *.txt y\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_relative_display",
+      "seq": 396,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo sub/*.txt && echo *.nope",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/a.txt sub/b.txt\n*.nope\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_relative_for",
+      "seq": 397,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "for f in sub/*.txt; do echo $f; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/a.txt\nsub/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_relative_func",
+      "seq": 398,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/a.txt 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_zero_mount_error",
+      "seq": 416,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat *.nope 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cat: *.nope: No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_pushdown_labels",
+      "seq": 417,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l s*/x.txt && grep -l hi sub/*.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 sea/x.txt\n1 sub/x.txt\n2 total\nsub/x.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_ls_operand",
+      "seq": 418,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls sub/*.txt && cd / && rm -r /data/g15",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/x.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_ln_multi_source",
+      "seq": 649,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data/sorted_*.txt /data/lnk_multi",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: target '/data/lnk_multi' is not a directory\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "gzip_gunzip_pipe",
+      "seq": 94,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | gzip | gunzip",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gzip_zcat_pipe",
+      "seq": 95,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | gzip | zcat",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gzip_c_pipe",
+      "seq": 355,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/b.txt | gzip -c | zcat",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gzip_d_no_input",
+      "seq": 564,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "gzip -d",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gzip: (stdin): unexpected end of file"
+      }
+    },
+    {
+      "id": "gzip_no_input_roundtrip",
+      "seq": 566,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "gzip | gunzip | sha256sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -15,7 +15,10 @@
 import { NOOPAccessor } from '../accessor/base.ts'
 import { applyIo } from '../cache/file/io.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
+import { applyOpSafeguard, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
 import { IOResult } from '../io/types.ts'
+import { mountKey } from '../utils/key_prefix.ts'
+import { rstripSlash } from '../utils/slash.ts'
 import { runWithRevisions } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
@@ -38,6 +41,9 @@ const DISPATCH_WRITE_OPS = new Set([
   'unlink',
   'create',
   'truncate',
+  'mkdir',
+  'rmdir',
+  'rename',
 ])
 
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
@@ -86,26 +92,58 @@ export class Dispatcher {
       kwargs?.index === undefined && resource.index !== undefined
         ? { ...(kwargs ?? {}), index: resource.index }
         : (kwargs ?? {})
+    let fullArgs = args ?? []
+    const renameDst = opName === 'rename' && fullArgs[0] instanceof PathSpec ? fullArgs[0] : null
+    if (renameDst !== null) {
+      // Ops.rename addresses both endpoints against the source's mount,
+      // mirroring the Python dispatcher: a caller-supplied dst built
+      // from the virtual path alone would otherwise reach the backend
+      // untranslated.
+      fullArgs = [
+        new PathSpec({
+          virtual: renameDst.virtual,
+          directory: renameDst.virtual.slice(0, renameDst.virtual.lastIndexOf('/')) || '/',
+          resourcePath: mountKey(renameDst.virtual, rstripSlash(mountPrefix)),
+        }),
+        ...fullArgs.slice(1),
+      ]
+    }
+    // Per-op command safeguards bind to the executing (post-follow)
+    // mount, and the timeout window covers only the backend op — cache
+    // probes and post-write invalidation stay outside the budget —
+    // mirroring Python's Mount.execute_op.
+    const opOverride = mount?.commandSafeguards.get(opName) ?? null
+    const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     try {
       result = await runWithRevisions(
         mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
         async () =>
-          this.opsRegistry.call(
+          runWithTimeout(
+            Promise.resolve(
+              this.opsRegistry.call(
+                opName,
+                resource.kind,
+                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                scope,
+                fullArgs,
+                fullKwargs,
+              ),
+            ),
+            opTimeout,
             opName,
-            resource.kind,
-            resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-            scope,
-            args ?? [],
-            fullKwargs,
           ),
       )
     } catch (err) {
       await this.reconciler.onOpMissing(opName, p.virtual, err)
       throw err
     }
+    result = await applyOpSafeguard(result, opOverride)
     if (DISPATCH_WRITE_OPS.has(opName)) {
       await this.invalidateAfterWriteByPath(p.virtual)
+      if (renameDst !== null) {
+        await this.invalidateAfterWriteByPath(renameDst.virtual)
+      }
     }
     if (opName === 'stat' && result instanceof FileStat) {
       return [mergeOverlayStat(this.namespace.metaFor(p.virtual), result), new IOResult()]

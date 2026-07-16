@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "fmt_w20",
+      "seq": 80,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | fmt -w 20",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello world foo bar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fmt_w10",
+      "seq": 333,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fmt -w 10 /data/c.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha beta\ngamma\ndelta\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -24,14 +24,17 @@ import {
   PYTHON_RUNTIMES,
   RAMFileCacheStore,
   RAMNamespaceStore,
+  RAMSessionStore,
   RedisFileCacheStore,
   RedisNamespaceStore,
+  RedisSessionStore,
   validateRuntimeOptions,
   type FileCache,
   type IndexConfig,
   type NamespaceStore,
   type RedisIndexConfig,
   type Resource,
+  type SessionStore,
 } from '@struktoai/mirage-node'
 
 const VALID_MODES = new Set<string>([MountMode.READ, MountMode.WRITE, MountMode.EXEC])
@@ -124,6 +127,7 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
   if (isPlainObject(out.namespace)) out.namespace = camelizeKeys(out.namespace)
+  if (isPlainObject(out.session)) out.session = camelizeKeys(out.session)
   if (isPlainObject(out.runtime)) {
     const runtime = camelizeKeys(out.runtime)
     for (const name of RUNTIME_BLOCK_NAMES) {
@@ -240,6 +244,16 @@ interface RedisNamespaceBlock {
   keyPrefix?: string
 }
 
+interface RamSessionBlock {
+  type?: 'ram'
+}
+
+interface RedisSessionBlock {
+  type: 'redis'
+  url?: string
+  keyPrefix?: string
+}
+
 interface RuntimeBlock {
   python?: string
   js?: string
@@ -260,6 +274,7 @@ export interface WorkspaceConfigRaw {
   cache?: RamCacheBlock | RedisCacheBlock | null
   index?: RamIndexBlock | RedisIndexBlock | null
   namespace?: RamNamespaceBlock | RedisNamespaceBlock | null
+  session?: RamSessionBlock | RedisSessionBlock | null
 }
 
 function readProcessEnv(): Record<string, string> {
@@ -366,6 +381,19 @@ function buildNamespaceStore(
   return new RAMNamespaceStore()
 }
 
+function buildSessionStore(
+  block: RamSessionBlock | RedisSessionBlock | null | undefined,
+): SessionStore | undefined {
+  if (block === null || block === undefined) return undefined
+  if (block.type === 'redis') {
+    return new RedisSessionStore({
+      ...(block.url !== undefined ? { url: block.url } : {}),
+      ...(block.keyPrefix !== undefined ? { keyPrefix: block.keyPrefix } : {}),
+    })
+  }
+  return new RAMSessionStore()
+}
+
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
   const runtimeOptions: Record<string, Record<string, unknown>> = {}
   if (cfg.runtime !== undefined && cfg.runtime !== null) {
@@ -389,6 +417,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   const cache = buildCache(cfg.cache)
   const index = buildIndex(cfg.index)
   const namespaceStore = buildNamespaceStore(cfg.namespace)
+  const sessionStore = buildSessionStore(cfg.session)
   return {
     resources,
     options: {
@@ -399,6 +428,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
       ...(namespaceStore !== undefined ? { namespaceStore } : {}),
+      ...(sessionStore !== undefined ? { sessionStore } : {}),
       ...(cfg.runtime?.python !== undefined
         ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
         : {}),

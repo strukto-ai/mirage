@@ -412,6 +412,9 @@ export {
 } from './workspace/types.ts'
 export { Session, type SessionInit } from './workspace/session/session.ts'
 export { SessionManager } from './workspace/session/manager.ts'
+export { SessionStore, type SessionFields } from './workspace/session/store.ts'
+export { RAMSessionStore } from './workspace/session/ram.ts'
+export { runWithSession } from './context/session_context.ts'
 export { CallFrame, type CallFrameInit, CallStack } from './shell/call_stack.ts'
 export { Job, JobStatus, JobTable, type JobTaskResult } from './shell/job_table.ts'
 export {

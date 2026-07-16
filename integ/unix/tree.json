@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "tree",
+      "seq": 323,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tree /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "├── deep\n│   └── deeper.txt\n└── nested.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

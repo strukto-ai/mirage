@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "strings",
+      "seq": 78,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "strings /data/binary.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "strings_no_input",
+      "seq": 550,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "strings",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

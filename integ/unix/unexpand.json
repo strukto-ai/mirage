@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "unexpand",
+      "seq": 81,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/tabbed.txt | unexpand",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\t1\nb\t2\nc\t3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unexpand_all",
+      "seq": 340,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo '    hi' | unexpand -a",
+      "expect": {
+        "exit": 0,
+        "stdout": "    hi\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

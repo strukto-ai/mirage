@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "id": "guard_cp_same_file",
+      "seq": 611,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/guard/g.txt /data/guard/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: '/data/guard/g.txt' and '/data/guard/g.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "guard_mv_same_file",
+      "seq": 612,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mv /data/guard/g.txt /data/guard/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: '/data/guard/g.txt' and '/data/guard/g.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "guard_mv_same_file_intact",
+      "seq": 613,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/guard/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "guard\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "guard_mv_into_dir_where_file_lives",
+      "seq": 614,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mv /data/guard/sub/s.txt /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: '/data/guard/sub/s.txt' and '/data/guard/sub/s.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "guard_cp_dir_into_itself",
+      "seq": 615,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp -r /data/guard/sub /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot copy a directory, '/data/guard/sub', into itself, '/data/guard/sub/sub'\n"
+      }
+    },
+    {
+      "id": "guard_mv_dir_into_own_subtree",
+      "seq": 616,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mv /data/guard /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data/guard' to a subdirectory of itself, '/data/guard/sub/guard'\n"
+      }
+    },
+    {
+      "id": "guard_cp_missing_source_continues",
+      "seq": 617,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/missing.txt /data/guard/g.txt /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot stat '/data/missing.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_state_after",
+      "seq": 618,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/guard -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1623,7 +1623,7 @@ def test_cross_mount_cp_multiple_sources_require_directory():
     io = _exec(ws, "cp /ram/a.txt /ram/b.txt /disk/target.txt")
 
     assert io.exit_code != 0
-    assert b"not a directory" in io.stderr
+    assert io.stderr == b"cp: target '/disk/target.txt': Not a directory\n"
     assert _stdout(_exec(ws, "cat /ram/a.txt")) == b"first\n"
     assert _stdout(_exec(ws, "cat /ram/b.txt")) == b"second\n"
     assert _stdout(_exec(ws, "cat /disk/target.txt")) == b"target\n"
@@ -1638,7 +1638,7 @@ def test_cross_mount_mv_multiple_sources_require_directory():
     io = _exec(ws, "mv /ram/a.txt /ram/b.txt /disk/target.txt")
 
     assert io.exit_code != 0
-    assert b"not a directory" in io.stderr
+    assert io.stderr == b"mv: target '/disk/target.txt': Not a directory\n"
     assert _stdout(_exec(ws, "cat /ram/a.txt")) == b"first\n"
     assert _stdout(_exec(ws, "cat /ram/b.txt")) == b"second\n"
     assert _stdout(_exec(ws, "cat /disk/target.txt")) == b"target\n"

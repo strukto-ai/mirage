@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "root_create",
+      "seq": 479,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo atroot | tee /data/at_root.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "atroot\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "root_create_cat",
+      "seq": 480,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/at_root.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "atroot\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "root_create_mkdir",
+      "seq": 481,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir /data/rootdir && find /data/rootdir -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rootdir\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "root_create_basename",
+      "seq": 482,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "basename /data/at_root.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "at_root.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "root_create_dirname",
+      "seq": 483,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "dirname /data/at_root.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

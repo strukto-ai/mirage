@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "dirname",
+      "seq": 64,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "dirname /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dirname_trailing_slash",
+      "seq": 65,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "dirname /data/sub/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dirname_multi",
+      "seq": 66,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "dirname /data/a.txt /data/sub/nested.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dirname_relative",
+      "seq": 67,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "dirname a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": ".\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dirname_root",
+      "seq": 68,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "dirname /",
+      "expect": {
+        "exit": 0,
+        "stdout": "/\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

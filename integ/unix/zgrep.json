@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_e_multi_pipe",
+      "seq": 285,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | gzip | zgrep -e world -e baz",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_f_pipe",
+      "seq": 289,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | gzip | zgrep -f /data/patterns.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_pipe",
+      "seq": 353,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | gzip | zgrep world",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_e_pipe",
+      "seq": 354,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | gzip | zgrep -e world",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_no_input",
+      "seq": 561,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zgrep foo",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_c_match_exit",
+      "seq": 574,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hello | gzip | zgrep -c hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_c_no_match_exit",
+      "seq": 575,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hello | gzip | zgrep -c zzz",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_usage_exit",
+      "seq": 578,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zgrep",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "zgrep: usage: zgrep [flags] pattern [path]\n"
+      }
+    }
+  ]
+}

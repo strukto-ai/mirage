@@ -26,6 +26,7 @@ from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
                           MountMode, ResourceName, ResourceStateKey,
                           SessionKey, StateKey)
 from mirage.workspace.mount.namespace import NodeMeta
+from mirage.workspace.session.session import Session
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
@@ -167,7 +168,7 @@ async def apply_state_dict(ws, state: dict) -> None:
             continue
         mount.resource.load_state(m[MountKey.RESOURCE_STATE])
 
-    _restore_sessions(ws, state)
+    await _restore_sessions(ws, state)
     ws._current_agent_id = state.get(StateKey.CURRENT_AGENT_ID,
                                      ws._default_agent_id)
 
@@ -185,8 +186,9 @@ async def _restore_nodes(ws, state: dict) -> None:
     await ws._namespace.replace_nodes(entries)
 
 
-def _restore_sessions(ws, state: dict) -> None:
+async def _restore_sessions(ws, state: dict) -> None:
     default_sid = state.get(StateKey.DEFAULT_SESSION_ID)
+    restored: list = []
     for s_data in state.get(StateKey.SESSIONS, []):
         sid = s_data[SessionKey.SESSION_ID]
         if sid == default_sid:
@@ -196,8 +198,14 @@ def _restore_sessions(ws, state: dict) -> None:
                 session = ws._session_mgr.create(sid)
             except ValueError:
                 continue
-        session.cwd = s_data.get(SessionKey.CWD, "/")
-        session.env = s_data.get(SessionKey.ENV, {})
+        fields = Session.from_dict(s_data)
+        session.cwd = fields.cwd
+        session.env = fields.env
+        session.mount_modes = fields.mount_modes
+        restored.append(session)
+    # The snapshot's session table wins over prior store contents,
+    # mirroring Namespace.replace_nodes.
+    await ws._session_mgr.replace_from_snapshot(restored)
 
 
 def _restore_cache(ws, state: dict) -> None:

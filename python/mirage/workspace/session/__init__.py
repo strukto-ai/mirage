@@ -15,13 +15,26 @@
 from mirage.context import (assert_mount_allowed, get_current_session,
                             reset_current_session, set_current_session)
 from mirage.workspace.session.manager import SessionManager
+from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.session import Session
+from mirage.workspace.session.store import SessionFields, SessionStore
 
 __all__ = [
+    "RAMSessionStore",
+    "RedisSessionStore",
     "Session",
+    "SessionFields",
     "SessionManager",
+    "SessionStore",
     "assert_mount_allowed",
     "get_current_session",
     "reset_current_session",
     "set_current_session",
 ]
+
+
+def __getattr__(name: str):
+    if name == "RedisSessionStore":
+        from mirage.workspace.session.redis import RedisSessionStore
+        return RedisSessionStore
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,0 +1,180 @@
+{
+  "cases": [
+    {
+      "id": "arch_gzip_roundtrip",
+      "seq": 467,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/arch && echo gz-data | tee /data/arch/g.txt > /dev/null && gzip /data/arch/g.txt && gunzip /data/arch/g.txt.gz && cat /data/arch/g.txt && ls /data/arch",
+      "expect": {
+        "exit": 0,
+        "stdout": "gz-data\ng.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_create_verbose",
+      "seq": 468,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar -c -v -z -f /data/arch/a.tgz /data/arch/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/arch/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_list",
+      "seq": 469,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar -t -z -f /data/arch/a.tgz",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/arch/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_extract_strip",
+      "seq": 470,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar -x -z -f /data/arch/a.tgz --strip-components 2 -C /data/arch/out && cat /data/arch/out/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "gz-data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_exclude",
+      "seq": 471,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo noise | tee /data/arch/skip.log > /dev/null && tar -c -v -f /data/arch/b.tar --exclude '*.log' /data/arch/g.txt /data/arch/skip.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/arch/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_zip_unzip",
+      "seq": 472,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zip -q /data/arch/z.zip /data/arch/g.txt && unzip -p /data/arch/z.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "gz-data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_split_roundtrip",
+      "seq": 473,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "split -b 4 /data/arch/g.txt /data/arch/pt_ && cat /data/arch/pt_aa /data/arch/pt_ab",
+      "expect": {
+        "exit": 0,
+        "stdout": "gz-data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_csplit",
+      "seq": 474,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | tee /data/arch/c.txt > /dev/null && csplit -s -f /data/arch/cs_ /data/arch/c.txt /foo/ && cat /data/arch/cs_00",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_iconv_file",
+      "seq": 475,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "iconv -f utf-8 -t utf-8 /data/arch/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "gz-data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_mktemp",
+      "seq": 476,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mktemp -p /data/arch | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_gzip_interleaved_ls",
+      "seq": 536,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/arch2 && echo two | tee /data/arch2/h.txt > /dev/null && gzip /data/arch2/h.txt && ls /data/arch2 && gunzip /data/arch2/h.txt.gz && cat /data/arch2/h.txt && ls /data/arch2",
+      "expect": {
+        "exit": 0,
+        "stdout": "h.txt.gz\ntwo\nh.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -104,4 +104,55 @@ describe('mvGeneric guards', () => {
     expect(await io.stderrStr()).toContain("mv: cannot move '/d' to a subdirectory of itself")
     expect(files.has('/d/a.txt')).toBe(true)
   })
+
+  it('moves multiple sources into a directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    await run(files, new Set(['/d']), ['/a.txt', '/b.txt', '/d'])
+    expect(files.has('/d/a.txt')).toBe(true)
+    expect(files.has('/d/b.txt')).toBe(true)
+    expect(files.has('/a.txt')).toBe(false)
+    expect(files.has('/b.txt')).toBe(false)
+  })
+
+  it('refuses multiple sources when the target is not a directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+      ['/dst.txt', new Uint8Array([3])],
+    ])
+    await expect(run(files, new Set(), ['/a.txt', '/b.txt', '/dst.txt'])).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+    expect(files.get('/dst.txt')).toEqual(new Uint8Array([3]))
+  })
+
+  it('no-clobber preserves both source and target', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([9])],
+      ['/d/a.txt', new Uint8Array([1])],
+    ])
+    await run(files, new Set(['/d']), ['/a.txt', '/d'], { n: true })
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([9]))
+  })
+
+  it('no-clobber with duplicate basenames keeps the skipped source', async () => {
+    const files = new Map([
+      ['/x/a.txt', new Uint8Array([1])],
+      ['/y/a.txt', new Uint8Array([2])],
+    ])
+    await run(files, new Set(['/d']), ['/x/a.txt', '/y/a.txt', '/d'], { n: true })
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
+    expect(files.has('/x/a.txt')).toBe(false)
+    expect(files.get('/y/a.txt')).toEqual(new Uint8Array([2]))
+  })
+
+  it('records writes for both source and target', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(['/d']), ['/a.txt', '/d'])
+    expect(new Set(Object.keys(io.writes))).toEqual(new Set(['/a.txt', '/d/a.txt']))
+  })
 })

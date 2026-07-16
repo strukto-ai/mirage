@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_sort_stream",
+      "seq": 708,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort /data/numbers.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "10\n2\n30\n4\n5\ncross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

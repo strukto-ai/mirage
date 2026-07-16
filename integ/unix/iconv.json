@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "iconv_id",
+      "seq": 324,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | iconv -f utf-8 -t utf-8",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "iconv_no_input",
+      "seq": 554,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "iconv",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

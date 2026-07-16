@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "id": "du_multi",
+      "seq": 105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24\t/data/a.txt\n6\t/data/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_max_depth_eq",
+      "seq": 270,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du --max-depth=1 /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "20\t/data/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_missing_flag_value",
+      "seq": 275,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du --max-depth 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "du: option '--max-depth' requires an argument\nTry 'du --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_file",
+      "seq": 320,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24\t/data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_dir",
+      "seq": 321,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "894\t/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_h",
+      "seq": 322,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du -h /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24B\t/data/a.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

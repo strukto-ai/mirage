@@ -26,5 +26,21 @@ hello-runtime
 exit_code=1
 === py3_host_fs_invisible ===
 exit_code=1
+=== s3_inval_prime ===
+seeded-cold
+=== py3_s3_cache_invalidate ===
+updated-by-sandbox
+=== s3_warm_prime ===
+cold-bytes
+=== py3_s3_warm_read ===
+cold-bytes
+=== sbx_link_guard ===
+01234567
+=== xmount_rename ===
+moved-bytes
+=== xmount_rename_src ===
+exit_code=1
+=== xmount_rename_dst_mount ===
+exit_code=1
 === py3_safeguard_timeout ===
 exit_code=124

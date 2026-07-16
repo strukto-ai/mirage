@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_nl",
+      "seq": 711,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nl /data/b.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t1\n     2\t2\n     3\t3\n     4\tcross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

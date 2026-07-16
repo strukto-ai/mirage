@@ -1,0 +1,260 @@
+{
+  "cases": [
+    {
+      "id": "pipe_grep_sort_uniq_wc",
+      "seq": 152,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -v c /data/dup.txt | sort | uniq | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_cat_cut_sort",
+      "seq": 153,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/csv.csv | cut -d , -f 2 | sort -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "age\n25\n30\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_jq_grep",
+      "seq": 154,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".id\" /data/data.jsonl | grep 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_find_grep_wc",
+      "seq": 155,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name \"*.txt\" | grep dup | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_cat_tr_sort_uniq",
+      "seq": 156,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/dup.txt | tr a-z A-Z | sort | uniq -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "      2 A\n      2 B\n      1 C\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_head_pipe_tail2",
+      "seq": 157,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head /data/numbers.txt | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_tail_head",
+      "seq": 158,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tail /data/a.txt | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_awk_sort",
+      "seq": 360,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{print $2}' /data/fields.txt | sort -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "25\n30\n40\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_grep_cut",
+      "seq": 361,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -v name /data/csv.csv | cut -d , -f 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice\nbob\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_sed_wc",
+      "seq": 362,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sed 's/hello/hi/g' /data/mixed.txt | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_find_xargs_cat",
+      "seq": 363,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/sub -name \"*.txt\" | sort | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub/deep/deeper.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_tr_sort_uniq_c",
+      "seq": 364,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/dup.txt | tr a-z A-Z | sort | uniq -c | sort -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "      1 C\n      2 A\n      2 B\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_concat_head_first",
+      "seq": 592,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_a.txt /data/sorted_b.txt | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_concat_head_span",
+      "seq": 593,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_a.txt /data/sorted_b.txt | head -n 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\ncherry\nbanana\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_after_first",
+      "seq": 594,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\ncherry\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_after_second",
+      "seq": 595,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "banana\ndate\nelder\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

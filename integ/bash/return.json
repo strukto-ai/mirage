@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "return_non_numeric",
+      "seq": 435,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "f() { return x; }; f 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "return: x: numeric argument required\ncode=2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

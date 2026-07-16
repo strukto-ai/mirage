@@ -13,15 +13,37 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Session } from './session.ts'
+import { RAMSessionStore } from './ram.ts'
+import type { SessionFields, SessionStore } from './store.ts'
 import type { MountMode } from '../../types.ts'
 
+type StoredSession = Parameters<typeof Session.fromJSON>[0]
+
+/**
+ * Owns the live session table over a storage-agnostic SessionStore.
+ *
+ * Mirrors the Namespace/NamespaceStore split: sessions are worked on in
+ * memory (creation stays synchronous), the store hydrates once at the
+ * first async entry point, and durable fields flush back at async
+ * boundaries (end of execute, snapshot, explicit persist). `close`
+ * deletes from the store — closing a session revokes it everywhere —
+ * while process shutdown leaves stored sessions in place.
+ */
 export class SessionManager {
   private readonly sessions = new Map<string, Session>()
+  private readonly sessionStore: SessionStore
   readonly defaultId: string
+  private loaded = false
+  private loadPromise: Promise<void> | null = null
 
-  constructor(defaultSessionId: string) {
+  constructor(defaultSessionId: string, store?: SessionStore) {
     this.defaultId = defaultSessionId
+    this.sessionStore = store ?? new RAMSessionStore()
     this.sessions.set(defaultSessionId, new Session({ sessionId: defaultSessionId }))
+  }
+
+  get store(): SessionStore {
+    return this.sessionStore
   }
 
   get cwd(): string {
@@ -38,6 +60,59 @@ export class SessionManager {
 
   set env(value: Record<string, string>) {
     this.defaultSession().env = value
+  }
+
+  /**
+   * Hydrate sessions from the store once.
+   *
+   * Stored sessions fill in ids this process has not created; locally
+   * created sessions win a conflict (they overwrite the store on the
+   * next flush). The default session adopts the stored durable fields
+   * so a restarted daemon keeps its cwd/env.
+   */
+  ensureLoaded(): Promise<void> {
+    if (this.loaded) return Promise.resolve()
+    this.loadPromise ??= this.hydrate()
+    return this.loadPromise
+  }
+
+  private async hydrate(): Promise<void> {
+    const entries = await this.sessionStore.load()
+    for (const [sid, fields] of entries) {
+      const stored = Session.fromJSON(fields as StoredSession)
+      if (sid === this.defaultId) {
+        const dflt = this.defaultSession()
+        dflt.cwd = stored.cwd
+        dflt.env = stored.env
+        dflt.createdAt = stored.createdAt
+        dflt.mountModes = stored.mountModes
+        continue
+      }
+      if (this.sessions.has(sid)) continue
+      this.sessions.set(sid, stored)
+    }
+    this.loaded = true
+  }
+
+  /** Write every session's durable fields through to the store. */
+  async flush(): Promise<void> {
+    for (const session of [...this.sessions.values()]) {
+      await this.sessionStore.set(session.sessionId, session.toJSON() as SessionFields)
+    }
+  }
+
+  /**
+   * Adopt a snapshot's session table and replace the store. The
+   * snapshot wins over prior store contents, mirroring
+   * `Namespace.replaceNodes`.
+   */
+  async replaceFromSnapshot(sessions: readonly Session[]): Promise<void> {
+    this.loaded = true
+    this.loadPromise = Promise.resolve()
+    const entries = new Map<string, SessionFields>()
+    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toJSON() as SessionFields)
+    for (const s of sessions) entries.set(s.sessionId, s.toJSON() as SessionFields)
+    await this.sessionStore.replaceAll(entries)
   }
 
   create(
@@ -65,20 +140,24 @@ export class SessionManager {
     return [...this.sessions.values()]
   }
 
-  close(sessionId: string): Promise<void> {
+  async close(sessionId: string): Promise<void> {
     if (sessionId === this.defaultId) {
-      return Promise.reject(new Error('Cannot close the default session'))
+      throw new Error('Cannot close the default session')
     }
     if (!this.sessions.has(sessionId)) {
-      return Promise.reject(new Error(`unknown session: ${sessionId}`))
+      throw new Error(`unknown session: ${sessionId}`)
     }
     this.sessions.delete(sessionId)
-    return Promise.resolve()
+    await this.sessionStore.delete([sessionId])
   }
 
   async closeAll(): Promise<void> {
     const ids = [...this.sessions.keys()].filter((id) => id !== this.defaultId)
     for (const id of ids) await this.close(id)
+  }
+
+  closeStore(): Promise<void> {
+    return this.sessionStore.close()
   }
 
   private defaultSession(): Session {

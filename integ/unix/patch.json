@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "patch_apply",
+      "seq": 537,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "patch -p1 /data/poem.diff > /dev/null && cat /data/poem.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "roses are red\nviolets are dark\nsugar is sweet\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_n_noop",
+      "seq": 538,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "patch -N -p1 /data/poem.diff > /dev/null && cat /data/poem.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "roses are red\nviolets are dark\nsugar is sweet\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_reverse",
+      "seq": 539,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "patch -R -p1 /data/poem.diff > /dev/null && cat /data/poem.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "roses are red\nviolets are blue\nsugar is sweet\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_no_input",
+      "seq": 559,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "patch",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}
