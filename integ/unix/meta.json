@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "mkdir -p /data/metad && echo alpha > /data/metad/f.txt && touch -t 202601021530 /data/metad/f.txt",
       "expect": {
@@ -29,7 +30,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "ls -l /data/metad",
       "expect": {
@@ -48,7 +50,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chmod 601 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -67,7 +70,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -86,7 +90,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chown 500:dev /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -105,7 +110,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chown alice /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -124,7 +130,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "touch -t 202601021530 /data/metad/new.txt && ls -l /data/metad",
       "expect": {
@@ -143,7 +150,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "touch -c /data/metad/ghost.txt && ls /data/metad",
       "expect": {
@@ -162,7 +170,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -181,7 +190,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -200,7 +210,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -219,7 +230,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad",
       "expect": {
@@ -238,7 +250,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "touch -h -t 202601021530 /data/metad/ln.txt && readlink /data/metad/ln.txt",
       "expect": {
@@ -257,7 +270,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chmod 999 /data/metad/g.txt 2>&1",
       "expect": {
@@ -276,7 +290,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chmod u+q /data/metad/g.txt 2>&1",
       "expect": {
@@ -295,7 +310,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chmod 644 /data/metad/missing.txt 2>&1",
       "expect": {
@@ -314,7 +330,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "chown alice /data/metad/missing.txt 2>&1",
       "expect": {
@@ -333,7 +350,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "touch -t 99 /data/metad/g.txt 2>&1",
       "expect": {
@@ -352,7 +370,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "rm /data/metad/ln.txt && rm -r /data/metad",
       "expect": {

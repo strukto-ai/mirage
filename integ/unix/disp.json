@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && wc -l a.txt)",
       "expect": {
@@ -29,7 +30,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && wc -l a.txt b.txt)",
       "expect": {
@@ -48,7 +50,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && wc -l ./a.txt)",
       "expect": {
@@ -67,7 +70,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data/sub && wc -l ../a.txt)",
       "expect": {
@@ -86,7 +90,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && grep world a.txt b.txt)",
       "expect": {
@@ -105,7 +110,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && md5 a.txt)",
       "expect": {
@@ -124,7 +130,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && stat -c %n a.txt)",
       "expect": {
@@ -143,7 +150,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && find sub -name nested.txt)",
       "expect": {
@@ -162,7 +170,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && head -n 1 a.txt b.txt)",
       "expect": {
@@ -181,7 +190,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && grep -l world a.txt b.txt)",
       "expect": {
@@ -200,7 +210,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && grep -r nested disptree)",
       "expect": {
@@ -219,7 +230,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && rg nested disptree)",
       "expect": {
@@ -238,7 +250,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && ls -R disptree)",
       "expect": {
@@ -257,7 +270,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cd /data && find disptree)",
       "expect": {

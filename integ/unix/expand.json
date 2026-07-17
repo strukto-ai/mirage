@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/tabbed.txt | expand",
       "expect": {
@@ -29,7 +30,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "expand -t 4 /data/tabbed.txt",
       "expect": {
@@ -48,7 +50,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "echo expandisp=$(printf ' \\tX\\n' | expand -i | wc -c)",
       "expect": {

@@ -95,3 +95,50 @@ async def test_resolve_unknown_site():
         result = await resolve(_accessor(), path)
     assert result.level == "site"
     assert result.site_id is None
+
+
+def _scoped_accessor() -> SharePointAccessor:
+    return SharePointAccessor(
+        SharePointConfig(access_token="tok",
+                         site="Engineering",
+                         drive="Documents"))
+
+
+def _seed_scoped():
+    _site_cache["Engineering"] = _SITE_ID
+    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+
+
+def _spec(virtual: str) -> PathSpec:
+    return PathSpec(resource_path=mount_key(virtual, "/sp"),
+                    virtual=virtual,
+                    directory=virtual)
+
+
+@pytest.mark.asyncio
+async def test_scoped_resolve_root_is_drive_level():
+    _seed_scoped()
+    result = await resolve(_scoped_accessor(), _spec("/sp/"))
+    assert result.level == "drive"
+    assert result.drive_id == _DRIVE_ID
+    assert result.item_path is None
+
+
+@pytest.mark.asyncio
+async def test_scoped_resolve_path_is_drive_relative_item():
+    _seed_scoped()
+    result = await resolve(_scoped_accessor(), _spec("/sp/sub/a.txt"))
+    assert result.level == "item"
+    assert result.drive_id == _DRIVE_ID
+    assert result.item_path == "sub/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_scoped_resolve_unknown_drive():
+    _site_cache["Engineering"] = _SITE_ID
+    drives_url = re.compile(r".*/sites/.*/drives.*")
+    with aioresponses() as m:
+        m.get(drives_url, payload={"value": [{"id": "x", "name": "Other"}]})
+        result = await resolve(_scoped_accessor(), _spec("/sp/a.txt"))
+    assert result.level == "drive"
+    assert result.drive_id is None

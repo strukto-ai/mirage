@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "file /data/a.txt",
       "expect": {
@@ -29,7 +30,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "file /data/user.json",
       "expect": {
@@ -48,7 +50,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "file -b /data/a.txt",
       "expect": {
@@ -67,7 +70,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "file /data/a.txt /data/user.json",
       "expect": {
@@ -86,7 +90,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "file /data/empty.txt",
       "expect": {
@@ -105,7 +110,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "file /data/binary.bin",
       "expect": {

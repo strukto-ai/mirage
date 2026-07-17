@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cmp /data/xdiff.txt /data2/xdiff.txt",
       "expect": {
@@ -29,7 +30,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cp /data/xdiff.txt /data2/xsame.txt && cmp /data/xdiff.txt /data2/xsame.txt && rm /data/xdiff.txt /data2/xdiff.txt /data2/xsame.txt",
       "expect": {

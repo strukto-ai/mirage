@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.core.sharepoint._client import GRAPH_API, graph_list
+from mirage.core.msgraph.drive_ops import DriveLoc
+from mirage.core.sharepoint._client import (GRAPH_API, drive_ref_path,
+                                            graph_list, item_url)
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -77,6 +80,25 @@ async def resolve(accessor: SharePointAccessor,
             raw = rest or "/"
     raw = raw.strip("/")
 
+    config = accessor.config
+    if config.site is not None and config.drive is not None:
+        # Scoped mount: the whole mount lives inside one drive, so paths
+        # are drive-relative and the site/drive namespace levels vanish.
+        site_id = await _resolve_site_id(accessor, config.site)
+        if site_id is None:
+            return ResolvedPath(level="site", site_id=None)
+        drive_id = await _resolve_drive_id(accessor, site_id, config.drive)
+        if drive_id is None:
+            return ResolvedPath(level="drive", site_id=site_id, drive_id=None)
+        if not raw:
+            return ResolvedPath(level="drive",
+                                site_id=site_id,
+                                drive_id=drive_id)
+        return ResolvedPath(level="item",
+                            site_id=site_id,
+                            drive_id=drive_id,
+                            item_path=raw)
+
     if not raw:
         return ResolvedPath(level="root")
 
@@ -140,3 +162,12 @@ async def list_drives(accessor: SharePointAccessor, site_id: str) -> list[str]:
         names.append(name)
         _drive_cache[(site_id, name)] = d["id"]
     return sorted(names)
+
+
+def drive_loc(resolved: ResolvedPath, virt: str) -> DriveLoc:
+    assert resolved.drive_id is not None
+    return DriveLoc(drive=resolved.drive_id,
+                    path=resolved.item_path or "",
+                    virt=virt,
+                    url=partial(item_url, resolved.drive_id),
+                    ref=partial(drive_ref_path, resolved.drive_id))

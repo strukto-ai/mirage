@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
 from urllib.parse import quote
 
-# yapf: enable
 from mirage.accessor.onedrive import OneDriveConfig
 # yapf: disable
 from mirage.core.msgraph._client import (GRAPH_API, MAX_BACKOFF,
@@ -25,11 +25,14 @@ from mirage.core.msgraph._client import (GRAPH_API, MAX_BACKOFF,
                                          graph_post_monitor, graph_put_bytes,
                                          graph_stream, headers, new_session,
                                          poll_monitor, upload_chunk)
+# yapf: enable
+from mirage.core.msgraph.drive_ops import DriveLoc
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 __all__ = [
     "GRAPH_API",
+    "drive_loc",
     "MAX_BACKOFF",
     "RETRY_STATUSES",
     "GraphError",
@@ -93,3 +96,11 @@ def drive_ref_path(config: OneDriveConfig, folder: str = "") -> str:
     if full:
         return f"{base}/root:/{quote(full, safe='/')}"
     return f"{base}/root:"
+
+
+def drive_loc(config: OneDriveConfig, stripped: str) -> DriveLoc:
+    return DriveLoc(drive="",
+                    path=stripped,
+                    virt=stripped,
+                    url=partial(item_url, config),
+                    ref=partial(drive_ref_path, config))

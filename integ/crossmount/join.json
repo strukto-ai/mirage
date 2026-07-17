@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "printf '1 alpha\\n2 beta\\n' | tee /data/xj1.txt > /dev/null && printf '1 one\\n3 three\\n' | tee /data2/xj2.txt > /dev/null && join /data/xj1.txt /data2/xj2.txt",
       "expect": {
@@ -29,7 +30,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "join -a 1 /data/xj1.txt /data2/xj2.txt && rm /data/xc1.txt /data2/xc2.txt /data/xj1.txt /data2/xj2.txt",
       "expect": {

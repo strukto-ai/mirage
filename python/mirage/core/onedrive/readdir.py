@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
-                                ResourceType)
-from mirage.core.onedrive._client import GraphError, graph_list, item_url
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.msgraph.drive_ops import readdir_items
+from mirage.core.onedrive._client import drive_loc
 from mirage.core.onedrive.stat import stat
-from mirage.types import FileType, PathSpec
-from mirage.utils.errors import enoent
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -38,42 +39,7 @@ async def readdir(accessor: OneDriveAccessor,
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries
-
-    url = item_url(accessor.config,
-                   "/" + stripped if stripped else "/",
-                   action="/children")
-    try:
-        children = await graph_list(accessor.config, url)
-    except GraphError as exc:
-        if exc.status != 404:
-            raise
-        info = await stat(accessor, original, index=index)
-        if info.type != FileType.DIRECTORY:
-            raise NotADirectoryError(virtual_key) from exc
-        raise enoent(virtual_key) from exc
-    base = "/" + stripped if stripped else ""
-    names: list[str] = []
-    index_entries: list[tuple[str, IndexEntry]] = []
-    for child in children:
-        cname = child.get("name", "")
-        key = f"{base}/{cname}"
-        names.append(key)
-        if "folder" in child:
-            entry = IndexEntry(id=key,
-                               name=cname,
-                               resource_type=ResourceType.FOLDER,
-                               size=child.get("size"),
-                               remote_time=child.get("lastModifiedDateTime",
-                                                     ""))
-        else:
-            entry = IndexEntry(id=key,
-                               name=cname,
-                               resource_type=ResourceType.FILE,
-                               size=child.get("size"),
-                               remote_time=child.get("lastModifiedDateTime",
-                                                     ""))
-        index_entries.append((cname, entry))
-    names = sorted(names)
-    virtual_entries = sorted((prefix + e if prefix else e) for e in names)
-    await index.set_dir(virtual_key, index_entries)
-    return virtual_entries
+    return await readdir_items(accessor.config,
+                               drive_loc(accessor.config, stripped), index,
+                               prefix, stripped, virtual_key,
+                               partial(stat, accessor, original, index))

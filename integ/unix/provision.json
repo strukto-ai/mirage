@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt",
       "provision": true,
@@ -31,7 +32,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt /data/b.txt",
       "provision": true,
@@ -51,7 +53,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "wc -l /data/a.txt",
       "provision": true,
@@ -71,7 +74,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "sort /data/numbers.txt",
       "provision": true,
@@ -91,7 +95,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "md5 /data/b.txt",
       "provision": true,
@@ -111,7 +116,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "grep world /data/a.txt",
       "provision": true,
@@ -131,7 +137,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "grep hello /data/a.txt /data/mixed.txt",
       "provision": true,
@@ -151,7 +158,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "rg world /data/a.txt",
       "provision": true,
@@ -171,7 +179,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "head /data/a.txt",
       "provision": true,
@@ -191,7 +200,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "head -c 5 /data/a.txt",
       "provision": true,
@@ -211,7 +221,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "tail -n 1 /data/a.txt",
       "provision": true,
@@ -231,7 +242,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "ls /data",
       "provision": true,
@@ -251,7 +263,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "find /data -name \"*.txt\"",
       "provision": true,
@@ -271,7 +284,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "du /data/a.txt",
       "provision": true,
@@ -291,7 +305,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "stat /data/a.txt",
       "provision": true,
@@ -311,7 +326,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "jq \".name\" /data/user.json",
       "provision": true,
@@ -331,7 +347,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "jq \".id\" /data/data.jsonl",
       "provision": true,
@@ -351,7 +368,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/missing.txt",
       "provision": true,
@@ -371,7 +389,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "sed s/a/b/ /data/a.txt",
       "provision": true,
@@ -391,7 +410,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "sed -i s/a/b/ /data/a.txt",
       "provision": true,
@@ -411,7 +431,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "tee /data/prov_out.txt",
       "provision": true,
@@ -431,7 +452,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt | head -c 4",
       "provision": true,
@@ -451,7 +473,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "grep world /data/a.txt | wc -l",
       "provision": true,
@@ -471,7 +494,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt && cat /data/b.txt",
       "provision": true,
@@ -491,7 +515,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt; cat /data/b.txt",
       "provision": true,
@@ -511,7 +536,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/b.txt || cat /data/a.txt",
       "provision": true,
@@ -531,7 +557,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "for i in 1 2 3; do cat /data/a.txt; done",
       "provision": true,
@@ -551,7 +578,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "while true; do cat /data/a.txt; done",
       "provision": true,
@@ -571,7 +599,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "file /data/a.txt",
       "provision": true,
@@ -591,7 +620,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "iconv -f utf-8 -t utf-8 /data/a.txt",
       "provision": true,
@@ -611,7 +641,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cp /data/a.txt /data/sub",
       "provision": true,
@@ -631,7 +662,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "gzip /data/b.txt",
       "provision": true,
@@ -651,7 +683,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "rm /data/dup.txt",
       "provision": true,
@@ -671,7 +704,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "rm -r /data/guard",
       "provision": true,
@@ -691,7 +725,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "mkdir /data/provdir",
       "provision": true,
@@ -711,7 +746,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "mv /data/a.txt /data/moved.txt",
       "provision": true,
@@ -731,7 +767,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "seq 3",
       "provision": true,
@@ -751,7 +788,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "date",
       "provision": true,
@@ -771,7 +809,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt | grep hello | wc -l",
       "provision": true,
@@ -791,7 +830,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt && cat /data/b.txt || cat /data/numbers.txt",
       "provision": true,
@@ -811,7 +851,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt || cat /data/b.txt && cat /data/numbers.txt",
       "provision": true,
@@ -831,7 +872,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "if true; then cat /data/a.txt; else cat /data/b.txt; fi",
       "provision": true,
@@ -851,7 +893,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "if grep -q hello /data/a.txt; then cat /data/b.txt; fi",
       "provision": true,
@@ -871,7 +914,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "case x in x) cat /data/a.txt;; *) cat /data/b.txt;; esac",
       "provision": true,
@@ -891,7 +935,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "(cat /data/a.txt; cat /data/b.txt)",
       "provision": true,
@@ -911,7 +956,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "{ cat /data/a.txt; cat /data/b.txt; }",
       "provision": true,
@@ -931,7 +977,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "! grep zzz /data/a.txt",
       "provision": true,
@@ -951,7 +998,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt > /data/prov_redir.txt",
       "provision": true,
@@ -971,7 +1019,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "tee /data/prov_x.txt || cat /data/a.txt",
       "provision": true,
@@ -991,7 +1040,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "for i in 1 2; do cat /data/a.txt | wc -l; done",
       "provision": true,
@@ -1011,7 +1061,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "for i in 1 2; do for j in 1 2; do cat /data/b.txt; done; done",
       "provision": true,
@@ -1031,7 +1082,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat $(echo /data/a.txt)",
       "provision": true,
@@ -1051,7 +1103,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "for i in 1 2; do cat /data/a.txt | wc -l && cat /data/b.txt; done",
       "provision": true,
@@ -1071,7 +1124,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "FOO=1 cat /data/a.txt",
       "provision": true,
@@ -1091,7 +1145,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "pfn() { cat /data/b.txt; }; pfn; pfn",
       "provision": true,
@@ -1111,7 +1166,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "prec() { prec; }; prec",
       "provision": true,
@@ -1131,7 +1187,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "eval 'cat /data/a.txt'",
       "provision": true,
@@ -1151,7 +1208,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "select x in a b; do cat /data/a.txt; done",
       "provision": true,
@@ -1171,7 +1229,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "until false; do cat /data/a.txt; done",
       "provision": true,
@@ -1191,7 +1250,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "wc -l < /data/a.txt",
       "provision": true,
@@ -1211,7 +1271,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt > /dev/null",
       "provision": true,
@@ -1231,7 +1292,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data2/xm_link.txt",
       "provision": true,
@@ -1251,7 +1313,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "grep x /data/xm_rlink.txt",
       "provision": true,
@@ -1271,7 +1334,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -1291,7 +1355,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "grep s /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -1311,7 +1376,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt /data2/xm.txt | wc -c",
       "provision": true,
@@ -1331,7 +1397,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "md5 /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -1351,7 +1418,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "du /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -1371,7 +1439,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/rgm/d1/*.txt",
       "provision": true,
@@ -1391,7 +1460,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/rgm/d1/*.nope",
       "provision": true,
@@ -1411,7 +1481,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "grep -r hello /data/rgm",
       "provision": true,
@@ -1431,7 +1502,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "wc -l",
       "provision": true,
@@ -1451,7 +1523,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "wc -c <<EOF\nhello\nEOF",
       "provision": true,
@@ -1471,7 +1544,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "for i in $(echo 1 2); do cat /data/a.txt; done",
       "provision": true,
@@ -1491,7 +1565,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "cat /data/a.txt > $(echo /data/prov_out.txt)",
       "provision": true,
