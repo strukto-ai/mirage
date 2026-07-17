@@ -88,8 +88,19 @@ async def stat_check(ws, check: dict) -> str:
     return line + "\n"
 
 
+def provision_line(result) -> str:
+    return (f"net={result.network_read} write={result.network_write} "
+            f"cache={result.cache_read} ops={result.read_ops} "
+            f"hits={result.cache_hits} precision={result.precision.value}")
+
+
 async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
+    if case.get("clear_cache"):
+        await ws.cache.clear()
     start = time.monotonic()
+    if case.get("provision"):
+        plan = await ws.execute(case["command"], provision=True)
+        return 0, provision_line(plan) + "\n", "", time.monotonic() - start
     result = await ws.execute(case["command"])
     elapsed = time.monotonic() - start
     out = await result.stdout_str()

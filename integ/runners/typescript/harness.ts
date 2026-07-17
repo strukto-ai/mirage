@@ -55,8 +55,23 @@ export interface Case {
   command: string
   flags?: string[]
   check?: StatCheck
+  provision?: boolean
+  clear_cache?: boolean
   expect: Expect
   _source?: string
+}
+
+export interface ProvisionInfo {
+  networkRead: number | string
+  networkWrite: number | string
+  cacheRead: number | string
+  readOps: number
+  cacheHits: number
+  precision: string
+}
+
+interface ProvisionExec {
+  execute(cmd: string, opts: { provision: true }): Promise<ProvisionInfo>
 }
 
 export interface ExecResult {
@@ -75,6 +90,7 @@ export interface HarnessStat {
 export interface ExecWorkspace {
   execute(cmd: string, opts?: { stdin?: Uint8Array }): Promise<ExecResult>
   dispatch(opName: string, path: string): Promise<unknown>
+  cache: { clear(): Promise<void> }
   close(): Promise<void>
 }
 
@@ -166,11 +182,29 @@ export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<st
   return check.fields.map((name) => checkField(st, name)).join(' ') + '\n'
 }
 
+function provisionLine(r: ProvisionInfo): string {
+  return (
+    `net=${r.networkRead} write=${r.networkWrite} ` +
+    `cache=${r.cacheRead} ops=${String(r.readOps)} ` +
+    `hits=${String(r.cacheHits)} precision=${r.precision}`
+  )
+}
+
 export async function runCase(
   ws: ExecWorkspace,
   c: Case,
 ): Promise<{ exitCode: number; out: string; err: string; elapsed: number }> {
+  if (c.clear_cache === true) await ws.cache.clear()
   const start = performance.now()
+  if (c.provision === true) {
+    const plan = await (ws as unknown as ProvisionExec).execute(c.command, { provision: true })
+    return {
+      exitCode: 0,
+      out: provisionLine(plan) + '\n',
+      err: '',
+      elapsed: (performance.now() - start) / 1000,
+    }
+  }
   const result = await ws.execute(c.command)
   const elapsed = (performance.now() - start) / 1000
   let out = DEC.decode(result.stdout)

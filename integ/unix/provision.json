@@ -1,0 +1,1430 @@
+{
+  "cases": [
+    {
+      "id": "prov_cat",
+      "seq": 300000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      },
+      "clear_cache": true
+    },
+    {
+      "id": "prov_cat_multi",
+      "seq": 300001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt /data/b.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_wc",
+      "seq": 300002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "wc -l /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_sort",
+      "seq": 300003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "sort /data/numbers.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=12 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_md5",
+      "seq": 300004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "md5 /data/b.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=6 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_grep",
+      "seq": 300005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "grep world /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_grep_multi",
+      "seq": 300006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "grep hello /data/a.txt /data/mixed.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=60 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_rg",
+      "seq": 300007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "rg world /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_head",
+      "seq": 300008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "head /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0-24 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_head_c",
+      "seq": 300009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "head -c 5 /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=5 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_tail",
+      "seq": 300010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "tail -n 1 /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0-24 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_ls",
+      "seq": 300011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "ls /data",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_find",
+      "seq": 300012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "find /data -name \"*.txt\"",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_du",
+      "seq": 300013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "du /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_stat",
+      "seq": 300014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "stat /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_jq_object",
+      "seq": 300015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "jq \".name\" /data/user.json",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=29 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_jq_jsonl",
+      "seq": 300016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "jq \".id\" /data/data.jsonl",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=27 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_missing",
+      "seq": 300017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/missing.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_sed",
+      "seq": 300018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "sed s/a/b/ /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_sed_inplace",
+      "seq": 300019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "sed -i s/a/b/ /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_write",
+      "seq": 300020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "tee /data/prov_out.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_pipe",
+      "seq": 300021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt | head -c 4",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_pipe_floor",
+      "seq": 300022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "grep world /data/a.txt | wc -l",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_and",
+      "seq": 300023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt && cat /data/b.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_seq",
+      "seq": 300024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt; cat /data/b.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_or",
+      "seq": 300025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/b.txt || cat /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=6-24 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_for",
+      "seq": 300026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "for i in 1 2 3; do cat /data/a.txt; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=72 write=0 cache=0 ops=3 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_while",
+      "seq": 300027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "while true; do cat /data/a.txt; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_file_cmd",
+      "seq": 300028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "file /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0-24 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_iconv",
+      "seq": 300029,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "iconv -f utf-8 -t utf-8 /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_cp",
+      "seq": 300030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cp /data/a.txt /data/sub",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0-24 write=0-24 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_gzip",
+      "seq": 300031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "gzip /data/b.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=6 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_rm",
+      "seq": 300032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "rm /data/dup.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_rm_r",
+      "seq": 300033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "rm -r /data/guard",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_mkdir",
+      "seq": 300034,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "mkdir /data/provdir",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_mv",
+      "seq": 300035,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "mv /data/a.txt /data/moved.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_seq_2",
+      "seq": 300036,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "seq 3",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_date",
+      "seq": 300037,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "date",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_pipe3",
+      "seq": 300038,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt | grep hello | wc -l",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_and_or",
+      "seq": 300039,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt && cat /data/b.txt || cat /data/numbers.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=12-30 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_or_and",
+      "seq": 300040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt || cat /data/b.txt && cat /data/numbers.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=18-36 write=0 cache=0 ops=2 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_if_else",
+      "seq": 300041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "if true; then cat /data/a.txt; else cat /data/b.txt; fi",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=6-24 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_if_cond_read",
+      "seq": 300042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "if grep -q hello /data/a.txt; then cat /data/b.txt; fi",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24-30 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_case",
+      "seq": 300043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "case x in x) cat /data/a.txt;; *) cat /data/b.txt;; esac",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=6-24 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_subshell",
+      "seq": 300044,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(cat /data/a.txt; cat /data/b.txt)",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_brace_group",
+      "seq": 300045,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "{ cat /data/a.txt; cat /data/b.txt; }",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_negate",
+      "seq": 300046,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "! grep zzz /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_redirect_out",
+      "seq": 300047,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt > /data/prov_redir.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0-24 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_or_unknown_branch",
+      "seq": 300048,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "tee /data/prov_x.txt || cat /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0-24 write=0 cache=0 ops=0 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_for_pipe",
+      "seq": 300049,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "for i in 1 2; do cat /data/a.txt | wc -l; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=48 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_for_nested",
+      "seq": 300050,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "for i in 1 2; do for j in 1 2; do cat /data/b.txt; done; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=4 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_cmdsub",
+      "seq": 300051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat $(echo /data/a.txt)",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_deep_mix",
+      "seq": 300052,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "for i in 1 2; do cat /data/a.txt | wc -l && cat /data/b.txt; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=60 write=0 cache=0 ops=4 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_env_prefix",
+      "seq": 300053,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "FOO=1 cat /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_func_call",
+      "seq": 300054,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "pfn() { cat /data/b.txt; }; pfn; pfn",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=12 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_func_recursive",
+      "seq": 300055,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "prec() { prec; }; prec",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_eval",
+      "seq": 300056,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "eval 'cat /data/a.txt'",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_select",
+      "seq": 300057,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "select x in a b; do cat /data/a.txt; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_until",
+      "seq": 300058,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "until false; do cat /data/a.txt; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_redirect_in",
+      "seq": 300059,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "wc -l < /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_redirect_devnull",
+      "seq": 300060,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt > /dev/null",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_symlink",
+      "seq": 300061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data2/xm_link.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_symlink_grep",
+      "seq": 300062,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "grep x /data/xm_rlink.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=6 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_xmount_concat",
+      "seq": 300063,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt /data2/xm.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_xmount_grep",
+      "seq": 300064,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "grep s /data/a.txt /data2/xm.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_xmount_pipe",
+      "seq": 300065,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt /data2/xm.txt | wc -c",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_xmount_md5",
+      "seq": 300066,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "md5 /data/a.txt /data2/xm.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_xmount_du",
+      "seq": 300067,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "du /data/a.txt /data2/xm.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_glob",
+      "seq": 300068,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/rgm/d1/*.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_glob_unmatched",
+      "seq": 300069,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/rgm/d1/*.nope",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_grep_r",
+      "seq": 300070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "grep -r hello /data/rgm",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=60 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_pathless",
+      "seq": 300071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "wc -l",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_heredoc",
+      "seq": 300072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "wc -c <<EOF\nhello\nEOF",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_for_cmdsub",
+      "seq": 300073,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "for i in $(echo 1 2); do cat /data/a.txt; done",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_redirect_cmdsub",
+      "seq": 300074,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "cat /data/a.txt > $(echo /data/prov_out.txt)",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
