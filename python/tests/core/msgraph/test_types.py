@@ -7,7 +7,9 @@ def test_parse_drive_item_validates_json_fields():
         "name": "report.txt",
         "size": 12,
         "lastModifiedDateTime": None,
-        "folder": {"childCount": 0},
+        "folder": {
+            "childCount": 0
+        },
         "file": "invalid",
     })
 

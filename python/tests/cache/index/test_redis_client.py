@@ -1,8 +1,7 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
-
-from datetime import datetime, timedelta, timezone
 
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.redis import RedisIndexCacheStore
@@ -18,8 +17,8 @@ def client():
         0,
         [b"test:mirage:idx:entry:/folder/a.txt"],
     ))
-    value.get = AsyncMock(return_value=(
-        b'{"id":"a","name":"a.txt","resource_type":"file"}'))
+    value.get = AsyncMock(
+        return_value=(b'{"id":"a","name":"a.txt","resource_type":"file"}'))
     pipe = MagicMock()
     pipe.execute = AsyncMock()
     value.pipeline.return_value = pipe
@@ -68,8 +67,10 @@ async def test_falsey_injected_client_is_used_and_not_closed(client):
 async def test_seed_flushes_before_first_lookup(client):
     store = RedisIndexCacheStore(client=client)
     store.seed(
-        {"/folder/a.txt": IndexEntry(id="a", name="a.txt",
-                                           resource_type="file")},
+        {
+            "/folder/a.txt": IndexEntry(
+                id="a", name="a.txt", resource_type="file")
+        },
         {"/folder": ["/folder/a.txt"]},
         datetime.now(timezone.utc) + timedelta(hours=1),
     )
