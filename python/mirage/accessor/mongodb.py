@@ -13,15 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import Any
 
 from pymongo import AsyncMongoClient
+from pymongo.driver_info import DriverInfo
 
 from mirage.accessor.base import Accessor
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.resource.secrets import reveal_secret
+
+logger = logging.getLogger(__name__)
+
+
+def _mirage_version() -> str | None:
+    try:
+        return package_version("mirage-ai")
+    except PackageNotFoundError:
+        logger.warning("mirage-ai package metadata not found; "
+                       "MongoDB driver handshake will omit the version")
+        return None
+
+
+_DRIVER_INFO = DriverInfo(name="Mirage", version=_mirage_version())
 
 
 class MongoDBAccessor(Accessor):
@@ -31,23 +49,25 @@ class MongoDBAccessor(Accessor):
                  listing_cache_ttl: float = 5.0) -> None:
         self.config = config
         self.listing_cache_ttl = listing_cache_ttl
-        self._clients: dict[int, AsyncMongoClient] = {}
+        self._clients: dict[int, AsyncMongoClient[dict[str, Any]]] = {}
         self._cache: dict[str, tuple[float, Any]] = {}
 
     @property
-    def client(self) -> AsyncMongoClient:
+    def client(self) -> AsyncMongoClient[dict[str, Any]]:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return self._for_loop(None)
         return self._for_loop(loop)
 
-    def _for_loop(self,
-                  loop: asyncio.AbstractEventLoop | None) -> AsyncMongoClient:
+    def _for_loop(
+        self, loop: asyncio.AbstractEventLoop | None
+    ) -> AsyncMongoClient[dict[str, Any]]:
         key = id(loop) if loop is not None else 0
         client = self._clients.get(key)
         if client is None:
-            client = AsyncMongoClient(reveal_secret(self.config.uri))
+            client = AsyncMongoClient(reveal_secret(self.config.uri),
+                                      driver=_DRIVER_INFO)
             self._clients[key] = client
         return client
 
@@ -62,3 +82,10 @@ class MongoDBAccessor(Accessor):
         value = await fetch()
         self._cache[key] = (now + self.listing_cache_ttl, value)
         return value
+
+    async def close(self) -> None:
+        clients = list(self._clients.values())
+        self._clients.clear()
+        self._cache.clear()
+        for client in clients:
+            await client.close()

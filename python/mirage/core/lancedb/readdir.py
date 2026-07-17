@@ -16,7 +16,8 @@ from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.lancedb.query import (distinct_values, list_tables,
                                        rows_matching)
-from mirage.core.lancedb.scope import ScopeLevel, detect_scope
+from mirage.core.lancedb.scope import (LanceDBGroupScope, ScopeLevel,
+                                       detect_scope)
 from mirage.types import PathSpec
 
 
@@ -54,8 +55,7 @@ async def readdir(
         names = await list_tables(accessor)
         return [f"{base}/{name}" for name in names]
 
-    if scope.level == ScopeLevel.GROUP_DIR:
-        assert scope.table is not None
+    if isinstance(scope, LanceDBGroupScope):
         depth = len(scope.filters)
         total = len(config.group_by)
         if depth < total:

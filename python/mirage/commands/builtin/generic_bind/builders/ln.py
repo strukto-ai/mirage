@@ -16,7 +16,8 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,17 +37,21 @@ async def ln(
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:
         raise ValueError("ln: usage: ln [-s] [-f] source dest")
-    assert ops.exists is not None and ops.write is not None
+    exists = ops.require(Operation.EXISTS)
+    write = ops.require(Operation.WRITE)
     paths = await ops.resolve_glob(accessor, paths, index)
     source_path = paths[0]
     dest_path = paths[1]
-    if n and await ops.exists(accessor, dest_path):
+    if n and await exists(accessor, dest_path):
         return None, IOResult()
     data = await ops.read_bytes(accessor, source_path)
-    await ops.write(accessor, dest_path, data)
+    await write(accessor, dest_path, data)
     output = f"'{source_path.virtual}' -> '{dest_path.virtual}'\n".encode(
     ) if v else None
     return output, IOResult(writes={dest_path.mount_path: data})
 
 
-BUILDER = Builder('ln', ln, None, True, None)
+BUILDER = Builder('ln',
+                  ln,
+                  write=True,
+                  requirements=frozenset({Operation.EXISTS, Operation.WRITE}))

@@ -114,6 +114,9 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
             if keys:
                 await self._cache_client.delete(*keys)
 
+    async def close(self) -> None:
+        await self._store.close()
+
     def evict_paths(self, paths: Iterable[str]) -> None:
         # No-op: Redis cache holds nothing restored from the snapshot
         # (only RAM caches are repopulated by _restore_cache), and the

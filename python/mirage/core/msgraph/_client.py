@@ -117,7 +117,8 @@ async def _request(config: MsGraphConfig,
                    auth: bool = True,
                    read: str = "json"):
     own = session is None
-    sess = session or aiohttp.ClientSession(timeout=_timeout(config))
+    sess = (session if session is not None else aiohttp.ClientSession(
+        timeout=_timeout(config)))
     try:
         attempt = 0
         refreshed = False
@@ -173,7 +174,8 @@ async def graph_list(
     next_url: str | None = url
     next_params = params
     own = session is None
-    sess = session or aiohttp.ClientSession(timeout=_timeout(config))
+    sess = (session if session is not None else aiohttp.ClientSession(
+        timeout=_timeout(config)))
     try:
         while next_url:
             data = await _request(config,
@@ -211,7 +213,8 @@ async def graph_stream(config: MsGraphConfig,
                        session: aiohttp.ClientSession | None = None,
                        auth: bool = True):
     own = session is None
-    sess = session or aiohttp.ClientSession(timeout=_timeout(config))
+    sess = (session if session is not None else aiohttp.ClientSession(
+        timeout=_timeout(config)))
     try:
         attempt = 0
         refreshed = False
@@ -250,13 +253,17 @@ async def graph_post_monitor(
         config: MsGraphConfig,
         url: str,
         body: dict | None = None,
-        session: aiohttp.ClientSession | None = None) -> str | None:
-    return await _request(config,
-                          "POST",
-                          url,
-                          json_body=body or {},
-                          session=session,
-                          read="location")
+        session: aiohttp.ClientSession | None = None) -> str:
+    location = await _request(config,
+                              "POST",
+                              url,
+                              json_body=body or {},
+                              session=session,
+                              read="location")
+    if not isinstance(location, str) or not location:
+        raise GraphError(502, "missingMonitor",
+                         f"POST {url} did not return a Location header")
+    return location
 
 
 async def graph_patch(config: MsGraphConfig,
@@ -300,7 +307,13 @@ async def poll_monitor(url: str,
                 if resp.status >= 400:
                     raise GraphError(resp.status, "monitorError", f"GET {url}")
                 payload = await resp.json()
+            if not isinstance(payload, dict):
+                raise GraphError(502, "invalidMonitorResponse",
+                                 f"GET {url} did not return an object")
             status = payload.get("status")
+            if not isinstance(status, str) or not status:
+                raise GraphError(502, "invalidMonitorResponse",
+                                 f"GET {url} did not return a status")
             if status in ("completed", "failed"):
                 return payload
             if waited >= timeout:

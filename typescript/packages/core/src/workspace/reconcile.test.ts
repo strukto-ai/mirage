@@ -87,7 +87,7 @@ describe('Reconciler', () => {
     await ws.close()
   })
 
-  it('mayServeCached forces a re-read for a no-fingerprint backend under ALWAYS', async () => {
+  it('mayServeCached forces a re-read for a live-only backend under ALWAYS', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     const mount = mountOf(ws, '/data/f.txt')
     const rec = new Reconciler(ws.cache, ws.namespace, ws.ops, ConsistencyPolicy.ALWAYS)

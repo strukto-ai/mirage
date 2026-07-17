@@ -66,6 +66,9 @@ class FileCacheMixin:
     async def clear(self) -> None:
         raise NotImplementedError
 
+    async def close(self) -> None:
+        """Release connections held by the cache backend."""
+
     def evict_paths(self, paths: Iterable[str]) -> None:
         """Synchronously evict the given keys from the cache.
 

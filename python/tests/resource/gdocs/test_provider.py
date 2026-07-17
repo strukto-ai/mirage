@@ -45,10 +45,3 @@ def test_resource_commands_registered(config):
     resource = GDocsResource(config=config)
     cmds = resource.commands()
     assert len(cmds) > 15
-
-
-@pytest.mark.asyncio
-async def test_resource_fingerprint_not_found(config):
-    resource = GDocsResource(config=config)
-    fp = await resource.fingerprint("owned/Nonexistent__xyz.gdoc.json")
-    assert fp is None

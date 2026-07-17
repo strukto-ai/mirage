@@ -51,6 +51,13 @@ async def test_aexecute_failing_command(backend):
 
 
 @pytest.mark.asyncio
+async def test_sync_execute_is_safe_inside_running_event_loop(backend):
+    resp = backend.execute("echo nested")
+    assert resp.exit_code == 0
+    assert "nested" in resp.output
+
+
+@pytest.mark.asyncio
 async def test_awrite_and_aread(backend):
     result = await backend.awrite("/test.txt", "hello world")
     assert result.error is None

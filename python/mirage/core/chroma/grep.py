@@ -103,7 +103,7 @@ async def target_slugs(accessor,
     targets: dict[str, str] = {}
     for path in paths:
         resolved = await resolve_path(accessor, path, index)
-        if resolved.entry is not None and not resolved.is_dir:
+        if not resolved.is_dir:
             targets[path.virtual] = str(resolved.entry.extra["slug"])
             continue
         if resolved.is_dir:
@@ -117,7 +117,6 @@ async def target_slugs(accessor,
                     child, rekey(path.virtual, path.resource_path, child))
                 child_resolved = await resolve_path(accessor, child_spec,
                                                     index)
-                if (child_resolved.entry is not None
-                        and not child_resolved.is_dir):
+                if not child_resolved.is_dir:
                     targets[child] = str(child_resolved.entry.extra["slug"])
     return targets

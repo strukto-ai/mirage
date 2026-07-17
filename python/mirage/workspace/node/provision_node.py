@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from mirage.provision import Precision, ProvisionResult
 from mirage.shell.node_kind import NodeKind, node_kind
+from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import RedirectKind
 from mirage.shell.types import ShellBuiltin as SB
@@ -84,7 +85,7 @@ class PlanScope:
     on the session: planning must not mutate shell state), and
     `planning` guards recursive functions from looping the planner.
     """
-    functions: dict[str, list] = field(default_factory=dict)
+    functions: dict[str, FunctionBody] = field(default_factory=dict)
     planning: set[str] = field(default_factory=set)
 
 
@@ -213,10 +214,10 @@ async def provision_node(
 
     if kind == NodeKind.COMMAND:
         name = get_command_name(node)
-        func_body: object = plan_scope.functions.get(name)
+        func_body = plan_scope.functions.get(name)
         if func_body is None:
             func_body = session.functions.get(name)
-        if isinstance(func_body, list):
+        if func_body is not None:
             return await handle_function_provision(recurse, name, func_body,
                                                    plan_scope.planning,
                                                    session)
@@ -300,7 +301,7 @@ async def provision_node(
     if kind == NodeKind.FUNCTION_DEF:
         name = get_function_name(node)
         fn_body = get_function_body(node)
-        if name and fn_body is not None:
+        if name:
             plan_scope.functions[name] = fn_body
         return await handle_builtin_provision()
 

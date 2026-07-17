@@ -16,14 +16,18 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
-
-try:
-    import wasmtime
-except ImportError:
-    wasmtime = None  # type: ignore[assignment]
+from typing import Any
 
 from mirage.runtime.wasm.fs import GuestFs
 from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
+
+wasmtime: Any
+try:
+    import wasmtime as _wasmtime
+except ImportError:
+    wasmtime = None
+else:
+    wasmtime = _wasmtime
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +149,12 @@ class WasmRuntime:
         store.set_wasi(wasi)
         instance = linker.instantiate(store, module)
         start = instance.exports(store)["_start"]
+        if not isinstance(start, wasmtime.Func):
+            raise RuntimeError("WASI module exports a non-function _start")
         exit_code = 0
         trap_message = b""
         try:
-            start(store)  # type: ignore[operator]
+            start(store)
         except wasmtime.ExitTrap as exc:
             exit_code = exc.code
         except wasmtime.Trap as exc:

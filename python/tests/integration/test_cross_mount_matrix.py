@@ -131,10 +131,7 @@ async def _populate_file_async(state: _MountState, name: str,
         for i in range(1, len(parts)):
             d = "/" + "/".join(parts[:i])
             if d not in state.accessor.store.dirs:
-                try:
-                    await mem_mkdir(state.accessor, d)
-                except (FileExistsError, ValueError):
-                    pass
+                await mem_mkdir(state.accessor, PathSpec.from_str_path(d))
         await mem_write(state.accessor, PathSpec.from_str_path("/" + name),
                         content)
     elif state.ptype == "disk":
@@ -145,10 +142,8 @@ async def _populate_file_async(state: _MountState, name: str,
         parts = ("/" + name).strip("/").split("/")
         for i in range(1, len(parts)):
             d = "/" + "/".join(parts[:i])
-            try:
-                await redis_mkdir(state.resource.accessor, d)
-            except (FileExistsError, ValueError):
-                pass
+            await redis_mkdir(state.resource.accessor,
+                              PathSpec.from_str_path(d))
         await redis_write(state.resource.accessor,
                           PathSpec.from_str_path("/" + name), content)
 

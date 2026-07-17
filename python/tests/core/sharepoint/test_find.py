@@ -1,24 +1,29 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.core.sharepoint import find as find_mod
 from mirage.core.sharepoint._resolver import ResolvedPath
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 _TREE = [
     ("reports/a.txt", {
         "name": "a.txt",
-        "size": 10
+        "size": 10,
+        "lastModifiedDateTime": "2026-07-15T12:00:00Z"
     }, False),
     ("reports/sub", {
         "name": "sub",
+        "lastModifiedDateTime": "2026-07-14T12:00:00Z",
         "folder": {}
     }, True),
     ("reports/sub/b.txt", {
         "name": "b.txt",
-        "size": 20
+        "size": 20,
+        "lastModifiedDateTime": "2026-07-13T12:00:00Z"
     }, False),
 ]
 
@@ -82,3 +87,24 @@ async def test_find_maxdepth_one(_patched):
     acc = SimpleNamespace(config=None)
     out = await find_mod.find(acc, _spec(), maxdepth=1)
     assert out == ["/reports", "/reports/a.txt", "/reports/sub"]
+
+
+@pytest.mark.asyncio
+async def test_find_honors_mtime_window(_patched, monkeypatch):
+    monkeypatch.setattr(
+        find_mod,
+        "stat",
+        AsyncMock(return_value=FileStat(
+            name="reports",
+            type=FileType.DIRECTORY,
+            modified="2026-07-14T12:00:00Z",
+        )),
+    )
+    acc = SimpleNamespace(config=None)
+    out = await find_mod.find(
+        acc,
+        _spec(),
+        mtime_min=datetime(2026, 7, 15, tzinfo=timezone.utc).timestamp(),
+        mtime_max=datetime(2026, 7, 16, tzinfo=timezone.utc).timestamp(),
+    )
+    assert out == ["/reports/a.txt"]

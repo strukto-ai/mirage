@@ -17,6 +17,7 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.create import create
 from mirage.resource.ram.store import RAMStore
+from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
@@ -24,7 +25,7 @@ async def test_create():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await create(a, "/new.txt")
+    await create(a, PathSpec.from_str_path("/new.txt"))
     assert s.files["/new.txt"] == b""
     assert "/new.txt" in s.modified
 
@@ -35,7 +36,7 @@ async def test_create_overwrites_existing():
 
     a = RAMAccessor(s)
     s.files["/existing.txt"] = b"old data"
-    await create(a, "/existing.txt")
+    await create(a, PathSpec.from_str_path("/existing.txt"))
     assert s.files["/existing.txt"] == b""
 
 
@@ -44,5 +45,5 @@ async def test_create_normalizes_path():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await create(a, "file.txt")
+    await create(a, PathSpec.from_str_path("file.txt"))
     assert "/file.txt" in s.files

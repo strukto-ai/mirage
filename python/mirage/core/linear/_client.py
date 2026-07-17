@@ -35,7 +35,7 @@ class LinearAPIError(RuntimeError):
         status: int | None = None,
     ) -> None:
         super().__init__(message)
-        self.errors = errors or []
+        self.errors = errors if errors is not None else []
         self.status = status
 
 

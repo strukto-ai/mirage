@@ -12,19 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
-
 from mirage.resource.base import BaseResource
 from mirage.resource.ram import RAMResource
 
 
-@pytest.mark.asyncio
-async def test_base_backend_fingerprint_returns_none():
-    backend = BaseResource()
-    assert await backend.fingerprint("/any") is None
+def test_base_resource_does_not_claim_snapshot_support():
+    assert BaseResource.SUPPORTS_SNAPSHOT is False
 
 
-@pytest.mark.asyncio
-async def test_memory_backend_fingerprint_returns_none():
-    backend = RAMResource()
-    assert await backend.fingerprint("/any") is None
+def test_memory_resource_does_not_claim_snapshot_support():
+    assert RAMResource.SUPPORTS_SNAPSHOT is False

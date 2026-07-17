@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tee import tee as generic_tee
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -39,10 +40,13 @@ async def tee(
     return await generic_tee(paths,
                              texts,
                              read_stream=with_index(ops.read_stream, index),
-                             write_bytes=ops.require("write"),
+                             write_bytes=ops.require(Operation.WRITE),
                              accessor=accessor,
                              stdin=stdin,
                              append=a)
 
 
-BUILDER = Builder('tee', tee, None, True, None)
+BUILDER = Builder('tee',
+                  tee,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE}))

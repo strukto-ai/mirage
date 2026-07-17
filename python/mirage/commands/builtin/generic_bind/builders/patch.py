@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.patch import patch as generic_patch
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -38,7 +39,7 @@ async def patch(
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_patch(paths,
                                read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.require("write"),
+                               write_bytes=ops.require(Operation.WRITE),
                                has_resource=ops.is_mounted(accessor),
                                accessor=accessor,
                                stdin=stdin,
@@ -48,4 +49,7 @@ async def patch(
                                N=N)
 
 
-BUILDER = Builder('patch', patch, None, True, None)
+BUILDER = Builder('patch',
+                  patch,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE}))

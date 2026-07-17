@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from mirage.core.dify import find, stat, tree
@@ -80,3 +82,25 @@ async def test_find_filters_name_type_size_and_depth(monkeypatch,
     assert "/" not in deep
     assert "/guides" not in deep
     assert "/guides/deep" in deep
+
+
+@pytest.mark.asyncio
+async def test_find_honors_mtime_and_empty(monkeypatch, dify_accessor,
+                                           dify_index, knowledge_root):
+    monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
+    monkeypatch.setattr(stat, "get_document_detail", get_detail)
+
+    recent = await find.find(
+        dify_accessor,
+        knowledge_root,
+        mtime_min=datetime(2024, 5, 20, tzinfo=timezone.utc).timestamp(),
+        mtime_max=datetime(2024, 5, 22, tzinfo=timezone.utc).timestamp(),
+        index=dify_index,
+    )
+    empty = await find.find(dify_accessor,
+                            knowledge_root,
+                            empty=True,
+                            index=dify_index)
+
+    assert recent == ["/README.md", "/guides/deep/note", "/guides/quickstart"]
+    assert empty == ["/README.md", "/guides/deep/note", "/guides/quickstart"]

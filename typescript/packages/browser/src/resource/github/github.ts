@@ -110,11 +110,6 @@ export class GitHubResource implements Resource {
     return githubStat(this.accessor, p, this.index)
   }
 
-  async fingerprint(p: PathSpec): Promise<string | null> {
-    const lookup = await this.index.get(p.virtual)
-    return lookup.entry?.id ?? null
-  }
-
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''

@@ -164,7 +164,7 @@ def expand_tilde(word: str, home: str | None) -> str:
     return word
 
 
-def rebase_raw(paths: list[str], original: str, raw: str | None) -> list[str]:
+def rebase_raw(paths: list[str], original: str, raw: str) -> list[str]:
     """Rewrite the base of walked output paths to the as-typed form.
 
     Used by walkers like ``find``/``grep -r``: results are absolute (start
@@ -196,12 +196,12 @@ def rebase_raw(paths: list[str], original: str, raw: str | None) -> list[str]:
         list[str]: ``paths`` with each ``original`` base replaced by
         ``raw``.
     """
-    if raw is None or raw == original:
+    if raw == original:
         return paths
     return [rebase_one(p, original, raw) for p in paths]
 
 
-def rebase_one(path: str, original: str, raw: str | None) -> str:
+def rebase_one(path: str, original: str, raw: str) -> str:
     """Rewrite a single path's ``original`` base to the as-typed ``raw``.
 
     Only the leading ``original`` prefix is rewritten, so any suffix after
@@ -225,7 +225,7 @@ def rebase_one(path: str, original: str, raw: str | None) -> str:
     Returns:
         str: ``path`` with its ``original`` base replaced by ``raw``.
     """
-    if raw is None or raw == original:
+    if raw == original:
         return path
     base = original.rstrip("/")
     if path == base:

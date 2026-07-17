@@ -29,10 +29,10 @@ class Aggr:
     field's aggregation behavior lives next to the field.
 
     Args:
-        reduce (Callable[[list], object]): the per-field aggregation rule.
+        reduce (Callable[[list[Any]], object]): the per-field aggregation rule.
     """
 
-    def __init__(self, reduce: Callable[[list], object]) -> None:
+    def __init__(self, reduce: Callable[[list[Any]], object]) -> None:
         self.reduce = reduce
 
 
@@ -85,7 +85,7 @@ class FileStat(BaseModel):
     uid: int | str | None = None
     gid: int | str | None = None
     atime: str | None = None
-    extra: dict = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class MountMode(str, Enum):
@@ -235,24 +235,42 @@ class ResourceName(str, Enum):
     SHAREPOINT = "sharepoint"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class PathSpec:
     virtual: str
     directory: str
     resource_path: str
+    raw_path: str
     pattern: str | None = None
     resolved: bool = True
-    raw_path: str | None = None
 
-    def __post_init__(self) -> None:
-        """Default ``raw_path`` to ``virtual``.
+    def __init__(
+        self,
+        virtual: str,
+        directory: str,
+        resource_path: str,
+        pattern: str | None = None,
+        resolved: bool = True,
+        raw_path: str | None = None,
+    ) -> None:
+        """Create a path whose stored spelling is always concrete.
 
-        ``raw_path`` is the word's spelling: as typed for relative
-        words, the absolute path for everything else. It is always a
-        ``str`` after construction; pass None to take the default.
+        Args:
+            virtual (str): Absolute path in the workspace.
+            directory (str): Directory containing the path.
+            resource_path (str): Path relative to the mounted resource.
+            pattern (str | None): Unresolved glob pattern.
+            resolved (bool): Whether glob resolution is complete.
+            raw_path (str | None): Spelling supplied by the user; defaults
+                to ``virtual`` only at the construction boundary.
         """
-        if self.raw_path is None:
-            object.__setattr__(self, "raw_path", self.virtual)
+        object.__setattr__(self, "virtual", virtual)
+        object.__setattr__(self, "directory", directory)
+        object.__setattr__(self, "resource_path", resource_path)
+        object.__setattr__(self, "pattern", pattern)
+        object.__setattr__(self, "resolved", resolved)
+        object.__setattr__(self, "raw_path",
+                           virtual if raw_path is None else raw_path)
 
     @property
     def mount_path(self) -> str:
@@ -312,7 +330,7 @@ def word_text(word: "str | PathSpec") -> str:
         word (str | PathSpec): text argument or path.
     """
     if isinstance(word, PathSpec):
-        return word.raw_path if word.raw_path is not None else word.virtual
+        return word.raw_path
     return word
 
 

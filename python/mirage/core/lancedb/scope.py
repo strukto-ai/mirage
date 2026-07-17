@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Literal, TypeAlias
 
 from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.types import PathSpec
@@ -26,14 +27,41 @@ class ScopeLevel(str, Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass
-class LanceDBScope:
-    level: ScopeLevel
-    table: str | None = None
-    filters: dict[str, str] = field(default_factory=dict)
-    row_id: str | None = None
-    blob: bool = False
+@dataclass(frozen=True)
+class LanceDBRootScope:
     resource_path: str = "/"
+    level: Literal[ScopeLevel.ROOT] = field(default=ScopeLevel.ROOT,
+                                            init=False)
+
+
+@dataclass(frozen=True)
+class LanceDBGroupScope:
+    table: str
+    filters: dict[str, str] = field(default_factory=dict)
+    resource_path: str = "/"
+    level: Literal[ScopeLevel.GROUP_DIR] = field(default=ScopeLevel.GROUP_DIR,
+                                                 init=False)
+
+
+@dataclass(frozen=True)
+class LanceDBRowScope:
+    table: str
+    row_id: str
+    blob: bool
+    filters: dict[str, str] = field(default_factory=dict)
+    resource_path: str = "/"
+    level: Literal[ScopeLevel.ROW] = field(default=ScopeLevel.ROW, init=False)
+
+
+@dataclass(frozen=True)
+class LanceDBUnknownScope:
+    resource_path: str = "/"
+    level: Literal[ScopeLevel.UNKNOWN] = field(default=ScopeLevel.UNKNOWN,
+                                               init=False)
+
+
+LanceDBScope: TypeAlias = (LanceDBRootScope | LanceDBGroupScope
+                           | LanceDBRowScope | LanceDBUnknownScope)
 
 
 def _parse_row_file(name: str,
@@ -47,8 +75,8 @@ def _parse_row_file(name: str,
     return None
 
 
-def detect_scope(path, config: LanceDBConfig) -> LanceDBScope:
-    raw = path.mount_path if isinstance(path, PathSpec) else path
+def detect_scope(path: PathSpec, config: LanceDBConfig) -> LanceDBScope:
+    raw = path.mount_path
     key = raw.strip("/")
     segs = key.split("/") if key else []
 
@@ -57,7 +85,7 @@ def detect_scope(path, config: LanceDBConfig) -> LanceDBScope:
         rest = segs
     else:
         if not segs:
-            return LanceDBScope(level=ScopeLevel.ROOT, resource_path=raw)
+            return LanceDBRootScope(resource_path=raw)
         table = segs[0]
         rest = segs[1:]
 
@@ -66,20 +94,18 @@ def detect_scope(path, config: LanceDBConfig) -> LanceDBScope:
 
     if len(rest) <= n:
         filters = {gb[i]: rest[i] for i in range(len(rest))}
-        return LanceDBScope(level=ScopeLevel.GROUP_DIR,
-                            table=table,
-                            filters=filters,
-                            resource_path=raw)
+        return LanceDBGroupScope(table=table,
+                                 filters=filters,
+                                 resource_path=raw)
 
     if len(rest) == n + 1:
         filters = {gb[i]: rest[i] for i in range(n)}
         parsed = _parse_row_file(rest[n], config)
         if parsed is not None:
-            return LanceDBScope(level=ScopeLevel.ROW,
-                                table=table,
-                                filters=filters,
-                                row_id=parsed[0],
-                                blob=parsed[1],
-                                resource_path=raw)
+            return LanceDBRowScope(table=table,
+                                   filters=filters,
+                                   row_id=parsed[0],
+                                   blob=parsed[1],
+                                   resource_path=raw)
 
-    return LanceDBScope(level=ScopeLevel.UNKNOWN, resource_path=raw)
+    return LanceDBUnknownScope(resource_path=raw)

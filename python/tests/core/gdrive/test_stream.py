@@ -64,6 +64,10 @@ async def _collect(source):
     return data
 
 
+async def _fail_list_files(_tm, folder_id, drive_id=None):
+    raise RuntimeError("drive unavailable")
+
+
 @pytest.mark.asyncio
 async def test_stream_file(accessor, index):
     await index.put(
@@ -97,6 +101,18 @@ async def test_stream_not_found(accessor, index):
 
     with patch("mirage.core.gdrive.readdir.list_files", new=fake_list_files):
         with pytest.raises(FileNotFoundError):
+            await _collect(
+                stream(
+                    accessor,
+                    PathSpec(resource_path="missing/file.txt",
+                             virtual="/missing/file.txt",
+                             directory="/missing/file.txt"), index))
+
+
+@pytest.mark.asyncio
+async def test_stream_propagates_parent_refresh_failure(accessor, index):
+    with patch("mirage.core.gdrive.readdir.list_files", new=_fail_list_files):
+        with pytest.raises(RuntimeError, match="drive unavailable"):
             await _collect(
                 stream(
                     accessor,

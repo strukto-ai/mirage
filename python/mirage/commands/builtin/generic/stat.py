@@ -58,7 +58,7 @@ async def stat(
             err += fs_error_line("stat", p, exc).encode()
             continue
         if fmt is not None:
-            lines.append(_format_stat(fmt, s, p.raw_path or p.virtual))
+            lines.append(_format_stat(fmt, s, p.raw_path))
         else:
             lines.append(f"name={s.name} size={s.size}"
                          f" modified={s.modified}"

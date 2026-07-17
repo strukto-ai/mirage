@@ -20,6 +20,7 @@ import pytest_asyncio
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.create import create
 from mirage.resource.redis.store import RedisStore
+from mirage.types import PathSpec
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -45,7 +46,7 @@ async def mk_store():
 @pytest.mark.asyncio
 async def test_create(mk_store):
     a = await mk_store("test:create:1:")
-    await create(a, "/new.txt")
+    await create(a, PathSpec.from_str_path("/new.txt"))
     assert await a.store.get_file("/new.txt") == b""
     assert await a.store.get_modified("/new.txt") is not None
 
@@ -54,12 +55,12 @@ async def test_create(mk_store):
 async def test_create_overwrites_existing(mk_store):
     a = await mk_store("test:create:2:")
     await a.store.set_file("/existing.txt", b"old data")
-    await create(a, "/existing.txt")
+    await create(a, PathSpec.from_str_path("/existing.txt"))
     assert await a.store.get_file("/existing.txt") == b""
 
 
 @pytest.mark.asyncio
 async def test_create_normalizes_path(mk_store):
     a = await mk_store("test:create:3:")
-    await create(a, "file.txt")
+    await create(a, PathSpec.from_str_path("file.txt"))
     assert await a.store.has_file("/file.txt")

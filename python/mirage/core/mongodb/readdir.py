@@ -59,7 +59,6 @@ async def readdir(
         if not await database_exists(accessor.client, accessor.config,
                                      scope.database, accessor):
             raise enoent(path)
-        assert scope.kind is not None
         return await _list_kind_dir(accessor, scope.database, scope.kind,
                                     virtual_key, index, prefix)
 
@@ -68,7 +67,6 @@ async def readdir(
                                    scope.database, scope.name, scope.kind,
                                    accessor):
             raise enoent(path)
-        assert scope.kind is not None
         base = (f"{prefix}/{scope.database}/"
                 f"{KIND_TO_DIR[scope.kind]}/{scope.name}")
         return [

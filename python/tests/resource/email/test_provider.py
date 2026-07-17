@@ -51,10 +51,3 @@ def test_resource_ops_registered(config):
     resource = EmailResource(config=config)
     ops = resource.ops_list()
     assert len(ops) == 3
-
-
-@pytest.mark.asyncio
-async def test_resource_fingerprint_not_found(config):
-    resource = EmailResource(config=config)
-    fp = await resource.fingerprint("/email/nonexistent")
-    assert fp is None

@@ -101,10 +101,6 @@ export class LangfuseResource implements Resource {
     return langfuseStat(this.accessor, p, this.index)
   }
 
-  fingerprint(_p: PathSpec): Promise<string | null> {
-    return Promise.resolve(null)
-  }
-
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''

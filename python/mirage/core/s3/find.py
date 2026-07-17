@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from datetime import datetime
+
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
@@ -21,9 +23,23 @@ from mirage.core.s3._client import (_client_kwargs, _prefix, _strip_prefix,
 from mirage.types import PathSpec
 
 
+def _matches_mtime(modified: datetime | None, mtime_min: float | None,
+                   mtime_max: float | None) -> bool:
+    if mtime_min is None and mtime_max is None:
+        return True
+    if modified is None:
+        return False
+    timestamp = modified.timestamp()
+    if mtime_min is not None and timestamp < mtime_min:
+        return False
+    if mtime_max is not None and timestamp > mtime_max:
+        return False
+    return True
+
+
 async def find(
     accessor: S3Accessor,
-    path_spec: str | PathSpec,
+    path_spec: PathSpec,
     name: str | None = None,
     type: str | None = None,
     min_size: int | None = None,
@@ -43,7 +59,7 @@ async def find(
 
     Args:
         accessor (S3Accessor): S3 accessor.
-        path (PathSpec | str): Prefix path.
+        path_spec (PathSpec): Prefix path.
         name (str | None): Glob pattern to match entry name.
         type (str | None): "f" (file) or "d" (directory).
         min_size (int | None): Minimum object size.
@@ -58,8 +74,7 @@ async def find(
         mindepth (int | None): Minimum depth to include.
     """
     start_name = start_basename(path_spec)
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     config = accessor.config
     pfx = _prefix(path, config)
     results: list[str] = []
@@ -72,6 +87,7 @@ async def find(
                                                     empty=empty)
     saw_descendant = False
     dir_marker_seen = False
+    root_modified: datetime | None = None
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         paginator = client.get_paginator("list_objects_v2")
@@ -80,6 +96,9 @@ async def find(
                 key = obj["Key"]
                 if key == pfx:
                     dir_marker_seen = True
+                    marker_time = obj.get("LastModified")
+                    root_modified = (marker_time if isinstance(
+                        marker_time, datetime) else None)
                     continue
                 saw_descendant = True
                 is_dir = key.endswith("/")
@@ -108,9 +127,15 @@ async def find(
                         continue
                     if max_size is not None and effective > max_size:
                         continue
+                last_modified = obj.get("LastModified")
+                modified = (last_modified if isinstance(
+                    last_modified, datetime) else None)
+                if not _matches_mtime(modified, mtime_min, mtime_max):
+                    continue
                 results.append(full_path)
     stripped = path.strip("/")
-    if saw_descendant or dir_marker_seen:
+    if ((saw_descendant or dir_marker_seen)
+            and _matches_mtime(root_modified, mtime_min, mtime_max)):
         root_key = "/" + stripped if stripped else "/"
         emit_start_path(results,
                         root_key,

@@ -15,6 +15,7 @@
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_context import grep_context_lines
@@ -162,7 +163,7 @@ async def resolve_pattern(
     texts: Sequence[str],
     flags: FlagView,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object,
+    accessor: Accessor | None,
     index: IndexCacheStore | None,
     usage: str,
 ) -> tuple[str, bool]:
@@ -173,7 +174,7 @@ async def resolve_pattern(
         flags (FlagView): typed view over raw flag kwargs.
         read_bytes (Callable[..., Awaitable[bytes]]): whole-file reader used
             for -f pattern files.
-        accessor (object): backend accessor for read_bytes.
+        accessor (Accessor | None): backend accessor for read_bytes.
         index (IndexCacheStore | None): optional cache index.
         usage (str): usage error message when no pattern was supplied.
 

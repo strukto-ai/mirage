@@ -20,6 +20,8 @@ from pydantic import BaseModel
 from mirage.accessor.base import Accessor
 from mirage.cache.index import (IndexCacheStore, IndexConfig,
                                 RAMIndexCacheStore, RedisIndexConfig)
+from mirage.commands.config import RegisteredCommand
+from mirage.ops.registry import RegisteredOp
 from mirage.resource.secrets import redacted_config_dump
 from mirage.types import PathSpec
 
@@ -52,15 +54,18 @@ class BaseResource:
     def __init__(
         self,
         index: IndexConfig | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self._commands: list = []
-        self._ops_list: list = []
+        self._closed = False
+        self._commands: list[RegisteredCommand] = []
+        self._ops_list: list[RegisteredOp] = []
+        self._index: IndexCacheStore
         self.set_index(index)
 
     def set_index(self, config: IndexConfig | None = None) -> None:
-        cfg = config or IndexConfig(ttl=self.index_ttl)
+        cfg = (config if config is not None else IndexConfig(
+            ttl=self.index_ttl))
         if isinstance(cfg, RedisIndexConfig):
             if RedisIndexCacheStore is None:
                 raise ImportError(
@@ -79,7 +84,7 @@ class BaseResource:
         return self._index
 
     async def resolve_glob(self,
-                           paths: list,
+                           paths: list[str | PathSpec],
                            prefix: str = "") -> list[PathSpec]:
         raise NotImplementedError
 
@@ -90,37 +95,26 @@ class BaseResource:
         raise AttributeError(
             f"'{type(self).__name__}' has no attribute '{name}'")
 
-    async def fingerprint(self, path: str) -> str | None:
-        """Return current remote fingerprint for freshness comparison.
-
-        Args:
-            path (str): Backend-relative path.
-
-        Returns:
-            str | None: Fingerprint string, or None if always fresh.
-        """
-        return None
-
-    def register_op(self, fn) -> None:
+    def register_op(self, fn: Any) -> None:
         for ro in fn._registered_ops:
             self._ops_list.append(ro)
 
-    def ops_list(self) -> list:
+    def ops_list(self) -> list[RegisteredOp]:
         return self._ops_list
 
-    def register(self, fn) -> None:
+    def register(self, fn: Any) -> None:
         for rc in fn._registered_commands:
             self._commands.append(rc)
 
-    def commands(self) -> list:
+    def commands(self) -> list[RegisteredCommand]:
         return self._commands
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,
         }
 
-    def config_state(self, config: BaseModel, **extra: Any) -> dict:
+    def config_state(self, config: BaseModel, **extra: Any) -> dict[str, Any]:
         cfg = redacted_config_dump(config)
         return {
             "type": self.name,
@@ -128,5 +122,12 @@ class BaseResource:
             **extra,
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        await self.accessor.close()
+        await self._index.close()
+        self._closed = True

@@ -23,7 +23,7 @@ async def copy(accessor: SharePointAccessor, src: PathSpec,
     url = item_url(src_resolved.drive_id,
                    src_resolved.item_path,
                    action="/copy")
-    body: dict = {"name": name}
+    body: dict[str, object] = {"name": name}
     if src_resolved.drive_id == dst_resolved.drive_id:
         body["parentReference"] = {
             "path": drive_ref_path(dst_resolved.drive_id, dst_parent)
@@ -34,14 +34,12 @@ async def copy(accessor: SharePointAccessor, src: PathSpec,
             "path": drive_ref_path(dst_resolved.drive_id, dst_parent),
         }
     monitor = await graph_post_monitor(accessor.config, url, body)
-    if not monitor:
-        return
     result = await poll_monitor(monitor, timeout=accessor.config.timeout)
     status = result.get("status")
     if status == "failed":
         err = result.get("error", {}) if isinstance(result, dict) else {}
         raise GraphError(500, err.get("code", "copyFailed"),
                          err.get("message", "copy failed"))
-    if status not in ("completed", None):
+    if status != "completed":
         raise GraphError(504, "copyTimeout", "copy not confirmed complete")
     await invalidate_after_write(dst)

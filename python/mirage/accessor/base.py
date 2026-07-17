@@ -15,7 +15,7 @@
 
 class Accessor:
 
-    def __getattr__(self, name: str):
+    async def close(self) -> None:
         return None
 
 

@@ -29,10 +29,9 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 async def mkdir(accessor: DiskAccessor,
-                path_spec: str | PathSpec,
+                path_spec: PathSpec,
                 parents: bool = False) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     p = _resolve(accessor.root, path)
     if parents:
         await aiofiles.os.makedirs(p, exist_ok=True)
@@ -42,4 +41,4 @@ async def mkdir(accessor: DiskAccessor,
         except FileExistsError:
             # mkdir -p semantics: an existing directory is success
             pass
-    await invalidate_after_write(path)
+    await invalidate_after_write(path_spec)

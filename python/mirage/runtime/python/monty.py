@@ -16,22 +16,35 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import PurePosixPath
-from typing import Callable
-
-try:
-    import pydantic_monty
-    from pydantic_monty import MemoryFile, MontyFileHandle, OSAccess
-    from pydantic_monty.os_access import path_from_arg
-except ImportError:
-    pydantic_monty = None  # type: ignore[assignment]
-    MemoryFile = None  # type: ignore[misc, assignment]
-    MontyFileHandle = None  # type: ignore[misc, assignment]
-    OSAccess = object  # type: ignore[misc, assignment]
-    path_from_arg = None  # type: ignore[assignment]
+from typing import Any, Callable
 
 from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
                                         PythonRuntime)
 from mirage.types import PathSpec
+
+pydantic_monty: Any
+MemoryFile: Any
+MontyFileHandle: Any
+OSAccess: Any
+path_from_arg: Any
+try:
+    import pydantic_monty as _pydantic_monty
+    from pydantic_monty import MemoryFile as _MemoryFile
+    from pydantic_monty import MontyFileHandle as _MontyFileHandle
+    from pydantic_monty import OSAccess as _OSAccess
+    from pydantic_monty.os_access import path_from_arg as _path_from_arg
+except ImportError:
+    pydantic_monty = None
+    MemoryFile = None
+    MontyFileHandle = None
+    OSAccess = object
+    path_from_arg = None
+else:
+    pydantic_monty = _pydantic_monty
+    MemoryFile = _MemoryFile
+    MontyFileHandle = _MontyFileHandle
+    OSAccess = _OSAccess
+    path_from_arg = _path_from_arg
 
 
 class _MirageOS(OSAccess):

@@ -30,13 +30,13 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def copy(accessor: DiskAccessor, src_spec: str | PathSpec,
-               dst_spec: str | PathSpec) -> None:
-    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
-    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
+async def copy(accessor: DiskAccessor, src_spec: PathSpec,
+               dst_spec: PathSpec) -> None:
+    src = src_spec.mount_path
+    dst = dst_spec.mount_path
     root = accessor.root
     s = _resolve(root, src)
     d = _resolve(root, dst)
     await aiofiles.os.makedirs(d.parent, exist_ok=True)
     await asyncio.to_thread(shutil.copy2, s, d)
-    await invalidate_after_write(dst)
+    await invalidate_after_write(dst_spec)

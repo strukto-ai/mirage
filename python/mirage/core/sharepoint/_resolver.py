@@ -64,7 +64,7 @@ async def resolve(accessor: SharePointAccessor,
 
     Args:
         accessor (SharePointAccessor): The accessor with config.
-        path (PathSpec | str): Virtual path to resolve.
+        path (PathSpec): Virtual path to resolve.
 
     Returns:
         ResolvedPath: Resolved components.

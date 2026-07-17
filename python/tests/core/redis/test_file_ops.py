@@ -201,13 +201,13 @@ async def test_unlink_not_found(mk_store):
 
 @pytest.mark.asyncio
 async def test_truncate_shorter(accessor):
-    await truncate(accessor, "/file.txt", 3)
+    await truncate(accessor, PathSpec.from_str_path("/file.txt"), 3)
     assert await accessor.store.get_file("/file.txt") == b"hel"
 
 
 @pytest.mark.asyncio
 async def test_truncate_longer(accessor):
-    await truncate(accessor, "/file.txt", 8)
+    await truncate(accessor, PathSpec.from_str_path("/file.txt"), 8)
     data = await accessor.store.get_file("/file.txt")
     assert data == b"hello\x00\x00\x00"
     assert len(data) == 8
@@ -216,13 +216,13 @@ async def test_truncate_longer(accessor):
 @pytest.mark.asyncio
 async def test_truncate_nonexistent(mk_store):
     a = await mk_store("test:fops:tr:")
-    await truncate(a, "/new.txt", 5)
+    await truncate(a, PathSpec.from_str_path("/new.txt"), 5)
     assert await a.store.get_file("/new.txt") == b"\x00\x00\x00\x00\x00"
 
 
 @pytest.mark.asyncio
 async def test_truncate_to_zero(accessor):
-    await truncate(accessor, "/file.txt", 0)
+    await truncate(accessor, PathSpec.from_str_path("/file.txt"), 0)
     assert await accessor.store.get_file("/file.txt") == b""
 
 

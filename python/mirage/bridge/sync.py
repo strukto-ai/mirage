@@ -14,23 +14,42 @@
 
 import asyncio
 import concurrent.futures
+from collections.abc import Awaitable
+from typing import TypeVar
+
+T = TypeVar("T")
 
 
-def run_async_from_sync(coro, loop=None):
+async def _await_result(awaitable: Awaitable[T]) -> T:
+    return await awaitable
+
+
+def _run_in_new_loop(awaitable: Awaitable[T]) -> T:
+    return asyncio.run(_await_result(awaitable))
+
+
+def run_async_from_sync(
+    awaitable: Awaitable[T],
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> T:
     """Call from a sync thread to run an async coroutine.
 
     Args:
-        coro: The coroutine to run.
+        awaitable (Awaitable[T]): The asynchronous operation to run.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
             If provided, uses run_coroutine_threadsafe.
             If None, creates a new event loop.
     """
-    if loop is not None:
-        future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result()
     try:
-        asyncio.get_running_loop()
-        with concurrent.futures.ThreadPoolExecutor(1) as pool:
-            return pool.submit(asyncio.run, coro).result()
+        running_loop = asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        running_loop = None
+
+    if loop is not None and loop.is_running() and loop is not running_loop:
+        future = asyncio.run_coroutine_threadsafe(_await_result(awaitable),
+                                                  loop)
+        return future.result()
+    if running_loop is None:
+        return _run_in_new_loop(awaitable)
+    with concurrent.futures.ThreadPoolExecutor(1) as pool:
+        return pool.submit(_run_in_new_loop, awaitable).result()

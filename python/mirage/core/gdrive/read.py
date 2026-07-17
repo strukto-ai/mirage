@@ -52,12 +52,8 @@ async def read(
         if parent_key != virtual_key:
             parent_path = PathSpec.from_str_path(parent_key,
                                                  mount_key(parent_key, prefix))
-            try:
-                await readdir(accessor, parent_path, index)
-                result = await index.get(virtual_key)
-            except Exception:
-                # parent refresh failed; fall through to FileNotFoundError
-                pass
+            await readdir(accessor, parent_path, index)
+            result = await index.get(virtual_key)
         if result.entry is None:
             raise enoent(virtual)
     if result.entry.resource_type in DIRECTORY_RESOURCE_TYPES:

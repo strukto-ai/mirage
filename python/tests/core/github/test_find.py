@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from datetime import datetime, timezone
+
 import pytest
 
-from mirage.cache.index import IndexEntry
+from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.find import find
 from mirage.types import PathSpec
@@ -38,6 +40,12 @@ def _index() -> RAMIndexCacheStore:
     return index
 
 
+class EntryOnlyIndex(IndexCacheStore):
+
+    async def entries(self) -> dict[str, IndexEntry]:
+        return await _index().entries()
+
+
 def _spec(path: str, prefix: str = "") -> PathSpec:
     return PathSpec(resource_path=mount_key(path, prefix),
                     virtual=path,
@@ -51,6 +59,12 @@ async def test_find_all_from_root():
         "/", "/README.md", "/src", "/src/main.py", "/src/utils",
         "/src/utils/helpers.py"
     ]
+
+
+@pytest.mark.asyncio
+async def test_find_uses_store_interface_not_ram_implementation():
+    results = await find(None, _spec("/"), index=EntryOnlyIndex())
+    assert "/src/main.py" in results
 
 
 @pytest.mark.asyncio
@@ -118,3 +132,36 @@ async def test_find_size_filters_file_start():
                             min_size=100,
                             index=_index())
     assert big_enough == ["/src/main.py"]
+
+
+@pytest.mark.asyncio
+async def test_find_mtime_filters_unknown_and_out_of_window_entries():
+    index = _index()
+    index._entries["/src/main.py"] = index._entries["/src/main.py"].model_copy(
+        update={"remote_time": "2026-07-15T12:00:00+00:00"})
+
+    results = await find(
+        None,
+        _spec("/"),
+        mtime_min=datetime(2026, 7, 15, tzinfo=timezone.utc).timestamp(),
+        mtime_max=datetime(2026, 7, 16, tzinfo=timezone.utc).timestamp(),
+        index=index,
+    )
+
+    assert results == ["/src/main.py"]
+
+
+@pytest.mark.asyncio
+async def test_find_empty_matches_empty_files_and_directories():
+    index = _index()
+    index._entries["/empty.txt"] = IndexEntry(id="empty-file",
+                                              name="empty.txt",
+                                              resource_type="file",
+                                              size=0)
+    index._entries["/empty-dir"] = IndexEntry(id="empty-dir",
+                                              name="empty-dir",
+                                              resource_type="folder")
+
+    results = await find(None, _spec("/"), empty=True, index=index)
+
+    assert results == ["/empty-dir", "/empty.txt"]

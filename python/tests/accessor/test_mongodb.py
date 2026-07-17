@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -33,7 +33,10 @@ async def test_client_constructs_async_mongo_client(accessor):
                return_value=sentinel) as ctor:
         client = accessor.client
     assert client is sentinel
-    ctor.assert_called_once_with("mongodb://localhost:27017")
+    ctor.assert_called_once()
+    args, kwargs = ctor.call_args
+    assert args == ("mongodb://localhost:27017", )
+    assert kwargs["driver"].name == "Mirage"
 
 
 @pytest.mark.asyncio
@@ -54,3 +57,20 @@ def test_client_built_outside_event_loop_uses_loopless_key(accessor):
     assert first is second
     ctor.assert_called_once()
     assert 0 in accessor._clients
+
+
+@pytest.mark.asyncio
+async def test_close_releases_all_clients_and_caches(accessor):
+    first = MagicMock()
+    first.close = AsyncMock()
+    second = MagicMock()
+    second.close = AsyncMock()
+    accessor._clients = {1: first, 2: second}
+    accessor._cache = {"db": (100.0, ["row"])}
+
+    await accessor.close()
+
+    first.close.assert_awaited_once_with()
+    second.close.assert_awaited_once_with()
+    assert accessor._clients == {}
+    assert accessor._cache == {}

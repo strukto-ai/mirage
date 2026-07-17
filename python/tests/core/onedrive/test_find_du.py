@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 from aioresponses import aioresponses
 
@@ -23,11 +25,13 @@ def _tree(m):
                       "id": "1",
                       "name": "a.txt",
                       "size": 3,
+                      "lastModifiedDateTime": "2026-07-15T12:00:00Z",
                       "file": {}
                   },
                   {
                       "id": "2",
                       "name": "sub",
+                      "lastModifiedDateTime": "2026-07-14T12:00:00Z",
                       "folder": {
                           "childCount": 1
                       }
@@ -40,6 +44,7 @@ def _tree(m):
                   "id": "3",
                   "name": "b.txt",
                   "size": 5,
+                  "lastModifiedDateTime": "2026-07-13T12:00:00Z",
                   "file": {}
               }]
           })
@@ -150,3 +155,25 @@ async def test_find_empty_folder_emits_start_path():
                          PathSpec.from_str_path("/empty"),
                          type="d")
     assert out == ["/empty"]
+
+
+@pytest.mark.asyncio
+async def test_find_honors_mtime_window():
+    with aioresponses() as m:
+        _tree(m)
+        m.get(_BASE + "/root",
+              payload={
+                  "id": "root",
+                  "name": "root",
+                  "lastModifiedDateTime": "2026-07-14T12:00:00Z",
+                  "folder": {
+                      "childCount": 2
+                  }
+              })
+        out = await find(
+            _accessor(),
+            PathSpec.from_str_path("/"),
+            mtime_min=datetime(2026, 7, 15, tzinfo=timezone.utc).timestamp(),
+            mtime_max=datetime(2026, 7, 16, tzinfo=timezone.utc).timestamp(),
+        )
+    assert out == ["/a.txt"]

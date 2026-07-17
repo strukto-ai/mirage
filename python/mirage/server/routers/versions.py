@@ -100,22 +100,23 @@ async def diff_versions(
 ) -> DiffResponse:  # noqa: E125
     store = await VersionStore.open(request.app.state.version_backend,
                                     workspace_id)
-    state = None
-    if a is None or b is None:
-        registry = request.app.state.registry
-        if workspace_id not in registry:
-            raise HTTPException(status_code=404, detail="workspace not found")
-        entry = registry.get(workspace_id)
-        state = await entry.runner.call(_state_of(entry.runner.ws))
-    try:
-        if a is not None and b is not None:
+    if a is not None and b is not None:
+        try:
             changes = await version_diff(store, await resolve_ref(store, a),
                                          await resolve_ref(store, b))
-        elif a is not None:
-            assert state is not None
+        except KeyError:
+            raise HTTPException(status_code=404, detail="version not found")
+        return DiffResponse(**changes)
+
+    registry = request.app.state.registry
+    if workspace_id not in registry:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    entry = registry.get(workspace_id)
+    state = await entry.runner.call(_state_of(entry.runner.ws))
+    try:
+        if a is not None:
             changes = await diff_live_vs_ref(store, state, a)
         else:
-            assert state is not None
             changes = await status_state(store, state, branch)
     except KeyError:
         raise HTTPException(status_code=404, detail="version not found")

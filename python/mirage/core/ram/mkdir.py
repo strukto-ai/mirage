@@ -20,10 +20,9 @@ from mirage.utils.path import norm, parent
 
 
 async def mkdir(accessor: RAMAccessor,
-                path_spec: str | PathSpec,
+                path_spec: PathSpec,
                 parents: bool = False) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     if parents:
@@ -35,7 +34,7 @@ async def mkdir(accessor: RAMAccessor,
             store.dirs.add(current)
             if current not in store.modified:
                 store.modified[current] = now
-        await invalidate_after_write(path)
+        await invalidate_after_write(path_spec)
         return
     parent_dir = parent(p)
     if parent_dir != "/" and parent_dir not in store.dirs:
@@ -43,4 +42,4 @@ async def mkdir(accessor: RAMAccessor,
             f"parent directory does not exist: {parent_dir}")
     store.dirs.add(p)
     store.modified[p] = now_iso()
-    await invalidate_after_write(path)
+    await invalidate_after_write(path_spec)

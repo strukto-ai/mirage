@@ -14,6 +14,7 @@
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -123,3 +124,14 @@ async def test_stat_strip_slashes(tree):
                  directory="/README.md"), index)
     assert result.name == "README.md"
     assert result.size == 50
+
+
+@pytest.mark.asyncio
+async def test_stat_propagates_parent_refresh_failure():
+    failure = RuntimeError("github unavailable")
+    with patch("mirage.core.github.stat._readdir",
+               new_callable=AsyncMock,
+               side_effect=failure):
+        with pytest.raises(RuntimeError, match="github unavailable"):
+            await stat(None, PathSpec.from_str_path("/missing.py"),
+                       RAMIndexCacheStore())

@@ -36,15 +36,13 @@ async def copy(accessor: OneDriveAccessor, src: PathSpec,
         },
     }
     monitor = await graph_post_monitor(accessor.config, url, body)
-    if not monitor:
-        return
     result = await poll_monitor(monitor, timeout=accessor.config.timeout)
     status = result.get("status")
     if status == "failed":
         err = result.get("error", {}) if isinstance(result, dict) else {}
         raise GraphError(500, err.get("code", "copyFailed"),
                          err.get("message", f"copy {src_s} -> {dst_s} failed"))
-    if status not in ("completed", None):
+    if status != "completed":
         raise GraphError(504, "copyTimeout",
                          f"copy {src_s} -> {dst_s} not confirmed complete")
     await invalidate_after_write(dst)

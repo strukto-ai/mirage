@@ -173,3 +173,13 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     # binary files download raw, so Drive's size is the rendered length
     assert result.size == 2048
     assert mock_list.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stat_propagates_parent_refresh_failure(accessor, index):
+    failure = RuntimeError("drive unavailable")
+    with patch("mirage.core.gdrive.stat._readdir",
+               new_callable=AsyncMock,
+               side_effect=failure):
+        with pytest.raises(RuntimeError, match="drive unavailable"):
+            await stat(accessor, PathSpec.from_str_path("/missing.txt"), index)

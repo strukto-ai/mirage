@@ -14,6 +14,8 @@
 
 import pytest
 
+from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.commands.builtin.github.du import _du_total
 from mirage.commands.builtin.github.grep import grep
 from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.github.rg import rg
@@ -22,6 +24,15 @@ from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
 
 _NGLOBALS = narrow_scope.__globals__
+
+
+class EntryOnlyIndex(IndexCacheStore):
+
+    async def entries(self) -> dict[str, IndexEntry]:
+        return {
+            "/src/main.py":
+            IndexEntry(id="main", name="main.py", resource_type="file", size=7)
+        }
 
 
 @pytest.fixture
@@ -48,6 +59,11 @@ def _subdir() -> PathSpec:
                     virtual="/src",
                     directory="/src",
                     resolved=False)
+
+
+@pytest.mark.asyncio
+async def test_du_uses_store_interface_not_ram_implementation():
+    assert await _du_total(EntryOnlyIndex(), _subdir()) == 7
 
 
 @pytest.mark.asyncio

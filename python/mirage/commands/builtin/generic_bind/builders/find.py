@@ -49,7 +49,8 @@ async def find(
         return await _find_walk(ops, accessor, paths, texts, name, type, size,
                                 mtime, maxdepth, iname, path, mindepth, empty,
                                 index)
-    stat = partial(ops.stat, accessor) if ops.local else None
+    stat = (partial(ops.stat, accessor, index=index)
+            if ops.local or mtime is not None else None)
     return await generic_find(paths,
                               texts,
                               find_core=partial(ops.find, accessor),

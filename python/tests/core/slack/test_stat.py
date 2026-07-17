@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
@@ -254,3 +256,15 @@ async def test_stat_file_blob_unknown_mimetype_is_binary(accessor, index):
         index=index)
     assert s.type == FileType.BINARY
     assert s.size == 2048
+
+
+@pytest.mark.asyncio
+async def test_stat_propagates_parent_refresh_failure(accessor, index):
+    failure = RuntimeError("slack unavailable")
+    with patch("mirage.core.slack.stat._readdir",
+               new_callable=AsyncMock,
+               side_effect=failure):
+        with pytest.raises(RuntimeError, match="slack unavailable"):
+            await stat(accessor,
+                       PathSpec.from_str_path("/channels/missing__C999"),
+                       index)

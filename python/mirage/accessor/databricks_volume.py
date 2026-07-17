@@ -17,12 +17,17 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
 
+WorkspaceClient: Any
+WorkspaceConfig: Any
 try:
-    from databricks.sdk import WorkspaceClient
-    from databricks.sdk.config import Config as WorkspaceConfig
+    from databricks.sdk import WorkspaceClient as _WorkspaceClient
+    from databricks.sdk.config import Config as _WorkspaceConfig
 except ImportError:
-    WorkspaceConfig = None  # type: ignore[misc, assignment]
-    WorkspaceClient = None  # type: ignore[misc, assignment]
+    WorkspaceClient = None
+    WorkspaceConfig = None
+else:
+    WorkspaceClient = _WorkspaceClient
+    WorkspaceConfig = _WorkspaceConfig
 
 
 class DatabricksVolumeAccessor(Accessor):

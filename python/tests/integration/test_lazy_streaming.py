@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 
@@ -25,13 +25,16 @@ from mirage.workspace import Workspace
 def ws():
     mem = RAMResource()
     asyncio.run(
-        mem.write("/big.txt",
+        mem.write(PathSpec.from_str_path("/big.txt"),
                   data=b"\n".join(f"line {i}".encode() for i in range(10000))))
     asyncio.run(
-        mem.write("/small.txt", data=b"apple\nbanana\napricot\ncherry\n"))
-    asyncio.run(mem.write("/dupes.txt", data=b"a\na\nb\nb\nc\n"))
+        mem.write(PathSpec.from_str_path("/small.txt"),
+                  data=b"apple\nbanana\napricot\ncherry\n"))
     asyncio.run(
-        mem.write("/csv.txt",
+        mem.write(PathSpec.from_str_path("/dupes.txt"),
+                  data=b"a\na\nb\nb\nc\n"))
+    asyncio.run(
+        mem.write(PathSpec.from_str_path("/csv.txt"),
                   data=b"name,age,city\nalice,30,nyc\nbob,25,sf\n"))
     return Workspace(
         {"/data": (mem, MountMode.WRITE)},

@@ -18,6 +18,7 @@ from typing import Callable
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes, relay, transfer_primitives)
+from mirage.commands.builtin.generic.mv import PrimitiveMove
 from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
@@ -38,9 +39,15 @@ async def run_mv(scopes: list[PathSpec], flag_kwargs: dict,
     """
     p = functools.partial
     fl = FlagView(flag_kwargs, spec=SPECS["mv"])
+    primitives = transfer_primitives(dispatch)
     return await generic_mv(flat_scopes(scopes),
+                            stat=primitives["stat"],
+                            strategy=PrimitiveMove(
+                                read_bytes=primitives["read_bytes"],
+                                write=primitives["write"],
+                                mkdir=primitives["mkdir"],
+                                readdir=primitives["readdir"],
+                                unlink=p(relay, dispatch, "unlink", None),
+                                rmdir=p(relay, dispatch, "rmdir", None)),
                             n=fl.as_bool("n"),
-                            v=fl.as_bool("v"),
-                            unlink=p(relay, dispatch, "unlink", None),
-                            rmdir=p(relay, dispatch, "rmdir", None),
-                            **transfer_primitives(dispatch))
+                            v=fl.as_bool("v"))

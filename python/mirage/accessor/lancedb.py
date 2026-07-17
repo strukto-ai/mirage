@@ -28,7 +28,8 @@ class LanceDBAccessor(Accessor):
         self.config = config
         self._dbs: dict[int, Any] = {}
         self._tables: dict[tuple[int, str], Any] = {}
-        self._search_cache: dict[tuple[str, str, int], list[dict]] = {}
+        self._search_cache: dict[tuple[str, str, int], list[dict[str,
+                                                                 Any]]] = {}
 
     def _loop_key(self) -> int:
         try:
@@ -63,9 +64,18 @@ class LanceDBAccessor(Accessor):
             self._tables[key] = tbl
         return tbl
 
-    def cached_search(self, key: tuple[str, str, int]) -> list[dict] | None:
+    def cached_search(
+            self, key: tuple[str, str, int]) -> list[dict[str, Any]] | None:
         return self._search_cache.get(key)
 
     def store_search(self, key: tuple[str, str, int],
-                     rows: list[dict]) -> None:
+                     rows: list[dict[str, Any]]) -> None:
         self._search_cache[key] = rows
+
+    async def close(self) -> None:
+        dbs = list(self._dbs.values())
+        self._dbs.clear()
+        self._tables.clear()
+        self._search_cache.clear()
+        for db in dbs:
+            db.close()

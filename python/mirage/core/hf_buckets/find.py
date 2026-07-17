@@ -57,7 +57,8 @@ async def find(
                                                     path_pattern=path_pattern,
                                                     type=type,
                                                     name_exclude=name_exclude,
-                                                    or_names=or_names)
+                                                    or_names=or_names,
+                                                    empty=empty)
     try:
         async for entry in await op.scan(scan_path):
             rel = entry.path
@@ -88,7 +89,12 @@ async def find(
                 depth = ep.count("/") - base_depth
                 if maxdepth is not None and depth > maxdepth:
                     continue
-                fe = FindEntry(key=ep, name=en, kind=k, depth=depth)
+                fe = FindEntry(
+                    key=ep,
+                    name=en,
+                    kind=k,
+                    depth=depth,
+                    is_empty=(False if k == "d" else content_length == 0))
                 if not keep(fe, tree, mindepth):
                     continue
 
@@ -118,7 +124,7 @@ async def find(
                         base,
                         start_name,
                         kind="d",
-                        is_empty=None,
+                        is_empty=not saw_descendant,
                         exists=True,
                         tree=tree,
                         maxdepth=maxdepth,

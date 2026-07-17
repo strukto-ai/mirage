@@ -45,8 +45,7 @@ async def read(
             try:
                 await readdir(accessor, parent_path, index)
                 result = await index.get(virtual_key)
-            except Exception as exc:
-                # best-effort cache populate; canonical ENOENT raised below
+            except FileNotFoundError as exc:
                 logger.debug("read populate failed for %s: %s", virtual_key,
                              exc)
         if result.entry is None:

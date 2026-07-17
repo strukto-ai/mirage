@@ -14,7 +14,8 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.mktemp import mktemp as generic_mktemp
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -26,17 +27,20 @@ async def mktemp(
     *texts: str,
     stdin: bytes | None = None,
     d: bool = False,
-    p: str | None = None,
+    p: PathSpec | None = None,
     t: bool = False,
-    **flags,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_mktemp(*texts,
-                                mkdir_fn=ops.require("mkdir"),
-                                write_bytes_fn=ops.require("write"),
+                                mkdir_fn=ops.require(Operation.MKDIR),
+                                write_bytes_fn=ops.require(Operation.WRITE),
                                 accessor=accessor,
                                 d=d,
                                 p=p,
                                 t=t)
 
 
-BUILDER = Builder('mktemp', mktemp, None, True, None)
+BUILDER = Builder('mktemp',
+                  mktemp,
+                  write=True,
+                  requirements=frozenset({Operation.MKDIR, Operation.WRITE}))

@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.unzip import unzip as generic_unzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -43,8 +44,8 @@ async def unzip(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_unzip(paths,
                                read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.require("write"),
-                               mkdir_fn=ops.require("mkdir"),
+                               write_bytes=ops.require(Operation.WRITE),
+                               mkdir_fn=ops.require(Operation.MKDIR),
                                accessor=accessor,
                                o=o,
                                args_l=args_l,
@@ -54,4 +55,7 @@ async def unzip(
                                t=t)
 
 
-BUILDER = Builder('unzip', unzip, None, True, None)
+BUILDER = Builder('unzip',
+                  unzip,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE, Operation.MKDIR}))

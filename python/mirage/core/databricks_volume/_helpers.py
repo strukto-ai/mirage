@@ -16,14 +16,7 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
-def ensure_path_spec(path: PathSpec | str) -> PathSpec:
-    if isinstance(path, PathSpec):
-        return path
-    return PathSpec.from_str_path(path)
-
-
-def parent_path(path: PathSpec | str) -> PathSpec:
-    path = ensure_path_spec(path)
+def parent_path(path: PathSpec) -> PathSpec:
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     stripped = path.mount_path.rstrip("/")
     parent_relative = stripped.rsplit("/", 1)[0] if "/" in stripped else "/"

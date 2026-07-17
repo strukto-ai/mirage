@@ -30,7 +30,7 @@ from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 BUCKET = "test-bucket"
@@ -332,10 +332,10 @@ class NativeTestEnv:
             d = "/" + "/".join(parts[:i])
             if d not in accessor.store.dirs:
                 try:
-                    asyncio.run(mkdir(accessor, d))
+                    asyncio.run(mkdir(accessor, PathSpec.from_str_path(d)))
                 except (FileExistsError, ValueError):
                     pass
-        asyncio.run(mem_write(accessor, path, content))
+        asyncio.run(mem_write(accessor, PathSpec.from_str_path(path), content))
 
     def native(self, cmd: str, stdin: bytes | None = None) -> str:
         native_cwd = self.disk_root if self.disk_root else self.tmp_path

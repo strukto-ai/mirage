@@ -14,6 +14,7 @@
 
 from typing import Callable
 
+from mirage.commands.builtin.generic.cp import PrimitiveCopy
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
@@ -37,9 +38,14 @@ async def run_cp(scopes: list[PathSpec], flag_kwargs: dict,
         dispatch (Callable): Workspace operation dispatcher.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["cp"])
-    return await generic_cp(flat_scopes(scopes),
-                            recursive=fl.as_bool("r") or fl.as_bool("R")
-                            or fl.as_bool("a"),
-                            n=fl.as_bool("n"),
-                            v=fl.as_bool("v"),
-                            **transfer_primitives(dispatch))
+    primitives = transfer_primitives(dispatch)
+    return await generic_cp(
+        flat_scopes(scopes),
+        stat=primitives["stat"],
+        strategy=PrimitiveCopy(read_bytes=primitives["read_bytes"],
+                               write=primitives["write"],
+                               mkdir=primitives["mkdir"],
+                               readdir=primitives["readdir"]),
+        recursive=fl.as_bool("r") or fl.as_bool("R") or fl.as_bool("a"),
+        n=fl.as_bool("n"),
+        v=fl.as_bool("v"))

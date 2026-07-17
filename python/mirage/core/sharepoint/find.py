@@ -2,11 +2,13 @@ from collections.abc import AsyncIterator
 
 import aiohttp
 
-from mirage.accessor.sharepoint import SharePointAccessor
+from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
+from mirage.core.msgraph.time import matches_mtime
+from mirage.core.msgraph.types import DriveItem, parse_drive_item
 from mirage.core.sharepoint._client import graph_list, item_url, new_session
 from mirage.core.sharepoint._resolver import resolve
 from mirage.core.sharepoint.stat import stat
@@ -14,14 +16,15 @@ from mirage.types import FileType, PathSpec
 
 
 async def iter_tree(
-    config,
+    config: SharePointConfig,
     drive_id: str,
     base: str,
     session: aiohttp.ClientSession | None = None,
-) -> AsyncIterator[tuple[str, dict, bool]]:
+) -> AsyncIterator[tuple[str, DriveItem, bool]]:
     url = item_url(drive_id, "/" + base if base else "/", action="/children")
     children = await graph_list(config, url, session=session)
-    for child in children:
+    for raw_child in children:
+        child = parse_drive_item(raw_child)
         cname = child.get("name", "")
         rel = f"{base}/{cname}" if base else cname
         is_dir = "folder" in child
@@ -97,16 +100,21 @@ async def find(
                     continue
                 if max_size is not None and effective > max_size:
                     continue
+            if not matches_mtime(item.get("lastModifiedDateTime"), mtime_min,
+                                 mtime_max):
+                continue
             results.append(full_path)
     dir_exists = saw_descendant
-    if not dir_exists:
+    root_matches = mtime_min is None and mtime_max is None
+    if not dir_exists or not root_matches:
         try:
-            dir_exists = (await
-                          stat(accessor, path,
-                               index=NULL_INDEX)).type == FileType.DIRECTORY
+            root_stat = await stat(accessor, path, index=NULL_INDEX)
+            dir_exists = root_stat.type == FileType.DIRECTORY
+            root_matches = matches_mtime(root_stat.modified, mtime_min,
+                                         mtime_max)
         except FileNotFoundError:
             dir_exists = False
-    if dir_exists:
+    if dir_exists and root_matches:
         root_key = "/" + item_base if item_base else "/"
         emit_start_path(results,
                         root_key,

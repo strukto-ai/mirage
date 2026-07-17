@@ -14,10 +14,12 @@
 
 import logging
 from collections.abc import Callable
+from typing import Protocol
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.google._client import TokenManager
 from mirage.core.google.drive import delete_file
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -29,6 +31,10 @@ logger = logging.getLogger(__name__)
 # synthetic owned/shared tree over the index; stat and unlink differ only
 # in the readdir they warm the cache with.
 VIRTUAL_DIRS = {"", "owned", "shared"}
+
+
+class DriveItemAccessor(Protocol):
+    token_manager: TokenManager
 
 
 def make_stat(readdir: Callable) -> Callable:
@@ -62,8 +68,7 @@ def make_stat(readdir: Callable) -> Callable:
                              resource_path=mount_key(parent_virtual, prefix)),
                     index=index,
                 )
-            except Exception as exc:
-                # best-effort cache populate; canonical ENOENT raised below
+            except FileNotFoundError as exc:
                 logger.debug("stat readdir populate failed for %s: %s",
                              parent_virtual, exc)
             result = await index.get(virtual_key)
@@ -93,7 +98,7 @@ def make_unlink(readdir: Callable) -> Callable:
     """
 
     async def unlink(
-        accessor: Accessor,
+        accessor: DriveItemAccessor,
         path: PathSpec,
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
@@ -117,6 +122,6 @@ def make_unlink(readdir: Callable) -> Callable:
         await delete_file(accessor.token_manager, result.entry.id)
         parent_dir = "/".join(virtual_key.rsplit("/", 1)[:-1]) or "/"
         await index.invalidate_dir(parent_dir)
-        await invalidate_after_unlink(virtual_key)
+        await invalidate_after_unlink(path)
 
     return unlink

@@ -131,7 +131,7 @@ class FlagView:
     def __init__(self,
                  flags: Mapping[str, object] | None,
                  spec: CommandSpec | None = None) -> None:
-        self._flags = flags or {}
+        self._flags = flags if flags is not None else {}
         self._allowed = spec_flag_names(spec) if spec is not None else None
 
     def _key(self, name: str) -> str:

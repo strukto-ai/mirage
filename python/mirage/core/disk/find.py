@@ -153,7 +153,7 @@ def _find_sync(
 
 async def find(
     accessor: DiskAccessor,
-    path_spec: str | PathSpec,
+    path_spec: PathSpec,
     name: str | None = None,
     type: str | None = None,
     min_size: int | None = None,
@@ -170,8 +170,7 @@ async def find(
     tree: PredNode | None = None,
 ) -> list[str]:
     start_name = start_basename(path_spec)
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     return await asyncio.to_thread(
         _find_sync,
         accessor.root,

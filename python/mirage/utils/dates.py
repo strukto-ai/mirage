@@ -19,3 +19,29 @@ def utc_date_folder(ts: float | None = None) -> str:
     t = (datetime.now(timezone.utc) if ts is None else datetime.fromtimestamp(
         ts, timezone.utc))
     return t.strftime("%Y-%m-%d")
+
+
+def iso_timestamp(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def matches_mtime(value: str | None, mtime_min: float | None,
+                  mtime_max: float | None) -> bool:
+    if mtime_min is None and mtime_max is None:
+        return True
+    timestamp = iso_timestamp(value)
+    if timestamp is None:
+        return False
+    if mtime_min is not None and timestamp < mtime_min:
+        return False
+    if mtime_max is not None and timestamp > mtime_max:
+        return False
+    return True

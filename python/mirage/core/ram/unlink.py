@@ -18,9 +18,8 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def unlink(accessor: RAMAccessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def unlink(accessor: RAMAccessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     if p not in store.files:
@@ -28,4 +27,4 @@ async def unlink(accessor: RAMAccessor, path_spec: str | PathSpec) -> None:
     del store.files[p]
     store.modified.pop(p, None)
     store.attrs.pop(p, None)
-    await invalidate_after_unlink(path)
+    await invalidate_after_unlink(path_spec)

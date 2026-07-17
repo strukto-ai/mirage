@@ -9,6 +9,7 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.databricks_volume.path import backend_path
 from mirage.resource.databricks_volume import DatabricksVolumeConfig
+from mirage.types import PathSpec
 
 
 class NotFoundError(Exception):
@@ -222,7 +223,7 @@ def databricks_config() -> DatabricksVolumeConfig:
 
 @pytest.fixture
 def remote_root(databricks_config: DatabricksVolumeConfig) -> str:
-    return backend_path(databricks_config, "/")
+    return backend_path(databricks_config, PathSpec.from_str_path("/"))
 
 
 @pytest.fixture

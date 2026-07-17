@@ -1,7 +1,6 @@
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.chroma.path import resolve_path
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 
 
 async def stat_light(accessor,
@@ -20,8 +19,6 @@ async def stat(accessor,
             type=FileType.DIRECTORY,
             extra={"children_count": 0},
         )
-    if resolved.entry is None:
-        raise enoent(path)
     return FileStat(
         name=resolved.entry.name,
         type=FileType.TEXT,

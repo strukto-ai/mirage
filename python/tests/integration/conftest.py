@@ -22,7 +22,7 @@ from mirage.core.ram.write import write_bytes as mem_write
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 LAST_MODIFIED = datetime(2026, 3, 31, tzinfo=timezone.utc)
@@ -234,10 +234,10 @@ def memory_create_file(resource: RAMResource, path: str, content: bytes):
         d = "/" + "/".join(parts[:i])
         if d not in accessor.store.dirs:
             try:
-                asyncio.run(mem_mkdir(accessor, d))
+                asyncio.run(mem_mkdir(accessor, PathSpec.from_str_path(d)))
             except (FileExistsError, ValueError):
                 pass
-    asyncio.run(mem_write(accessor, path, content))
+    asyncio.run(mem_write(accessor, PathSpec.from_str_path(path), content))
 
 
 def run(ws: Workspace, cmd: str) -> str:

@@ -22,10 +22,9 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def append_bytes(accessor: RAMAccessor, path_spec: str | PathSpec,
+async def append_bytes(accessor: RAMAccessor, path_spec: PathSpec,
                        data: bytes) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     store = accessor.store
     start_ms = int(time.monotonic() * 1000)
     p = norm(path)
@@ -35,4 +34,4 @@ async def append_bytes(accessor: RAMAccessor, path_spec: str | PathSpec,
         store.files[p] = data
     store.modified[p] = now_iso()
     record("append", path, "ram", len(data), start_ms)
-    await invalidate_after_write(path)
+    await invalidate_after_write(path_spec)
