@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "uniq /data/a.txt /data2/xm_uniq_out.txt",
       "expect": {

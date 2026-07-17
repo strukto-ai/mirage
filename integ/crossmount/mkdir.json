@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mkdir /data/xd /data2/xd && ls /data2 && rm -r /data/xd /data2/xd",
       "expect": {

@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep abc",
       "expect": {
@@ -27,7 +28,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep",
       "expect": {
@@ -45,7 +47,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep -1",
       "expect": {
@@ -63,7 +66,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep Infinity",
       "expect": {
@@ -81,14 +85,18 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep 0",
       "expect": {
         "exit": 0,
         "stdout": "",
         "stderr": "",
-        "elapsed": { "min": 0, "max": 2.0 }
+        "elapsed": {
+          "min": 0,
+          "max": 2.0
+        }
       }
     },
     {
@@ -100,14 +108,18 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep 0.2",
       "expect": {
         "exit": 0,
         "stdout": "",
         "stderr": "",
-        "elapsed": { "min": 0.15, "max": 2.2 }
+        "elapsed": {
+          "min": 0.15,
+          "max": 2.2
+        }
       }
     },
     {
@@ -119,14 +131,18 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep 1",
       "expect": {
         "exit": 0,
         "stdout": "",
         "stderr": "",
-        "elapsed": { "min": 0.95, "max": 3.0 }
+        "elapsed": {
+          "min": 0.95,
+          "max": 3.0
+        }
       }
     }
   ]

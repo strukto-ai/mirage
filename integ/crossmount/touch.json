@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch /data/xt.txt /data2/xt.txt && ls /data/xt.txt /data2/xt.txt && rm /data/xt.txt /data2/xt.txt && ls /data2",
       "expect": {
