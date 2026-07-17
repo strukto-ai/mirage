@@ -16,7 +16,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
-                                               start_basename)
+                                               start_basename, tree_has_empty)
 from mirage.types import PathSpec
 from mirage.utils.dates import matches_mtime
 
@@ -57,6 +57,14 @@ async def find(
     start_remote_time = ""
     has_child = False
     entries = await index.entries()
+    non_empty_dirs: set[str] = set()
+    if tree_has_empty(tree):
+        # Every intermediate folder is itself an entry, so marking direct
+        # parents is enough to classify all non-empty directories.
+        non_empty_dirs = {
+            entry_path.rsplit("/", 1)[0] or "/"
+            for entry_path in entries
+        }
     for entry_path in sorted(entries):
         p = entry_path.lstrip("/")
         if p == base:
@@ -76,14 +84,15 @@ async def find(
             continue
         # Directories count as size 0 for -size (deliberate GNU divergence).
         size = 0 if is_dir else (entry_meta.size or 0)
-        entry = FindEntry(
-            key=full_path,
-            name=p.rsplit("/", 1)[-1],
-            kind="d" if is_dir else "f",
-            depth=depth,
-            is_empty=(not any(other != entry_path and other.startswith(
-                entry_path.rstrip("/") + "/")
-                              for other in entries) if is_dir else size == 0))
+        is_empty = None
+        if tree_has_empty(tree):
+            is_empty = (entry_path.rstrip("/") not in non_empty_dirs
+                        if is_dir else size == 0)
+        entry = FindEntry(key=full_path,
+                          name=p.rsplit("/", 1)[-1],
+                          kind="d" if is_dir else "f",
+                          depth=depth,
+                          is_empty=is_empty)
         if not keep(entry, tree, mindepth):
             continue
         if min_size is not None and size < min_size:

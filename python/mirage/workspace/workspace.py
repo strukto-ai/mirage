@@ -154,6 +154,9 @@ class Workspace:
         self._closed = False
         self._async_closed = False
         self._close_lock = asyncio.Lock()
+        # Resources reused from another live workspace (copy() / load
+        # resource overrides) stay open here; their origin closes them.
+        self._shared_resources: set[int] = set()
         self._drift_policy: DriftPolicy = DriftPolicy.OFF
         self._drift_check_pending: bool = False
         # Queued at Workspace.load: (mount, path, expected_fingerprint).
@@ -471,6 +474,7 @@ class Workspace:
             resources = {
                 id(mount.resource): mount.resource
                 for mount in self._registry.mounts()
+                if id(mount.resource) not in self._shared_resources
             }
             await asyncio.gather(*(resource.close()
                                    for resource in resources.values()))
@@ -623,6 +627,8 @@ class Workspace:
                  consistency=args.consistency,
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id)
+        if resources:
+            ws._shared_resources = {id(r) for r in resources.values()}
         await apply_state_dict(ws, state)
         return ws
 

@@ -15,7 +15,8 @@
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep, start_basename)
+                                               keep, start_basename,
+                                               tree_has_empty)
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
 from mirage.types import FileStat, FileType, PathSpec
@@ -91,12 +92,15 @@ async def find(
         depth = 0 if rel == base else rel.count("/") - base_depth
         if maxdepth is not None and depth > maxdepth:
             continue
-        if is_dir:
-            prefix = entry_path.rstrip("/") + "/"
-            is_empty = not any(other != entry_path and other.startswith(prefix)
-                               for other, _ in collected)
-        else:
-            is_empty = (file_stat.size or 0) == 0
+        is_empty = None
+        if tree_has_empty(tree):
+            if is_dir:
+                child_prefix = entry_path.rstrip("/") + "/"
+                is_empty = not any(
+                    other != entry_path and other.startswith(child_prefix)
+                    for other, _ in collected)
+            else:
+                is_empty = (file_stat.size or 0) == 0
         entry = FindEntry(key=rel,
                           name=entry_name,
                           kind="d" if is_dir else "f",

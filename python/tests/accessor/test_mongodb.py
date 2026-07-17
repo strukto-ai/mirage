@@ -33,10 +33,7 @@ async def test_client_constructs_async_mongo_client(accessor):
                return_value=sentinel) as ctor:
         client = accessor.client
     assert client is sentinel
-    ctor.assert_called_once()
-    args, kwargs = ctor.call_args
-    assert args == ("mongodb://localhost:27017", )
-    assert kwargs["driver"].name == "Mirage"
+    ctor.assert_called_once_with("mongodb://localhost:27017")
 
 
 @pytest.mark.asyncio

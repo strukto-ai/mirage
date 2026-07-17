@@ -14,6 +14,7 @@ from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.store import SessionStore
+from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 
 
@@ -108,10 +109,11 @@ async def test_mounted_mktemp_preserves_virtual_and_resource_paths():
         virtual = output.strip()
         assert virtual.startswith("/scratch/tmp/agent.")
         assert await stdout(ws, f"cat {virtual}") == ""
-        assert virtual.removeprefix("/scratch") in resource.accessor.store.files
+        assert virtual.removeprefix(
+            "/scratch") in resource.accessor.store.files
 
-        directory = (await stdout(
-            ws, "mktemp -d -p /scratch/tmp run.XXXX")).strip()
+        directory = (await
+                     stdout(ws, "mktemp -d -p /scratch/tmp run.XXXX")).strip()
         assert directory.startswith("/scratch/tmp/run.")
         assert directory.removeprefix("/scratch") \
             in resource.accessor.store.dirs
@@ -173,6 +175,22 @@ async def test_workspace_close_respects_store_ownership_end_to_end():
     assert owned.namespace_probe.close_calls == 1
     assert owned.observer_probe.close_calls == 1
     assert owned.session_probe.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_close_leaves_resources_shared_with_other_workspaces_open():
+    resource = ProbeRAMResource()
+    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
+    await ws.execute("echo seed | tee /data/a.txt > /dev/null")
+
+    state = await to_state_dict(ws)
+    replica = await Workspace.from_state(state, resources={"/data": resource})
+    await replica.close()
+    assert resource.close_calls == 0
+    assert await stdout(ws, "cat /data/a.txt") == "seed\n"
+
+    await ws.close()
+    assert resource.close_calls == 1
 
 
 def test_workspace_context_open_modes_and_cleanup():
