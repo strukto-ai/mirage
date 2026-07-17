@@ -16,7 +16,6 @@ import { applyStateDict, type Workspace as CoreWorkspace } from '@struktoai/mira
 import { NoSuchBranchError } from './errors.ts'
 import {
   blobToMeta,
-  CACHE_PREFIX,
   META_PATH,
   metaToBlob,
   toState,
@@ -40,8 +39,7 @@ const EMPTY_META: VersionMeta = {
 }
 
 function stripMeta(d: DiffResult): DiffResult {
-  const keep = (xs: string[]): string[] =>
-    xs.filter((p) => p !== META_PATH && !p.startsWith(CACHE_PREFIX))
+  const keep = (xs: string[]): string[] => xs.filter((p) => p !== META_PATH)
   return { added: keep(d.added), modified: keep(d.modified), deleted: keep(d.deleted) }
 }
 
