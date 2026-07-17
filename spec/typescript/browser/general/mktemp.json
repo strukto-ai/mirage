@@ -29,7 +29,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-p",
-      "value_kind": "text",
+      "value_kind": "path",
       "value_optional": false
     },
     {

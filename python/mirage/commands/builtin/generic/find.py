@@ -91,6 +91,12 @@ async def apply_mtime_filter(
         except (FileNotFoundError, ValueError):
             continue
         if s.modified is None:
+            # Object stores have no directory mtimes; GNU always has one
+            # and includes fresh dirs, so an unknown-mtime directory
+            # passes (deliberate divergence, like dirs counting as size
+            # 0). Files without timestamps stay excluded (TS NaN rule).
+            if s.type == FileType.DIRECTORY:
+                filtered.append(r)
             continue
         mod_ts = datetime.fromisoformat(
             s.modified).replace(tzinfo=timezone.utc).timestamp()
