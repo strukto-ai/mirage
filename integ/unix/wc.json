@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc /data/a.txt",
       "expect": {
@@ -27,7 +28,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -l /data/a.txt",
       "expect": {
@@ -45,7 +47,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -w /data/a.txt",
       "expect": {
@@ -63,7 +66,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -c /data/a.txt",
       "expect": {
@@ -81,7 +85,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc /data/a.txt /data/b.txt",
       "expect": {
@@ -99,7 +104,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -l /data/a.txt /data/b.txt",
       "expect": {
@@ -117,7 +123,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc /data/empty.txt",
       "expect": {
@@ -135,7 +142,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc /data/no_nl.txt",
       "expect": {
@@ -153,7 +161,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc /data/one_byte.txt",
       "expect": {
@@ -171,7 +180,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -m /data/a.txt",
       "expect": {
@@ -189,7 +199,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -L /data/a.txt",
       "expect": {
@@ -207,7 +218,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "echo 'a b c' | wc",
       "expect": {
@@ -225,7 +237,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/a.txt | wc -l",
       "expect": {

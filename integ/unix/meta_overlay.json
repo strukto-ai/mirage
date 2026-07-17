@@ -6,7 +6,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mkdir -p /data/metao && echo alpha > /data/metao/f.txt && touch -t 202601021530 /data/metao/f.txt",
       "check": {
@@ -30,7 +31,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod 601 /data/metao/f.txt",
       "check": {
@@ -52,7 +54,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod u+x,go-r /data/metao/f.txt",
       "check": {
@@ -73,7 +76,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chown 500:dev /data/metao/f.txt",
       "check": {
@@ -95,7 +99,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chown alice /data/metao/f.txt",
       "check": {
@@ -117,7 +122,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -t 202601021530 /data/metao/new.txt",
       "check": {
@@ -139,7 +145,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -c /data/metao/ghost.txt",
       "check": {
@@ -160,7 +167,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -t 202603041200 /data/metao/f.txt",
       "check": {
@@ -181,7 +189,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod 750 /data/metao",
       "check": {
@@ -202,7 +211,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mv /data/metao/f.txt /data/metao/g.txt",
       "check": {
@@ -226,7 +236,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "rm /data/metao/g.txt && echo fresh > /data/metao/g.txt",
       "check": {
@@ -249,7 +260,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ln -s /data/metao/g.txt /data/metao/ln.txt && chmod 604 /data/metao/ln.txt",
       "check": {
@@ -270,7 +282,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -t 202601021530 /data/metao/g.txt && touch -h -t 202603041200 /data/metao/ln.txt",
       "check": {
@@ -291,7 +304,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod 644 /data/metao/missing.txt 2>&1",
       "expect": {
@@ -306,7 +320,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -t 99 /data/metao/g.txt 2>&1",
       "expect": {
@@ -321,7 +336,8 @@
       "targets": [
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "rm /data/metao/ln.txt && rm -r /data/metao",
       "expect": {
