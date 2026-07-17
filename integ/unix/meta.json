@@ -1,0 +1,346 @@
+{
+  "cases": [
+    {
+      "id": "meta_setup",
+      "seq": 200000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "mkdir -p /data/metad && echo alpha > /data/metad/f.txt && touch -t 202601021530 /data/metad/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_ls_long",
+      "seq": 200001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 user user 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_octal",
+      "seq": 200002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chmod 601 /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw------x 1 user user 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_symbolic",
+      "seq": 200003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 user user 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chown_ids",
+      "seq": 200004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chown 500:dev /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 500 dev 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chown_name",
+      "seq": 200005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chown alice /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_touch_create",
+      "seq": 200006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "touch -t 202601021530 /data/metad/new.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_touch_nocreate",
+      "seq": 200007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "touch -c /data/metad/ghost.txt && ls /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "f.txt\nnew.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_touch_restamp",
+      "seq": 200008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 alice dev 6 Mar  4 12:00 f.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_mv_carries",
+      "seq": 200009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 alice dev 6 Mar  4 12:00 g.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_rm_drops",
+      "seq": 200010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 user user 6 Jan  2 15:30 g.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_link_chmod_follows",
+      "seq": 200011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw----r-- 1 user user 6 Jan  2 15:30 g.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\nl\t-\t-\tln.txt -> /data/metad/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_touch_h_link",
+      "seq": 200012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "touch -h -t 202601021530 /data/metad/ln.txt && readlink /data/metad/ln.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/metad/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_bad_mode",
+      "seq": 200013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chmod 999 /data/metad/g.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chmod: invalid mode: '999'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_bad_symbolic",
+      "seq": 200014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chmod u+q /data/metad/g.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chmod: invalid mode: 'u+q'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_enoent",
+      "seq": 200015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chmod 644 /data/metad/missing.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chmod: cannot access '/data/metad/missing.txt': No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chown_enoent",
+      "seq": 200016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "chown alice /data/metad/missing.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chown: cannot access '/data/metad/missing.txt': No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_touch_bad_stamp",
+      "seq": 200017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "touch -t 99 /data/metad/g.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "touch: invalid date format '99'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_cleanup",
+      "seq": 200018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "rm /data/metad/ln.txt && rm -r /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

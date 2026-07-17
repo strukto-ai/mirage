@@ -113,8 +113,3 @@ def file(raw: bytes) -> bytes:
                      for name, type_name in _fields(schema))
     return (f"feather, {table.num_rows} rows, {len(schema)} columns"
             f" ({cols})").encode()
-
-
-def ls(raw: bytes) -> tuple[int, int]:
-    table = _read_table(raw)
-    return table.num_rows, len(table.schema)

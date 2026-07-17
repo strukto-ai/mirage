@@ -58,11 +58,11 @@ async function runTarget(
     for (const mount of target.mounts) await seedFixture(ws, mount.fixture, mount.path, root)
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue
-      const { exitCode, out, err } = await runCase(ws, c)
+      const { exitCode, out, err, elapsed } = await runCase(ws, c)
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: err })
       } else if (report !== null) {
-        report.record(target.id, c.id, compare(c, exitCode, out, err))
+        report.record(target.id, c.id, compare(c, exitCode, out, err, elapsed))
       }
     }
   } finally {

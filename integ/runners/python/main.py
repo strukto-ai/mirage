@@ -37,7 +37,7 @@ async def run_target(target: dict, cases: list[dict], root: Path,
         for case in cases:
             if target["id"] not in case["targets"]:
                 continue
-            exit_code, out, err = await harness.run_case(ws, case)
+            exit_code, out, err, elapsed = await harness.run_case(ws, case)
             if emit is not None:
                 emit.append({
                     "target": target["id"],
@@ -47,8 +47,9 @@ async def run_target(target: dict, cases: list[dict], root: Path,
                     "stderr": err,
                 })
             elif report is not None:
-                report.record(target["id"], case["id"],
-                              harness.compare(case, exit_code, out, err))
+                report.record(
+                    target["id"], case["id"],
+                    harness.compare(case, exit_code, out, err, elapsed))
     finally:
         await cleanup()
 

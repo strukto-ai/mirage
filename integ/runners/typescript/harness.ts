@@ -40,6 +40,12 @@ export interface Expect {
   exit: number
   stdout: string
   stderr: string
+  elapsed?: { min: number; max: number }
+}
+
+export interface StatCheck {
+  stat: string
+  fields: string[]
 }
 
 export interface Case {
@@ -48,8 +54,24 @@ export interface Case {
   targets: string[]
   command: string
   flags?: string[]
+  check?: StatCheck
+  provision?: boolean
+  clear_cache?: boolean
   expect: Expect
   _source?: string
+}
+
+export interface ProvisionInfo {
+  networkRead: number | string
+  networkWrite: number | string
+  cacheRead: number | string
+  readOps: number
+  cacheHits: number
+  precision: string
+}
+
+interface ProvisionExec {
+  execute(cmd: string, opts: { provision: true }): Promise<ProvisionInfo>
 }
 
 export interface ExecResult {
@@ -58,8 +80,17 @@ export interface ExecResult {
   exitCode: number
 }
 
+export interface HarnessStat {
+  mode: number | null
+  uid: number | string | null
+  gid: number | string | null
+  modified: string | null
+}
+
 export interface ExecWorkspace {
   execute(cmd: string, opts?: { stdin?: Uint8Array }): Promise<ExecResult>
+  dispatch(opName: string, path: string): Promise<unknown>
+  cache: { clear(): Promise<void> }
   close(): Promise<void>
 }
 
@@ -124,25 +155,86 @@ export async function seedFixture(
   }
 }
 
+function checkField(st: HarnessStat, name: string): string {
+  let value: string
+  if (name === 'mode') {
+    value = st.mode !== null ? st.mode.toString(8) : '-'
+  } else if (name === 'uid') {
+    value = st.uid !== null ? String(st.uid) : '-'
+  } else if (name === 'gid') {
+    value = st.gid !== null ? String(st.gid) : '-'
+  } else {
+    // First 19 chars ("2026-01-02T15:30:00") so the Z vs +00:00 suffix
+    // never reaches the comparison.
+    value = st.modified !== null && st.modified !== '' ? st.modified.slice(0, 19) : '-'
+  }
+  return `${name}=${value}`
+}
+
+export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<string> {
+  let st: HarnessStat
+  try {
+    st = (await ws.dispatch('stat', check.stat)) as HarnessStat
+  } catch (err) {
+    if ((err as { code?: string }).code === 'ENOENT') return 'absent\n'
+    throw err
+  }
+  return check.fields.map((name) => checkField(st, name)).join(' ') + '\n'
+}
+
+function provisionLine(r: ProvisionInfo): string {
+  return (
+    `net=${r.networkRead} write=${r.networkWrite} ` +
+    `cache=${r.cacheRead} ops=${String(r.readOps)} ` +
+    `hits=${String(r.cacheHits)} precision=${r.precision}`
+  )
+}
+
 export async function runCase(
   ws: ExecWorkspace,
   c: Case,
-): Promise<{ exitCode: number; out: string; err: string }> {
+): Promise<{ exitCode: number; out: string; err: string; elapsed: number }> {
+  if (c.clear_cache === true) await ws.cache.clear()
+  const start = performance.now()
+  if (c.provision === true) {
+    const plan = await (ws as unknown as ProvisionExec).execute(c.command, { provision: true })
+    return {
+      exitCode: 0,
+      out: provisionLine(plan) + '\n',
+      err: '',
+      elapsed: (performance.now() - start) / 1000,
+    }
+  }
   const result = await ws.execute(c.command)
+  const elapsed = (performance.now() - start) / 1000
+  let out = DEC.decode(result.stdout)
+  if (c.check !== undefined) out = await statCheck(ws, c.check)
   return {
     exitCode: result.exitCode,
-    out: DEC.decode(result.stdout),
+    out,
     err: DEC.decode(result.stderr),
+    elapsed,
   }
 }
 
-export function compare(c: Case, exitCode: number, out: string, err: string): string[] {
+export function compare(
+  c: Case,
+  exitCode: number,
+  out: string,
+  err: string,
+  elapsed: number,
+): string[] {
   const diffs: string[] = []
   if (exitCode !== c.expect.exit) diffs.push(`exit: expected ${c.expect.exit}, got ${exitCode}`)
   if (out !== c.expect.stdout)
     diffs.push(`stdout: expected ${JSON.stringify(c.expect.stdout)}, got ${JSON.stringify(out)}`)
   if (err.replace(/\n+$/, '') !== c.expect.stderr.replace(/\n+$/, ''))
     diffs.push(`stderr: expected ${JSON.stringify(c.expect.stderr)}, got ${JSON.stringify(err)}`)
+  const bounds = c.expect.elapsed
+  if (bounds !== undefined && (elapsed < bounds.min || elapsed > bounds.max))
+    diffs.push(
+      `elapsed: expected [${String(bounds.min)}, ${String(bounds.max)}], got ${elapsed.toFixed(3)}`,
+    )
   return diffs
 }
 

@@ -45,8 +45,8 @@ async def handle_ln(
     # (an expanded multi-match glob source lands here).
     if len(operands) > 2:
         return fail(
-            "ln", f"ln: target '{word_text(operands[-1])}' "
-            f"is not a directory\n")
+            "ln", f"ln: target '{word_text(operands[-1])}': "
+            f"Not a directory\n")
     link_abs = abs_path(operands[1], session.cwd)
     target_typed = word_text(operands[0])
     exists = namespace.is_link(link_abs) and "f" not in flags

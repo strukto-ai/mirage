@@ -144,8 +144,3 @@ def file(raw: bytes) -> bytes:
     cols = ", ".join(f"{name}: {type_name}" for name, type_name in _fields(df))
     return (f"hdf5, {len(df)} rows, {len(df.columns)} columns"
             f" ({cols})").encode()
-
-
-def ls(raw: bytes) -> tuple[int, int]:
-    df = _read_df(raw)
-    return len(df), len(df.columns)

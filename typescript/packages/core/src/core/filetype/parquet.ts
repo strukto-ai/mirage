@@ -134,25 +134,6 @@ export async function tail(raw: Uint8Array, n = 10): Promise<Uint8Array> {
   return ENC.encode(lines.join('\n'))
 }
 
-export function ls(
-  raw: Uint8Array,
-  meta: { size: number; modified: string | null; name: string },
-): Uint8Array {
-  const pq = readMeta(raw)
-  const rows = asNumber(pq.num_rows)
-  const cols = fieldColumns(pq.schema).length
-  const line = `parquet\t${String(meta.size)}\t${String(rows)} rows\t${String(cols)} cols\t${meta.modified ?? ''}\t${meta.name}`
-  return ENC.encode(line)
-}
-
-export function lsFallback(meta: {
-  size: number
-  modified: string | null
-  name: string
-}): Uint8Array {
-  return ENC.encode(`parquet\t${String(meta.size)}\t\t\t${meta.modified ?? ''}\t${meta.name}`)
-}
-
 export function wc(raw: Uint8Array): number {
   return asNumber(readMeta(raw).num_rows)
 }
