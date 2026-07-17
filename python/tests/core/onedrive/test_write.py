@@ -1,6 +1,7 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
 
+import mirage.core.msgraph.drive_ops as drive_ops
 import mirage.core.onedrive.write as write_mod
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.write import write_bytes
@@ -36,7 +37,7 @@ async def test_write_small_file_puts_content():
 @pytest.mark.asyncio
 async def test_write_large_file_uses_upload_session(monkeypatch):
     monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
-    monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 4)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
     ranges = []
 
     def _chunk_cb(url, **kwargs):
@@ -60,7 +61,7 @@ async def test_write_large_file_uses_upload_session(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_session_requests_replace(monkeypatch):
     monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
-    monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 8)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 8)
     captured = {}
 
     def _session_cb(url, **kwargs):
@@ -80,7 +81,7 @@ async def test_upload_session_requests_replace(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_resumes_from_next_expected_ranges(monkeypatch):
     monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
-    monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 4)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
     ranges = []
 
     def _chunk_cb(url, **kwargs):

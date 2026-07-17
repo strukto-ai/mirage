@@ -12,22 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
-
-from pydantic import BaseModel, ConfigDict, SecretStr
-
 from mirage.accessor.base import Accessor
+from mirage.core.msgraph.config import MsGraphConfig
 
 
-class OneDriveConfig(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    access_token: SecretStr | Callable[[], str | SecretStr]
+class OneDriveConfig(MsGraphConfig):
     drive_id: str | None = None
     site_id: str | None = None
     key_prefix: str | None = None
-    timeout: int = 30
-    max_retries: int = 5
 
 
 class OneDriveAccessor(Accessor):

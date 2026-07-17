@@ -1,6 +1,7 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
 
+import mirage.core.msgraph.drive_ops as drive_ops
 import mirage.core.sharepoint.write as write_mod
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint._resolver import _drive_cache, _site_cache
@@ -57,7 +58,7 @@ async def test_write_small_file():
 @pytest.mark.asyncio
 async def test_write_large_file_uses_upload_session(monkeypatch):
     monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
-    monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 4)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
     ranges = []
 
     def _chunk_cb(url, **kwargs):
@@ -86,7 +87,7 @@ async def test_write_large_file_uses_upload_session(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_session_requests_replace(monkeypatch):
     monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
-    monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 8)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 8)
     captured = {}
 
     def _session_cb(url, **kwargs):
