@@ -67,7 +67,7 @@ async def test_find_invalid_maxdepth_raises_find_parse_error(accessor, index):
 @pytest.mark.asyncio
 async def test_find_single_run_allowed(accessor, index):
 
-    async def fake_readdir(_acc, p, _idx=None):
+    async def fake_readdir(_acc, p, index=None):
         if p.virtual == "/runs/wf_1":
             return ["/runs/wf_1/run.json", "/runs/wf_1/jobs"]
         if p.virtual == "/runs/wf_1/jobs":
@@ -75,7 +75,9 @@ async def test_find_single_run_allowed(accessor, index):
         return []
 
     with patch("mirage.commands.builtin.github_ci.find._readdir",
-               new=AsyncMock(side_effect=fake_readdir)):
+               new=AsyncMock(side_effect=fake_readdir)), \
+            patch("mirage.core.github_ci.stat._readdir",
+                  new=AsyncMock(side_effect=fake_readdir)):
         out, io = await find(
             accessor,
             [_scope("/runs/wf_1")],
@@ -89,7 +91,7 @@ async def test_find_single_run_allowed(accessor, index):
 @pytest.mark.asyncio
 async def test_find_path_pattern_is_honored(accessor, index):
 
-    async def fake_readdir(_acc, p, _idx=None):
+    async def fake_readdir(_acc, p, index=None):
         if p.virtual == "/runs/wf_1":
             return ["/runs/wf_1/run.json", "/runs/wf_1/jobs"]
         if p.virtual == "/runs/wf_1/jobs":
@@ -97,7 +99,9 @@ async def test_find_path_pattern_is_honored(accessor, index):
         return []
 
     with patch("mirage.commands.builtin.github_ci.find._readdir",
-               new=AsyncMock(side_effect=fake_readdir)):
+               new=AsyncMock(side_effect=fake_readdir)), \
+            patch("mirage.core.github_ci.stat._readdir",
+                  new=AsyncMock(side_effect=fake_readdir)):
         out, _io = await find(accessor, [_scope("/runs/wf_1")],
                               path="*jobs*",
                               index=index)
@@ -110,7 +114,7 @@ async def test_find_path_pattern_is_honored(accessor, index):
 @pytest.mark.asyncio
 async def test_find_size_counts_sizeless_entries_as_zero(accessor, index):
 
-    async def fake_readdir(_acc, p, _idx=None):
+    async def fake_readdir(_acc, p, index=None):
         if p.virtual == "/runs/wf_1":
             return ["/runs/wf_1/run.json", "/runs/wf_1/jobs"]
         if p.virtual == "/runs/wf_1/jobs":

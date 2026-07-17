@@ -35,7 +35,9 @@ from mirage.workspace import Workspace
 
 BUCKET = "test-bucket"
 REGION = "us-east-1"
-LAST_MODIFIED = datetime(2026, 3, 31, tzinfo=timezone.utc)
+# A current timestamp: -mtime -N filters are now honored by the s3 core,
+# so a fixed past date would wrongly exclude freshly "written" objects.
+LAST_MODIFIED = datetime.now(timezone.utc)
 
 _CORE_MODULES = [
     "mirage.core.s3.read",

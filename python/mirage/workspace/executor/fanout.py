@@ -267,6 +267,7 @@ async def _fan_out_traversal(
     all_stdout: list[bytes] = []
     merged_io = IOResult()
     final_exit = 0
+    success_seen = False
     for mount in [primary_mount] + list(descendants):
         if mount is primary_mount:
             sub_paths = list(paths)
@@ -302,7 +303,9 @@ async def _fan_out_traversal(
             data = await materialize(stdout)
             if data:
                 all_stdout.append(data)
-        if io.exit_code != 0 and final_exit == 0:
+        if io.exit_code == 0:
+            success_seen = True
+        elif final_exit == 0:
             final_exit = io.exit_code
         merged_io = await merged_io.merge(io)
 
@@ -317,7 +320,12 @@ async def _fan_out_traversal(
         combined = b"\n".join(b.rstrip(b"\n") for b in all_stdout) + b"\n"
     else:
         combined = None
-    final_io_exit = final_exit
+    # grep exits 0 when ANY mount matched (GNU: "any line was selected");
+    # traversal commands (find/du/tree) keep the first per-mount failure.
+    if cmd_name in ("grep", "rg") and success_seen:
+        final_io_exit = 0
+    else:
+        final_io_exit = final_exit
 
     if cmd_name == "find":
         combined, action_err = await _apply_find_actions(
