@@ -24,7 +24,7 @@ import {
 import { RedisObserverStore } from '../../observe/redis_store.ts'
 import { loadOptionalPeer } from '../../optional_peer.ts'
 import { RedisNamespaceStore } from '../namespace/redis.ts'
-import { RedisSessionStore } from '../session/redis.ts'
+import { CAS_SCRIPT, RedisSessionStore } from '../session/redis.ts'
 
 export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {
   url?: string
@@ -127,6 +127,21 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   protected async writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void> {
     const c = await this.client()
     await c.hSet(this.metaKey, workspaceId, JSON.stringify(fields))
+  }
+
+  // Same generic hash-field CAS the session store uses: the meta hash
+  // is keyed by workspace id instead of session id.
+  protected async casWriteMeta(
+    workspaceId: string,
+    fields: WorkspaceFields,
+    expectedGeneration: number,
+  ): Promise<boolean> {
+    const c = await this.client()
+    const result = await c.eval(CAS_SCRIPT, {
+      keys: [this.metaKey],
+      arguments: [workspaceId, JSON.stringify(fields), String(expectedGeneration)],
+    })
+    return result === 1
   }
 
   protected async closeSelf(): Promise<void> {

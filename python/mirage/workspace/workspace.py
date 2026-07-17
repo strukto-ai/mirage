@@ -704,13 +704,19 @@ class Workspace:
             return
         existing = await self._state_store.load_meta(self._workspace_id)
         if existing is None:
-            await self._state_store.set_meta(
+            created = await self._state_store.cas_set_meta(
                 self._workspace_id, {
                     "workspace_id": self._workspace_id,
                     "default_session_id": self._default_session_id,
                     "created_at": time.time(),
-                })
-        else:
+                    "generation": 1,
+                }, 0)
+            if not created:
+                # Lost the create race: a sibling registered first and
+                # its record wins, like any other existing record.
+                existing = await self._state_store.load_meta(self._workspace_id
+                                                             )
+        if existing is not None:
             stored = existing.get("default_session_id")
             if not self._session_id_explicit and isinstance(stored, str):
                 self._session_mgr.adopt_default(stored)

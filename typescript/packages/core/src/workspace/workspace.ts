@@ -568,12 +568,9 @@ export class Workspace {
    */
   async adoptDefaultSession(sessionId: string): Promise<void> {
     this.sessionManager.adoptDefault(sessionId)
-    const existing = await this.stateStoreInternal.loadMeta(this.wsId)
-    await this.stateStoreInternal.setMeta(this.wsId, {
-      ...(existing ?? {}),
+    await this.stateStoreInternal.replaceMeta(this.wsId, {
       workspace_id: this.wsId,
       default_session_id: sessionId,
-      created_at: existing?.created_at ?? Date.now() / 1000,
     })
     this.metaWritten = true
   }
@@ -593,14 +590,25 @@ export class Workspace {
    */
   private async ensureMeta(): Promise<void> {
     if (this.metaWritten) return
-    const existing = await this.stateStoreInternal.loadMeta(this.wsId)
+    let existing = await this.stateStoreInternal.loadMeta(this.wsId)
     if (existing === null) {
-      await this.stateStoreInternal.setMeta(this.wsId, {
-        workspace_id: this.wsId,
-        default_session_id: this.sessionManager.defaultId,
-        created_at: Date.now() / 1000,
-      })
-    } else {
+      const created = await this.stateStoreInternal.casSetMeta(
+        this.wsId,
+        {
+          workspace_id: this.wsId,
+          default_session_id: this.sessionManager.defaultId,
+          created_at: Date.now() / 1000,
+          generation: 1,
+        },
+        0,
+      )
+      if (!created) {
+        // Lost the create race: a sibling registered first and its
+        // record wins, like any other existing record.
+        existing = await this.stateStoreInternal.loadMeta(this.wsId)
+      }
+    }
+    if (existing !== null) {
       const stored = existing.default_session_id
       if (!this.sessionIdExplicit && typeof stored === 'string') {
         this.sessionManager.adoptDefault(stored)

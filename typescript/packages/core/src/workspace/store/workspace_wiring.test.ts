@@ -22,6 +22,15 @@ import { RAMWorkspaceStateStore } from './ram.ts'
 
 const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
+// Yields to the microtask queue on meta reads so two concurrent
+// attaches both observe the record as absent before either writes.
+class YieldingStore extends RAMWorkspaceStateStore {
+  protected override async readMeta(workspaceId: string) {
+    await Promise.resolve()
+    return super.readMeta(workspaceId)
+  }
+}
+
 const open: Workspace[] = []
 
 afterEach(async () => {
@@ -114,6 +123,19 @@ describe('Workspace on a WorkspaceStateStore', () => {
     const meta = await ws.workspaceMeta()
     expect(meta.default_session_id).toBe('sess_x')
     expect(meta.created_at).toBe(1)
+  })
+
+  it('concurrent attach admits a single discovery record', async () => {
+    const store = new YieldingStore()
+    const ram = new RAMResource()
+    const wsA = await mkWs(store, 'ws-a', ram)
+    const wsB = await mkWs(store, 'ws-a', ram)
+    await Promise.all([wsA.ensureSessionsLoaded(), wsB.ensureSessionsLoaded()])
+    const meta = await store.loadMeta('ws-a')
+    expect(meta).not.toBeNull()
+    expect(meta?.generation).toBe(1)
+    expect(wsA.defaultSessionId).toBe(wsB.defaultSessionId)
+    expect(meta?.default_session_id).toBe(wsA.defaultSessionId)
   })
 
   it('same workspace id shares sessions across workspaces', async () => {

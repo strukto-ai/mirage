@@ -21,7 +21,7 @@ from mirage.observe.redis_store import RedisObserverStore
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.session.redis import RedisSessionStore
+from mirage.workspace.session.redis import CAS_SCRIPT, RedisSessionStore
 from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
@@ -51,6 +51,9 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         self._prefix = key_prefix
         self._meta_client = aioredis.from_url(url)
         self._meta_key = f"{key_prefix}workspaces"
+        # Same generic hash-field CAS the session store uses: the meta
+        # hash is keyed by workspace id instead of session id.
+        self._meta_cas = self._meta_client.register_script(CAS_SCRIPT)
         self._namespaces: dict[str, RedisNamespaceStore] = {}
         self._observers: dict[str, RedisObserverStore] = {}
         self._sessions: dict[str, RedisSessionStore] = {}
@@ -86,6 +89,16 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
             Awaitable,
             self._meta_client.hset(self._meta_key, workspace_id,
                                    json.dumps(fields)))
+
+    async def _cas_set_meta(self, workspace_id: str, fields: WorkspaceFields,
+                            expected_generation: int) -> bool:
+        result = await self._meta_cas(keys=[self._meta_key],
+                                      args=[
+                                          workspace_id,
+                                          json.dumps(fields),
+                                          expected_generation,
+                                      ])
+        return bool(result)
 
     async def _close(self) -> None:
         for ns in self._namespaces.values():

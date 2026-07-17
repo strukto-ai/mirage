@@ -14,7 +14,6 @@
 
 import importlib
 import tempfile
-import time
 
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
@@ -187,14 +186,10 @@ async def _restore_sessions(ws, state: dict) -> None:
         # one, and the discovery record's pointer follows it.
         ws._session_mgr.adopt_default(default_sid)
         ws._default_session_id = default_sid
-        existing = await ws._state_store.load_meta(ws._workspace_id)
-        await ws._state_store.set_meta(
-            ws._workspace_id, {
-                **(existing or {}),
-                "workspace_id": ws._workspace_id,
-                "default_session_id": default_sid,
-                "created_at": (existing or {}).get("created_at", time.time()),
-            })
+        await ws._state_store.replace_meta(ws._workspace_id, {
+            "workspace_id": ws._workspace_id,
+            "default_session_id": default_sid,
+        })
         ws._meta_written = True
     restored: list = []
     for s_data in state.get(StateKey.SESSIONS, []):

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import uuid
 
 import pytest
@@ -20,7 +21,17 @@ from mirage.observe.store import RAMObserverStore
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
+from mirage.workspace.store.base import WorkspaceFields
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
+
+
+class YieldingStore(RAMWorkspaceStateStore):
+    """Yields to the event loop on meta reads so two concurrent
+    attaches both observe the record as absent before either writes."""
+
+    async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
+        await asyncio.sleep(0)
+        return await super()._load_meta(workspace_id)
 
 
 @pytest.mark.asyncio
@@ -114,6 +125,32 @@ async def test_existing_meta_wins():
     assert meta["default_session_id"] == "sess_x"
     assert meta["created_at"] == 1.0
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_attach_single_discovery_record():
+    """Two processes attach the same fresh workspace id at once: the
+    CAS create admits exactly one discovery record and the loser adopts
+    the winner's default session instead of clobbering the pointer."""
+    store = YieldingStore()
+    ram = RAMResource()
+    ws_a = Workspace({"/data": ram},
+                     mode=MountMode.EXEC,
+                     workspace_id="ws-a",
+                     store=store)
+    ws_b = Workspace({"/data": ram},
+                     mode=MountMode.EXEC,
+                     workspace_id="ws-a",
+                     store=store)
+    await asyncio.gather(ws_a.ensure_sessions_loaded(),
+                         ws_b.ensure_sessions_loaded())
+    meta = await store.load_meta("ws-a")
+    assert meta is not None
+    assert meta["generation"] == 1
+    assert ws_a.default_session_id == ws_b.default_session_id
+    assert meta["default_session_id"] == ws_a.default_session_id
+    await ws_a.close()
+    await ws_b.close()
 
 
 @pytest.mark.asyncio

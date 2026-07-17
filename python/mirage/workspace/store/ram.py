@@ -57,5 +57,14 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
                         fields: WorkspaceFields) -> None:
         self._meta[workspace_id] = dict(fields)
 
+    async def _cas_set_meta(self, workspace_id: str, fields: WorkspaceFields,
+                            expected_generation: int) -> bool:
+        stored = self._meta.get(workspace_id)
+        current = 0 if stored is None else int(stored.get("generation", 0))
+        if current != expected_generation:
+            return False
+        self._meta[workspace_id] = dict(fields)
+        return True
+
     async def _close(self) -> None:
         pass

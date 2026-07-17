@@ -18,8 +18,9 @@ import { SessionStore, type SessionFields } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../../optional_peer.ts'
 
 // Shipped next to this module in src and copied beside the bundle in
-// dist (tsup onSuccess); byte-identical to the Python cas.lua.
-const CAS_SCRIPT = readFileSync(new URL('./cas.lua', import.meta.url), 'utf8')
+// dist (tsup onSuccess); byte-identical to the Python cas.lua. Generic
+// hash-field CAS, shared with the workspace meta record.
+export const CAS_SCRIPT = readFileSync(new URL('./cas.lua', import.meta.url), 'utf8')
 
 export interface RedisSessionStoreOptions {
   url?: string
