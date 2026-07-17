@@ -21,20 +21,11 @@ from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
 from mirage.core.s3._client import (_client_kwargs, _prefix, _strip_prefix,
                                     async_session)
 from mirage.types import PathSpec
+from mirage.utils.dates import in_mtime_window
 
 
-def _matches_mtime(modified: datetime | None, mtime_min: float | None,
-                   mtime_max: float | None) -> bool:
-    if mtime_min is None and mtime_max is None:
-        return True
-    if modified is None:
-        return False
-    timestamp = modified.timestamp()
-    if mtime_min is not None and timestamp < mtime_min:
-        return False
-    if mtime_max is not None and timestamp > mtime_max:
-        return False
-    return True
+def _timestamp(modified: datetime | None) -> float | None:
+    return modified.timestamp() if modified is not None else None
 
 
 async def find(
@@ -130,12 +121,13 @@ async def find(
                 last_modified = obj.get("LastModified")
                 modified = (last_modified if isinstance(
                     last_modified, datetime) else None)
-                if not _matches_mtime(modified, mtime_min, mtime_max):
+                if not in_mtime_window(_timestamp(modified), mtime_min,
+                                       mtime_max):
                     continue
                 results.append(full_path)
     stripped = path.strip("/")
-    if ((saw_descendant or dir_marker_seen)
-            and _matches_mtime(root_modified, mtime_min, mtime_max)):
+    if ((saw_descendant or dir_marker_seen) and in_mtime_window(
+            _timestamp(root_modified), mtime_min, mtime_max)):
         root_key = "/" + stripped if stripped else "/"
         emit_start_path(results,
                         root_key,

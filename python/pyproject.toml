@@ -281,7 +281,6 @@ module = [
     "mirage.core.hf_buckets.find",
     "mirage.core.lancedb.scope",
     "mirage.core.mongodb.scope",
-    "mirage.core.msgraph.time",
     "mirage.core.msgraph.types",
     "mirage.core.onedrive.find",
     "mirage.core.onedrive.copy",

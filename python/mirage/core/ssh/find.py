@@ -21,19 +21,7 @@ from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
 from mirage.core.ssh._client import _abs
 from mirage.core.ssh.config import SSHConfig
 from mirage.types import PathSpec
-
-
-def _matches_mtime(mtime: float | None, mtime_min: float | None,
-                   mtime_max: float | None) -> bool:
-    if mtime_min is None and mtime_max is None:
-        return True
-    if mtime is None:
-        return False
-    if mtime_min is not None and mtime < mtime_min:
-        return False
-    if mtime_max is not None and mtime > mtime_max:
-        return False
-    return True
+from mirage.utils.dates import in_mtime_window
 
 
 async def find(
@@ -73,7 +61,7 @@ async def find(
             root_attrs = None
         if root_attrs is not None:
             is_dir = root_attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
-            if _matches_mtime(root_attrs.mtime, mtime_min, mtime_max):
+            if in_mtime_window(root_attrs.mtime, mtime_min, mtime_max):
                 emit_start_path(results,
                                 path,
                                 start_name,
@@ -161,6 +149,6 @@ def _matches(
         if max_size is not None and size > max_size:
             return False
     if mtime_min is not None or mtime_max is not None:
-        if not _matches_mtime(entry.attrs.mtime, mtime_min, mtime_max):
+        if not in_mtime_window(entry.attrs.mtime, mtime_min, mtime_max):
             return False
     return True

@@ -21,12 +21,12 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
-from mirage.core.msgraph.time import matches_mtime
 from mirage.core.msgraph.types import DriveItem, parse_drive_item
 from mirage.core.onedrive._client import (graph_list, item_url, new_session,
                                           split_path)
 from mirage.core.onedrive.stat import stat
 from mirage.types import FileType, PathSpec
+from mirage.utils.dates import matches_mtime
 
 
 async def iter_tree(

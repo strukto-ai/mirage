@@ -33,11 +33,10 @@ def iso_timestamp(value: str | None) -> float | None:
     return parsed.timestamp()
 
 
-def matches_mtime(value: str | None, mtime_min: float | None,
-                  mtime_max: float | None) -> bool:
+def in_mtime_window(timestamp: float | None, mtime_min: float | None,
+                    mtime_max: float | None) -> bool:
     if mtime_min is None and mtime_max is None:
         return True
-    timestamp = iso_timestamp(value)
     if timestamp is None:
         return False
     if mtime_min is not None and timestamp < mtime_min:
@@ -45,3 +44,8 @@ def matches_mtime(value: str | None, mtime_min: float | None,
     if mtime_max is not None and timestamp > mtime_max:
         return False
     return True
+
+
+def matches_mtime(value: str | None, mtime_min: float | None,
+                  mtime_max: float | None) -> bool:
+    return in_mtime_window(iso_timestamp(value), mtime_min, mtime_max)
