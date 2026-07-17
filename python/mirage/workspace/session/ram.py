@@ -14,7 +14,8 @@
 
 from collections.abc import Iterable
 
-from mirage.workspace.session.store import SessionFields, SessionStore
+from mirage.workspace.session.store import (SessionFields, SessionStore,
+                                            generation_of)
 
 
 class RAMSessionStore(SessionStore):
@@ -36,8 +37,7 @@ class RAMSessionStore(SessionStore):
     async def cas_set(self, session_id: str, fields: SessionFields,
                       expected_generation: int) -> bool:
         stored = self._entries.get(session_id)
-        current = 0 if stored is None else int(stored.get("generation", 0))
-        if current != expected_generation:
+        if generation_of(stored) != expected_generation:
             return False
         self._entries[session_id] = dict(fields)
         return True

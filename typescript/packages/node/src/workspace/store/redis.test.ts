@@ -84,6 +84,43 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
     }
   })
 
+  it('casSetMeta admits one create winner across providers', async () => {
+    const prefix = testPrefix()
+    const storeA = makeStore(prefix)
+    const storeB = makeStore(prefix)
+    try {
+      const mine = { workspace_id: 'ws1', default_session_id: 'a', generation: 1 }
+      const theirs = { workspace_id: 'ws1', default_session_id: 'b', generation: 1 }
+      expect(await storeA.casSetMeta('ws1', mine, 0)).toBe(true)
+      expect(await storeB.casSetMeta('ws1', theirs, 0)).toBe(false)
+      expect((await storeB.loadMeta('ws1'))?.default_session_id).toBe('a')
+    } finally {
+      await cleanup(prefix)
+      await storeA.close()
+      await storeB.close()
+    }
+  })
+
+  it('replaceMeta serializes over the wire', async () => {
+    const prefix = testPrefix()
+    const store = makeStore(prefix)
+    try {
+      await store.setMeta('ws1', {
+        workspace_id: 'ws1',
+        default_session_id: 'old',
+        created_at: 1.0,
+        generation: 4,
+      })
+      const written = await store.replaceMeta('ws1', { default_session_id: 'new' })
+      expect(written.generation).toBe(5)
+      expect(written.created_at).toBe(1.0)
+      expect(await store.loadMeta('ws1')).toEqual(written)
+    } finally {
+      await cleanup(prefix)
+      await store.close()
+    }
+  })
+
   it('a sibling process discovers the workspace and reads its sessions', async () => {
     const prefix = testPrefix()
     const storeA = makeStore(prefix)

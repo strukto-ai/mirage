@@ -18,6 +18,20 @@
 // (functions, arrays, stdin buffers) never persists.
 export type SessionFields = Record<string, unknown>
 
+// Shared cap for every generation-CAS retry loop (session flush,
+// workspace meta): losing this many times in a row on a rarely written
+// record is a bug to surface, not contention to absorb.
+export const CAS_MAX_RETRIES = 3
+
+/**
+ * A stored record's CAS generation; a missing record or a legacy
+ * record without the field counts as 0.
+ */
+export function generationOf(fields: Record<string, unknown> | null | undefined): number {
+  if (fields === null || fields === undefined) return 0
+  return Number(fields.generation ?? 0)
+}
+
 /**
  * Storage seam for durable session state. Abstract base.
  *

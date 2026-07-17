@@ -48,6 +48,51 @@ describe('RAMWorkspaceStateStore', () => {
     expect((await store.loadMeta('a'))?.default_session_id).toBe('default')
     await store.close()
   })
+
+  it('casSetMeta creates if absent and admits one winner', async () => {
+    const store = new RAMWorkspaceStateStore()
+    expect(await store.casSetMeta('a', { workspace_id: 'a', generation: 1 }, 0)).toBe(true)
+    expect(await store.casSetMeta('a', { workspace_id: 'b', generation: 1 }, 0)).toBe(false)
+    expect((await store.loadMeta('a'))?.workspace_id).toBe('a')
+  })
+
+  it('casSetMeta rejects a stale generation', async () => {
+    const store = new RAMWorkspaceStateStore()
+    await store.setMeta('a', { workspace_id: 'a', generation: 2 })
+    expect(await store.casSetMeta('a', { workspace_id: 'a', generation: 1 }, 0)).toBe(false)
+    expect((await store.loadMeta('a'))?.generation).toBe(2)
+  })
+
+  it('casSetMeta treats a legacy record as generation 0', async () => {
+    const store = new RAMWorkspaceStateStore()
+    await store.setMeta('a', { workspace_id: 'a' })
+    expect(
+      await store.casSetMeta('a', { workspace_id: 'a', default_session_id: 's', generation: 1 }, 0),
+    ).toBe(true)
+    expect((await store.loadMeta('a'))?.default_session_id).toBe('s')
+  })
+
+  it('replaceMeta preserves created_at and serializes on the counter', async () => {
+    const store = new RAMWorkspaceStateStore()
+    await store.setMeta('a', {
+      workspace_id: 'a',
+      default_session_id: 'old',
+      created_at: 1.0,
+      generation: 4,
+    })
+    const written = await store.replaceMeta('a', { default_session_id: 'new' })
+    expect(written.default_session_id).toBe('new')
+    expect(written.created_at).toBe(1.0)
+    expect(written.generation).toBe(5)
+    expect(await store.loadMeta('a')).toEqual(written)
+  })
+
+  it('replaceMeta creates when absent', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const written = await store.replaceMeta('a', { workspace_id: 'a', default_session_id: 's' })
+    expect(written.generation).toBe(1)
+    expect(Number(written.created_at)).toBeGreaterThan(0)
+  })
 })
 
 describe('WorkspaceStateStore group overrides', () => {

@@ -14,12 +14,12 @@
 
 import type { ObserverStore } from '../../observe/store.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { SessionStore } from '../session/store.ts'
+import { CAS_MAX_RETRIES, generationOf, type SessionStore } from '../session/store.ts'
 
 // One workspace's metadata record: the JSON-able discovery payload
-// (workspace_id, default_session_id, created_at). This is what another
-// process reads to find a workspace's sessions and its default session
-// before binding to it.
+// (workspace_id, default_session_id, created_at, generation). This is
+// what another process reads to find a workspace's sessions and its
+// default session before binding to it.
 export type WorkspaceFields = Record<string, unknown>
 
 export interface WorkspaceStateStoreOverrides {
@@ -85,6 +85,46 @@ export abstract class WorkspaceStateStore {
     return (this.workspaceOverride ?? this).writeMeta(workspaceId, fields)
   }
 
+  /**
+   * Write the metadata record iff its stored generation matches.
+   *
+   * Same optimistic-concurrency contract as SessionStore.casSet: a
+   * missing record (and a legacy record without the field) counts as
+   * generation 0, so create-if-absent is `expectedGeneration = 0`.
+   * Resolves true when the write landed, false on conflict.
+   */
+  casSetMeta(
+    workspaceId: string,
+    fields: WorkspaceFields,
+    expectedGeneration: number,
+  ): Promise<boolean> {
+    return (this.workspaceOverride ?? this).casWriteMeta(workspaceId, fields, expectedGeneration)
+  }
+
+  /**
+   * CAS-write `fields` over the stored record, retrying on conflict.
+   *
+   * Ours-wins content (snapshot restore semantics): each attempt
+   * merges `fields` over the stored record, preserves the stored
+   * `created_at`, bumps the generation, and retries when another
+   * writer got there first. Resolves with the record as written.
+   */
+  async replaceMeta(workspaceId: string, fields: WorkspaceFields): Promise<WorkspaceFields> {
+    for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
+      const existing = await this.loadMeta(workspaceId)
+      const stored = existing ?? {}
+      const expected = generationOf(existing)
+      const merged = {
+        ...stored,
+        ...fields,
+        created_at: stored.created_at ?? Date.now() / 1000,
+        generation: expected + 1,
+      }
+      if (await this.casSetMeta(workspaceId, merged, expected)) return merged
+    }
+    throw new Error(`workspace ${workspaceId} meta kept conflicting with another writer`)
+  }
+
   /** Release connections held by this provider and its overrides. */
   async close(): Promise<void> {
     for (const override of [this.namespaceOverride, this.observerOverride, this.workspaceOverride])
@@ -97,5 +137,10 @@ export abstract class WorkspaceStateStore {
   protected abstract makeSessions(workspaceId: string): SessionStore
   protected abstract readMeta(workspaceId: string): Promise<WorkspaceFields | null>
   protected abstract writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void>
+  protected abstract casWriteMeta(
+    workspaceId: string,
+    fields: WorkspaceFields,
+    expectedGeneration: number,
+  ): Promise<boolean>
   protected abstract closeSelf(): Promise<void>
 }

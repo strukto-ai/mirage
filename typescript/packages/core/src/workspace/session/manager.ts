@@ -14,12 +14,10 @@
 
 import { Session } from './session.ts'
 import { RAMSessionStore } from './ram.ts'
-import type { SessionFields, SessionStore } from './store.ts'
+import { CAS_MAX_RETRIES, generationOf, type SessionFields, type SessionStore } from './store.ts'
 import type { MountMode } from '../../types.ts'
 
 type StoredSession = Parameters<typeof Session.fromJSON>[0]
-
-const MAX_FLUSH_RETRIES = 3
 
 /**
  * Owns the live session table over a storage-agnostic SessionStore.
@@ -146,7 +144,7 @@ export class SessionManager {
     const sid = session.sessionId
     // Clean: the store already has exactly this state.
     if (JSON.stringify(session.toJSON()) === this.persisted.get(sid)) return
-    for (let attempt = 0; attempt < MAX_FLUSH_RETRIES; attempt++) {
+    for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const expected = session.generation
       session.generation = expected + 1
       const fields = session.toJSON() as SessionFields
@@ -159,7 +157,7 @@ export class SessionManager {
       session.generation = expected
       const stored = (await this.sessionStore.load()).get(sid)
       if (stored !== undefined) {
-        session.generation = Number(stored.generation ?? 0)
+        session.generation = generationOf(stored)
       }
     }
     throw new Error(`session ${sid} flush kept conflicting with another writer`)

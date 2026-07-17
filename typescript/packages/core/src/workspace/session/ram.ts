@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SessionStore, type SessionFields } from './store.ts'
+import { generationOf, SessionStore, type SessionFields } from './store.ts'
 
 // SessionStore held in process memory (the default). Durability equals
 // the process lifetime; snapshots remain the only persistence. Redis-backed
@@ -33,8 +33,7 @@ export class RAMSessionStore extends SessionStore {
 
   casSet(sessionId: string, fields: SessionFields, expectedGeneration: number): Promise<boolean> {
     const stored = this.entries.get(sessionId)
-    const current = stored === undefined ? 0 : Number(stored.generation ?? 0)
-    if (current !== expectedGeneration) return Promise.resolve(false)
+    if (generationOf(stored) !== expectedGeneration) return Promise.resolve(false)
     this.entries.set(sessionId, { ...fields })
     return Promise.resolve(true)
   }

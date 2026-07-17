@@ -12,17 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore
-from mirage.workspace.session.store import SessionStore
+from mirage.workspace.session.store import (CAS_MAX_RETRIES, SessionStore,
+                                            generation_of)
 
 # One workspace's metadata record: the JSON-able discovery payload
-# (workspace_id, default_session_id, created_at). This is what another
-# process reads to find a workspace's sessions and its default session
-# before binding to it.
+# (workspace_id, default_session_id, created_at, generation). This is
+# what another process reads to find a workspace's sessions and its
+# default session before binding to it.
 WorkspaceFields = dict[str, Any]
 
 
@@ -89,6 +91,44 @@ class WorkspaceStateStore(ABC):
                   if self._workspace_override is not None else self)
         await target._set_meta(workspace_id, fields)
 
+    async def cas_set_meta(self, workspace_id: str, fields: WorkspaceFields,
+                           expected_generation: int) -> bool:
+        """Write the metadata record iff its stored generation matches.
+
+        Same optimistic-concurrency contract as SessionStore.cas_set: a
+        missing record (and a legacy record without the field) counts as
+        generation 0, so create-if-absent is ``expected_generation=0``.
+        Returns True when the write landed, False on conflict.
+        """
+        target = self._workspace_override or self
+        return await target._cas_set_meta(workspace_id, fields,
+                                          expected_generation)
+
+    async def replace_meta(self, workspace_id: str,
+                           fields: WorkspaceFields) -> WorkspaceFields:
+        """CAS-write ``fields`` over the stored record, retrying on
+        conflict.
+
+        Ours-wins content (snapshot restore semantics): each attempt
+        merges ``fields`` over the stored record, preserves the stored
+        ``created_at``, bumps the generation, and retries when another
+        writer got there first. Returns the record as written.
+        """
+        for _ in range(CAS_MAX_RETRIES):
+            existing = await self.load_meta(workspace_id)
+            stored = existing if existing is not None else {}
+            expected = generation_of(existing)
+            merged = {
+                **stored,
+                **fields,
+                "created_at": stored.get("created_at", time.time()),
+                "generation": expected + 1,
+            }
+            if await self.cas_set_meta(workspace_id, merged, expected):
+                return merged
+        raise RuntimeError(f"workspace {workspace_id!r} meta kept "
+                           "conflicting with another writer")
+
     async def close(self) -> None:
         """Release connections held by this provider and its overrides."""
         if self._closed:
@@ -120,6 +160,11 @@ class WorkspaceStateStore(ABC):
     async def _set_meta(self, workspace_id: str,
                         fields: WorkspaceFields) -> None:
         """Backend write of one metadata record."""
+
+    @abstractmethod
+    async def _cas_set_meta(self, workspace_id: str, fields: WorkspaceFields,
+                            expected_generation: int) -> bool:
+        """Backend conditional write of one metadata record."""
 
     @abstractmethod
     async def _close(self) -> None:

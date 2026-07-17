@@ -77,6 +77,8 @@ async def read(prefix: str) -> None:
     probe = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
     meta = await probe.load_meta(WORKSPACE_ID)
     check("py read: meta record found", meta is not None)
+    check("py read: meta carries a CAS generation", meta is not None
+          and int(meta.get("generation", 0)) >= 1, f"got {meta!r}")
     pointer = meta.get("default_session_id") if meta is not None else None
     check("py read: default session id is uuid7",
           isinstance(pointer, str) and uuid.UUID(pointer).version == 7,

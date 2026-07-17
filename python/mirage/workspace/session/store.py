@@ -21,6 +21,23 @@ from typing import Any
 # shell state (functions, arrays, stdin buffers) never persists.
 SessionFields = dict[str, Any]
 
+# Shared cap for every generation-CAS retry loop (session flush,
+# workspace meta): losing this many times in a row on a rarely written
+# record is a bug to surface, not contention to absorb.
+CAS_MAX_RETRIES = 3
+
+
+def generation_of(fields: SessionFields | None) -> int:
+    """A stored record's CAS generation; a missing record or a legacy
+    record without the field counts as 0.
+
+    Args:
+        fields (SessionFields | None): the stored record, or None.
+    """
+    if fields is None:
+        return 0
+    return int(fields.get("generation", 0))
+
 
 class SessionStore(ABC):
     """Storage seam for durable session state.

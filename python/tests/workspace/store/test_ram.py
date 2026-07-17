@@ -50,3 +50,59 @@ async def test_meta_roundtrip_and_copies():
     loaded["default_session_id"] = "mutated"
     assert (await store.load_meta("a"))["default_session_id"] == "default"
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_cas_set_meta_create_if_absent():
+    store = RAMWorkspaceStateStore()
+    fields = {"workspace_id": "a", "generation": 1}
+    assert await store.cas_set_meta("a", fields, 0) is True
+    # A second create loses: the record now exists at generation 1.
+    assert await store.cas_set_meta("a", {"generation": 1}, 0) is False
+    assert (await store.load_meta("a"))["workspace_id"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_cas_set_meta_stale_generation_conflicts():
+    store = RAMWorkspaceStateStore()
+    await store.set_meta("a", {"workspace_id": "a", "generation": 2})
+    lost = {"workspace_id": "a", "generation": 1}
+    assert await store.cas_set_meta("a", lost, 0) is False
+    assert (await store.load_meta("a"))["generation"] == 2
+
+
+@pytest.mark.asyncio
+async def test_cas_set_meta_legacy_record_counts_as_generation_zero():
+    store = RAMWorkspaceStateStore()
+    await store.set_meta("a", {"workspace_id": "a"})
+    fields = {"workspace_id": "a", "default_session_id": "s", "generation": 1}
+    assert await store.cas_set_meta("a", fields, 0) is True
+    assert (await store.load_meta("a"))["default_session_id"] == "s"
+
+
+@pytest.mark.asyncio
+async def test_replace_meta_preserves_created_at_and_serializes():
+    store = RAMWorkspaceStateStore()
+    await store.set_meta(
+        "a", {
+            "workspace_id": "a",
+            "default_session_id": "old",
+            "created_at": 1.0,
+            "generation": 4,
+        })
+    written = await store.replace_meta("a", {"default_session_id": "new"})
+    assert written["default_session_id"] == "new"
+    assert written["created_at"] == 1.0
+    assert written["generation"] == 5
+    assert await store.load_meta("a") == written
+
+
+@pytest.mark.asyncio
+async def test_replace_meta_creates_when_absent():
+    store = RAMWorkspaceStateStore()
+    written = await store.replace_meta("a", {
+        "workspace_id": "a",
+        "default_session_id": "s",
+    })
+    assert written["generation"] == 1
+    assert written["created_at"] > 0

@@ -77,6 +77,57 @@ async def test_meta_visible_across_providers(prefix, store):
 
 
 @pytest.mark.asyncio
+async def test_cas_set_meta_create_race_one_winner(prefix, store):
+    """Two providers race the discovery-record create; exactly one
+    conditional write lands and the loser sees the winner's record."""
+    sibling = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    try:
+        mine = {
+            "workspace_id": "ws1",
+            "default_session_id": "a",
+            "generation": 1
+        }
+        theirs = {
+            "workspace_id": "ws1",
+            "default_session_id": "b",
+            "generation": 1
+        }
+        assert await store.cas_set_meta("ws1", mine, 0) is True
+        assert await sibling.cas_set_meta("ws1", theirs, 0) is False
+        loaded = await sibling.load_meta("ws1")
+        assert loaded is not None
+        assert loaded["default_session_id"] == "a"
+    finally:
+        await sibling.close()
+
+
+@pytest.mark.asyncio
+async def test_cas_set_meta_stale_generation_conflicts(store):
+    await store.set_meta("ws1", {"workspace_id": "ws1", "generation": 2})
+    lost = {"workspace_id": "ws1", "generation": 1}
+    assert await store.cas_set_meta("ws1", lost, 0) is False
+    meta = await store.load_meta("ws1")
+    assert meta is not None
+    assert meta["generation"] == 2
+
+
+@pytest.mark.asyncio
+async def test_replace_meta_serializes_over_the_wire(store):
+    await store.set_meta(
+        "ws1", {
+            "workspace_id": "ws1",
+            "default_session_id": "old",
+            "created_at": 1.0,
+            "generation": 4,
+        })
+    written = await store.replace_meta("ws1", {"default_session_id": "new"})
+    assert written["generation"] == 5
+    assert written["created_at"] == 1.0
+    loaded = await store.load_meta("ws1")
+    assert loaded == written
+
+
+@pytest.mark.asyncio
 async def test_workspace_discovery_and_session_sharing(prefix):
     """The kernel-tier flow: one process runs a workspace, a sibling
     with only the store config + workspace id finds its default

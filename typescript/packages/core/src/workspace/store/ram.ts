@@ -16,7 +16,7 @@ import { RAMObserverStore, type ObserverStore } from '../../observe/store.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { RAMSessionStore } from '../session/ram.ts'
-import type { SessionStore } from '../session/store.ts'
+import { generationOf, type SessionStore } from '../session/store.ts'
 import {
   WorkspaceStateStore,
   type WorkspaceFields,
@@ -72,6 +72,17 @@ export class RAMWorkspaceStateStore extends WorkspaceStateStore {
   protected writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void> {
     this.meta.set(workspaceId, { ...fields })
     return Promise.resolve()
+  }
+
+  protected casWriteMeta(
+    workspaceId: string,
+    fields: WorkspaceFields,
+    expectedGeneration: number,
+  ): Promise<boolean> {
+    const stored = this.meta.get(workspaceId)
+    if (generationOf(stored) !== expectedGeneration) return Promise.resolve(false)
+    this.meta.set(workspaceId, { ...fields })
+    return Promise.resolve(true)
   }
 
   protected closeSelf(): Promise<void> {

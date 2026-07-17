@@ -70,6 +70,11 @@ async function read(prefix: string): Promise<void> {
   const probe = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
   const meta = await probe.loadMeta(WORKSPACE_ID)
   check('ts read: meta record found', meta !== null)
+  check(
+    'ts read: meta carries a CAS generation',
+    meta !== null && Number(meta.generation ?? 0) >= 1,
+    JSON.stringify(meta),
+  )
   const pointer = meta?.default_session_id
   const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
   check(

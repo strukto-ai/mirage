@@ -15,7 +15,7 @@
 from mirage.observe.store import ObserverStore, RAMObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
 from mirage.workspace.session.ram import RAMSessionStore
-from mirage.workspace.session.store import SessionStore
+from mirage.workspace.session.store import SessionStore, generation_of
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
 
@@ -64,6 +64,14 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
     async def _set_meta(self, workspace_id: str,
                         fields: WorkspaceFields) -> None:
         self._meta[workspace_id] = dict(fields)
+
+    async def _cas_set_meta(self, workspace_id: str, fields: WorkspaceFields,
+                            expected_generation: int) -> bool:
+        stored = self._meta.get(workspace_id)
+        if generation_of(stored) != expected_generation:
+            return False
+        self._meta[workspace_id] = dict(fields)
+        return True
 
     async def _close(self) -> None:
         pass
