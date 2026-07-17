@@ -48,7 +48,20 @@ async def stat(accessor: OneDriveAccessor,
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     if not stripped:
-        return FileStat(name="/", type=FileType.DIRECTORY)
+        # The mount root is a real Graph item (`/drive/root` or the
+        # key_prefix folder); fetch it so size/modified are populated
+        # and -mtime filtering does not drop the root.
+        try:
+            item = await graph_get(accessor.config,
+                                   item_url(accessor.config, ""))
+        except GraphError as exc:
+            if exc.status == 404:
+                raise enoent(virtual)
+            raise
+        return FileStat(name="/",
+                        type=FileType.DIRECTORY,
+                        size=item.get("size"),
+                        modified=item.get("lastModifiedDateTime"))
 
     virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
     lookup = await index.get(virtual_key)

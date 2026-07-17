@@ -26,7 +26,6 @@ from mirage.core.onedrive._client import (graph_list, item_url, new_session,
                                           split_path)
 from mirage.core.onedrive.stat import stat
 from mirage.types import FileType, PathSpec
-from mirage.utils.dates import matches_mtime
 
 
 async def iter_tree(
@@ -105,21 +104,16 @@ async def find(
                     continue
                 if max_size is not None and effective > max_size:
                     continue
-            if not matches_mtime(item.get("lastModifiedDateTime"), mtime_min,
-                                 mtime_max):
-                continue
             results.append(full_path)
     dir_exists = saw_descendant
-    root_matches = mtime_min is None and mtime_max is None
-    if not dir_exists or not root_matches:
+    if not dir_exists:
         try:
-            root_stat = await stat(accessor, path, index=NULL_INDEX)
-            dir_exists = root_stat.type == FileType.DIRECTORY
-            root_matches = matches_mtime(root_stat.modified, mtime_min,
-                                         mtime_max)
+            dir_exists = (await
+                          stat(accessor, path,
+                               index=NULL_INDEX)).type == FileType.DIRECTORY
         except FileNotFoundError:
             dir_exists = False
-    if dir_exists and root_matches:
+    if dir_exists:
         root_key = "/" + base if base else "/"
         emit_start_path(results,
                         root_key,

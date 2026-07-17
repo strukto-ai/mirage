@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime, timezone
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -66,35 +65,3 @@ def test_find_strips_key_prefix_from_results():
         results = asyncio.run(find(accessor, path))
     for r in results:
         assert "prod" not in r, f"key_prefix leaked into find result: {r}"
-
-
-def test_find_honors_mtime_window():
-    store = {"test-bucket": {"dir/a.txt": b"a", "dir/b.txt": b"b"}}
-    with patch_s3_multi(store):
-        accessor = S3Accessor(_make_config())
-        path = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
-        results = asyncio.run(
-            find(
-                accessor,
-                path,
-                mtime_min=datetime(2026, 3, 30,
-                                   tzinfo=timezone.utc).timestamp(),
-                mtime_max=datetime(2026, 4, 1,
-                                   tzinfo=timezone.utc).timestamp(),
-            ))
-    assert results == ["/dir/a.txt", "/dir/b.txt"]
-
-
-def test_find_mtime_excludes_out_of_window_objects():
-    store = {"test-bucket": {"dir/a.txt": b"a"}}
-    with patch_s3_multi(store):
-        accessor = S3Accessor(_make_config())
-        path = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
-        results = asyncio.run(
-            find(
-                accessor,
-                path,
-                mtime_min=datetime(2026, 4, 1,
-                                   tzinfo=timezone.utc).timestamp(),
-            ))
-    assert results == []

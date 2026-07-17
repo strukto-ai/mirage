@@ -20,8 +20,21 @@ _DIR_URL = "https://graph.microsoft.com/v1.0/me/drive/root:/Docs"
 
 @pytest.mark.asyncio
 async def test_stat_root_is_directory():
-    result = await stat(_accessor(), PathSpec.from_str_path("/"))
+    with aioresponses() as m:
+        m.get("https://graph.microsoft.com/v1.0/me/drive/root",
+              payload={
+                  "id": "01ROOT",
+                  "name": "root",
+                  "size": 4096,
+                  "folder": {
+                      "childCount": 2
+                  },
+                  "lastModifiedDateTime": "2026-05-01T10:00:00Z",
+              })
+        result = await stat(_accessor(), PathSpec.from_str_path("/"))
     assert result.type == FileType.DIRECTORY
+    assert result.name == "/"
+    assert result.modified == "2026-05-01T10:00:00Z"
 
 
 @pytest.mark.asyncio

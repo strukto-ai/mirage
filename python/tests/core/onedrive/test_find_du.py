@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import pytest
 from aioresponses import aioresponses
 
@@ -50,9 +48,22 @@ def _tree(m):
           })
 
 
+def _root(m):
+    m.get(_BASE + "/root",
+          payload={
+              "id": "root",
+              "name": "root",
+              "lastModifiedDateTime": "2026-07-14T12:00:00Z",
+              "folder": {
+                  "childCount": 2
+              }
+          })
+
+
 @pytest.mark.asyncio
 async def test_du_sums_all_files_recursively():
     with aioresponses() as m:
+        _root(m)
         _tree(m)
         total = await du(_accessor(), PathSpec.from_str_path("/"))
     assert total == 8
@@ -61,6 +72,7 @@ async def test_du_sums_all_files_recursively():
 @pytest.mark.asyncio
 async def test_du_all_lists_files_plus_total():
     with aioresponses() as m:
+        _root(m)
         _tree(m)
         rows = await du_all(_accessor(), PathSpec.from_str_path("/"))
     assert ("/a.txt", 3) in rows
@@ -155,25 +167,3 @@ async def test_find_empty_folder_emits_start_path():
                          PathSpec.from_str_path("/empty"),
                          type="d")
     assert out == ["/empty"]
-
-
-@pytest.mark.asyncio
-async def test_find_honors_mtime_window():
-    with aioresponses() as m:
-        _tree(m)
-        m.get(_BASE + "/root",
-              payload={
-                  "id": "root",
-                  "name": "root",
-                  "lastModifiedDateTime": "2026-07-14T12:00:00Z",
-                  "folder": {
-                      "childCount": 2
-                  }
-              })
-        out = await find(
-            _accessor(),
-            PathSpec.from_str_path("/"),
-            mtime_min=datetime(2026, 7, 15, tzinfo=timezone.utc).timestamp(),
-            mtime_max=datetime(2026, 7, 16, tzinfo=timezone.utc).timestamp(),
-        )
-    assert out == ["/a.txt"]
