@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { DEFAULT_SESSION_ID, MountMode } from '../types.ts'
+import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -36,7 +36,7 @@ describe('background jobs + stdin (port of tests/shell/test_background_jobs.py)'
       { '/data': ram },
       { mode: MountMode.WRITE, ops: registry, shellParser: parser },
     )
-    ws.getSession(DEFAULT_SESSION_ID).cwd = '/data'
+    ws.getSession(ws.defaultSessionId).cwd = '/data'
     const io = await ws.execute('sleep 0 & cat', { stdin: ENC.encode('hello\n') })
     if (!('stdout' in io)) throw new Error('expected ExecuteResult')
     expect(stdoutStr(io).trim()).toBe('hello')

@@ -17,7 +17,8 @@ import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
 import { Workspace, type Resource } from '@struktoai/mirage-node'
-import { newWorkspaceId, type WorkspaceRegistry } from '../registry.ts'
+import { newWorkspaceId } from '@struktoai/mirage-node'
+import { type WorkspaceRegistry } from '../registry.ts'
 import { buildOverrideResources, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
 import {
   configToWorkspaceArgs,
@@ -103,8 +104,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         ws = new Workspace(resourceMap, {
           mode: args.options.mode,
           consistency: args.options.consistency,
-          sessionId: args.options.sessionId,
-          agentId: args.options.agentId,
+          ...(args.options.sessionId !== undefined ? { sessionId: args.options.sessionId } : {}),
+          ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
           workspaceId: wid,
           ...(args.options.store !== undefined ? { store: args.options.store } : {}),
           ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),

@@ -335,8 +335,8 @@ export interface WorkspaceArgs {
   options: {
     mode: MountMode
     consistency: ConsistencyPolicy
-    sessionId: string
-    agentId: string
+    sessionId?: string
+    agentId?: string
     cache?: FileCache & Resource
     index?: IndexConfig
     workspaceId?: string
@@ -437,8 +437,8 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     options: {
       mode: wsMode,
       consistency,
-      sessionId: cfg.defaultSessionId ?? 'default',
-      agentId: cfg.defaultAgentId ?? 'default',
+      ...(cfg.defaultSessionId !== undefined ? { sessionId: cfg.defaultSessionId } : {}),
+      ...(cfg.defaultAgentId !== undefined ? { agentId: cfg.defaultAgentId } : {}),
       ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),

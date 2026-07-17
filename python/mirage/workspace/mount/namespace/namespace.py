@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from mirage.resource.base import BaseResource
-from mirage.types import DEFAULT_AGENT_ID, MountMode, NodeMetaKey
+from mirage.types import MountMode, NodeMetaKey
 from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
@@ -112,17 +112,16 @@ class Namespace:
         return self._nodes
 
     @property
-    def user(self) -> str:
+    def user(self) -> str | None:
         """The workspace user (whoami identity).
 
-        Before store resolution the launch claim (or DEFAULT_AGENT_ID)
-        answers; after it, the resolved identity.
+        Before store resolution the launch claim answers; after it, the
+        resolved identity. None when no agent ever claimed the
+        workspace, mirroring a uid with no passwd entry.
         """
         if self._user is not None:
             return self._user
-        if self._claim is not None:
-            return self._claim
-        return DEFAULT_AGENT_ID
+        return self._claim
 
     async def _resolve_user(self) -> None:
         """Resolve the workspace user against the store, once.

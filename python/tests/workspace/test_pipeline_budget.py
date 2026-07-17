@@ -18,7 +18,6 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
-from mirage.workspace.workspace import DEFAULT_SESSION_ID
 
 
 async def _slow_stdin():
@@ -50,7 +49,7 @@ def _ws():
 @pytest.mark.asyncio
 async def test_pipeline_budget_bounds_slow_final_stage():
     ws = _ws()
-    ws._session_mgr.get(DEFAULT_SESSION_ID).pipeline_timeout_seconds = 0.1
+    ws.get_session(ws.default_session_id).pipeline_timeout_seconds = 0.1
     r = await ws.execute("cat | cat", stdin=_slow_stdin())
     assert r.exit_code == 124
     assert "pipeline: timed out after 0.1s" in (await r.stderr_str())
@@ -67,7 +66,7 @@ async def test_pipeline_without_budget_is_unbounded():
 @pytest.mark.asyncio
 async def test_pipeline_budget_tears_down_upstream_producer():
     ws = _ws()
-    ws._session_mgr.get(DEFAULT_SESSION_ID).pipeline_timeout_seconds = 0.1
+    ws.get_session(ws.default_session_id).pipeline_timeout_seconds = 0.1
     flag = {"closed": False}
     r = await ws.execute("cat | cat", stdin=_probed_stdin(flag))
     assert r.exit_code == 124
@@ -77,7 +76,7 @@ async def test_pipeline_budget_tears_down_upstream_producer():
 @pytest.mark.asyncio
 async def test_early_finish_reports_downstream_code_not_sigpipe():
     ws = _ws()
-    session = ws._session_mgr.get(DEFAULT_SESSION_ID)
+    session = ws.get_session(ws.default_session_id)
     session.shell_options["pipefail"] = True
     r = await ws.execute("cat | head -n1", stdin=_multiline_stdin())
     assert r.exit_code == 0

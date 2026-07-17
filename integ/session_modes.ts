@@ -68,7 +68,7 @@ async function main(): Promise<void> {
       '/side': new RAMResource(),
       '/ro': [new RAMResource(), MountMode.READ] as const,
     },
-    { mode: MountMode.WRITE },
+    { mode: MountMode.WRITE, sessionId: 'default' },
   )
   try {
     ws.createSession('reader', { mounts: { '/data': MountMode.READ } })
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
 
   const wsRoot = new Workspace(
     { '/': new RAMResource(), '/data': new RAMResource() },
-    { mode: MountMode.WRITE },
+    { mode: MountMode.WRITE, sessionId: 'default' },
   )
   try {
     wsRoot.createSession('no_root', { mounts: { '/data': MountMode.WRITE } })

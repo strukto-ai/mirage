@@ -25,7 +25,7 @@ def workspace():
 @pytest.mark.asyncio
 async def test_mv_onto_same_path_errors_and_preserves_file(workspace):
     await workspace.ops.write("/a.txt", b"keep")
-    io = await workspace.execute("mv /a.txt /a.txt", session_id="default")
+    io = await workspace.execute("mv /a.txt /a.txt")
     assert io.exit_code != 0
     assert b"are the same file" in io.stderr
     assert await workspace.ops.read("/a.txt") == b"keep"
@@ -36,7 +36,7 @@ async def test_mv_into_own_subtree_refused(workspace):
     await workspace.ops.mkdir("/d")
     await workspace.ops.write("/d/a.txt", b"a")
     await workspace.ops.mkdir("/d/sub")
-    io = await workspace.execute("mv /d /d/sub", session_id="default")
+    io = await workspace.execute("mv /d /d/sub")
     assert io.exit_code != 0
     assert b"subdirectory of itself" in io.stderr
     assert await workspace.ops.read("/d/a.txt") == b"a"
@@ -44,7 +44,6 @@ async def test_mv_into_own_subtree_refused(workspace):
 
 @pytest.mark.asyncio
 async def test_mv_missing_source_reports_cannot_stat(workspace):
-    io = await workspace.execute("mv /missing.txt /dst.txt",
-                                 session_id="default")
+    io = await workspace.execute("mv /missing.txt /dst.txt")
     assert io.exit_code != 0
     assert b"mv: cannot stat" in io.stderr

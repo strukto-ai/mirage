@@ -15,7 +15,7 @@
 import type { HistoryAccessor } from '../../../accessor/history.ts'
 import { renderHistoryListing } from '../../../core/history/render.ts'
 import { IOResult } from '../../../io/types.ts'
-import { DEFAULT_SESSION_ID, type PathSpec } from '../../../types.ts'
+import { type PathSpec } from '../../../types.ts'
 import { command } from '../../config.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -55,7 +55,10 @@ async function historyFn(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const observer = accessor.observer
-  const session = opts.sessionId ?? DEFAULT_SESSION_ID
+  if (opts.sessionId === undefined) {
+    throw new Error("history requires the caller's session id")
+  }
+  const session = opts.sessionId
   const flags = opts.flags
   const c = flags.c === true
   const s = flags.s === true

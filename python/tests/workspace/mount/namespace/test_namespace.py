@@ -323,8 +323,8 @@ async def test_drop_overlay_missing_node_is_noop(namespace):
     assert await namespace.drop_overlay("/data/nope.txt") is False
 
 
-def test_user_defaults_before_resolution(namespace):
-    assert namespace.user == "default"
+def test_user_none_before_resolution(namespace):
+    assert namespace.user is None
 
 
 @pytest.mark.asyncio
@@ -348,11 +348,11 @@ async def test_bare_launch_adopts_stored_user(registry):
 
 
 @pytest.mark.asyncio
-async def test_bare_launch_empty_store_stays_default(registry):
+async def test_bare_launch_empty_store_has_no_user(registry):
     store = RAMNamespaceStore()
     namespace = Namespace(registry, store=store)
     await namespace.ensure_loaded()
-    assert namespace.user == "default"
+    assert namespace.user is None
     assert await store.load_user() is None
 
 

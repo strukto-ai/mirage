@@ -108,7 +108,16 @@ export function handlePrintenv(name: string | null, session: Session): Result {
 export function handleWhoami(namespace: Namespace): Result {
   // GNU whoami reports the effective user and never consults $USER; the
   // workspace user (launch agentId, shared via the namespace store) is
-  // the effective identity here.
+  // the effective identity here. With no claimed identity it fails like
+  // GNU does for a uid with no passwd entry.
+  if (namespace.user === null) {
+    const err = new TextEncoder().encode('whoami: cannot find name for user ID\n')
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: 'whoami', exitCode: 1, stderr: err }),
+    ]
+  }
   const out = new TextEncoder().encode(`${namespace.user}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
 }

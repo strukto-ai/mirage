@@ -18,7 +18,6 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
-from mirage.types import DEFAULT_SESSION_ID
 
 
 def _make_ws():
@@ -45,18 +44,18 @@ async def test_cwd_runs_in_override():
 @pytest.mark.asyncio
 async def test_cwd_does_not_mutate_session():
     ws = _make_ws()
-    before = ws.get_session(DEFAULT_SESSION_ID).cwd
+    before = ws.get_session(ws.default_session_id).cwd
     await ws.execute("pwd", cwd="/ram/subdir")
-    after = ws.get_session(DEFAULT_SESSION_ID).cwd
+    after = ws.get_session(ws.default_session_id).cwd
     assert before == after
 
 
 @pytest.mark.asyncio
 async def test_cwd_cd_does_not_leak():
     ws = _make_ws()
-    before = ws.get_session(DEFAULT_SESSION_ID).cwd
+    before = ws.get_session(ws.default_session_id).cwd
     await ws.execute("cd /ram/subdir", cwd="/ram")
-    after = ws.get_session(DEFAULT_SESSION_ID).cwd
+    after = ws.get_session(ws.default_session_id).cwd
     assert before == after
 
 
@@ -75,19 +74,19 @@ async def test_cwd_parallel_isolation():
 async def test_setup_persists_overrides_inherit():
     ws = _make_ws()
     await ws.execute("export DEBUG=1")
-    assert ws.get_session(DEFAULT_SESSION_ID).env.get("DEBUG") == "1"
-    before_cwd = ws.get_session(DEFAULT_SESSION_ID).cwd
+    assert ws.get_session(ws.default_session_id).env.get("DEBUG") == "1"
+    before_cwd = ws.get_session(ws.default_session_id).cwd
     r = await ws.execute("printenv DEBUG", cwd="/ram/subdir")
     assert (await r.stdout_str()).strip() == "1"
-    assert ws.get_session(DEFAULT_SESSION_ID).cwd == before_cwd
-    assert ws.get_session(DEFAULT_SESSION_ID).env.get("DEBUG") == "1"
+    assert ws.get_session(ws.default_session_id).cwd == before_cwd
+    assert ws.get_session(ws.default_session_id).env.get("DEBUG") == "1"
 
 
 @pytest.mark.asyncio
 async def test_function_definitions_do_not_leak():
     ws = _make_ws()
     await ws.execute("greet() { echo hi; }", cwd="/ram/subdir")
-    session = ws.get_session(DEFAULT_SESSION_ID)
+    session = ws.get_session(ws.default_session_id)
     assert "greet" not in session.functions
 
 
@@ -105,9 +104,9 @@ async def test_env_exposes_override():
 @pytest.mark.asyncio
 async def test_env_does_not_mutate_session():
     ws = _make_ws()
-    before = dict(ws.get_session(DEFAULT_SESSION_ID).env)
+    before = dict(ws.get_session(ws.default_session_id).env)
     await ws.execute("printenv FOO", env={"FOO": "bar"})
-    after = dict(ws.get_session(DEFAULT_SESSION_ID).env)
+    after = dict(ws.get_session(ws.default_session_id).env)
     assert before == after
 
 
@@ -115,19 +114,19 @@ async def test_env_does_not_mutate_session():
 async def test_env_export_does_not_leak():
     ws = _make_ws()
     await ws.execute("export LEAKED=yes", env={"FOO": "bar"})
-    assert "LEAKED" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "LEAKED" not in ws.get_session(ws.default_session_id).env
 
 
 @pytest.mark.asyncio
 async def test_env_layers_onto_session():
     ws = _make_ws()
     await ws.execute("export BASE=keep")
-    assert ws.get_session(DEFAULT_SESSION_ID).env.get("BASE") == "keep"
+    assert ws.get_session(ws.default_session_id).env.get("BASE") == "keep"
     r_base = await ws.execute("printenv BASE", env={"FOO": "bar"})
     assert (await r_base.stdout_str()).strip() == "keep"
     r_foo = await ws.execute("printenv FOO", env={"FOO": "bar"})
     assert (await r_foo.stdout_str()).strip() == "bar"
-    session_env = ws.get_session(DEFAULT_SESSION_ID).env
+    session_env = ws.get_session(ws.default_session_id).env
     assert session_env.get("BASE") == "keep"
     assert "FOO" not in session_env
 
@@ -264,7 +263,7 @@ async def test_agent_pattern_parallel_tool_calls_each_with_own_options():
     assert "one" in a.stdout.decode()
     assert "/ram" in b.stdout.decode()
     assert "two" in b.stdout.decode()
-    session = ws.get_session(DEFAULT_SESSION_ID)
+    session = ws.get_session(ws.default_session_id)
     assert session.cwd != "/ram/subdir"
     assert "DEBUG" not in session.env
 

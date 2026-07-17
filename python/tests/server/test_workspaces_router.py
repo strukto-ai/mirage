@@ -15,6 +15,7 @@
 import asyncio
 import os
 import time
+import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -54,7 +55,7 @@ async def test_create_list_get_delete_round_trip():
         assert r.status_code == 201, r.text
         detail = r.json()
         wid = detail["id"]
-        assert wid.startswith("ws_")
+        assert uuid.UUID(wid).version == 7
         assert detail["mode"] == "write"
         assert any(m["prefix"] == "/" for m in detail["mounts"])
 
@@ -164,7 +165,7 @@ async def test_clone_returns_new_workspace_with_same_mounts():
         assert r.status_code == 201, r.text
         clone = r.json()
         assert clone["id"] != wid
-        assert clone["id"].startswith("ws_")
+        assert uuid.UUID(clone["id"]).version == 7
         assert {m["prefix"] for m in clone["mounts"]} == {"/"}
 
         r = await client.get("/v1/workspaces")

@@ -24,7 +24,7 @@ from mirage.provision import Precision
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 from tests.commands.native.conftest import (_CORE_MODULES, BUCKET, REGION,
                                             MockAsyncSession)
@@ -139,7 +139,7 @@ def cross(request, tmp_path):
         "/m2": (p2, MountMode.WRITE)
     },
                    mode=MountMode.WRITE)
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/m1"
+    ws.get_session(ws.default_session_id).cwd = "/m1"
 
     p1_acc = p1.accessor if hasattr(p1, "accessor") else None
     p2_acc = p2.accessor if hasattr(p2, "accessor") else None

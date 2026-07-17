@@ -28,7 +28,7 @@ from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import DEFAULT_SESSION_ID, MountMode, PathSpec
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from tests.integration.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.integration.s3_mock import patch_s3_multi
@@ -249,7 +249,7 @@ def cross(request, tmp_path):
         },
         mode=MountMode.WRITE,
     )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/m1"
+    ws.get_session(ws.default_session_id).cwd = "/m1"
 
     buckets: dict[str, dict[str, bytes]] = {}
     if m1.ptype == "s3":

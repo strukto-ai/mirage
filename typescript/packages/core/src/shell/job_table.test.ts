@@ -65,7 +65,7 @@ describe('JobTable.submit', () => {
       cwd: '/',
     })
     expect(j.agent).toBe('unknown')
-    expect(j.sessionId).toBe('default')
+    expect(j.sessionId).toBe('')
     expect(j.status).toBe(JobStatus.RUNNING)
   })
 })

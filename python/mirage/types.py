@@ -331,11 +331,6 @@ class RuntimeType(str, Enum):
     DISK = "disk"
 
 
-DEFAULT_SESSION_ID = "default"
-DEFAULT_AGENT_ID = "default"
-DEFAULT_WORKSPACE_ID = "default"
-
-
 class StateKey(StrEnum):
     VERSION = "version"
     MIRAGE_VERSION = "mirage_version"

@@ -17,7 +17,7 @@ import resource
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -36,5 +36,5 @@ def write_ws():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/"
+    ws.get_session(ws.default_session_id).cwd = "/"
     return ws

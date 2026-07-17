@@ -53,7 +53,7 @@ function buildWs(): Workspace {
 describe('pipeline timeout', () => {
   it('bounds a slow final stage', async () => {
     const ws = buildWs()
-    ws.getSession('default').pipelineTimeoutSeconds = 0.1
+    ws.getSession(ws.defaultSessionId).pipelineTimeoutSeconds = 0.1
     try {
       const r = await ws.execute('cat | cat', { stdin: slowStdin() })
       expect(r.exitCode).toBe(124)

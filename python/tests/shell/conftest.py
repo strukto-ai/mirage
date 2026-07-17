@@ -18,7 +18,7 @@ import subprocess
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 
@@ -36,7 +36,7 @@ class ShellTestEnv:
             {"/data": (self.mem, MountMode.WRITE)},
             mode=MountMode.WRITE,
         )
-        self.ws.get_session(DEFAULT_SESSION_ID).cwd = "/data"
+        self.ws.get_session(self.ws.default_session_id).cwd = "/data"
 
     def create_file(self, name: str, content: bytes):
         local_path = self.tmp_path / name

@@ -17,8 +17,6 @@ export {
   CommandSafeguard,
   type CommandSafeguardInit,
   ConsistencyPolicy,
-  DEFAULT_AGENT_ID,
-  DEFAULT_SESSION_ID,
   DriftPolicy,
   FileStat,
   type FileStatInit,
@@ -147,6 +145,7 @@ export {
   setVirtualPrefix,
 } from './observe/context.ts'
 export { guessType } from './utils/filetype.ts'
+export { newSessionId, newWorkspaceId, uuid7 } from './utils/ids.ts'
 export { Accessor, NOOPAccessor, RAMAccessor } from './accessor/index.ts'
 export { cat as featherCat, describe as featherDescribe } from './core/filetype/feather.ts'
 export { cat as hdf5Cat, describe as hdf5Describe } from './core/filetype/hdf5.ts'

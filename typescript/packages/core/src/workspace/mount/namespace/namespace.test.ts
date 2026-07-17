@@ -319,9 +319,9 @@ describe('Namespace + NamespaceStore', () => {
     await ws.close()
   })
 
-  it('user defaults before resolution', async () => {
+  it('user is null before resolution', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
-    expect(ws.namespace.user).toBe('default')
+    expect(ws.namespace.user).toBeNull()
     await ws.close()
   })
 
@@ -348,11 +348,11 @@ describe('Namespace + NamespaceStore', () => {
     await ws.close()
   })
 
-  it('bare launch with an empty store stays default', async () => {
+  it('bare launch with an empty store has no user', async () => {
     const store = new RAMNamespaceStore()
     const ws = new Workspace({ '/data': new RAMResource() }, { namespaceStore: store })
     await ws.namespace.ensureLoaded()
-    expect(ws.namespace.user).toBe('default')
+    expect(ws.namespace.user).toBeNull()
     expect(await store.loadUser()).toBeNull()
     await ws.close()
   })

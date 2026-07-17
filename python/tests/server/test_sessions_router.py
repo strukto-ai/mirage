@@ -53,7 +53,7 @@ async def test_create_list_delete_session_round_trip():
         r = await client.get(f"/v1/workspaces/{wid}/sessions")
         ids = {s["session_id"] for s in r.json()}
         assert "agent_a" in ids
-        assert "default" in ids
+        assert len(ids) == 2
 
         r = await client.delete(f"/v1/workspaces/{wid}/sessions/agent_a")
         assert r.status_code == 200

@@ -265,8 +265,8 @@ class WorkspaceConfig(BaseModel):
     runtime: RuntimeBlock | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
-    default_session_id: str = "default"
-    default_agent_id: str = "default"
+    default_session_id: str | None = None
+    default_agent_id: str | None = None
     workspace_id: str | None = None
     cache: CacheBlock | None = None
     index: IndexBlock | None = None

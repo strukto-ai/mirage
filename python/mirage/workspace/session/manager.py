@@ -68,6 +68,31 @@ class SessionManager:
     def env(self, value: dict[str, str]) -> None:
         self._sessions[self._default_id].env = value
 
+    def adopt_default(self, session_id: str) -> None:
+        """Re-key the default session to an externally decided id.
+
+        Two callers: attach (the discovery record already names a
+        default session, so the freshly minted placeholder re-keys
+        before hydration lands the stored durable fields on it) and
+        snapshot restore (the snapshot's default identity wins). The
+        store itself is untouched; the next flush or snapshot replace
+        writes the new key.
+
+        Args:
+            session_id (str): the default session id to adopt.
+        """
+        if session_id == self._default_id:
+            return
+        if session_id in self._sessions:
+            del self._sessions[self._default_id]
+            del self._locks[self._default_id]
+        else:
+            session = self._sessions.pop(self._default_id)
+            session.session_id = session_id
+            self._sessions[session_id] = session
+            self._locks[session_id] = self._locks.pop(self._default_id)
+        self._default_id = session_id
+
     async def ensure_loaded(self) -> None:
         """Hydrate sessions from the store once.
 

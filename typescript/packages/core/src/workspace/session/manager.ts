@@ -32,18 +32,45 @@ type StoredSession = Parameters<typeof Session.fromJSON>[0]
 export class SessionManager {
   private readonly sessions = new Map<string, Session>()
   private readonly sessionStore: SessionStore
-  readonly defaultId: string
+  private defaultIdInternal: string
   private loaded = false
   private loadPromise: Promise<void> | null = null
 
   constructor(defaultSessionId: string, store?: SessionStore) {
-    this.defaultId = defaultSessionId
+    this.defaultIdInternal = defaultSessionId
     this.sessionStore = store ?? new RAMSessionStore()
     this.sessions.set(defaultSessionId, new Session({ sessionId: defaultSessionId }))
   }
 
   get store(): SessionStore {
     return this.sessionStore
+  }
+
+  get defaultId(): string {
+    return this.defaultIdInternal
+  }
+
+  /**
+   * Re-key the default session to an externally decided id.
+   *
+   * Two callers: attach (the discovery record already names a default
+   * session, so the freshly minted placeholder re-keys before hydration
+   * lands the stored durable fields on it) and snapshot restore (the
+   * snapshot's default identity wins). The store itself is untouched;
+   * the next flush or snapshot replace writes the new key.
+   */
+  adoptDefault(sessionId: string): void {
+    if (sessionId === this.defaultIdInternal) return
+    const existing = this.sessions.get(sessionId)
+    if (existing !== undefined) {
+      this.sessions.delete(this.defaultIdInternal)
+    } else {
+      const session = this.defaultSession()
+      this.sessions.delete(this.defaultIdInternal)
+      session.sessionId = sessionId
+      this.sessions.set(sessionId, session)
+    }
+    this.defaultIdInternal = sessionId
   }
 
   get cwd(): string {

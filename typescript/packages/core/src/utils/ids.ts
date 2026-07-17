@@ -12,12 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConsistencyPolicy, MountMode } from '../../types.ts'
-import type { Resource } from '../../resource/base.ts'
+import { v7 as uuidV7 } from 'uuid'
 
-export interface MountArgs {
-  mountArgs: Record<string, [Resource, MountMode]>
-  consistency: ConsistencyPolicy
-  defaultSessionId: string
-  defaultAgentId: string | null
+/**
+ * Mint an RFC 9562 UUIDv7 in canonical lowercase hyphenated form.
+ *
+ * The first 48 bits are a unix-millisecond timestamp, so ids sort by
+ * creation time and stay index-friendly as database primary keys; the
+ * remaining 74 bits are random.
+ */
+export function uuid7(): string {
+  return uuidV7()
+}
+
+/** Mint a fresh workspace id (UUIDv7). */
+export function newWorkspaceId(): string {
+  return uuid7()
+}
+
+/** Mint a fresh session id (UUIDv7). */
+export function newSessionId(): string {
+  return uuid7()
 }

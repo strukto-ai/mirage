@@ -63,14 +63,22 @@ async function read(prefix: string): Promise<void> {
   const probe = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
   const meta = await probe.loadMeta(WORKSPACE_ID)
   check('ts read: meta record found', meta !== null)
+  const pointer = meta?.default_session_id
+  const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
   check(
-    'ts read: default session id',
-    meta?.default_session_id === 'default',
+    'ts read: default session id is uuid7',
+    typeof pointer === 'string' && UUID7_RE.test(pointer),
     `got ${JSON.stringify(meta)}`,
   )
   await probe.close()
 
   const { ws, store } = makeWorkspace(prefix)
+  await ws.ensureSessionsLoaded()
+  check(
+    "ts read: adopted writer's default session",
+    ws.defaultSessionId === pointer,
+    `got ${ws.defaultSessionId} want ${String(pointer)}`,
+  )
   const history = await ws.execute('history')
   check('ts read: history has marker', history.stdoutText.includes(MARKER), history.stdoutText)
   const target = await ws.execute('readlink /data/l.txt')
