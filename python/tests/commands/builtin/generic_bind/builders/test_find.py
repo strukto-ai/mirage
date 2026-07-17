@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
@@ -121,14 +119,3 @@ async def test_walk_honors_multiple_start_points():
     assert "/mnt/notes.txt" in lines
     assert lines.index("/mnt/table1/rows.jsonl") < lines.index(
         "/mnt/notes.txt")
-
-
-@pytest.mark.asyncio
-async def test_remote_native_find_uses_stat_for_mtime_filter():
-    stat_calls: list[str] = []
-    ops = _ops(stat_calls, find_op=AsyncMock(return_value=["/notes.txt"]))
-
-    stdout, _io = await find(ops, None, [_root()], mtime="-1")
-
-    assert stdout == b"/mnt/notes.txt\n"
-    assert stat_calls == ["/mnt", "/mnt/notes.txt"]

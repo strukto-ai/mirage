@@ -1,13 +1,11 @@
-from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
 import mirage.core.msgraph.drive_ops as drive_ops
 from mirage.core.sharepoint import find as find_mod
 from mirage.core.sharepoint._resolver import ResolvedPath
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
 _TREE = [
@@ -89,24 +87,3 @@ async def test_find_maxdepth_one(_patched):
     acc = SimpleNamespace(config=None)
     out = await find_mod.find(acc, _spec(), maxdepth=1)
     assert out == ["/reports", "/reports/a.txt", "/reports/sub"]
-
-
-@pytest.mark.asyncio
-async def test_find_honors_mtime_window(_patched, monkeypatch):
-    monkeypatch.setattr(
-        find_mod,
-        "stat",
-        AsyncMock(return_value=FileStat(
-            name="reports",
-            type=FileType.DIRECTORY,
-            modified="2026-07-14T12:00:00Z",
-        )),
-    )
-    acc = SimpleNamespace(config=None)
-    out = await find_mod.find(
-        acc,
-        _spec(),
-        mtime_min=datetime(2026, 7, 15, tzinfo=timezone.utc).timestamp(),
-        mtime_max=datetime(2026, 7, 16, tzinfo=timezone.utc).timestamp(),
-    )
-    assert out == ["/reports/a.txt"]

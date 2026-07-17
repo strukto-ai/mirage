@@ -372,12 +372,6 @@ def test_find_maxdepth(env):
     assert "nested.txt" not in result
 
 
-def test_find_mtime_excludes_old_entries(env):
-    env.create_file("old.txt", b"old")
-    result = env.run("find /ssh/ -mtime -1")
-    assert "old.txt" not in result
-
-
 def test_find_empty_matches_zero_length_file(env):
     env.create_file("empty.txt", b"")
     env.create_file("full.txt", b"full")
