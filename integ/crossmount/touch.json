@@ -10,7 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
-        "onedrive"
+        "onedrive",
+        "sharepoint"
       ],
       "command": "touch /data/xt.txt /data2/xt.txt && ls /data/xt.txt /data2/xt.txt && rm /data/xt.txt /data2/xt.txt && ls /data2",
       "expect": {

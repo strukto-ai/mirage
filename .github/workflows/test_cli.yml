@@ -731,6 +731,7 @@ jobs:
           chmod +x /tmp/mc
           /tmp/mc alias set local http://localhost:9000 minio minio123
           /tmp/mc mb local/mirage-cross || true
+          /tmp/mc mb local/mirage-state || true
 
       - name: Run cross-language snapshot interop (both directions)
         run: |
@@ -740,6 +741,10 @@ jobs:
 
       - name: Run cross-language state store interop (both directions)
         run: bash integ/state_store.sh
+        env:
+          STORE_S3: "1"
+          STORE_S3_ENDPOINT: http://localhost:9000
+          STORE_S3_BUCKET: mirage-state
 
       - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
         run: |

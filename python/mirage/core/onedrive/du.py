@@ -14,8 +14,8 @@
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.index import NULL_INDEX
-from mirage.core.onedrive._client import new_session, split_path
-from mirage.core.onedrive.find import iter_tree
+from mirage.core.msgraph.drive_ops import du_tree_entries, du_tree_total
+from mirage.core.onedrive._client import drive_loc, split_path
 from mirage.core.onedrive.stat import stat
 from mirage.types import FileType, PathSpec
 
@@ -38,14 +38,8 @@ async def du(accessor: OneDriveAccessor, path: PathSpec) -> int:
     if info is not None and info.type != FileType.DIRECTORY:
         return info.size or 0
     _, base = split_path(path)
-    total = 0
-    async with new_session(accessor.config) as session:
-        async for _rel, item, is_dir in iter_tree(accessor.config,
-                                                  base,
-                                                  session=session):
-            if not is_dir:
-                total += item.get("size", 0)
-    return total
+    return await du_tree_total(accessor.config,
+                               drive_loc(accessor.config, base))
 
 
 async def du_all(accessor: OneDriveAccessor,
@@ -66,16 +60,5 @@ async def du_all(accessor: OneDriveAccessor,
     if info is not None and info.type != FileType.DIRECTORY:
         return []
     _, base = split_path(path)
-    results: list[tuple[str, int]] = []
-    total = 0
-    async with new_session(accessor.config) as session:
-        async for rel, item, is_dir in iter_tree(accessor.config,
-                                                 base,
-                                                 session=session):
-            if is_dir:
-                continue
-            size = item.get("size", 0)
-            results.append(("/" + rel, size))
-            total += size
-    results.append(("/" + base if base else "/", total))
-    return results
+    return await du_tree_entries(accessor.config,
+                                 drive_loc(accessor.config, base))

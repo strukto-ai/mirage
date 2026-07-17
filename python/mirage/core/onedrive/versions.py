@@ -13,34 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.core.onedrive._client import (graph_get, graph_list, item_url,
-                                          split_path)
+from mirage.core.msgraph.drive_ops import capture_item_metadata
+from mirage.core.onedrive._client import drive_loc, graph_list, split_path
 from mirage.types import PathSpec
-
-
-def _current_version_id(versions: list[dict]) -> str | None:
-    if not versions:
-        return None
-    current = max(versions, key=lambda v: v.get("lastModifiedDateTime") or "")
-    return current.get("id")
 
 
 async def list_versions(accessor: OneDriveAccessor,
                         path: PathSpec) -> list[dict]:
     _, stripped = split_path(path)
-    url = item_url(accessor.config, "/" + stripped, action="/versions")
-    return await graph_list(accessor.config, url)
+    loc = drive_loc(accessor.config, stripped)
+    return await graph_list(accessor.config, loc.item("/versions"))
 
 
 async def capture_metadata(
         accessor: OneDriveAccessor,
         path: PathSpec) -> tuple[str | None, str | None, str | None]:
     _, stripped = split_path(path)
-    config = accessor.config
-    item = await graph_get(config,
-                           item_url(config, "/" + stripped),
-                           params={"$expand": "versions"})
-    fingerprint = item.get("cTag")
-    revision = _current_version_id(item.get("versions", []))
-    download_url = item.get("@microsoft.graph.downloadUrl")
-    return fingerprint, revision, download_url
+    return await capture_item_metadata(accessor.config,
+                                       drive_loc(accessor.config, stripped))

@@ -27,11 +27,14 @@ from moto.server import ThreadedMotoServer
 
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
+from mirage.accessor.sharepoint import SharePointConfig
+from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.disk import DiskResource
 from mirage.resource.onedrive.onedrive import OneDriveResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.resource.sharepoint.sharepoint import SharePointResource
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
@@ -125,7 +128,39 @@ class OneDriveService:
         await self.runner.cleanup()
 
 
-Service = S3Service | OneDriveService
+def _clear_sharepoint_caches() -> None:
+    # The resolver's site/drive id caches are module globals; a fresh
+    # fake tenant per run must not see ids from the previous one.
+    sharepoint_resolver._site_cache.clear()
+    sharepoint_resolver._drive_cache.clear()
+
+
+class SharePointService:
+
+    def __init__(self, server, runner) -> None:
+        self.server = server
+        self.runner = runner
+
+    @classmethod
+    async def create(cls) -> "SharePointService":
+        module = _load_onedrive_server()
+        _state, server, runner = await module.start_fake_graph()
+        _clear_sharepoint_caches()
+        return cls(server, runner)
+
+    def resource(self, mount: dict) -> SharePointResource:
+        self.server.add_drive(mount["drive"])
+        return SharePointResource(
+            SharePointConfig(access_token="integ-token",
+                             site="Main",
+                             drive=mount["drive"]))
+
+    async def teardown(self) -> None:
+        _clear_sharepoint_caches()
+        await self.runner.cleanup()
+
+
+Service = S3Service | OneDriveService | SharePointService
 
 
 def build_ram(
@@ -167,12 +202,20 @@ def build_onedrive(
     return service.resource(mount), _noop
 
 
+def build_sharepoint(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, SharePointService)
+    return service.resource(mount), _noop
+
+
 BUILDERS = {
     "ram": build_ram,
     "disk": build_disk,
     "redis": build_redis,
     "s3": build_s3,
     "onedrive": build_onedrive,
+    "sharepoint": build_sharepoint,
 }
 
 
@@ -184,6 +227,8 @@ async def open_target(
         service = S3Service(run_id)
     elif target.get("service") == "onedrive":
         service = await OneDriveService.create()
+    elif target.get("service") == "sharepoint":
+        service = await SharePointService.create()
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
     for mount in target["mounts"]:

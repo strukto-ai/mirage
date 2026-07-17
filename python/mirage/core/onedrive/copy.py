@@ -12,20 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
-from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.core.msgraph.drive_ops import DriveLoc, copy_tree
-from mirage.core.onedrive._client import drive_ref_path, item_url, split_path
+from mirage.accessor.onedrive import OneDriveAccessor
+from mirage.core.msgraph.drive_ops import copy_tree
+from mirage.core.onedrive._client import drive_loc, split_path
 from mirage.types import PathSpec
-
-
-def drive_loc(config: OneDriveConfig, stripped: str) -> DriveLoc:
-    return DriveLoc(drive="",
-                    path=stripped,
-                    virt=stripped,
-                    url=partial(item_url, config),
-                    ref=partial(drive_ref_path, config))
 
 
 async def copy(accessor: OneDriveAccessor, src: PathSpec,

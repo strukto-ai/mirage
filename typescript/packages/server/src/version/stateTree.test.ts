@@ -53,15 +53,16 @@ function makeState(): WorkspaceStateDict {
 }
 
 describe('stateTree', () => {
-  it('pulls mount files and cache out into tree entries', () => {
+  it('pulls only mount files into tree entries (content-pure, no cache)', () => {
     const { entries, meta } = treeInputsFromState(makeState())
-    expect(Object.keys(entries).sort()).toEqual(['.mirage-cache/0', 'm/a.txt', 'm/sub/b.txt'])
+    expect(Object.keys(entries).sort()).toEqual(['m/a.txt', 'm/sub/b.txt'])
     expect(entries['m/a.txt']).toEqual(enc('hi'))
     expect(meta.mounts[0]?.resourceState).not.toHaveProperty('files')
-    expect(meta.cache.entries[0]?.ref).toBe('.mirage-cache/0')
+    expect(Object.keys(entries).every((k) => !k.startsWith('.mirage-cache'))).toBe(true)
+    expect(meta.cache.entries).toEqual([])
   })
 
-  it('round-trips state through tree inputs and a JSON meta blob', () => {
+  it('round-trips files through tree inputs; cache and sessions are dropped', () => {
     const { entries, meta } = treeInputsFromState(makeState())
     const back = toState(entries, blobToMeta(metaToBlob(meta)))
     const mounts = back.mounts as unknown as {
@@ -70,7 +71,10 @@ describe('stateTree', () => {
     const rs = mounts[0]?.resource_state
     expect(rs?.files['/a.txt']).toEqual(enc('hi'))
     expect(rs?.files['/sub/b.txt']).toEqual(enc('bee'))
-    expect(back.cache.entries[0]?.data).toEqual(enc('CACHE'))
+    // Cache is derived, sessions are control-plane: neither enters the
+    // commit tree (content-pure commits).
+    expect(back.cache.entries).toEqual([])
+    expect(back.sessions).toEqual([])
     expect(back.history).toEqual([])
   })
 })

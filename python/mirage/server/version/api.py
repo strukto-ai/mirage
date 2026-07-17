@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.server.version.errors import NoSuchBranchError
-from mirage.server.version.state_tree import (CACHE_PREFIX, META_PATH,
-                                              blob_to_meta, meta_to_blob,
-                                              to_state, tree_inputs_from_state)
+from mirage.server.version.state_tree import (META_PATH, blob_to_meta,
+                                              meta_to_blob, to_state,
+                                              tree_inputs_from_state)
 from mirage.server.version.store import VersionStore
 from mirage.types import DriftPolicy, StateKey
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
@@ -101,10 +101,7 @@ async def checkout(store: VersionStore,
 
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:
     return {
-        kind: [
-            p for p in paths
-            if p != META_PATH and not p.startswith(CACHE_PREFIX)
-        ]
+        kind: [p for p in paths if p != META_PATH]
         for kind, paths in changes.items()
     }
 

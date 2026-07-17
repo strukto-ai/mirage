@@ -19,7 +19,6 @@ export type { WorkspaceStateDict }
 type AnyDict = Record<string, unknown>
 
 export const META_PATH = '.mirage-meta.json'
-export const CACHE_PREFIX = '.mirage-cache/'
 
 export interface VersionMeta {
   version: number
@@ -56,7 +55,7 @@ function belongs(treePrefix: string, tp: string): boolean {
 }
 
 function isReserved(tp: string): boolean {
-  return tp === META_PATH || tp.startsWith(CACHE_PREFIX)
+  return tp === META_PATH
 }
 
 export function metaToBlob(meta: VersionMeta): Uint8Array {
@@ -85,25 +84,11 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
     })
   }
 
-  const cache = state.cache as unknown as { limit: number; entries: AnyDict[] }
-  const cacheMeta: AnyDict[] = []
-  cache.entries.forEach((entry, i) => {
-    const ref = `${CACHE_PREFIX}${String(i)}`
-    entries[ref] = entry.data as Uint8Array
-    cacheMeta.push({
-      key: entry.key,
-      fingerprint: entry.fingerprint ?? null,
-      ttl: entry.ttl ?? null,
-      cachedAt: entry.cached_at ?? 0,
-      size: entry.size ?? 0,
-      ref,
-    })
-  })
-
+  const cache = state.cache as unknown as { limit: number }
   const meta: VersionMeta = {
     version: state.version,
     mounts: mountsMeta,
-    cache: { limit: cache.limit, entries: cacheMeta },
+    cache: { limit: cache.limit, entries: [] },
     fingerprints: (state.fingerprints as unknown[] | undefined) ?? [],
     liveOnlyMounts: state.live_only_mounts ?? [],
   }
@@ -134,19 +119,10 @@ export function toState(
     })
   }
 
-  const cacheEntries: AnyDict[] = meta.cache.entries.map((c) => ({
-    key: c.key,
-    data: entries[c.ref as string],
-    fingerprint: c.fingerprint ?? null,
-    ttl: c.ttl ?? null,
-    cached_at: c.cachedAt ?? 0,
-    size: c.size ?? 0,
-  }))
-
   return {
     version: meta.version,
     mounts,
-    cache: { limit: meta.cache.limit, entries: cacheEntries },
+    cache: { limit: meta.cache.limit, entries: [] },
     sessions: [],
     history: [],
     jobs: [],

@@ -13,11 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode, RAMResource, type SessionStore } from '@struktoai/mirage-core'
-import { RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+import { RedisWorkspaceStateStore, S3WorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
+const STORE_BACKEND = process.env.STORE_BACKEND ?? 'redis'
+const S3_ENDPOINT = process.env.STORE_S3_ENDPOINT ?? 'http://localhost:9000'
+const S3_BUCKET = process.env.STORE_S3_BUCKET ?? 'mirage-state'
 const WORKSPACE_ID = 'xstore'
 const MARKER = 'xstore-history-marker'
+
+// The store under test: redis for every plane, or (STORE_BACKEND=s3) the
+// sessions+meta group riding S3 as the workspace group override.
+function makeStateStore(prefix: string): RedisWorkspaceStateStore {
+  if (STORE_BACKEND === 's3') {
+    const s3 = new S3WorkspaceStateStore({
+      bucket: S3_BUCKET,
+      region: 'us-east-1',
+      endpoint: S3_ENDPOINT,
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'minio',
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'minio123',
+      forcePathStyle: true,
+      keyPrefix: prefix,
+    })
+    return new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix, workspace: s3 })
+  }
+  return new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
+}
 
 let fail = 0
 
@@ -31,7 +52,7 @@ function check(name: string, ok: boolean, detail = ''): void {
 }
 
 function makeWorkspace(prefix: string): { ws: Workspace; store: RedisWorkspaceStateStore } {
-  const store = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
+  const store = makeStateStore(prefix)
   const ws = new Workspace(
     { '/data': new RAMResource() },
     { mode: MountMode.EXEC, workspaceId: WORKSPACE_ID, store },
@@ -67,7 +88,7 @@ async function write(prefix: string): Promise<void> {
 // Attach with only the store config + workspace id and verify every plane
 // written by the other language.
 async function read(prefix: string): Promise<void> {
-  const probe = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
+  const probe = makeStateStore(prefix)
   const meta = await probe.loadMeta(WORKSPACE_ID)
   check('ts read: meta record found', meta !== null)
   check(
@@ -166,7 +187,7 @@ async function casIncrement(sess: SessionStore, worker: string, rounds: number):
 // Announce with one increment, wait until the peer's counter shows up
 // (so both main loops genuinely overlap), then run the rest.
 async function hammer(prefix: string, rounds: number): Promise<void> {
-  const store = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
+  const store = makeStateStore(prefix)
   const sess = store.sessions(WORKSPACE_ID)
   await casIncrement(sess, 'ts', 1)
   let peerSeen = false
@@ -183,7 +204,7 @@ async function hammer(prefix: string, rounds: number): Promise<void> {
 
 // Both hammers done: no increment may be lost.
 async function casVerify(prefix: string, rounds: number): Promise<void> {
-  const store = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
+  const store = makeStateStore(prefix)
   const sess = store.sessions(WORKSPACE_ID)
   const final = (await sess.load()).get('hot')
   const env = (final?.env ?? {}) as Record<string, string>

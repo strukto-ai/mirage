@@ -97,7 +97,7 @@ async def test_to_state_is_tar_loadable():
 
 
 @pytest.mark.asyncio
-async def test_cache_fingerprints_sessions_round_trip():
+async def test_content_pure_tree_keeps_files_and_fingerprints():
     ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.execute("echo hi > /a.txt")
@@ -128,64 +128,40 @@ async def test_cache_fingerprints_sessions_round_trip():
     meta = blob_to_meta(meta_to_blob(meta))
     restored = to_state(entries, meta)
 
-    cache_entries = restored[StateKey.CACHE][CacheKey.ENTRIES]
-    assert len(cache_entries) == 1
-    assert cache_entries[0][CacheKey.DATA] == b"cached-bytes"
-    assert cache_entries[0][CacheKey.KEY] == "/a.txt"
-    assert restored[StateKey.FINGERPRINTS][0][FingerprintKey.REVISION] == "v1"
-    assert restored[StateKey.SESSIONS][0][SessionKey.CWD] == "/sub"
-    assert restored[StateKey.SESSIONS][0][SessionKey.ENV] == {"FOO": "bar"}
-
     files = _mount_files(restored, "/")
     assert files["/a.txt"] == b"hi\n"
-    assert all(".mirage-cache" not in k for k in files)
+    assert restored[StateKey.FINGERPRINTS][0][FingerprintKey.REVISION] == "v1"
+
+    # Cache is derived and sessions are control-plane state: neither
+    # enters the commit tree (content-pure commits). They travel via
+    # snapshots (tar) and the session store instead.
+    assert restored[StateKey.CACHE][CacheKey.ENTRIES] == []
+    assert restored[StateKey.SESSIONS] == []
+    assert all(not k.startswith(".mirage-cache") for k in entries)
 
 
 @pytest.mark.asyncio
-async def test_cache_and_pins_survive_tar():
+async def test_commit_tree_excludes_session_env_secrets():
     ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.execute("echo hi > /a.txt")
     state = await to_state_dict(ws)
-    state[StateKey.CACHE][CacheKey.ENTRIES] = [{
-        CacheKey.KEY: "/a.txt",
-        CacheKey.DATA: b"cached-bytes",
-        CacheKey.FINGERPRINT: "etag-1",
-        CacheKey.TTL: None,
-        CacheKey.CACHED_AT: 1.0,
-        CacheKey.SIZE: 12,
-    }]
-    state[StateKey.FINGERPRINTS] = [{
-        FingerprintKey.PATH: "/a.txt",
-        FingerprintKey.MOUNT_PREFIX: "/",
-        FingerprintKey.REVISION: "v1",
-    }]
     state[StateKey.SESSIONS] = [{
         SessionKey.SESSION_ID: "agent_a",
-        SessionKey.CWD: "/sub",
         SessionKey.ENV: {
-            "FOO": "bar"
+            "API_KEY": "sk-SECRET-LEAK-TOKEN"
         },
     }]
 
     entries, meta = tree_inputs_from_state(state)
-    meta = blob_to_meta(meta_to_blob(meta))
-    rebuilt = to_state(entries, meta)
+    meta_blob = meta_to_blob(meta)
 
-    manifest, blobs = split_manifest_and_blobs(rebuilt)
-    buf = io.BytesIO()
-    write_tar(buf, manifest, blobs)
-    buf.seek(0)
-    restored = read_tar(buf)
-
-    ce = restored[StateKey.CACHE][CacheKey.ENTRIES]
-    assert ce[0][CacheKey.DATA] == b"cached-bytes"
-    assert restored[StateKey.FINGERPRINTS][0][FingerprintKey.REVISION] == "v1"
-    sessions = {
-        s[SessionKey.SESSION_ID]: s
-        for s in restored[StateKey.SESSIONS]
-    }
-    assert sessions["agent_a"][SessionKey.CWD] == "/sub"
+    # No session env byte may be reachable from the commit tree: this is
+    # the precondition for pushing commits to real remotes (V2).
+    assert b"sk-SECRET-LEAK-TOKEN" not in meta_blob
+    assert all(b"sk-SECRET-LEAK-TOKEN" not in data
+               for data in entries.values())
+    assert "sessions" not in blob_to_meta(meta_blob)
 
 
 def test_meta_blob_round_trip():

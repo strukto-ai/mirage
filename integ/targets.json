@@ -195,6 +195,35 @@
           "fixture": "columnar/v1"
         }
       ]
+    },
+    {
+      "id": "sharepoint",
+      "hosts": [
+        "python"
+      ],
+      "service": "sharepoint",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "sharepoint",
+          "backend": "sharepoint",
+          "drive": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "sharepoint",
+          "backend": "sharepoint",
+          "drive": "xm2"
+        },
+        {
+          "path": "/res",
+          "resource": "sharepoint",
+          "backend": "sharepoint",
+          "drive": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
     }
   ]
 }
