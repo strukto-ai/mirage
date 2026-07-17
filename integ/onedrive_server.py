@@ -400,7 +400,9 @@ class GraphServer:
 async def start_fake_graph() -> tuple[FakeGraph, "GraphServer", web.AppRunner]:
     state = FakeGraph()
     server = GraphServer(state)
-    app = web.Application()
+    # Real Graph accepts simple PUTs up to 4 MiB; aiohttp's default
+    # client_max_size (1 MiB) would 413 them before the handler runs.
+    app = web.Application(client_max_size=8 * 1024 * 1024)
     app.router.add_route("*", "/{tail:.*}", server.handle)
     runner = web.AppRunner(app)
     await runner.setup()

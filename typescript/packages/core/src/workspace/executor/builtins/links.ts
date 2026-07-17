@@ -90,7 +90,7 @@ export async function handleLn(
   // (an expanded multi-match glob source lands here).
   if (operands.length > 2) {
     const last = operands[operands.length - 1]
-    return errorResult('ln', `ln: target '${wordText(last ?? '')}' is not a directory\n`)
+    return errorResult('ln', `ln: target '${wordText(last ?? '')}': Not a directory\n`)
   }
   const linkAbs = abs(linkArg, session.cwd)
   const targetTyped = wordText(targetArg)

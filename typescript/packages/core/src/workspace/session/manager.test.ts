@@ -13,15 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SESSION_ID, MountMode } from '../../types.ts'
+import { MountMode } from '../../types.ts'
 import { SessionManager } from './manager.ts'
 import { RAMSessionStore } from './ram.ts'
 
 describe('SessionManager', () => {
   it('seeds the default session on construction', () => {
-    const m = new SessionManager(DEFAULT_SESSION_ID)
-    expect(m.defaultId).toBe(DEFAULT_SESSION_ID)
-    expect(m.get(DEFAULT_SESSION_ID).sessionId).toBe(DEFAULT_SESSION_ID)
+    const m = new SessionManager('def')
+    expect(m.defaultId).toBe('def')
+    expect(m.get('def').sessionId).toBe('def')
+    expect(m.list()).toHaveLength(1)
+  })
+
+  it('adoptDefault re-keys the placeholder before hydration', () => {
+    const m = new SessionManager('minted')
+    m.get('minted').cwd = '/kept'
+    m.adoptDefault('stored')
+    expect(m.defaultId).toBe('stored')
+    expect(m.get('stored').cwd).toBe('/kept')
+    expect(m.list()).toHaveLength(1)
+    expect(() => m.get('minted')).toThrow()
+  })
+
+  it('adoptDefault switches to an existing session of that id', () => {
+    const m = new SessionManager('minted')
+    m.create('stored')
+    m.adoptDefault('stored')
+    expect(m.defaultId).toBe('stored')
     expect(m.list()).toHaveLength(1)
   })
 

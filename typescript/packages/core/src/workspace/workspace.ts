@@ -45,8 +45,6 @@ import type { FileStat } from '../types.ts'
 import {
   type CommandSafeguard,
   ConsistencyPolicy,
-  DEFAULT_AGENT_ID,
-  DEFAULT_WORKSPACE_ID,
   DriftPolicy,
   FileType,
   MountMode,
@@ -82,6 +80,7 @@ import type { WorkspaceFields, WorkspaceStateStore } from './store/base.ts'
 import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
+import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 /**
@@ -211,6 +210,7 @@ export class Workspace {
   private readonly stateStoreInternal: WorkspaceStateStore
   private readonly ownsStateStore: boolean
   private metaWritten = false
+  private readonly sessionIdExplicit: boolean
   private readonly opsRegistry: OpsRegistry
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
@@ -218,7 +218,7 @@ export class Workspace {
   private readonly opened = new Set<Resource>()
   private readonly openOrder: Resource[] = []
   readonly jobTable = new JobTable()
-  readonly agentId: string
+  readonly agentId: string | null
   readonly cache: FileCache & Resource
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
@@ -273,17 +273,21 @@ export class Workspace {
     // as direct overrides that win over the provider. A caller-passed
     // provider may be shared with sibling workspaces, so only a
     // workspace that built its own provider closes it.
-    this.wsId = options.workspaceId ?? DEFAULT_WORKSPACE_ID
+    this.wsId = options.workspaceId ?? newWorkspaceId()
+    // A minted default session id is provisional: attaching to a
+    // workspace whose discovery record already names one adopts the
+    // stored pointer instead (see ensureMeta).
+    this.sessionIdExplicit = options.sessionId !== undefined
     this.ownsStateStore = options.store === undefined
     this.stateStoreInternal = options.store ?? new RAMWorkspaceStateStore()
     const observeStore = options.observe ?? this.stateStoreInternal.observer(this.wsId)
     const namespaceStore = options.namespaceStore ?? this.stateStoreInternal.namespace(this.wsId)
     const sessionStore = options.sessionStore ?? this.stateStoreInternal.sessions(this.wsId)
-    this.sessionManager = new SessionManager(options.sessionId ?? 'default', sessionStore)
+    this.sessionManager = new SessionManager(options.sessionId ?? newSessionId(), sessionStore)
     this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
-    this.agentId = options.agentId ?? DEFAULT_AGENT_ID
+    this.agentId = options.agentId ?? null
     const userPython = options.python ?? {}
     this.pythonRuntime = selectPythonRuntime(
       options.pythonRuntime,
@@ -364,7 +368,7 @@ export class Workspace {
       this.opsRegistry,
       async (rec) => {
         this.records.push(rec)
-        await this.observer.logOp(rec, this.agentId, this.sessionManager.defaultId)
+        await this.observer.logOp(rec, this.agentId ?? '', this.sessionManager.defaultId)
       },
       this.namespace,
       (path, stat) => mergeOverlayStat(this.namespace.metaFor(path), stat),
@@ -536,18 +540,42 @@ export class Workspace {
     return this.sessionManager.closeAll()
   }
 
-  /** Hydrate sessions from the session store (idempotent). */
+  /**
+   * Hydrate sessions from the session store (idempotent). The discovery
+   * record resolves first so a minted default session id can adopt the
+   * stored pointer before hydration keys off it.
+   */
   async ensureSessionsLoaded(): Promise<void> {
-    await this.sessionManager.ensureLoaded()
     await this.ensureMeta()
+    await this.sessionManager.ensureLoaded()
   }
 
   get workspaceId(): string {
     return this.wsId
   }
 
+  get defaultSessionId(): string {
+    return this.sessionManager.defaultId
+  }
+
   get stateStore(): WorkspaceStateStore {
     return this.stateStoreInternal
+  }
+
+  /**
+   * Snapshot restore: adopt the snapshot's default session identity and
+   * point the discovery record at it.
+   */
+  async adoptDefaultSession(sessionId: string): Promise<void> {
+    this.sessionManager.adoptDefault(sessionId)
+    const existing = await this.stateStoreInternal.loadMeta(this.wsId)
+    await this.stateStoreInternal.setMeta(this.wsId, {
+      ...(existing ?? {}),
+      workspace_id: this.wsId,
+      default_session_id: sessionId,
+      created_at: existing?.created_at ?? Date.now() / 1000,
+    })
+    this.metaWritten = true
   }
 
   /** This workspace's metadata record (discovery surface). */
@@ -572,6 +600,11 @@ export class Workspace {
         default_session_id: this.sessionManager.defaultId,
         created_at: Date.now() / 1000,
       })
+    } else {
+      const stored = existing.default_session_id
+      if (!this.sessionIdExplicit && typeof stored === 'string') {
+        this.sessionManager.adoptDefault(stored)
+      }
     }
     this.metaWritten = true
   }
@@ -873,8 +906,8 @@ export class Workspace {
       throw makeAbortError()
     }
     await this.namespace.ensureLoaded()
-    await this.sessionManager.ensureLoaded()
     await this.ensureMeta()
+    await this.sessionManager.ensureLoaded()
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
@@ -918,7 +951,7 @@ export class Workspace {
       this.openOrder.push(resource)
     }
 
-    const callAgentId = options.agentId ?? this.agentId
+    const callAgentId = options.agentId ?? this.agentId ?? ''
     const deps = {
       dispatch,
       registry: this.registry,
@@ -955,7 +988,7 @@ export class Workspace {
     targetSession: Session,
     stdin: ByteSource | null,
   ): Promise<ExecuteResult> {
-    const callAgentId = options.agentId ?? this.agentId
+    const callAgentId = options.agentId ?? this.agentId ?? ''
     const useOverride = options.cwd !== undefined || options.env !== undefined
     const effectiveSession = useOverride
       ? targetSession.fork({
@@ -1090,7 +1123,7 @@ export class Workspace {
     }
     const mergedOptions: WorkspaceOptions = {
       sessionId: args.defaultSessionId,
-      agentId: args.defaultAgentId,
+      ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...options,
     }
     const ws = new this(resources, mergedOptions) as InstanceType<T>
@@ -1106,8 +1139,9 @@ export class Workspace {
     const state = await toStateDict(this)
     const opts: WorkspaceOptions = {
       mode: options.mode ?? MountMode.WRITE,
-      agentId: options.agentId ?? this.agentId,
     }
+    const copyAgentId = options.agentId ?? this.agentId
+    if (copyAgentId !== null) opts.agentId = copyAgentId
     opts.ops = options.ops ?? this.opsRegistry
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser

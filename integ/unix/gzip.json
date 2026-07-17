@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/a.txt | gzip | gunzip",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/a.txt | gzip | zcat",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/b.txt | gzip -c | zcat",
       "expect": {
@@ -55,7 +64,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "gzip -d",
       "expect": {
@@ -71,7 +83,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "gzip | gunzip | sha256sum",
       "expect": {

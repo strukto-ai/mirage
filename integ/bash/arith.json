@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(( 2 > 1 )); echo code=$?",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(( 0 )); echo code=$?",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "i=0; (( i++ )); echo code=$? i=$i; (( i++ )); echo code=$? i=$i; unset i",
       "expect": {
@@ -55,7 +64,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "x=$(( y = 3, y + 2 )); echo $x $y; unset x y",
       "expect": {
@@ -71,7 +83,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "echo $(( -7 / 2 )) $(( -7 % 2 )) $(( 2 ** 10 )) $(( 0x10 )) $(( 010 ))",
       "expect": {
@@ -87,7 +102,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n",
       "expect": {
@@ -103,7 +121,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "if (( 2 > 1 )); then echo yes; fi",
       "expect": {
@@ -119,7 +140,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(( 1 / 0 )) 2>&1; echo code=$?",
       "expect": {
@@ -135,7 +159,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(( 0 && (q = 7) )); echo q=${q:-unset}",
       "expect": {

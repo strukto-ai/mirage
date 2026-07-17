@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  canonicalType,
   cutColumns,
   ENC,
   grepRows,
@@ -339,7 +340,10 @@ function friendlyDtype(code: string | undefined): string {
 }
 
 function fieldsFromFrame(frame: Frame): SchemaField[] {
-  return frame.columns.map((c, i) => ({ name: c, type: friendlyDtype(frame.dtypes[i]) }))
+  return frame.columns.map((c, i) => ({
+    name: c,
+    type: canonicalType(friendlyDtype(frame.dtypes[i])),
+  }))
 }
 
 export async function describe(raw: Uint8Array): Promise<string> {
@@ -395,25 +399,6 @@ export async function tail(raw: Uint8Array, n = 10): Promise<Uint8Array> {
     ...renderTable(rows, `Last ${String(rowsNeeded)}`, rowsNeeded),
   ]
   return ENC.encode(lines.join('\n'))
-}
-
-export async function ls(
-  raw: Uint8Array,
-  meta: { size: number; modified: string | null; name: string },
-): Promise<Uint8Array> {
-  const frame = await readFrame(raw)
-  const rows = frame.rows.length
-  const cols = fieldsFromFrame(frame).length
-  const line = `hdf5\t${String(meta.size)}\t${String(rows)} rows\t${String(cols)} cols\t${meta.modified ?? ''}\t${meta.name}`
-  return ENC.encode(line)
-}
-
-export function lsFallback(meta: {
-  size: number
-  modified: string | null
-  name: string
-}): Uint8Array {
-  return ENC.encode(`hdf5\t${String(meta.size)}\t\t\t${meta.modified ?? ''}\t${meta.name}`)
 }
 
 export async function wc(raw: Uint8Array): Promise<number> {

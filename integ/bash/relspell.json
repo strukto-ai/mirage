@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mkdir -p /data/g14/sub && cd /data/g14 && printf 'hello\n' | tee sub/a.txt > /dev/null && printf 'hello\n' | tee sub/b.txt > /dev/null",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep -r hello sub",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find sub -name '*.txt'",
       "expect": {
@@ -55,7 +64,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat sub/missing.txt 2>&1",
       "expect": {
@@ -71,7 +83,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep hello sub/missing.txt 2>&1",
       "expect": {
@@ -87,7 +102,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "echo ./sub/*.txt",
       "expect": {
@@ -103,7 +121,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "du -s sub/",
       "expect": {
@@ -119,7 +140,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14",
       "expect": {

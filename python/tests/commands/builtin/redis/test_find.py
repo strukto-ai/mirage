@@ -39,7 +39,7 @@ async def workspace():
 async def test_find_name_glob(workspace):
     await workspace.ops.write("/hello.txt", b"hi")
     await workspace.ops.write("/world.py", b"hi")
-    io = await workspace.execute("find / -name '*.txt'", session_id="default")
+    io = await workspace.execute("find / -name '*.txt'")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "hello.txt" in out
@@ -51,7 +51,7 @@ async def test_find_type_f(workspace):
     await workspace.ops.mkdir("/sub")
     await workspace.ops.write("/a.txt", b"a")
     await workspace.ops.write("/sub/b.txt", b"b")
-    io = await workspace.execute("find / -type f", session_id="default")
+    io = await workspace.execute("find / -type f")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "/a.txt" in out
@@ -62,8 +62,7 @@ async def test_find_type_f(workspace):
 async def test_find_size_lower_bound(workspace):
     await workspace.ops.write("/big.txt", b"x" * 1000)
     await workspace.ops.write("/small.txt", b"x")
-    io = await workspace.execute("find / -size +500c -type f",
-                                 session_id="default")
+    io = await workspace.execute("find / -size +500c -type f")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "big.txt" in out
@@ -72,6 +71,6 @@ async def test_find_size_lower_bound(workspace):
 
 @pytest.mark.asyncio
 async def test_find_missing_path_returns_exit_1(workspace):
-    io = await workspace.execute("find /nonexistent", session_id="default")
+    io = await workspace.execute("find /nonexistent")
     assert io.exit_code == 1
     assert b"nonexistent" in (io.stderr or b"")

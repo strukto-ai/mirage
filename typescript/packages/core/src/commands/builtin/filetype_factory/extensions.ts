@@ -19,20 +19,12 @@ import * as hdf5Module from '../../../core/filetype/hdf5.ts'
 import * as parquetModule from '../../../core/filetype/parquet.ts'
 import type { PathSpec } from '../../../types.ts'
 
-interface LsMeta {
-  size: number
-  modified: string | null
-  name: string
-}
-
 export interface FiletypeModule {
   describe(raw: Uint8Array): string | Promise<string>
   cat(raw: Uint8Array): Uint8Array | Promise<Uint8Array>
   head(raw: Uint8Array, n: number): Uint8Array | Promise<Uint8Array>
   tail(raw: Uint8Array, n: number): Uint8Array | Promise<Uint8Array>
   wc(raw: Uint8Array): number | Promise<number>
-  ls(raw: Uint8Array, meta: LsMeta): Uint8Array | Promise<Uint8Array>
-  lsFallback(meta: LsMeta): Uint8Array
   stat(raw: Uint8Array): Uint8Array | Promise<Uint8Array>
   grep(raw: Uint8Array, pattern: string, ignoreCase: boolean): Uint8Array | Promise<Uint8Array>
   cut(raw: Uint8Array, columns: readonly string[]): Uint8Array | Promise<Uint8Array>

@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(x=1; (x=2); echo $x)",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(x=7; (echo $x))",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(export Z=9); echo [$Z]",
       "expect": {
@@ -55,7 +64,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(f(){ echo A; }; (f(){ echo B; }); f)",
       "expect": {
@@ -71,7 +83,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(nofn(){ echo x; }); nofn 2>/dev/null || echo gone",
       "expect": {
@@ -87,7 +102,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(set -- a b c; (set -- x); echo $#)",
       "expect": {
@@ -103,7 +121,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(set -- a b; (echo $1 $2))",
       "expect": {
@@ -119,7 +140,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(cd /data); pwd",
       "expect": {
@@ -135,7 +159,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "(cd /data && (cd /data/sub) && pwd)",
       "expect": {

@@ -21,8 +21,11 @@ from mirage.workspace import (ExecutionNode, Workspace, WorkspaceRunner)
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount.spec import Mount
 from mirage.types import ConsistencyPolicy
+from mirage.utils.ids import new_session_id, new_workspace_id, uuid7
+from mirage.version import __version__ as __version__
 
 __all__ = [
+    "__version__",
     "Workspace",
     "WorkspaceRunner",
     "RAMResource",
@@ -34,6 +37,7 @@ __all__ = [
     "Mount",
     "MountMode",
     "command",
+    "new_session_id",
+    "new_workspace_id",
+    "uuid7",
 ]
-
-__version__ = "0.0.3"

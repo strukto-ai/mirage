@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from mirage.types import FileStat, PathSpec
 
 CASE_DIRS = ("unix", "bash", "crossmount", "runtime", "resources", "cli")
 
@@ -61,14 +64,54 @@ async def seed_fixture(ws, fixture: str | None, mount_path: str,
         await ws.execute(f"tee {dest} > /dev/null", stdin=src.read_bytes())
 
 
-async def run_case(ws, case: dict) -> tuple[int, str, str]:
+def _check_field(st: FileStat, name: str) -> str:
+    if name == "mode":
+        value = oct(st.mode)[2:] if st.mode is not None else "-"
+    elif name == "uid":
+        value = str(st.uid) if st.uid is not None else "-"
+    elif name == "gid":
+        value = str(st.gid) if st.gid is not None else "-"
+    else:
+        # First 19 chars ("2026-01-02T15:30:00") so the Z vs +00:00 suffix
+        # never reaches the comparison.
+        value = st.modified[:19] if st.modified else "-"
+    return f"{name}={value}"
+
+
+async def stat_check(ws, check: dict) -> str:
+    try:
+        st, _ = await ws.dispatch("stat",
+                                  PathSpec.from_str_path(check["stat"]))
+    except FileNotFoundError:
+        return "absent\n"
+    line = " ".join(_check_field(st, name) for name in check["fields"])
+    return line + "\n"
+
+
+def provision_line(result) -> str:
+    return (f"net={result.network_read} write={result.network_write} "
+            f"cache={result.cache_read} ops={result.read_ops} "
+            f"hits={result.cache_hits} precision={result.precision.value}")
+
+
+async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
+    if case.get("clear_cache"):
+        await ws.cache.clear()
+    start = time.monotonic()
+    if case.get("provision"):
+        plan = await ws.execute(case["command"], provision=True)
+        return 0, provision_line(plan) + "\n", "", time.monotonic() - start
     result = await ws.execute(case["command"])
+    elapsed = time.monotonic() - start
     out = await result.stdout_str()
     err = await result.stderr_str()
-    return result.exit_code, out, err
+    if case.get("check") is not None:
+        out = await stat_check(ws, case["check"])
+    return result.exit_code, out, err, elapsed
 
 
-def compare(case: dict, exit_code: int, out: str, err: str) -> list[str]:
+def compare(case: dict, exit_code: int, out: str, err: str,
+            elapsed: float) -> list[str]:
     expect = case["expect"]
     diffs: list[str] = []
     if exit_code != expect["exit"]:
@@ -77,6 +120,10 @@ def compare(case: dict, exit_code: int, out: str, err: str) -> list[str]:
         diffs.append(f"stdout: expected {expect['stdout']!r}, got {out!r}")
     if err.rstrip("\n") != expect["stderr"].rstrip("\n"):
         diffs.append(f"stderr: expected {expect['stderr']!r}, got {err!r}")
+    bounds = expect.get("elapsed")
+    if bounds is not None and not bounds["min"] <= elapsed <= bounds["max"]:
+        diffs.append(f"elapsed: expected [{bounds['min']}, {bounds['max']}]"
+                     f", got {elapsed:.3f}")
     return diffs
 
 

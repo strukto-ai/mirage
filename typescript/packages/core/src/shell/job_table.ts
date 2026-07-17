@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource, IOResult } from '../io/types.ts'
-import { DEFAULT_SESSION_ID } from '../types.ts'
 import type { ExecutionNode } from '../workspace/types.ts'
 
 export const JobStatus = Object.freeze({
@@ -64,7 +63,7 @@ export class Job {
     this.abort = init.abort ?? null
     this.cwd = init.cwd
     this.agent = init.agent ?? 'unknown'
-    this.sessionId = init.sessionId ?? DEFAULT_SESSION_ID
+    this.sessionId = init.sessionId ?? ''
     this.createdAt = init.createdAt ?? Date.now() / 1000
     if (init.status !== undefined) this.status = init.status
     if (init.stdout !== undefined) this.stdout = init.stdout

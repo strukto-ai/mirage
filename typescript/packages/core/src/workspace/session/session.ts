@@ -40,7 +40,7 @@ export interface SessionInit {
 }
 
 export class Session {
-  readonly sessionId: string
+  sessionId: string
   cwd: string
   env: Record<string, string>
   createdAt: number

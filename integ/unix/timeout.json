@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "timeout 5 echo hello",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "timeout 5 echo 'a  b'",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "timeout 0.2 sleep 5; echo code=$?",
       "expect": {
@@ -55,7 +64,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "timeout 5 echo fast",
       "expect": {
@@ -71,7 +83,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "timeout xx sleep 1 2>&1; echo code=$?",
       "expect": {
@@ -87,7 +102,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "timeout -s KILL 1 sleep 1 2>&1; echo code=$?",
       "expect": {

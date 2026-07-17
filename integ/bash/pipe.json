@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep -v c /data/dup.txt | sort | uniq | wc -l",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/csv.csv | cut -d , -f 2 | sort -n",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "jq \".id\" /data/data.jsonl | grep 2",
       "expect": {
@@ -55,7 +64,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -name \"*.txt\" | grep dup | wc -l",
       "expect": {
@@ -71,7 +83,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/dup.txt | tr a-z A-Z | sort | uniq -c",
       "expect": {
@@ -87,7 +102,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head /data/numbers.txt | tail -n 2",
       "expect": {
@@ -103,7 +121,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "tail /data/a.txt | head -n 1",
       "expect": {
@@ -119,7 +140,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "awk '{print $2}' /data/fields.txt | sort -n",
       "expect": {
@@ -135,7 +159,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep -v name /data/csv.csv | cut -d , -f 1",
       "expect": {
@@ -151,7 +178,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sed 's/hello/hi/g' /data/mixed.txt | wc -l",
       "expect": {
@@ -167,7 +197,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/sub -name \"*.txt\" | sort | head -n 1",
       "expect": {
@@ -183,7 +216,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/dup.txt | tr a-z A-Z | sort | uniq -c | sort -n",
       "expect": {
@@ -199,7 +235,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/sorted_a.txt /data/sorted_b.txt | head -n 2",
       "expect": {
@@ -215,7 +254,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/sorted_a.txt /data/sorted_b.txt | head -n 4",
       "expect": {
@@ -231,7 +273,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/sorted_a.txt",
       "expect": {
@@ -247,7 +292,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/sorted_b.txt",
       "expect": {

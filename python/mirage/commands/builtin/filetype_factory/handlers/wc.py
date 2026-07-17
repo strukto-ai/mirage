@@ -40,8 +40,9 @@ async def _ft_wc(resolve_glob,
         )
     try:
         raw = await read(accessor, p, index)
-        return str(module.wc(raw)).encode(), IOResult(
-            reads={p.mount_path: raw}, cache=[p.mount_path])
+        line = f"{module.wc(raw)} {p.virtual}\n"
+        return line.encode(), IOResult(reads={p.mount_path: raw},
+                                       cache=[p.mount_path])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

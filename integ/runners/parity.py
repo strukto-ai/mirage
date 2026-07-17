@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ from pathlib import Path
 
 INTEG = Path(__file__).resolve().parents[1]
 SHARED_TARGETS = ["ram", "disk", "redis"]
+S3_TARGETS = ["s3", "s3-prefix"]
 
 
 def load(path: str) -> dict[tuple[str, str], dict]:
@@ -57,7 +59,10 @@ def diff_row(a: dict, b: dict) -> list[str]:
 
 
 def main() -> None:
-    targets = sys.argv[1:] or SHARED_TARGETS
+    default_targets = list(SHARED_TARGETS)
+    if os.environ.get("S3_ENDPOINT"):
+        default_targets += S3_TARGETS
+    targets = sys.argv[1:] or default_targets
     target_args: list[str] = []
     for t in targets:
         target_args += ["--target", t]

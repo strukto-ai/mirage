@@ -19,6 +19,7 @@ sys.path[:] = [p for p in sys.path if p not in (_INTEG_DIR, "")]
 
 import asyncio  # noqa: E402
 import os  # noqa: E402
+import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
@@ -71,11 +72,17 @@ async def read(prefix: str) -> None:
     probe = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
     meta = await probe.load_meta(WORKSPACE_ID)
     check("py read: meta record found", meta is not None)
-    check("py read: default session id", meta is not None
-          and meta.get("default_session_id") == "default", f"got {meta!r}")
+    pointer = meta.get("default_session_id") if meta is not None else None
+    check("py read: default session id is uuid7",
+          isinstance(pointer, str) and uuid.UUID(pointer).version == 7,
+          f"got {meta!r}")
     await probe.close()
 
     ws, store = make_workspace(prefix)
+    await ws.ensure_sessions_loaded()
+    check("py read: adopted writer's default session",
+          ws.default_session_id == pointer,
+          f"got {ws.default_session_id!r} want {pointer!r}")
     result = await ws.execute("history")
     check("py read: history has marker", MARKER
           in result.stdout.decode(errors="replace"), f"got {result.stdout!r}")

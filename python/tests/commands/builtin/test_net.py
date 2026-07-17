@@ -61,7 +61,7 @@ def multi_mount_ws():
         },
         mode=MountMode.WRITE,
     )
-    ws.get_session("default").cwd = "/"
+    ws.get_session(ws.default_session_id).cwd = "/"
     return ws
 
 

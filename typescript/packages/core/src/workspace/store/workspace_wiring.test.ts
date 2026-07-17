@@ -20,6 +20,8 @@ import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace.ts'
 import { RAMWorkspaceStateStore } from './ram.ts'
 
+const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
 const open: Workspace[] = []
 
 afterEach(async () => {
@@ -43,8 +45,61 @@ describe('Workspace on a WorkspaceStateStore', () => {
     await ws.execute('echo hi')
     const meta = await store.loadMeta('ws-a')
     expect(meta?.workspace_id).toBe('ws-a')
-    expect(meta?.default_session_id).toBe('default')
+    expect(meta?.default_session_id).toBe(ws.defaultSessionId)
+    expect(meta?.default_session_id).toMatch(UUID7_RE)
     expect(meta?.created_at as number).toBeGreaterThan(0)
+  })
+
+  it('a bare workspace mints uuid7 ids', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser },
+    )
+    open.push(ws)
+    const sibling = new Workspace(
+      { '/data': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser },
+    )
+    open.push(sibling)
+    expect(ws.workspaceId).toMatch(UUID7_RE)
+    expect(ws.defaultSessionId).toMatch(UUID7_RE)
+    expect(sibling.workspaceId).not.toBe(ws.workspaceId)
+  })
+
+  it('attach adopts the stored default session pointer', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const wsA = await mkWs(store, 'shared')
+    await wsA.execute('export MARK=1')
+    await wsA.flushSessions()
+
+    const wsB = await mkWs(store, 'shared')
+    const minted = wsB.defaultSessionId
+    await wsB.ensureSessionsLoaded()
+    expect(wsB.defaultSessionId).toBe(wsA.defaultSessionId)
+    expect(wsB.defaultSessionId).not.toBe(minted)
+    expect(wsB.getSession(wsB.defaultSessionId).env.MARK).toBe('1')
+  })
+
+  it('an explicit session id is not adopted away', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const wsA = await mkWs(store, 'shared')
+    await wsA.execute('echo hi')
+
+    const parser = await getTestParser()
+    const wsB = new Workspace(
+      { '/data': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        workspaceId: 'shared',
+        store,
+        sessionId: 'pinned',
+      },
+    )
+    open.push(wsB)
+    await wsB.ensureSessionsLoaded()
+    expect(wsB.defaultSessionId).toBe('pinned')
   })
 
   it('an existing discovery record wins', async () => {

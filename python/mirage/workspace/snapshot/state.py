@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import importlib
-import importlib.metadata
 import tempfile
+import time
 
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
@@ -25,19 +25,13 @@ from mirage.shell.job_table import Job, JobStatus
 from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
                           MountMode, ResourceName, ResourceStateKey,
                           SessionKey, StateKey)
+from mirage.version import __version__
 from mirage.workspace.mount.namespace import NodeMeta
 from mirage.workspace.session.session import Session
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
 from mirage.workspace.snapshot.utils import FORMAT_VERSION, norm_mount_prefix
-
-
-def _mirage_version() -> str:
-    try:
-        return importlib.metadata.version("mirage-ai")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
 
 
 async def to_state_dict(ws) -> dict:
@@ -81,7 +75,7 @@ async def to_state_dict(ws) -> dict:
 
     return {
         StateKey.VERSION: FORMAT_VERSION,
-        StateKey.MIRAGE_VERSION: _mirage_version(),
+        StateKey.MIRAGE_VERSION: __version__,
         StateKey.MOUNTS: mounts_state,
         StateKey.SESSIONS: [s.to_dict() for s in ws._session_mgr.list()],
         StateKey.DEFAULT_SESSION_ID: ws._session_mgr.default_id,
@@ -143,8 +137,8 @@ def build_mount_args(state: dict, resources: dict | None = None) -> MountArgs:
     return MountArgs(
         mount_args=mount_args,
         consistency=ConsistencyPolicy.LAZY,
-        default_session_id=state.get(StateKey.DEFAULT_SESSION_ID, "default"),
-        default_agent_id=state.get(StateKey.DEFAULT_AGENT_ID, "default"),
+        default_session_id=state[StateKey.DEFAULT_SESSION_ID],
+        default_agent_id=state.get(StateKey.DEFAULT_AGENT_ID),
     )
 
 
@@ -188,6 +182,20 @@ async def _restore_nodes(ws, state: dict) -> None:
 
 async def _restore_sessions(ws, state: dict) -> None:
     default_sid = state.get(StateKey.DEFAULT_SESSION_ID)
+    if default_sid is not None:
+        # The snapshot's default session identity wins over the live
+        # one, and the discovery record's pointer follows it.
+        ws._session_mgr.adopt_default(default_sid)
+        ws._default_session_id = default_sid
+        existing = await ws._state_store.load_meta(ws._workspace_id)
+        await ws._state_store.set_meta(
+            ws._workspace_id, {
+                **(existing or {}),
+                "workspace_id": ws._workspace_id,
+                "default_session_id": default_sid,
+                "created_at": (existing or {}).get("created_at", time.time()),
+            })
+        ws._meta_written = True
     restored: list = []
     for s_data in state.get(StateKey.SESSIONS, []):
         sid = s_data[SessionKey.SESSION_ID]

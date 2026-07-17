@@ -15,10 +15,24 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  CreateBucketCommand,
+  DeleteBucketCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from '@aws-sdk/client-s3'
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
-import { DiskResource, MountMode, RAMResource, RedisResource, Workspace } from '@struktoai/mirage-node'
+import {
+  DiskResource,
+  MountMode,
+  RAMResource,
+  RedisResource,
+  S3Resource,
+  Workspace,
+} from '@struktoai/mirage-node'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
-import type { ExecWorkspace, Target } from './harness.ts'
+import type { ExecWorkspace, Mount, Target } from './harness.ts'
 
 export interface Open {
   ws: ExecWorkspace
@@ -26,6 +40,10 @@ export interface Open {
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
+const S3_ENDPOINT = process.env.S3_ENDPOINT
+const S3_REGION = process.env.S3_REGION ?? 'us-east-1'
+const S3_ACCESS = process.env.AWS_ACCESS_KEY_ID ?? 'testing'
+const S3_SECRET = process.env.AWS_SECRET_ACCESS_KEY ?? 'testing'
 
 function runId(): string {
   return `${String(process.pid)}-${String(Date.now())}`
@@ -79,9 +97,62 @@ async function openOpfs(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function openS3(target: Target): Promise<Open> {
+  if (!S3_ENDPOINT) throw new Error('s3 target requires S3_ENDPOINT')
+  const id = runId()
+  const client = new S3Client({
+    region: S3_REGION,
+    endpoint: S3_ENDPOINT,
+    forcePathStyle: true,
+    credentials: { accessKeyId: S3_ACCESS, secretAccessKey: S3_SECRET },
+  })
+  const buckets = new Set<string>()
+  const bucketFor = async (m: Mount): Promise<string> => {
+    const name = `mirage-integ-${id}-${String(m.bucket)}`
+    if (!buckets.has(name)) {
+      await client.send(new CreateBucketCommand({ Bucket: name }))
+      buckets.add(name)
+    }
+    return name
+  }
+  const mounts: Record<string, S3Resource> = {}
+  for (const m of target.mounts) {
+    const bucket = await bucketFor(m)
+    mounts[m.path] = new S3Resource({
+      bucket,
+      region: S3_REGION,
+      endpoint: S3_ENDPOINT,
+      accessKeyId: S3_ACCESS,
+      secretAccessKey: S3_SECRET,
+      forcePathStyle: true,
+      keyPrefix: m.prefix,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    for (const bucket of buckets) {
+      let token: string | undefined
+      do {
+        const listed = await client.send(
+          new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }),
+        )
+        for (const obj of listed.Contents ?? []) {
+          if (obj.Key) await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: obj.Key }))
+        }
+        token = listed.IsTruncated ? listed.NextContinuationToken : undefined
+      } while (token)
+      await client.send(new DeleteBucketCommand({ Bucket: bucket }))
+    }
+    client.destroy()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
   redis: openRedis,
   opfs: openOpfs,
+  s3: openS3,
 }

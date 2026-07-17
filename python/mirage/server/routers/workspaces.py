@@ -20,8 +20,8 @@ from mirage import Workspace
 from mirage.resource.registry import build_resource
 from mirage.server.clone import clone_workspace_with_override
 from mirage.server.paths import PathOutsideRootError, resolve_within_root
-from mirage.server.registry import new_workspace_id
 from mirage.server.summary import make_brief, make_detail
+from mirage.utils.ids import new_workspace_id
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
 from mirage.server.schemas import (  # isort: skip

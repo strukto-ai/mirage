@@ -72,6 +72,7 @@ async def main() -> None:
             "/ro": (RAMResource(), MountMode.READ),
         },
         mode=MountMode.WRITE,
+        session_id="default",
     )
     ws.create_session("reader", mounts={"/data": "read"})
     ws.create_session("writer", mounts={"/data": "write"})
@@ -85,6 +86,7 @@ async def main() -> None:
             "/data": (RAMResource(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
+        session_id="default",
     )
     ws_root.create_session("no_root", mounts={"/data": "write"})
     ws_root.create_session("root_ro", mounts={"/data": "write", "/": "read"})

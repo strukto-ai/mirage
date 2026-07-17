@@ -27,4 +27,4 @@ class MountArgs:
     mount_args: dict
     consistency: ConsistencyPolicy
     default_session_id: str
-    default_agent_id: str
+    default_agent_id: str | None

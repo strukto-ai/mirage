@@ -19,5 +19,5 @@ export interface MountArgs {
   mountArgs: Record<string, [Resource, MountMode]>
   consistency: ConsistencyPolicy
   defaultSessionId: string
-  defaultAgentId: string
+  defaultAgentId: string | null
 }

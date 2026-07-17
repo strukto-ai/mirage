@@ -129,11 +129,12 @@ describe('handleWhoami', () => {
     expect(io.stderr).toBeNull()
   })
 
-  it('defaults without an identity', () => {
+  it('errors without an identity', () => {
     const ns = new Namespace(emptyRegistry(), unusedResolve)
     const [out, io] = handleWhoami(ns)
-    expect(decode(out as Uint8Array)).toBe('default\n')
-    expect(io.exitCode).toBe(0)
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(1)
+    expect(decode(io.stderr as Uint8Array)).toBe('whoami: cannot find name for user ID\n')
   })
 })
 

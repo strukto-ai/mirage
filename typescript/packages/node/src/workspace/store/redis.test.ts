@@ -98,7 +98,7 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
       await ws.flushSessions()
 
       const meta = await storeB.loadMeta('agent-ws')
-      expect(meta?.default_session_id).toBe('default')
+      expect(meta?.default_session_id).toBe(ws.defaultSessionId)
       const sessions = await storeB.sessions('agent-ws').load()
       const narrow = sessions.get('narrow') as { mount_modes?: Record<string, string> }
       expect(narrow.mount_modes?.['/data']).toBe('read')

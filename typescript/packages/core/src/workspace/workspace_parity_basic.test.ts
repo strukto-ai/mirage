@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_SESSION_ID,
   countOccurrences,
   makeWorkspace,
   stdoutBytes,
@@ -57,7 +56,7 @@ describe('workspace: export / env', () => {
   it('export sets session env', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('export MSG=hello')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.MSG).toBe('hello')
+    expect(ws.getSession(ws.defaultSessionId).env.MSG).toBe('hello')
     await ws.close()
   })
 
@@ -75,7 +74,7 @@ describe('workspace: cd', () => {
   it('cd sets cwd', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('cd /disk')
-    expect(ws.getSession(DEFAULT_SESSION_ID).cwd).toBe('/disk')
+    expect(ws.getSession(ws.defaultSessionId).cwd).toBe('/disk')
     await ws.close()
   })
 
@@ -129,21 +128,21 @@ describe('workspace: control flow', () => {
   it('if true', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('if true; then export R=yes; fi')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.R).toBe('yes')
+    expect(ws.getSession(ws.defaultSessionId).env.R).toBe('yes')
     await ws.close()
   })
 
   it('if false else', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('if false; then export R=yes; else export R=no; fi')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.R).toBe('no')
+    expect(ws.getSession(ws.defaultSessionId).env.R).toBe('no')
     await ws.close()
   })
 
   it('for loop', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('for x in a b c; do export LAST=$x; done')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.LAST).toBe('c')
+    expect(ws.getSession(ws.defaultSessionId).env.LAST).toBe('c')
     await ws.close()
   })
 
@@ -151,14 +150,14 @@ describe('workspace: control flow', () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('while false; do export RAN=yes; done')
     expect(io.exitCode).toBe(0)
-    expect('RAN' in ws.getSession(DEFAULT_SESSION_ID).env).toBe(false)
+    expect('RAN' in ws.getSession(ws.defaultSessionId).env).toBe(false)
     await ws.close()
   })
 
   it('case match', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('case hello in hello) export M=yes;; esac')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.M).toBe('yes')
+    expect(ws.getSession(ws.defaultSessionId).env.M).toBe('yes')
     await ws.close()
   })
 })
@@ -167,7 +166,7 @@ describe('workspace: operators', () => {
   it('semicolons chain', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('export A=1; export B=2; export C=3')
-    const s = ws.getSession(DEFAULT_SESSION_ID)
+    const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
     expect(s.env.C).toBe('3')
@@ -177,21 +176,21 @@ describe('workspace: operators', () => {
   it('&& chain', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('true && export OK=yes')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.OK).toBe('yes')
+    expect(ws.getSession(ws.defaultSessionId).env.OK).toBe('yes')
     await ws.close()
   })
 
   it('&& short-circuits on false', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('false && export SKIP=yes')
-    expect('SKIP' in ws.getSession(DEFAULT_SESSION_ID).env).toBe(false)
+    expect('SKIP' in ws.getSession(ws.defaultSessionId).env).toBe(false)
     await ws.close()
   })
 
   it('|| fallback', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('false || export FALL=yes')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.FALL).toBe('yes')
+    expect(ws.getSession(ws.defaultSessionId).env.FALL).toBe('yes')
     await ws.close()
   })
 })
@@ -201,7 +200,7 @@ describe('workspace: subshell', () => {
     const { ws } = await makeWorkspace()
     await ws.execute('export X=outer')
     await ws.execute('(export X=inner)')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.X).toBe('outer')
+    expect(ws.getSession(ws.defaultSessionId).env.X).toBe('outer')
     await ws.close()
   })
 })
@@ -210,14 +209,14 @@ describe('workspace: function', () => {
   it('define and call', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('greet() { export MSG=hello; }; greet')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.MSG).toBe('hello')
+    expect(ws.getSession(ws.defaultSessionId).env.MSG).toBe('hello')
     await ws.close()
   })
 
   it('with args', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('f() { export A=$1; export B=$2; }; f x y')
-    const s = ws.getSession(DEFAULT_SESSION_ID)
+    const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('x')
     expect(s.env.B).toBe('y')
     await ws.close()
@@ -244,7 +243,7 @@ describe('workspace: brace group', () => {
   it('{ ... } runs sequentially in same session', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('{ export A=1; export B=2; }')
-    const s = ws.getSession(DEFAULT_SESSION_ID)
+    const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
     await ws.close()
@@ -275,7 +274,7 @@ describe('workspace: assignment', () => {
   it('bare assignment X=hello', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('X=hello')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.X).toBe('hello')
+    expect(ws.getSession(ws.defaultSessionId).env.X).toBe('hello')
     await ws.close()
   })
 
@@ -283,7 +282,7 @@ describe('workspace: assignment', () => {
     const { ws } = await makeWorkspace()
     await ws.execute('export BASE=/s3')
     await ws.execute('OUT=$BASE/result.txt')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.OUT).toBe('/s3/result.txt')
+    expect(ws.getSession(ws.defaultSessionId).env.OUT).toBe('/s3/result.txt')
     await ws.close()
   })
 })
@@ -294,7 +293,7 @@ describe('workspace: while read', () => {
     await ws.execute('while read LINE; do export LAST=$LINE; done', {
       stdin: new TextEncoder().encode('a\nb\nc\n'),
     })
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.LAST).toBe('c')
+    expect(ws.getSession(ws.defaultSessionId).env.LAST).toBe('c')
     await ws.close()
   })
 })
@@ -355,9 +354,9 @@ describe('workspace: exit code', () => {
   it('last_exit_code tracks last command', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('true')
-    expect(ws.getSession(DEFAULT_SESSION_ID).lastExitCode).toBe(0)
+    expect(ws.getSession(ws.defaultSessionId).lastExitCode).toBe(0)
     await ws.execute('false')
-    expect(ws.getSession(DEFAULT_SESSION_ID).lastExitCode).toBe(1)
+    expect(ws.getSession(ws.defaultSessionId).lastExitCode).toBe(1)
     await ws.close()
   })
 })
@@ -425,7 +424,7 @@ describe('workspace: complex nested patterns', () => {
 
   it('nested for across mounts', async () => {
     const { ws } = await makeWorkspace()
-    const s = ws.getSession(DEFAULT_SESSION_ID)
+    const s = ws.getSession(ws.defaultSessionId)
     await ws.execute(
       'for src in /s3 /ram; do for f in report.csv notes.txt; do cat $src/$f && export FOUND=$src/$f; done; done',
     )
@@ -436,7 +435,7 @@ describe('workspace: complex nested patterns', () => {
   it('background sleep + foreground work', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('sleep 0.01 & export A=1; export B=2; cat /s3/report.csv > /disk/copy.txt')
-    const s = ws.getSession(DEFAULT_SESSION_ID)
+    const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
     const io = await ws.execute('cat /disk/copy.txt')
@@ -447,7 +446,7 @@ describe('workspace: complex nested patterns', () => {
   it('subshell pipeline redirect', async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('(export TMP=inner; cat /s3/report.csv) | sort > /disk/out.txt')
-    const s = ws.getSession(DEFAULT_SESSION_ID)
+    const s = ws.getSession(ws.defaultSessionId)
     expect('TMP' in s.env).toBe(false)
     const io = await ws.execute('cat /disk/out.txt')
     expect(stdoutBytes(io).byteLength).toBeGreaterThan(0)

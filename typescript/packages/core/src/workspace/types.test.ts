@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpRecord } from '../observe/record.ts'
-import { DEFAULT_SESSION_ID } from '../types.ts'
 import { ExecutionNode, ExecutionRecord } from './types.ts'
 
 describe('ExecutionNode', () => {
@@ -80,7 +79,7 @@ describe('ExecutionNode', () => {
 })
 
 describe('ExecutionRecord', () => {
-  it('defaults sessionId to DEFAULT_SESSION_ID', () => {
+  it('defaults sessionId to empty when unattributed', () => {
     const tree = new ExecutionNode()
     const r = new ExecutionRecord({
       agent: 'a',
@@ -90,7 +89,7 @@ describe('ExecutionRecord', () => {
       tree,
       timestamp: 100,
     })
-    expect(r.sessionId).toBe(DEFAULT_SESSION_ID)
+    expect(r.sessionId).toBe('')
   })
 
   it('toJSON decodes stdout and stdin', () => {

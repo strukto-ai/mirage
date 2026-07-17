@@ -190,10 +190,6 @@ export const ResourceName = Object.freeze({
 
 export type ResourceName = (typeof ResourceName)[keyof typeof ResourceName]
 
-export const DEFAULT_SESSION_ID = 'default'
-export const DEFAULT_AGENT_ID = 'default'
-export const DEFAULT_WORKSPACE_ID = 'default'
-
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
   TEXT: 'text',

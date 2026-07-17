@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "echo /data/*.nope",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "test -f /data/one_b* && echo yes",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "f() { echo $1 $#; }; f /data/sorted_*.txt",
       "expect": {
@@ -55,7 +64,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "echo /data/sorted_*.txt",
       "expect": {
@@ -71,7 +83,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mkdir -p /data/g8 && printf 'x *.txt y\\n' | tee /data/g8/l1.txt > /dev/null && printf 'plain\\n' | tee /data/g8/l2.txt > /dev/null && cd /data/g8 && grep -F '*.txt' *.txt && cd / && rm -r /data/g8",
       "expect": {
@@ -87,7 +102,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "echo sub/*.txt && echo *.nope",
       "expect": {
@@ -103,7 +121,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "for f in sub/*.txt; do echo $f; done",
       "expect": {
@@ -119,7 +140,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12",
       "expect": {
@@ -135,7 +159,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat *.nope 2>&1",
       "expect": {
@@ -151,7 +178,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -l s*/x.txt && grep -l hi sub/*.txt",
       "expect": {
@@ -167,7 +197,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ls sub/*.txt && cd / && rm -r /data/g15",
       "expect": {
@@ -183,13 +216,16 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ln -s /data/sorted_*.txt /data/lnk_multi",
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ln: target '/data/lnk_multi' is not a directory\n"
+        "stderr": "ln: target '/data/lnk_multi': Not a directory\n"
       }
     }
   ]

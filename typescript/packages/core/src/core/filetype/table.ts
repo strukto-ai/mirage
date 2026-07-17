@@ -12,9 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CANONICAL_TYPES } from './constants.ts'
+
 const ENC = new TextEncoder()
 
-export const MAX_PREVIEW_ROWS = 20
+export { MAX_PREVIEW_ROWS } from './constants.ts'
+
+export function canonicalType(raw: string): string {
+  const key = raw.trim().toLowerCase()
+  return CANONICAL_TYPES[key] ?? key
+}
 
 export interface SchemaField {
   name: string

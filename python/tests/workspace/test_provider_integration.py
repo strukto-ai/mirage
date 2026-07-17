@@ -18,7 +18,7 @@ import pytest
 
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 
@@ -48,7 +48,7 @@ def _ram_ws():
     p._store.dirs.add("/sub")
     p._store.files["/sub/nested.txt"] = b"nested content\n"
     ws = Workspace(resources={"/ram/": (p, MountMode.WRITE)}, )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/ram"
+    ws.get_session(ws.default_session_id).cwd = "/ram"
     return ws
 
 
@@ -130,7 +130,7 @@ def disk_ws(tmp_path):
 
     p = DiskResource(root=str(data_dir))
     ws = Workspace(resources={"/disk/": (p, MountMode.WRITE)}, )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/disk"
+    ws.get_session(ws.default_session_id).cwd = "/disk"
     return ws
 
 
@@ -213,7 +213,7 @@ def multi_ws(tmp_path):
         "/ram/": (ram, MountMode.WRITE),
         "/disk/": (disk, MountMode.WRITE),
     }, )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/ram"
+    ws.get_session(ws.default_session_id).cwd = "/ram"
     return ws
 
 

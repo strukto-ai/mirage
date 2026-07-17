@@ -14,6 +14,7 @@
 
 import { tableFromIPC, type Table } from 'apache-arrow'
 import {
+  canonicalType,
   cutColumns,
   ENC,
   grepRows,
@@ -29,7 +30,7 @@ function readTable(raw: Uint8Array): Table {
 }
 
 function schemaFields(table: Table): SchemaField[] {
-  return table.schema.fields.map((f) => ({ name: f.name, type: String(f.type) }))
+  return table.schema.fields.map((f) => ({ name: f.name, type: canonicalType(String(f.type)) }))
 }
 
 function tableRows(table: Table, start = 0, end?: number): Record<string, unknown>[] {
@@ -95,25 +96,6 @@ export function tail(raw: Uint8Array, n = 10): Uint8Array {
 
 export function wc(raw: Uint8Array): number {
   return readTable(raw).numRows
-}
-
-export function ls(
-  raw: Uint8Array,
-  meta: { size: number; modified: string | null; name: string },
-): Uint8Array {
-  const table = readTable(raw)
-  const rows = table.numRows
-  const cols = schemaFields(table).length
-  const line = `feather\t${String(meta.size)}\t${String(rows)} rows\t${String(cols)} cols\t${meta.modified ?? ''}\t${meta.name}`
-  return ENC.encode(line)
-}
-
-export function lsFallback(meta: {
-  size: number
-  modified: string | null
-  name: string
-}): Uint8Array {
-  return ENC.encode(`feather\t${String(meta.size)}\t\t\t${meta.modified ?? ''}\t${meta.name}`)
 }
 
 export function stat(raw: Uint8Array): Uint8Array {

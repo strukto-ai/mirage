@@ -7,7 +7,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep abc",
       "expect": {
@@ -23,7 +26,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep",
       "expect": {
@@ -39,7 +45,10 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep -1",
       "expect": {
@@ -55,13 +64,85 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "sleep Infinity",
       "expect": {
         "exit": 1,
         "stdout": "",
         "stderr": "sleep: invalid time interval 'Infinity'\n"
+      }
+    },
+    {
+      "id": "sleep_zero",
+      "seq": 202000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "sleep 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed": {
+          "min": 0,
+          "max": 2.0
+        }
+      }
+    },
+    {
+      "id": "sleep_fraction",
+      "seq": 202001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "sleep 0.2",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed": {
+          "min": 0.15,
+          "max": 2.2
+        }
+      }
+    },
+    {
+      "id": "sleep_one",
+      "seq": 202002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "sleep 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed": {
+          "min": 0.95,
+          "max": 3.0
+        }
       }
     }
   ]

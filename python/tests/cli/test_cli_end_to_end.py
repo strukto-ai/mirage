@@ -15,6 +15,7 @@
 import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 CONFIG_YAML = """\
@@ -58,7 +59,7 @@ def test_workspace_lifecycle(daemon, tmp_path):
     cfg = _write_config(tmp_path)
     created = _run_cli(daemon["env"], "workspace", "create", str(cfg))
     wid = created["id"]
-    assert wid.startswith("ws_")
+    assert uuid.UUID(wid).version == 7
 
     listed = _run_cli(daemon["env"], "workspace", "list")
     assert any(w["id"] == wid for w in listed)

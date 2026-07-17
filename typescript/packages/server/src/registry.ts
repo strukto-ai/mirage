@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { randomBytes } from 'node:crypto'
-import { WorkspaceRunner, type Workspace } from '@struktoai/mirage-node'
-
-export function newWorkspaceId(): string {
-  return `ws_${randomBytes(8).toString('hex')}`
-}
+import { newWorkspaceId, WorkspaceRunner, type Workspace } from '@struktoai/mirage-node'
 
 export class WorkspaceEntry {
   readonly id: string
