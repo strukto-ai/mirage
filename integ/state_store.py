@@ -61,7 +61,11 @@ async def write(prefix: str) -> None:
     result = await ws.execute("ln -s /data/f.txt /data/l.txt")
     check("py write: symlink", result.exit_code == 0)
     ws.create_session("narrow", mounts={"/data": "read"})
+    shared = ws.create_session("shared")
+    shared.env["ORIGIN"] = "py"
     await ws.flush_sessions()
+    check("py write: shared session at generation 1", shared.generation == 1,
+          f"got {shared.generation}")
     await ws.close()
     await store.close()
 
@@ -100,6 +104,37 @@ async def read(prefix: str) -> None:
     result = await ws.execute("echo blocked > /data/x.txt",
                               session_id="narrow")
     check("py read: narrowed write denied", result.exit_code != 0)
+
+    # CAS against the record the other language wrote: the Lua compare
+    # must parse its JSON bytes.
+    shared = ws.get_session("shared")
+    base = shared.generation
+    check("py read: shared session hydrated",
+          shared.env.get("ORIGIN") == "ts" and base >= 1,
+          f"got env={shared.env!r} generation={base}")
+    shared.env["REPLY"] = "py"
+    await ws.flush_sessions()
+    sess_store = store.sessions(WORKSPACE_ID)
+    entries = await sess_store.load()
+    check("py read: flush CAS-bumped the foreign record",
+          entries["shared"]["generation"] == base + 1,
+          f"got {entries['shared']!r}")
+    stale = dict(entries["shared"])
+    check("py read: stale cas_set rejected", await
+          sess_store.cas_set("shared", stale, base) is False)
+    # A third writer advances the record behind our back; the next
+    # flush must adopt its generation and land serialized on top.
+    ahead = dict(entries["shared"])
+    ahead["generation"] = base + 5
+    await sess_store.set("shared", ahead)
+    shared.env["AGAIN"] = "py"
+    await ws.flush_sessions()
+    entries = await sess_store.load()
+    check(
+        "py read: conflict adopted and serialized",
+        entries["shared"]["generation"] == base + 6
+        and entries["shared"]["env"].get("AGAIN") == "py",
+        f"got {entries['shared']!r}")
     await ws.close()
     await store.close()
 

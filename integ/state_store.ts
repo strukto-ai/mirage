@@ -52,7 +52,14 @@ async function write(prefix: string): Promise<void> {
   const link = await ws.execute('ln -s /data/f.txt /data/l.txt')
   check('ts write: symlink', link.exitCode === 0)
   ws.createSession('narrow', { mounts: { '/data': 'read' } })
+  const shared = ws.createSession('shared')
+  shared.env.ORIGIN = 'ts'
   await ws.flushSessions()
+  check(
+    'ts write: shared session at generation 1',
+    shared.generation === 1,
+    `got ${String(shared.generation)}`,
+  )
   await ws.close()
   await store.close()
 }
@@ -96,6 +103,41 @@ async function read(prefix: string): Promise<void> {
   )
   const denied = await ws.execute('echo blocked > /data/x.txt', { sessionId: 'narrow' })
   check('ts read: narrowed write denied', denied.exitCode !== 0)
+
+  // CAS against the record the other language wrote: the Lua compare
+  // must parse its JSON bytes.
+  const shared = ws.getSession('shared')
+  const base = shared.generation
+  check(
+    'ts read: shared session hydrated',
+    shared.env.ORIGIN === 'py' && base >= 1,
+    `got env=${JSON.stringify(shared.env)} generation=${String(base)}`,
+  )
+  shared.env.REPLY = 'ts'
+  await ws.flushSessions()
+  const sessStore = store.sessions(WORKSPACE_ID)
+  const bumped = (await sessStore.load()).get('shared')
+  check(
+    'ts read: flush CAS-bumped the foreign record',
+    bumped?.generation === base + 1,
+    JSON.stringify(bumped),
+  )
+  check(
+    'ts read: stale casSet rejected',
+    (await sessStore.casSet('shared', { ...(bumped ?? {}) }, base)) === false,
+  )
+  // A third writer advances the record behind our back; the next flush
+  // must adopt its generation and land serialized on top.
+  await sessStore.set('shared', { ...(bumped ?? {}), generation: base + 5 })
+  shared.env.AGAIN = 'ts'
+  await ws.flushSessions()
+  const final = (await sessStore.load()).get('shared')
+  const finalEnv = (final?.env ?? {}) as Record<string, string>
+  check(
+    'ts read: conflict adopted and serialized',
+    final?.generation === base + 6 && finalEnv.AGAIN === 'ts',
+    JSON.stringify(final),
+  )
   await ws.close()
   await store.close()
 }
