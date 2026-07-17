@@ -9,12 +9,13 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "tree /data/sub",
       "expect": {
         "exit": 0,
-        "stdout": "├── deep\n│   └── deeper.txt\n└── nested.txt\n",
+        "stdout": "\u251c\u2500\u2500 deep\n\u2502   \u2514\u2500\u2500 deeper.txt\n\u2514\u2500\u2500 nested.txt\n",
         "stderr": ""
       }
     }

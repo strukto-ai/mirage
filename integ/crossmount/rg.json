@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "rg -c o /data/a.txt /data2/xm.txt",
       "expect": {

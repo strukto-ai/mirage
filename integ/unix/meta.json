@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mkdir -p /data/metad && echo alpha > /data/metad/f.txt && touch -t 202601021530 /data/metad/f.txt",
       "expect": {
@@ -27,7 +28,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ls -l /data/metad",
       "expect": {
@@ -45,7 +47,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod 601 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -63,7 +66,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -81,7 +85,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chown 500:dev /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -99,7 +104,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chown alice /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -117,7 +123,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -t 202601021530 /data/metad/new.txt && ls -l /data/metad",
       "expect": {
@@ -135,7 +142,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -c /data/metad/ghost.txt && ls /data/metad",
       "expect": {
@@ -153,7 +161,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -171,7 +180,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -189,7 +199,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -207,7 +218,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad",
       "expect": {
@@ -225,7 +237,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -h -t 202601021530 /data/metad/ln.txt && readlink /data/metad/ln.txt",
       "expect": {
@@ -243,7 +256,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod 999 /data/metad/g.txt 2>&1",
       "expect": {
@@ -261,7 +275,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod u+q /data/metad/g.txt 2>&1",
       "expect": {
@@ -279,7 +294,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chmod 644 /data/metad/missing.txt 2>&1",
       "expect": {
@@ -297,7 +313,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "chown alice /data/metad/missing.txt 2>&1",
       "expect": {
@@ -315,7 +332,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "touch -t 99 /data/metad/g.txt 2>&1",
       "expect": {
@@ -333,7 +351,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "rm /data/metad/ln.txt && rm -r /data/metad",
       "expect": {

@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ls /res",
       "expect": {
@@ -27,7 +28,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ls /res/example.parquet",
       "expect": {
@@ -45,7 +47,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "ls /res/*.parquet",
       "expect": {
@@ -63,7 +66,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "file /res/example.parquet",
       "expect": {
@@ -81,7 +85,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /res/example.parquet",
       "expect": {
@@ -99,7 +104,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -n 3 /res/example.parquet",
       "expect": {
@@ -117,7 +123,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "tail -n 2 /res/example.parquet",
       "expect": {
@@ -135,7 +142,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -l /res/example.parquet",
       "expect": {
@@ -153,7 +161,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep item /res/example.parquet",
       "expect": {
@@ -171,7 +180,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep -c item /res/example.parquet",
       "expect": {
@@ -189,7 +199,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "file /res/example.feather",
       "expect": {
@@ -207,7 +218,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /res/example.feather",
       "expect": {
@@ -225,7 +237,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -n 3 /res/example.feather",
       "expect": {
@@ -243,7 +256,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "tail -n 2 /res/example.feather",
       "expect": {
@@ -261,7 +275,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -l /res/example.feather",
       "expect": {
@@ -279,7 +294,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep item /res/example.feather",
       "expect": {
@@ -297,7 +313,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep -c item /res/example.feather",
       "expect": {
@@ -315,7 +332,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "file /res/example.h5",
       "expect": {
@@ -333,7 +351,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /res/example.h5",
       "expect": {
@@ -351,7 +370,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -n 3 /res/example.h5",
       "expect": {
@@ -369,7 +389,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "tail -n 2 /res/example.h5",
       "expect": {
@@ -387,7 +408,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "wc -l /res/example.h5",
       "expect": {
@@ -405,7 +427,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep item /res/example.h5",
       "expect": {
@@ -423,7 +446,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "grep -c item /res/example.h5",
       "expect": {

@@ -68,9 +68,12 @@ def item_url(config: OneDriveConfig, path: str, action: str = "") -> str:
 
 
 def drive_ref_path(config: OneDriveConfig, folder: str = "") -> str:
+    # `folder` is resource-relative; the key_prefix must apply here exactly
+    # like item_url, or copy/rename destinations land at the drive root.
     base = drive_base(config)[len(GRAPH_API):]
-    if folder:
-        return f"{base}/root:/{quote(folder, safe='/')}"
+    full = _full_path(config, folder)
+    if full:
+        return f"{base}/root:/{quote(full, safe='/')}"
     return f"{base}/root:"
 
 

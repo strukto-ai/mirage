@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "test -f plain.txt && echo yes-f && test -d sub && echo yes-d && test -f missing.txt || echo no-f",
       "expect": {

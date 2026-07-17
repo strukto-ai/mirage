@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -c 8 /data/a.txt | xxd",
       "expect": {
@@ -27,7 +28,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -c 8 /data/a.txt | xxd -p",
       "expect": {
@@ -45,7 +47,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "cat /data/a.txt | xxd | xxd -r",
       "expect": {
@@ -63,7 +66,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -c 12 /data/a.txt | xxd -c 4",
       "expect": {
@@ -81,7 +85,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -c 8 /data/a.txt | xxd -g 1",
       "expect": {
@@ -99,7 +104,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "head -c 8 /data/a.txt | xxd -u",
       "expect": {
@@ -117,7 +123,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "xxd",
       "expect": {

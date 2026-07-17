@@ -9,7 +9,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -name \"*.txt\"",
       "expect": {
@@ -27,7 +28,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -type f",
       "expect": {
@@ -45,7 +47,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -mindepth 1 -type f",
       "expect": {
@@ -63,7 +66,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -maxdepth 1 -type f",
       "expect": {
@@ -81,7 +85,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -name \"*.txt\" -o -name \"*.json\"",
       "expect": {
@@ -99,7 +104,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -name \"*.txt\" | wc -l",
       "expect": {
@@ -117,7 +123,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -name \"*.txt\" | sort | head -n 2",
       "expect": {
@@ -135,7 +142,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -type d",
       "expect": {
@@ -153,7 +161,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -iname \"*.TXT\"",
       "expect": {
@@ -171,7 +180,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -size +10c",
       "expect": {
@@ -189,7 +199,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -name \"*.txt\"",
       "expect": {
@@ -207,7 +218,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -path \"*sub*\"",
       "expect": {
@@ -225,7 +237,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/sub -type f",
       "expect": {
@@ -243,7 +256,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -empty",
       "expect": {
@@ -261,7 +275,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -not -name \"*.txt\"",
       "expect": {
@@ -279,7 +294,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -name data",
       "expect": {
@@ -297,7 +313,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -maxdepth 0",
       "expect": {
@@ -315,7 +332,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -mindepth 0 -type d",
       "expect": {
@@ -333,7 +351,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -size -5c",
       "expect": {
@@ -351,7 +370,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -depth -type f",
       "expect": {
@@ -369,7 +389,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -mtime +0 -o -mtime -1",
       "expect": {
@@ -387,7 +408,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin && printf x > /data/fs/small.bin && find /data/fs -size +4c",
       "expect": {
@@ -405,7 +427,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/fs -size -4c",
       "expect": {
@@ -423,7 +446,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c",
       "expect": {
@@ -441,7 +465,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/fs -size -4c",
       "expect": {
@@ -459,7 +484,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/fs -size 4c",
       "expect": {
@@ -477,7 +503,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/fs -size -1k",
       "expect": {
@@ -495,7 +522,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/fs -path '*data/fs/sub*'",
       "expect": {
@@ -513,7 +541,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/fs -path '/data/fs/sub'",
       "expect": {
@@ -531,7 +560,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data/fs -path '*sub*' -o -name small.bin",
       "expect": {
@@ -549,7 +579,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -maxdepth abc",
       "expect": {
@@ -567,7 +598,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -mindepth xx",
       "expect": {
@@ -585,7 +617,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -size abc",
       "expect": {
@@ -603,7 +636,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -size ''",
       "expect": {
@@ -621,7 +655,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -mtime abc",
       "expect": {
@@ -639,7 +674,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -regex '.*deep.*'",
       "expect": {
@@ -657,7 +693,8 @@
         "redis",
         "opfs",
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "onedrive"
       ],
       "command": "find /data -boguspredicate",
       "expect": {
