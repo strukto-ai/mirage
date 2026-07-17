@@ -26,6 +26,14 @@ BASE_TIME = datetime(2026, 3, 31, tzinfo=timezone.utc)
 MODIFIED = BASE_TIME.strftime("%Y-%m-%dT%H:%M:%SZ")
 SITE_ID = "site-main"
 SITE_NAME = "Main"
+# SharePoint (and OneDrive for Business, which is SharePoint underneath)
+# rewrites Office documents server-side after an upload: metadata is
+# injected into the file, so downloaded bytes differ from uploaded bytes
+# and cTag changes without a user write. The real rewrite is an async
+# zip-internal edit; the fake models it as a synchronous, idempotent
+# marker append so shared-case expectations stay deterministic.
+OFFICE_EXTENSIONS = (".pptx", ".docx", ".xlsx")
+ENRICH_MARKER = b"<odsp-metadata/>"
 
 
 def _norm(path: str) -> str:
@@ -33,6 +41,9 @@ def _norm(path: str) -> str:
 
 
 def _parse_range(header: str | None, size: int) -> tuple[int, int]:
+    # Single-range requests only; real Graph also serves single ranges
+    # but returns 416 for unsatisfiable ones, which the fake clamps
+    # instead (no client path requests past EOF).
     if not header or not header.startswith("bytes="):
         return 0, size
     spec = header[len("bytes="):]
@@ -61,19 +72,33 @@ class FakeGraph:
             self.dirs.add(parent)
             parent = posixpath.dirname(parent)
 
-    def _write_file(self, path: str, content: bytes) -> dict:
+    def _write_file(self,
+                    path: str,
+                    content: bytes,
+                    enrich: bool = False) -> dict:
         path = _norm(path)
+        # Real Graph auto-creates missing parent folders for some
+        # path-addressed uploads and 404s for others (shared/remote
+        # folders); the fake always creates them (unpinned edge case).
         self._ensure_parents(path)
+        if (enrich and path.lower().endswith(OFFICE_EXTENSIONS)
+                and not content.endswith(ENRICH_MARKER)):
+            # Only uploads enrich; server-side copies of an already
+            # enriched file do not (mirrors real SharePoint, whose
+            # metadata rewrite is idempotent rather than accumulative).
+            content = content + ENRICH_MARKER
         prior = self.files.get(path)
         versions = prior["versions"] if prior else []
         ctag = self._tag()
+        # Version ids follow real Graph numbering ("1.0", "2.0", ...).
+        vid = f"{len(versions) + 1}.0"
         # Version timestamps are distinct (real Graph never ties them);
         # a shared constant would make "current version" detection
         # order-dependent and mask stale-version bugs.
         stamp = (BASE_TIME +
                  timedelta(seconds=self._seq)).strftime("%Y-%m-%dT%H:%M:%SZ")
         versions = versions + [{
-            "id": ctag,
+            "id": vid,
             "lastModifiedDateTime": stamp,
             "content": content,
         }]
@@ -263,6 +288,8 @@ class GraphServer:
         if path.startswith("/upload/"):
             return await self._upload(request, path[len("/upload/"):])
         if path.startswith("/monitor/"):
+            # Monitor URLs are unauthenticated, like real Graph
+            # long-running-operation URLs (they live outside /v1.0).
             token = path[len("/monitor/"):]
             return web.json_response(
                 self.monitors.get(token, {"status": "completed"}))
@@ -299,7 +326,8 @@ class GraphServer:
         if action == "content":
             if method == "PUT":
                 data = await request.read()
-                return web.json_response(g._write_file(item_path, data))
+                return web.json_response(
+                    g._write_file(item_path, data, enrich=True))
             return self._serve_bytes(request, g, item_path)
         if action == "createUploadSession":
             return await self._create_upload(request, g, item_path)
@@ -395,6 +423,9 @@ class GraphServer:
                 # Real Graph returns the existing folder; children survive.
                 return web.json_response(g._folder_item(target))
             if behavior == "rename":
+                # Real Graph inserts the counter before a file extension
+                # ("doc 1.pptx"); only folders are renamed here, where
+                # the plain " N" suffix matches.
                 n = 1
                 while (_norm(posixpath.join(parent, f"{name} {n}")) in g.dirs
                        or _norm(posixpath.join(parent,
@@ -464,6 +495,9 @@ class GraphServer:
         dest_g = self.drives.get(dest_key, g) if dest_key else g
         parent = _ref_parent(ref.get("path", ""))
         dest = _norm(posixpath.join(parent, name))
+        # conflictBehavior on copy models OneDrive for Business /
+        # SharePoint; real consumer OneDrive rejects the parameter (the
+        # client never sends it and resolves conflicts itself).
         behavior = _conflict_behavior(request)
         is_file = item_path in g.files
         conflict = dest in dest_g.files or dest in dest_g.dirs
@@ -530,6 +564,9 @@ class GraphServer:
         })
 
     async def _upload(self, request: web.Request, token: str) -> web.Response:
+        # Chunks are assumed sequential; real upload sessions also
+        # support a status GET, DELETE (cancel), expiration and 416 on
+        # overlapping ranges, none of which the client exercises.
         session = self.uploads.get(token)
         if session is None:
             return _not_found()
@@ -546,7 +583,7 @@ class GraphServer:
             if path in g.files and session["behavior"] != "replace":
                 del self.uploads[token]
                 return _name_exists()
-            item = g._write_file(path, bytes(session["buffer"]))
+            item = g._write_file(path, bytes(session["buffer"]), enrich=True)
             del self.uploads[token]
             return web.json_response(item, status=201)
         return web.json_response(

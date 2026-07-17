@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "office_write_read_enriched",
+      "seq": 204000,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "mkdir -p /data/office && printf slide-bytes | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "slide-bytes<odsp-metadata/>",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_size_reflects_enrichment",
+      "seq": 204001,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "wc -c /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "27 /data/office/deck.pptx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_repeat_read_stable",
+      "seq": 204002,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "cat /data/office/deck.pptx && cat /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "slide-bytes<odsp-metadata/>slide-bytes<odsp-metadata/>",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_server_copy_no_reenrich",
+      "seq": 204003,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "cp /data/office/deck.pptx /data/office/copy.pptx && wc -c /data/office/copy.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "27 /data/office/copy.pptx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_xmount_upload_idempotent",
+      "seq": 204004,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "cp /data/office/deck.pptx /data2/deck.pptx && wc -c /data2/deck.pptx && rm /data2/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "27 /data2/deck.pptx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_overwrite_enriches_once",
+      "seq": 204005,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "printf v2 | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "v2<odsp-metadata/>",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_plain_files_untouched",
+      "seq": 204006,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "printf plain | tee /data/office/notes.txt > /dev/null && cat /data/office/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "plain",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_cleanup",
+      "seq": 204007,
+      "targets": [
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "rm -r /data/office && echo cleaned",
+      "expect": {
+        "exit": 0,
+        "stdout": "cleaned\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
