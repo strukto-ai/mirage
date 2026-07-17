@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
 import type { RedisClientType } from 'redis'
 import { SessionStore, type SessionFields } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../../optional_peer.ts'
+
+// Shipped next to this module in src and copied beside the bundle in
+// dist (tsup onSuccess); byte-identical to the Python cas.lua.
+const CAS_SCRIPT = readFileSync(new URL('./cas.lua', import.meta.url), 'utf8')
 
 export interface RedisSessionStoreOptions {
   url?: string
@@ -63,31 +68,14 @@ export class RedisSessionStore extends SessionStore {
   }
 
   // One atomic server-side compare-and-set: Lua reads the stored
-  // record's generation and writes only on a match. Byte-compatible
-  // with the Python RedisSessionStore script.
-  private static readonly CAS_SCRIPT = `
-local raw = redis.call('HGET', KEYS[1], ARGV[1])
-local current = 0
-if raw then
-    local record = cjson.decode(raw)
-    if record['generation'] then
-        current = tonumber(record['generation'])
-    end
-end
-if current ~= tonumber(ARGV[3]) then
-    return 0
-end
-redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
-return 1
-`
-
+  // record's generation and writes only on a match.
   async casSet(
     sessionId: string,
     fields: SessionFields,
     expectedGeneration: number,
   ): Promise<boolean> {
     const c = await this.client()
-    const result = await c.eval(RedisSessionStore.CAS_SCRIPT, {
+    const result = await c.eval(CAS_SCRIPT, {
       keys: [this.key],
       arguments: [sessionId, JSON.stringify(fields), String(expectedGeneration)],
     })

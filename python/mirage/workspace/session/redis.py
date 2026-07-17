@@ -14,11 +14,15 @@
 
 import json
 from collections.abc import Awaitable, Iterable
+from importlib.resources import files
 from typing import cast
 
 import redis.asyncio as aioredis
 
 from mirage.workspace.session.store import SessionFields, SessionStore
+
+CAS_SCRIPT = (files("mirage.workspace.session") /
+              "cas.lua").read_text(encoding="utf-8")
 
 
 class RedisSessionStore(SessionStore):
@@ -31,28 +35,12 @@ class RedisSessionStore(SessionStore):
     single-command (HSET/HDEL) so mutations stay one round trip.
     """
 
-    CAS_SCRIPT = """
-local raw = redis.call('HGET', KEYS[1], ARGV[1])
-local current = 0
-if raw then
-    local record = cjson.decode(raw)
-    if record['generation'] then
-        current = tonumber(record['generation'])
-    end
-end
-if current ~= tonumber(ARGV[3]) then
-    return 0
-end
-redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
-return 1
-"""
-
     def __init__(self,
                  url: str = "redis://localhost:6379/0",
                  key_prefix: str = "mirage:session:") -> None:
         self._client = aioredis.from_url(url)
         self._key = f"{key_prefix}sessions"
-        self._cas = self._client.register_script(self.CAS_SCRIPT)
+        self._cas = self._client.register_script(CAS_SCRIPT)
 
     async def load(self) -> dict[str, SessionFields]:
         raw = await cast(Awaitable, self._client.hgetall(self._key))
