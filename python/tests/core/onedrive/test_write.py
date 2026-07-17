@@ -58,6 +58,26 @@ async def test_write_large_file_uses_upload_session(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upload_session_requests_replace(monkeypatch):
+    monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
+    monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 8)
+    captured = {}
+
+    def _session_cb(url, **kwargs):
+        captured.update(kwargs.get("json") or {})
+        return CallbackResult(status=200, payload={"uploadUrl": upload_url})
+
+    upload_url = "https://upload.example/session3"
+    with aioresponses() as m:
+        m.post(_SESSION, callback=_session_cb)
+        m.put(upload_url, status=201, payload={"id": "X"})
+        await write_bytes(_accessor(), PathSpec.from_str_path("/Docs/a.txt"),
+                          b"abcdef")
+    behavior = captured["item"]["@microsoft.graph.conflictBehavior"]
+    assert behavior == "replace"
+
+
+@pytest.mark.asyncio
 async def test_upload_resumes_from_next_expected_ranges(monkeypatch):
     monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
     monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 4)

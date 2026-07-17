@@ -1,0 +1,118 @@
+{
+  "cases": [
+    {
+      "id": "ow_seed",
+      "seq": 203000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "mkdir -p /data/ow/t /data/ow/s/t && printf old | tee /data/ow/dst.txt > /dev/null && printf new | tee /data/ow/src.txt > /dev/null && printf keep | tee /data/ow/t/f.old > /dev/null && printf merged | tee /data/ow/s/t/f.txt > /dev/null && echo seeded",
+      "expect": {
+        "exit": 0,
+        "stdout": "seeded\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ow_cp_onto_existing_file",
+      "seq": 203001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "cp /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "new",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ow_cp_r_merges_existing_dir",
+      "seq": 203002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "cp -r /data/ow/s/t /data/ow && cat /data/ow/t/f.txt && ls /data/ow/t",
+      "expect": {
+        "exit": 0,
+        "stdout": "mergedf.old\nf.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ow_mv_onto_existing_file",
+      "seq": 203003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "mv /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt && ls /data/ow",
+      "expect": {
+        "exit": 0,
+        "stdout": "newdst.txt\ns\nt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ow_mkdir_p_existing_nonempty",
+      "seq": 203004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "mkdir -p /data/ow/t && ls /data/ow/t",
+      "expect": {
+        "exit": 0,
+        "stdout": "f.old\nf.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ow_cleanup",
+      "seq": 203005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive"
+      ],
+      "command": "rm -r /data/ow && echo cleaned",
+      "expect": {
+        "exit": 0,
+        "stdout": "cleaned\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -16,7 +16,8 @@ import posixpath
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.onedrive._client import graph_post, item_url, split_path
+from mirage.core.onedrive._client import (GraphError, graph_post, item_url,
+                                          split_path)
 from mirage.types import PathSpec
 
 
@@ -29,9 +30,16 @@ async def _create_dir(accessor: OneDriveAccessor, stripped: str) -> None:
     body = {
         "name": name,
         "folder": {},
-        "@microsoft.graph.conflictBehavior": "replace",
+        "@microsoft.graph.conflictBehavior": "fail",
     }
-    await graph_post(accessor.config, url, body)
+    try:
+        await graph_post(accessor.config, url, body)
+    except GraphError as exc:
+        # mkdir is idempotent on object-store-style backends (matches the
+        # s3 core); "replace" is unreliable for folders on real Graph, so
+        # create with "fail" and tolerate the existing item.
+        if exc.status != 409 and exc.code != "nameAlreadyExists":
+            raise
 
 
 async def mkdir(accessor: OneDriveAccessor,

@@ -31,7 +31,13 @@ async def _upload_session(accessor: OneDriveAccessor, stripped: str,
     session_url = item_url(config,
                            "/" + stripped,
                            action="/createUploadSession")
-    session = await graph_post(config, session_url)
+    # createUploadSession defaults to "fail": without replace, overwriting
+    # an existing file 409s on the final chunk.
+    session = await graph_post(
+        config, session_url,
+        {"item": {
+            "@microsoft.graph.conflictBehavior": "replace"
+        }})
     upload_url = session["uploadUrl"]
     total = len(data)
     start = 0

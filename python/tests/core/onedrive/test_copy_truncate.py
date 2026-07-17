@@ -59,13 +59,93 @@ async def test_copy_raises_when_monitor_reports_failed():
               payload={
                   "status": "failed",
                   "error": {
-                      "code": "nameAlreadyExists",
+                      "code": "generalException",
                       "message": "x"
                   }
               })
         with pytest.raises(GraphError):
             await copy(_accessor(), PathSpec.from_str_path("/a.txt"),
                        PathSpec.from_str_path("/b.txt"))
+
+
+@pytest.mark.asyncio
+async def test_copy_file_conflict_deletes_destination_and_retries():
+    monitor = "https://monitor.example/op/789"
+    with aioresponses() as m:
+        m.post(_BASE + "/root:/a.txt:/copy",
+               status=202,
+               headers={"Location": monitor})
+        m.get(monitor,
+              payload={
+                  "status": "failed",
+                  "error": {
+                      "code": "nameAlreadyExists",
+                      "message": "x"
+                  }
+              })
+        m.get(_BASE + "/root:/a.txt",
+              payload={
+                  "id": "1",
+                  "name": "a.txt",
+                  "size": 1,
+                  "file": {}
+              })
+        m.get(_BASE + "/root:/b.txt",
+              payload={
+                  "id": "2",
+                  "name": "b.txt",
+                  "size": 1,
+                  "file": {}
+              })
+        m.delete(_BASE + "/root:/b.txt", status=204)
+        m.post(_BASE + "/root:/a.txt:/copy", status=202, payload={})
+        await copy(_accessor(), PathSpec.from_str_path("/a.txt"),
+                   PathSpec.from_str_path("/b.txt"))
+
+
+@pytest.mark.asyncio
+async def test_copy_dir_conflict_merges_per_child():
+    monitor = "https://monitor.example/op/m1"
+    with aioresponses() as m:
+        m.post(_BASE + "/root:/src:/copy",
+               status=202,
+               headers={"Location": monitor})
+        m.get(monitor,
+              payload={
+                  "status": "failed",
+                  "error": {
+                      "code": "nameAlreadyExists",
+                      "message": "x"
+                  }
+              })
+        m.get(_BASE + "/root:/src",
+              payload={
+                  "id": "1",
+                  "name": "src",
+                  "folder": {
+                      "childCount": 1
+                  }
+              })
+        m.get(_BASE + "/root:/dst",
+              payload={
+                  "id": "2",
+                  "name": "dst",
+                  "folder": {
+                      "childCount": 0
+                  }
+              })
+        m.get(_BASE + "/root:/src:/children",
+              payload={
+                  "value": [{
+                      "id": "3",
+                      "name": "f.txt",
+                      "size": 1,
+                      "file": {}
+                  }]
+              })
+        m.post(_BASE + "/root:/src/f.txt:/copy", status=202, payload={})
+        await copy(_accessor(), PathSpec.from_str_path("/src"),
+                   PathSpec.from_str_path("/dst"))
 
 
 @pytest.mark.asyncio
