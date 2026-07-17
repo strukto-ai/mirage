@@ -17,7 +17,13 @@ async def _upload_session(accessor: SharePointAccessor, drive_id: str,
                           item_path: str, data: bytes) -> None:
     config = accessor.config
     session_url = item_url(drive_id, item_path, action="/createUploadSession")
-    session = await graph_post(config, session_url)
+    # createUploadSession defaults to "fail": without replace, overwriting
+    # an existing file 409s on the final chunk.
+    session = await graph_post(
+        config, session_url,
+        {"item": {
+            "@microsoft.graph.conflictBehavior": "replace"
+        }})
     upload_url = session["uploadUrl"]
     total = len(data)
     start = 0

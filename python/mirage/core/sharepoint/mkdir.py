@@ -2,7 +2,8 @@ import posixpath
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.sharepoint._client import graph_post, item_url, split_path
+from mirage.core.sharepoint._client import (GraphError, graph_post, item_url,
+                                            split_path)
 from mirage.core.sharepoint._resolver import resolve
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -18,9 +19,16 @@ async def _create_dir(accessor: SharePointAccessor, drive_id: str,
     body = {
         "name": name,
         "folder": {},
-        "@microsoft.graph.conflictBehavior": "replace",
+        "@microsoft.graph.conflictBehavior": "fail",
     }
-    await graph_post(accessor.config, url, body)
+    try:
+        await graph_post(accessor.config, url, body)
+    except GraphError as exc:
+        # mkdir is idempotent on object-store-style backends (matches the
+        # s3 core); "replace" is unreliable for folders on real Graph, so
+        # create with "fail" and tolerate the existing item.
+        if exc.status != 409 and exc.code != "nameAlreadyExists":
+            raise
 
 
 async def mkdir(accessor: SharePointAccessor,
