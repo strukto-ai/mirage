@@ -14,15 +14,13 @@
 
 import type { ObserverStore } from '../../observe/store.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { SessionStore } from '../session/store.ts'
+import { CAS_MAX_RETRIES, generationOf, type SessionStore } from '../session/store.ts'
 
 // One workspace's metadata record: the JSON-able discovery payload
 // (workspace_id, default_session_id, created_at, generation). This is
 // what another process reads to find a workspace's sessions and its
 // default session before binding to it.
 export type WorkspaceFields = Record<string, unknown>
-
-const MAX_META_RETRIES = 3
 
 export interface WorkspaceStateStoreOverrides {
   namespace?: WorkspaceStateStore
@@ -112,10 +110,10 @@ export abstract class WorkspaceStateStore {
    * writer got there first. Resolves with the record as written.
    */
   async replaceMeta(workspaceId: string, fields: WorkspaceFields): Promise<WorkspaceFields> {
-    for (let attempt = 0; attempt < MAX_META_RETRIES; attempt++) {
+    for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const existing = await this.loadMeta(workspaceId)
       const stored = existing ?? {}
-      const expected = Number(stored.generation ?? 0)
+      const expected = generationOf(existing)
       const merged = {
         ...stored,
         ...fields,

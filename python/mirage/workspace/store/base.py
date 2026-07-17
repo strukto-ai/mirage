@@ -18,15 +18,14 @@ from typing import Any
 
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore
-from mirage.workspace.session.store import SessionStore
+from mirage.workspace.session.store import (CAS_MAX_RETRIES, SessionStore,
+                                            generation_of)
 
 # One workspace's metadata record: the JSON-able discovery payload
 # (workspace_id, default_session_id, created_at, generation). This is
 # what another process reads to find a workspace's sessions and its
 # default session before binding to it.
 WorkspaceFields = dict[str, Any]
-
-MAX_META_RETRIES = 3
 
 
 class WorkspaceStateStore(ABC):
@@ -109,10 +108,10 @@ class WorkspaceStateStore(ABC):
         ``created_at``, bumps the generation, and retries when another
         writer got there first. Returns the record as written.
         """
-        for _ in range(MAX_META_RETRIES):
+        for _ in range(CAS_MAX_RETRIES):
             existing = await self.load_meta(workspace_id)
             stored = existing if existing is not None else {}
-            expected = int(stored.get("generation", 0))
+            expected = generation_of(existing)
             merged = {
                 **stored,
                 **fields,

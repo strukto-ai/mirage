@@ -18,9 +18,8 @@ import copy
 from mirage.types import MountMode
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.session import Session
-from mirage.workspace.session.store import SessionFields, SessionStore
-
-MAX_FLUSH_RETRIES = 3
+from mirage.workspace.session.store import (CAS_MAX_RETRIES, SessionFields,
+                                            SessionStore, generation_of)
 
 
 class SessionManager:
@@ -146,7 +145,7 @@ class SessionManager:
         sid = session.session_id
         if session.to_dict() == self._persisted.get(sid):
             return  # clean: the store already has exactly this state
-        for _ in range(MAX_FLUSH_RETRIES):
+        for _ in range(CAS_MAX_RETRIES):
             expected = session.generation
             session.generation = expected + 1
             fields = session.to_dict()
@@ -161,7 +160,7 @@ class SessionManager:
             session.generation = expected
             stored = (await self._store.load()).get(sid)
             if stored is not None:
-                session.generation = int(stored.get("generation", 0))
+                session.generation = generation_of(stored)
         raise RuntimeError(
             f"session {sid!r} flush kept conflicting with another writer")
 
