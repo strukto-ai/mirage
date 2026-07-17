@@ -1,6 +1,7 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
 
+import mirage.core.msgraph.drive_ops as drive_ops
 import mirage.core.sharepoint.write as write_mod
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint._resolver import _drive_cache, _site_cache
@@ -57,7 +58,7 @@ async def test_write_small_file():
 @pytest.mark.asyncio
 async def test_write_large_file_uses_upload_session(monkeypatch):
     monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
-    monkeypatch.setattr(write_mod, "UPLOAD_CHUNK", 4)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
     ranges = []
 
     def _chunk_cb(url, **kwargs):
@@ -81,3 +82,28 @@ async def test_write_large_file_uses_upload_session(monkeypatch):
                         directory="/sp/Engineering/Documents/big.bin")
         await write_bytes(_accessor(), path, b"abcdef")
     assert ranges == ["bytes 0-3/6", "bytes 4-5/6"]
+
+
+@pytest.mark.asyncio
+async def test_upload_session_requests_replace(monkeypatch):
+    monkeypatch.setattr(write_mod, "SIMPLE_UPLOAD_MAX", 4)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 8)
+    captured = {}
+
+    def _session_cb(url, **kwargs):
+        captured.update(kwargs.get("json") or {})
+        return CallbackResult(status=200, payload={"uploadUrl": upload_url})
+
+    session_url = (f"{_BASE}/drives/{_DRIVE_ID}"
+                   "/root:/big.bin:/createUploadSession")
+    upload_url = "https://upload.example/session2"
+    with aioresponses() as m:
+        m.post(session_url, callback=_session_cb)
+        m.put(upload_url, status=201, payload={"id": "X"})
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/big.bin", "/sp"),
+                        virtual="/sp/Engineering/Documents/big.bin",
+                        directory="/sp/Engineering/Documents/big.bin")
+        await write_bytes(_accessor(), path, b"abcdef")
+    behavior = captured["item"]["@microsoft.graph.conflictBehavior"]
+    assert behavior == "replace"

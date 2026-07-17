@@ -12,37 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
+from functools import partial
 
-from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.context import invalidate_after_write
-from mirage.core.onedrive._client import (GraphError, drive_ref_path,
-                                          graph_post_monitor, item_url,
-                                          poll_monitor, split_path)
+from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
+from mirage.core.msgraph.drive_ops import DriveLoc, copy_tree
+from mirage.core.onedrive._client import drive_ref_path, item_url, split_path
 from mirage.types import PathSpec
+
+
+def drive_loc(config: OneDriveConfig, stripped: str) -> DriveLoc:
+    return DriveLoc(drive="",
+                    path=stripped,
+                    virt=stripped,
+                    url=partial(item_url, config),
+                    ref=partial(drive_ref_path, config))
 
 
 async def copy(accessor: OneDriveAccessor, src: PathSpec,
                dst: PathSpec) -> None:
     _, src_s = split_path(src)
     _, dst_s = split_path(dst)
-    dst_parent = posixpath.dirname("/" + dst_s).strip("/")
-    name = posixpath.basename(dst_s)
-    url = item_url(accessor.config, "/" + src_s, action="/copy")
-    body = {
-        "name": name,
-        "parentReference": {
-            "path": drive_ref_path(accessor.config, dst_parent)
-        },
-    }
-    monitor = await graph_post_monitor(accessor.config, url, body)
-    result = await poll_monitor(monitor, timeout=accessor.config.timeout)
-    status = result.get("status")
-    if status == "failed":
-        err = result.get("error", {}) if isinstance(result, dict) else {}
-        raise GraphError(500, err.get("code", "copyFailed"),
-                         err.get("message", f"copy {src_s} -> {dst_s} failed"))
-    if status != "completed":
-        raise GraphError(504, "copyTimeout",
-                         f"copy {src_s} -> {dst_s} not confirmed complete")
-    await invalidate_after_write(dst)
+    config = accessor.config
+    await copy_tree(config, drive_loc(config, src_s), drive_loc(config, dst_s))

@@ -31,8 +31,22 @@ run_direction() {
   fi
 }
 
+run_concurrent() {
+  local prefix="mirage-integ-xstore-${RUN_ID}-hammer:"
+  local rounds=25
+  echo
+  echo "===== concurrent py+ts CAS hammer ====="
+  "$PY" "$HERE/state_store.py" hammer "$prefix" "$rounds" &
+  local hammer_pid=$!
+  (cd "$HERE" && pnpm exec tsx state_store.ts hammer "$prefix" "$rounds") || fail=1
+  wait "$hammer_pid" || fail=1
+  "$PY" "$HERE/state_store.py" cas-verify "$prefix" "$rounds" || fail=1
+  (cd "$HERE" && pnpm exec tsx state_store.ts cas-verify "$prefix" "$rounds") || fail=1
+}
+
 run_direction "py" "ts"
 run_direction "ts" "py"
+run_concurrent
 
 if [ "$fail" != "0" ]; then
   echo

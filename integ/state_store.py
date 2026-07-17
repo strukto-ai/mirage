@@ -23,6 +23,7 @@ import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
+from mirage.workspace.session.store import SessionStore  # noqa: E402
 from mirage.workspace.store.redis import RedisWorkspaceStateStore  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -61,7 +62,11 @@ async def write(prefix: str) -> None:
     result = await ws.execute("ln -s /data/f.txt /data/l.txt")
     check("py write: symlink", result.exit_code == 0)
     ws.create_session("narrow", mounts={"/data": "read"})
+    shared = ws.create_session("shared")
+    shared.env["ORIGIN"] = "py"
     await ws.flush_sessions()
+    check("py write: shared session at generation 1", shared.generation == 1,
+          f"got {shared.generation}")
     await ws.close()
     await store.close()
 
@@ -95,10 +100,96 @@ async def read(prefix: str) -> None:
     check(
         "py read: session grant narrowed", session.mount_modes is not None
         and session.mount_modes.get("/data") == MountMode.READ)
+    check("py read: generation survived the wire", session.generation >= 1,
+          f"got {session.generation}")
     result = await ws.execute("echo blocked > /data/x.txt",
                               session_id="narrow")
     check("py read: narrowed write denied", result.exit_code != 0)
+
+    # CAS against the record the other language wrote: the Lua compare
+    # must parse its JSON bytes.
+    shared = ws.get_session("shared")
+    base = shared.generation
+    check("py read: shared session hydrated",
+          shared.env.get("ORIGIN") == "ts" and base >= 1,
+          f"got env={shared.env!r} generation={base}")
+    shared.env["REPLY"] = "py"
+    await ws.flush_sessions()
+    sess_store = store.sessions(WORKSPACE_ID)
+    entries = await sess_store.load()
+    check("py read: flush CAS-bumped the foreign record",
+          entries["shared"]["generation"] == base + 1,
+          f"got {entries['shared']!r}")
+    stale = dict(entries["shared"])
+    check("py read: stale cas_set rejected", await
+          sess_store.cas_set("shared", stale, base) is False)
+    # A third writer advances the record behind our back; the next
+    # flush must adopt its generation and land serialized on top.
+    ahead = dict(entries["shared"])
+    ahead["generation"] = base + 5
+    await sess_store.set("shared", ahead)
+    shared.env["AGAIN"] = "py"
+    await ws.flush_sessions()
+    entries = await sess_store.load()
+    check(
+        "py read: conflict adopted and serialized",
+        entries["shared"]["generation"] == base + 6
+        and entries["shared"]["env"].get("AGAIN") == "py",
+        f"got {entries['shared']!r}")
     await ws.close()
+    await store.close()
+
+
+async def cas_increment(sess: SessionStore, worker: str, rounds: int) -> None:
+    """Read-modify-CAS this worker's counter, retrying until it lands."""
+    for _ in range(rounds):
+        for _ in range(500):
+            record = (await sess.load()).get("hot", {
+                "session_id": "hot",
+                "env": {},
+            })
+            env = dict(record.get("env", {}))
+            env[worker] = str(int(env.get(worker, "0")) + 1)
+            expected = int(record.get("generation", 0))
+            fields = dict(record)
+            fields["env"] = env
+            fields["generation"] = expected + 1
+            if await sess.cas_set("hot", fields, expected):
+                break
+        else:
+            raise SystemExit(f"{worker}: cas retry budget exhausted")
+
+
+async def hammer(prefix: str, rounds: int) -> None:
+    """Race the other language's hammer process on one shared record.
+
+    Announce with one increment, wait until the peer's counter shows
+    up (so both main loops genuinely overlap), then run the rest."""
+    store = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    sess = store.sessions(WORKSPACE_ID)
+    await cas_increment(sess, "py", 1)
+    for _ in range(300):
+        entries = await sess.load()
+        if "ts" in entries.get("hot", {}).get("env", {}):
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise SystemExit("py hammer: peer never showed up")
+    await cas_increment(sess, "py", rounds - 1)
+    print(f"  OK   py hammer: {rounds} increments landed")
+    await store.close()
+
+
+async def cas_verify(prefix: str, rounds: int) -> None:
+    """Both hammers done: no increment may be lost."""
+    store = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    sess = store.sessions(WORKSPACE_ID)
+    final = (await sess.load())["hot"]
+    check(
+        "py verify: concurrent hammers lost no updates",
+        final["generation"] == 2 * rounds
+        and final["env"].get("py") == str(rounds)
+        and final["env"].get("ts") == str(rounds), f"got {final!r}")
     await store.close()
 
 
@@ -109,6 +200,10 @@ async def main() -> None:
         await write(prefix)
     elif role == "read":
         await read(prefix)
+    elif role == "hammer":
+        await hammer(prefix, int(sys.argv[3]))
+    elif role == "cas-verify":
+        await cas_verify(prefix, int(sys.argv[3]))
     else:
         raise SystemExit(f"unknown role: {role!r}")
     if fail:

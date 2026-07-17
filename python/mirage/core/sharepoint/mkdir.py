@@ -2,7 +2,8 @@ import posixpath
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.sharepoint._client import graph_post, item_url, split_path
+from mirage.core.msgraph.drive_ops import create_child_folder
+from mirage.core.sharepoint._client import item_url, split_path
 from mirage.core.sharepoint._resolver import resolve
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -11,16 +12,11 @@ from mirage.utils.errors import enoent
 async def _create_dir(accessor: SharePointAccessor, drive_id: str,
                       stripped: str) -> None:
     parent = posixpath.dirname("/" + stripped).strip("/")
-    name = posixpath.basename(stripped)
     url = item_url(drive_id,
                    "/" + parent if parent else "/",
                    action="/children")
-    body = {
-        "name": name,
-        "folder": {},
-        "@microsoft.graph.conflictBehavior": "replace",
-    }
-    await graph_post(accessor.config, url, body)
+    await create_child_folder(accessor.config, url,
+                              posixpath.basename(stripped))
 
 
 async def mkdir(accessor: SharePointAccessor,

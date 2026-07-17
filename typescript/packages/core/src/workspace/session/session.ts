@@ -36,6 +36,7 @@ export interface SessionInit {
    * infrastructure mounts (implicit scratch root, observer, /dev).
    */
   mountModes?: ReadonlyMap<string, MountMode> | null
+  generation?: number
   pipelineTimeoutSeconds?: number | null
 }
 
@@ -53,6 +54,7 @@ export class Session {
   stdinBuffer: AsyncLineIterator | null = null
   localVars: Map<string, string | null> | null = null
   mountModes: ReadonlyMap<string, MountMode> | null
+  generation: number
   pipelineTimeoutSeconds: number | null
 
   constructor(init: SessionInit) {
@@ -67,6 +69,7 @@ export class Session {
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = init.arrays ?? {}
     this.mountModes = init.mountModes ?? null
+    this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
   }
 
@@ -93,6 +96,7 @@ export class Session {
         overrides.arrays ??
         Object.fromEntries(Object.entries(this.arrays).map(([k, v]) => [k, [...v]])),
       mountModes: overrides.mountModes ?? this.mountModes,
+      generation: overrides.generation ?? this.generation,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
     })
   }
@@ -109,6 +113,7 @@ export class Session {
       cwd: this.cwd,
       env: this.env,
       created_at: this.createdAt,
+      generation: this.generation,
     }
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
@@ -122,12 +127,14 @@ export class Session {
     env?: Record<string, string>
     created_at?: number
     mount_modes?: Record<string, MountMode> | null
+    generation?: number
   }): Session {
     return new Session({
       sessionId: data.session_id,
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       ...(data.env !== undefined ? { env: data.env } : {}),
       ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
+      ...(data.generation !== undefined ? { generation: data.generation } : {}),
       mountModes: data.mount_modes != null ? new Map(Object.entries(data.mount_modes)) : null,
     })
   }

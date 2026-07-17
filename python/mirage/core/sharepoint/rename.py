@@ -1,11 +1,9 @@
-import posixpath
-
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
-from mirage.core.sharepoint._client import (drive_ref_path, graph_patch,
-                                            item_url)
+from mirage.core.msgraph.drive_ops import rename_replace
 from mirage.core.sharepoint._resolver import resolve
+from mirage.core.sharepoint.copy import drive_loc
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -18,17 +16,9 @@ async def rename(accessor: SharePointAccessor, src: PathSpec,
             or dst_resolved.drive_id is None
             or dst_resolved.item_path is None):
         raise enoent(src.virtual if isinstance(src, PathSpec) else src)
-    src_parent = posixpath.dirname("/" + src_resolved.item_path).strip("/")
-    dst_parent = posixpath.dirname("/" + dst_resolved.item_path).strip("/")
-    name = posixpath.basename(dst_resolved.item_path)
-    body: dict = {"name": name}
-    if (dst_parent != src_parent
-            or src_resolved.drive_id != dst_resolved.drive_id):
-        body["parentReference"] = {
-            "path": drive_ref_path(dst_resolved.drive_id, dst_parent)
-        }
-    await graph_patch(accessor.config,
-                      item_url(src_resolved.drive_id, src_resolved.item_path),
-                      body)
+    src_virt = src.mount_path if isinstance(src, PathSpec) else src
+    dst_virt = dst.mount_path if isinstance(dst, PathSpec) else dst
+    await rename_replace(accessor.config, drive_loc(src_resolved, src_virt),
+                         drive_loc(dst_resolved, dst_virt))
     await invalidate_after_write(dst)
     await invalidate_after_unlink(src)

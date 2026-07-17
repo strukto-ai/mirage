@@ -224,3 +224,94 @@ async def test_sessions_persist_across_workspaces_on_shared_store():
     result = await ws_b.execute("echo blocked > /data/x.txt",
                                 session_id="narrow")
     assert result.exit_code != 0
+
+
+class CountingStore(RAMSessionStore):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cas_calls = 0
+
+    async def cas_set(self, session_id, fields, expected_generation):
+        self.cas_calls += 1
+        return await super().cas_set(session_id, fields, expected_generation)
+
+
+def test_flush_skips_clean_sessions():
+    store = CountingStore()
+    mgr = SessionManager("default", store=store)
+    _run(mgr.flush())
+    assert store.cas_calls == 1
+    _run(mgr.flush())
+    assert store.cas_calls == 1
+    mgr.get("default").env["K"] = "v"
+    _run(mgr.flush())
+    assert store.cas_calls == 2
+
+
+def test_flush_bumps_generation():
+    store = RAMSessionStore()
+    mgr = SessionManager("default", store=store)
+    _run(mgr.flush())
+    assert mgr.get("default").generation == 1
+    mgr.get("default").cwd = "/data"
+    _run(mgr.flush())
+    assert mgr.get("default").generation == 2
+    entries = _run(store.load())
+    assert entries["default"]["generation"] == 2
+
+
+def test_flush_conflict_adopts_stored_generation_and_retries():
+    store = RAMSessionStore()
+    mgr = SessionManager("default", store=store)
+    # Another writer already advanced the record to generation 5.
+    _run(
+        store.set(
+            "default", {
+                "session_id": "default",
+                "cwd": "/theirs",
+                "env": {},
+                "generation": 5,
+            }))
+    mgr.get("default").cwd = "/ours"
+    _run(mgr.flush())
+    entries = _run(store.load())
+    assert entries["default"]["cwd"] == "/ours"
+    assert entries["default"]["generation"] == 6
+    assert mgr.get("default").generation == 6
+
+
+def test_flush_exhausted_retries_raise():
+
+    class AlwaysConflict(RAMSessionStore):
+
+        async def cas_set(self, session_id, fields, expected_generation):
+            return False
+
+    mgr = SessionManager("default", store=AlwaysConflict())
+    mgr.get("default").cwd = "/data"
+    with pytest.raises(RuntimeError, match="conflict"):
+        _run(mgr.flush())
+
+
+def test_hydrated_sessions_start_clean():
+    store = CountingStore()
+    seeded = {
+        "session_id": "s2",
+        "cwd": "/data",
+        "env": {},
+        "generation": 3,
+    }
+    _run(store.set("s2", seeded))
+    mgr = SessionManager("default", store=store)
+    _run(mgr.ensure_loaded())
+    assert mgr.get("s2").generation == 3
+    before = store.cas_calls
+    _run(mgr.flush())
+    # Only the locally created default session is dirty; the hydrated
+    # one is clean until mutated.
+    assert store.cas_calls == before + 1
+    mgr.get("s2").env["K"] = "v"
+    _run(mgr.flush())
+    entries = _run(store.load())
+    assert entries["s2"]["generation"] == 4

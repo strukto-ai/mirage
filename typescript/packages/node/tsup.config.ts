@@ -26,4 +26,8 @@ export default defineConfig({
   clean: true,
   target: 'es2022',
   platform: 'node',
+  // Lua scripts are read at runtime relative to the emitted bundle, so
+  // they must sit beside it in dist just as they sit beside their
+  // module in src.
+  onSuccess: 'cp src/workspace/session/cas.lua dist/cas.lua',
 })

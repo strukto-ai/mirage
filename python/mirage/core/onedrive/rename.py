@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
-from mirage.core.onedrive._client import (drive_ref_path, graph_patch,
-                                          item_url, split_path)
+from mirage.core.msgraph.drive_ops import rename_replace
+from mirage.core.onedrive._client import split_path
+from mirage.core.onedrive.copy import drive_loc
 from mirage.types import PathSpec
 
 
@@ -26,15 +25,8 @@ async def rename(accessor: OneDriveAccessor, src: PathSpec,
                  dst: PathSpec) -> None:
     _, src_s = split_path(src)
     _, dst_s = split_path(dst)
-    src_parent = posixpath.dirname("/" + src_s).strip("/")
-    dst_parent = posixpath.dirname("/" + dst_s).strip("/")
-    name = posixpath.basename(dst_s)
-    body: dict = {"name": name}
-    if dst_parent != src_parent:
-        body["parentReference"] = {
-            "path": drive_ref_path(accessor.config, dst_parent)
-        }
-    await graph_patch(accessor.config, item_url(accessor.config, "/" + src_s),
-                      body)
+    config = accessor.config
+    await rename_replace(config, drive_loc(config, src_s),
+                         drive_loc(config, dst_s))
     await invalidate_after_write(dst)
     await invalidate_after_unlink(src)

@@ -1,13 +1,21 @@
-import posixpath
+from functools import partial
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.context import invalidate_after_write
-from mirage.core.sharepoint._client import (GraphError, drive_ref_path,
-                                            graph_post_monitor, item_url,
-                                            poll_monitor)
-from mirage.core.sharepoint._resolver import resolve
+from mirage.core.msgraph.drive_ops import DriveLoc, copy_tree
+from mirage.core.sharepoint._client import drive_ref_path, item_url
+from mirage.core.sharepoint._resolver import ResolvedPath, resolve
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+
+
+def drive_loc(resolved: ResolvedPath, virt: str) -> DriveLoc:
+    assert resolved.drive_id is not None
+    assert resolved.item_path is not None
+    return DriveLoc(drive=resolved.drive_id,
+                    path=resolved.item_path,
+                    virt=virt,
+                    url=partial(item_url, resolved.drive_id),
+                    ref=partial(drive_ref_path, resolved.drive_id))
 
 
 async def copy(accessor: SharePointAccessor, src: PathSpec,
@@ -18,28 +26,7 @@ async def copy(accessor: SharePointAccessor, src: PathSpec,
             or dst_resolved.drive_id is None
             or dst_resolved.item_path is None):
         raise enoent(src.virtual if isinstance(src, PathSpec) else src)
-    dst_parent = posixpath.dirname("/" + dst_resolved.item_path).strip("/")
-    name = posixpath.basename(dst_resolved.item_path)
-    url = item_url(src_resolved.drive_id,
-                   src_resolved.item_path,
-                   action="/copy")
-    body: dict[str, object] = {"name": name}
-    if src_resolved.drive_id == dst_resolved.drive_id:
-        body["parentReference"] = {
-            "path": drive_ref_path(dst_resolved.drive_id, dst_parent)
-        }
-    else:
-        body["parentReference"] = {
-            "driveId": dst_resolved.drive_id,
-            "path": drive_ref_path(dst_resolved.drive_id, dst_parent),
-        }
-    monitor = await graph_post_monitor(accessor.config, url, body)
-    result = await poll_monitor(monitor, timeout=accessor.config.timeout)
-    status = result.get("status")
-    if status == "failed":
-        err = result.get("error", {}) if isinstance(result, dict) else {}
-        raise GraphError(500, err.get("code", "copyFailed"),
-                         err.get("message", "copy failed"))
-    if status != "completed":
-        raise GraphError(504, "copyTimeout", "copy not confirmed complete")
-    await invalidate_after_write(dst)
+    dst_virt = dst.mount_path if isinstance(dst, PathSpec) else dst
+    src_virt = src.mount_path if isinstance(src, PathSpec) else src
+    await copy_tree(accessor.config, drive_loc(src_resolved, src_virt),
+                    drive_loc(dst_resolved, dst_virt))

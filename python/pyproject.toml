@@ -68,6 +68,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["mirage*"]
 
+[tool.setuptools.package-data]
+mirage = ["**/*.lua"]
+
 [project.optional-dependencies]
 # --- python runtime (sandboxed python3 default) ---
 monty    = ["pydantic-monty>=0.0.18"]

@@ -59,3 +59,28 @@ describe('RAMSessionStore', () => {
     await store.close()
   })
 })
+
+describe('RAMSessionStore casSet', () => {
+  it('writes on a matching generation', async () => {
+    const store = new RAMSessionStore()
+    const fields = { session_id: 's1', cwd: '/', env: {}, generation: 1 }
+    expect(await store.casSet('s1', fields, 0)).toBe(true)
+    expect((await store.load()).get('s1')?.generation).toBe(1)
+  })
+
+  it('conflicts on a stale generation', async () => {
+    const store = new RAMSessionStore()
+    await store.set('s1', { session_id: 's1', cwd: '/', generation: 2 })
+    expect(await store.casSet('s1', { session_id: 's1', cwd: '/stale', generation: 1 }, 0)).toBe(
+      false,
+    )
+    expect((await store.load()).get('s1')?.cwd).toBe('/')
+  })
+
+  it('treats a legacy record without the field as generation 0', async () => {
+    const store = new RAMSessionStore()
+    await store.set('s1', { session_id: 's1', cwd: '/old' })
+    expect(await store.casSet('s1', { session_id: 's1', cwd: '/new', generation: 1 }, 0)).toBe(true)
+    expect((await store.load()).get('s1')?.cwd).toBe('/new')
+  })
+})

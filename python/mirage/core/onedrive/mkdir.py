@@ -16,22 +16,18 @@ import posixpath
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.onedrive._client import graph_post, item_url, split_path
+from mirage.core.msgraph.drive_ops import create_child_folder
+from mirage.core.onedrive._client import item_url, split_path
 from mirage.types import PathSpec
 
 
 async def _create_dir(accessor: OneDriveAccessor, stripped: str) -> None:
     parent = posixpath.dirname("/" + stripped).strip("/")
-    name = posixpath.basename(stripped)
     url = item_url(accessor.config,
                    "/" + parent if parent else "/",
                    action="/children")
-    body = {
-        "name": name,
-        "folder": {},
-        "@microsoft.graph.conflictBehavior": "replace",
-    }
-    await graph_post(accessor.config, url, body)
+    await create_child_folder(accessor.config, url,
+                              posixpath.basename(stripped))
 
 
 async def mkdir(accessor: OneDriveAccessor,

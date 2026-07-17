@@ -19,6 +19,8 @@ import type { MountMode } from '../../types.ts'
 
 type StoredSession = Parameters<typeof Session.fromJSON>[0]
 
+const MAX_FLUSH_RETRIES = 3
+
 /**
  * Owns the live session table over a storage-agnostic SessionStore.
  *
@@ -35,6 +37,11 @@ export class SessionManager {
   private defaultIdInternal: string
   private loaded = false
   private loadPromise: Promise<void> | null = null
+  // What the store last saw from us, per session id. Flush compares
+  // against this to skip clean sessions without a network read, and to
+  // avoid clobbering other writers. Kept as JSON strings: a string
+  // cannot alias the live session (Python needs a deep copy instead).
+  private readonly persisted = new Map<string, string>()
 
   constructor(defaultSessionId: string, store?: SessionStore) {
     this.defaultIdInternal = defaultSessionId
@@ -61,6 +68,7 @@ export class SessionManager {
    */
   adoptDefault(sessionId: string): void {
     if (sessionId === this.defaultIdInternal) return
+    this.persisted.delete(this.defaultIdInternal)
     const existing = this.sessions.get(sessionId)
     if (existing !== undefined) {
       this.sessions.delete(this.defaultIdInternal)
@@ -113,19 +121,48 @@ export class SessionManager {
         dflt.env = stored.env
         dflt.createdAt = stored.createdAt
         dflt.mountModes = stored.mountModes
+        dflt.generation = stored.generation
+        // Hydrated sessions start clean: baseline what the store
+        // holds so the next flush skips them.
+        this.persisted.set(sid, JSON.stringify(dflt.toJSON()))
         continue
       }
       if (this.sessions.has(sid)) continue
       this.sessions.set(sid, stored)
+      this.persisted.set(sid, JSON.stringify(stored.toJSON()))
     }
     this.loaded = true
   }
 
-  /** Write every session's durable fields through to the store. */
+  /** Write dirty sessions through the store's generation gate. */
   async flush(): Promise<void> {
     for (const session of [...this.sessions.values()]) {
-      await this.sessionStore.set(session.sessionId, session.toJSON() as SessionFields)
+      await this.flushOne(session)
     }
+  }
+
+  /** Persist one session, retrying when another writer races us. */
+  private async flushOne(session: Session): Promise<void> {
+    const sid = session.sessionId
+    // Clean: the store already has exactly this state.
+    if (JSON.stringify(session.toJSON()) === this.persisted.get(sid)) return
+    for (let attempt = 0; attempt < MAX_FLUSH_RETRIES; attempt++) {
+      const expected = session.generation
+      session.generation = expected + 1
+      const fields = session.toJSON() as SessionFields
+      if (await this.sessionStore.casSet(sid, fields, expected)) {
+        this.persisted.set(sid, JSON.stringify(fields))
+        return
+      }
+      // Lost the race: adopt the winner's generation and retry our
+      // content on top (last-writer-wins until a merge policy exists).
+      session.generation = expected
+      const stored = (await this.sessionStore.load()).get(sid)
+      if (stored !== undefined) {
+        session.generation = Number(stored.generation ?? 0)
+      }
+    }
+    throw new Error(`session ${sid} flush kept conflicting with another writer`)
   }
 
   /**
@@ -140,6 +177,8 @@ export class SessionManager {
     for (const s of this.sessions.values()) entries.set(s.sessionId, s.toJSON() as SessionFields)
     for (const s of sessions) entries.set(s.sessionId, s.toJSON() as SessionFields)
     await this.sessionStore.replaceAll(entries)
+    this.persisted.clear()
+    for (const [sid, fields] of entries) this.persisted.set(sid, JSON.stringify(fields))
   }
 
   create(
@@ -175,6 +214,7 @@ export class SessionManager {
       throw new Error(`unknown session: ${sessionId}`)
     }
     this.sessions.delete(sessionId)
+    this.persisted.delete(sessionId)
     await this.sessionStore.delete([sessionId])
   }
 

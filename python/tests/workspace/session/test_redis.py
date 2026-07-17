@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 import uuid
 
@@ -22,6 +23,28 @@ from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.session.redis import RedisSessionStore
+from mirage.workspace.session.store import SessionStore
+
+
+async def cas_increment(store: SessionStore, worker: str, rounds: int) -> None:
+    """Read-modify-CAS one counter, retrying until each round lands."""
+    for _ in range(rounds):
+        for _ in range(200):
+            record = (await store.load()).get("hot", {
+                "session_id": "hot",
+                "env": {},
+            })
+            env = dict(record.get("env", {}))
+            env[worker] = str(int(env.get(worker, "0")) + 1)
+            expected = int(record.get("generation", 0))
+            fields = dict(record)
+            fields["env"] = env
+            fields["generation"] = expected + 1
+            if await store.cas_set("hot", fields, expected):
+                break
+        else:
+            raise AssertionError("cas retry budget exhausted")
+
 
 REDIS_URL = os.environ.get("REDIS_URL")
 
@@ -94,3 +117,55 @@ async def test_sessions_shared_across_workspaces(prefix):
         await store_a.clear()
         await ws_a.close()
         await ws_b.close()
+
+
+@pytest.mark.asyncio
+async def test_cas_set_matching_generation_writes(store):
+    fields = {"session_id": "s1", "cwd": "/", "env": {}, "generation": 1}
+    assert await store.cas_set("s1", fields, 0) is True
+    assert (await store.load())["s1"]["generation"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cas_set_stale_generation_conflicts(store):
+    await store.set("s1", {"session_id": "s1", "cwd": "/", "generation": 2})
+    lost = {"session_id": "s1", "cwd": "/stale", "generation": 1}
+    assert await store.cas_set("s1", lost, 0) is False
+    assert (await store.load())["s1"]["cwd"] == "/"
+
+
+@pytest.mark.asyncio
+async def test_cas_set_legacy_record_counts_as_generation_zero(store):
+    await store.set("s1", {"session_id": "s1", "cwd": "/old"})
+    fields = {"session_id": "s1", "cwd": "/new", "generation": 1}
+    assert await store.cas_set("s1", fields, 0) is True
+    assert (await store.load())["s1"]["cwd"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_cas_concurrent_writers_lose_no_updates(store):
+    """Five concurrent writers race one record; every increment must
+    survive and the generation must equal the exact write count."""
+    await asyncio.gather(*(cas_increment(store, f"w{i}", 10)
+                           for i in range(5)))
+    final = (await store.load())["hot"]
+    assert final["generation"] == 50
+    assert final["env"] == {f"w{i}": "10" for i in range(5)}
+
+
+@pytest.mark.asyncio
+async def test_cas_serializes_two_writers(prefix):
+    writer_a = RedisSessionStore(url=REDIS_URL, key_prefix=prefix)
+    writer_b = RedisSessionStore(url=REDIS_URL, key_prefix=prefix)
+    try:
+        first = {"session_id": "s", "cwd": "/a", "generation": 1}
+        second = {"session_id": "s", "cwd": "/b", "generation": 1}
+        assert await writer_a.cas_set("s", first, 0) is True
+        assert await writer_b.cas_set("s", second, 0) is False
+        retried = {"session_id": "s", "cwd": "/b", "generation": 2}
+        assert await writer_b.cas_set("s", retried, 1) is True
+        assert (await writer_a.load())["s"]["cwd"] == "/b"
+    finally:
+        await writer_a.clear()
+        await writer_a.close()
+        await writer_b.close()

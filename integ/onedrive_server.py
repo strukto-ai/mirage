@@ -14,14 +14,14 @@
 
 import posixpath
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
 
 import mirage.core.onedrive._client as onedrive_client
 
-MODIFIED = datetime(2026, 3, 31,
-                    tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+BASE_TIME = datetime(2026, 3, 31, tzinfo=timezone.utc)
+MODIFIED = BASE_TIME.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _norm(path: str) -> str:
@@ -62,9 +62,14 @@ class FakeGraph:
         prior = self.files.get(path)
         versions = prior["versions"] if prior else []
         ctag = self._tag()
+        # Version timestamps are distinct (real Graph never ties them);
+        # a shared constant would make "current version" detection
+        # order-dependent and mask stale-version bugs.
+        stamp = (BASE_TIME +
+                 timedelta(seconds=self._seq)).strftime("%Y-%m-%dT%H:%M:%SZ")
         versions = versions + [{
             "id": ctag,
-            "lastModifiedDateTime": MODIFIED,
+            "lastModifiedDateTime": stamp,
             "content": content,
         }]
         entry = {
@@ -111,7 +116,7 @@ class FakeGraph:
             "versions": [{
                 "id": v["id"],
                 "lastModifiedDateTime": v["lastModifiedDateTime"],
-            } for v in entry["versions"]],
+            } for v in reversed(entry["versions"])],
         }
 
     def _folder_size(self, path: str) -> int:
@@ -166,6 +171,23 @@ def _not_found() -> web.Response:
         status=404)
 
 
+def _name_exists() -> web.Response:
+    return web.json_response(
+        {
+            "error": {
+                "code": "nameAlreadyExists",
+                "message": "Name already exists"
+            }
+        },
+        status=409)
+
+
+def _conflict_behavior(request: web.Request) -> str:
+    # Real Graph defaults to "fail" for copy, move and folder creation;
+    # the permissive blind-overwrite fake masked real client bugs.
+    return request.query.get("@microsoft.graph.conflictBehavior", "fail")
+
+
 def _parse_item_path(path: str) -> tuple[str, str]:
     idx = path.find("/root")
     if idx < 0:
@@ -191,8 +213,10 @@ class GraphServer:
     def __init__(self, state: FakeGraph) -> None:
         self.state = state
         self.uploads: dict[str, dict] = {}
+        self.monitors: dict[str, dict] = {}
         self.calls: Counter = Counter()
         self._upload_seq = 0
+        self._monitor_seq = 0
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
         path = request.path
@@ -203,7 +227,9 @@ class GraphServer:
         if path.startswith("/upload/"):
             return await self._upload(request, path[len("/upload/"):])
         if path.startswith("/monitor/"):
-            return web.json_response({"status": "completed"})
+            token = path[len("/monitor/"):]
+            return web.json_response(
+                self.monitors.get(token, {"status": "completed"}))
         item_path, action = _parse_item_path(path)
         if method == "GET":
             kind = action if action in ("children", "content") else "item"
@@ -223,7 +249,7 @@ class GraphServer:
                 return web.json_response(state._write_file(item_path, data))
             return self._content_response(request, item_path)
         if action == "createUploadSession":
-            return self._create_upload(item_path)
+            return await self._create_upload(request, item_path)
         if action == "copy":
             return await self._copy(request, item_path)
         if action.startswith("versions/") and action.endswith("/content"):
@@ -234,6 +260,15 @@ class GraphServer:
         if action == "versions":
             return self._versions_response(item_path)
         if method == "DELETE":
+            if not item_path:
+                return web.json_response(
+                    {
+                        "error": {
+                            "code": "invalidRequest",
+                            "message": "Cannot delete root"
+                        }
+                    },
+                    status=400)
             return web.Response(
                 status=204) if state._delete(item_path) else _not_found()
         if method == "PATCH":
@@ -280,10 +315,11 @@ class GraphServer:
         entry = self.state.files.get(_norm(item_path))
         if entry is None:
             return _not_found()
+        # Real Graph lists versions newest-first.
         value = [{
             "id": v["id"],
             "lastModifiedDateTime": v["lastModifiedDateTime"],
-        } for v in entry["versions"]]
+        } for v in reversed(entry["versions"])]
         return web.json_response({"value": value})
 
     def _version_content(self, request: web.Request, item_path: str,
@@ -297,17 +333,38 @@ class GraphServer:
         return _not_found()
 
     async def _mkdir(self, request: web.Request, parent: str) -> web.Response:
+        state = self.state
+        parent = _norm(parent)
+        if parent and parent not in state.dirs:
+            return _not_found()
         body = await request.json()
         name = body.get("name", "")
+        behavior = body.get("@microsoft.graph.conflictBehavior", "fail")
         target = _norm(posixpath.join(parent, name))
-        self.state._ensure_parents(target)
-        self.state.dirs.add(target)
-        return web.json_response(self.state._folder_item(target))
+        if target in state.dirs or target in state.files:
+            if behavior == "replace" and target in state.dirs:
+                # Real Graph returns the existing folder; children survive.
+                return web.json_response(state._folder_item(target))
+            if behavior == "rename":
+                n = 1
+                while (_norm(posixpath.join(parent,
+                                            f"{name} {n}")) in state.dirs
+                       or _norm(posixpath.join(parent,
+                                               f"{name} {n}")) in state.files):
+                    n += 1
+                target = _norm(posixpath.join(parent, f"{name} {n}"))
+            else:
+                return _name_exists()
+        state._ensure_parents(target)
+        state.dirs.add(target)
+        return web.json_response(state._folder_item(target))
 
     async def _patch(self, request: web.Request,
                      item_path: str) -> web.Response:
         state = self.state
         item_path = _norm(item_path)
+        if item_path not in state.files and item_path not in state.dirs:
+            return _not_found()
         body = await request.json()
         name = body.get("name") or posixpath.basename(item_path)
         ref = body.get("parentReference", {})
@@ -316,15 +373,24 @@ class GraphServer:
         else:
             parent = posixpath.dirname(item_path)
         dest = _norm(posixpath.join(parent, name))
+        if dest != item_path:
+            behavior = _conflict_behavior(request)
+            conflict = dest in state.files or dest in state.dirs
+            replaceable = (behavior == "replace" and item_path in state.files
+                           and dest in state.files)
+            if conflict and not replaceable:
+                return _name_exists()
+            if conflict:
+                del state.files[dest]
         if item_path in state.files:
             entry = state.files.pop(item_path)
+            # A metadata change bumps eTag; cTag only moves with content.
+            entry["etag"] = state._tag()
             state._ensure_parents(dest)
             state.files[dest] = entry
             return web.json_response(state._file_item(dest))
-        if item_path in state.dirs:
-            self._move_dir(item_path, dest)
-            return web.json_response(state._folder_item(dest))
-        return _not_found()
+        self._move_dir(item_path, dest)
+        return web.json_response(state._folder_item(dest))
 
     def _move_dir(self, src: str, dest: str) -> None:
         state = self.state
@@ -344,18 +410,39 @@ class GraphServer:
                     item_path: str) -> web.Response:
         state = self.state
         item_path = _norm(item_path)
+        if item_path not in state.files and item_path not in state.dirs:
+            return _not_found()
         body = await request.json()
         name = body.get("name") or posixpath.basename(item_path)
         parent = _ref_parent(body.get("parentReference", {}).get("path", ""))
         dest = _norm(posixpath.join(parent, name))
-        if item_path in state.files:
+        behavior = _conflict_behavior(request)
+        is_file = item_path in state.files
+        conflict = dest in state.files or dest in state.dirs
+        # replace only applies to file-onto-file; folder conflicts always
+        # fail (reported through the monitor, like real Graph).
+        replaceable = (behavior == "replace" and is_file
+                       and dest in state.files)
+        if conflict and not replaceable:
+            return self._accept_monitor({
+                "status": "failed",
+                "error": {
+                    "code": "nameAlreadyExists",
+                    "message": "Name already exists"
+                },
+            })
+        if is_file:
             state._write_file(dest, state.files[item_path]["content"])
-        elif item_path in state.dirs:
-            self._copy_dir(item_path, dest)
         else:
-            return _not_found()
+            self._copy_dir(item_path, dest)
+        return self._accept_monitor({"status": "completed"})
+
+    def _accept_monitor(self, payload: dict) -> web.Response:
+        self._monitor_seq += 1
+        token = f"op{self._monitor_seq}"
+        self.monitors[token] = payload
         resp = web.Response(status=202)
-        resp.headers["Location"] = f"{state.base}/monitor/{dest}"
+        resp.headers["Location"] = f"{self.state.base}/monitor/{token}"
         return resp
 
     def _copy_dir(self, src: str, dest: str) -> None:
@@ -370,10 +457,25 @@ class GraphServer:
             if d != src and d.startswith(src + "/"):
                 state.dirs.add(dest + d[len(src):])
 
-    def _create_upload(self, item_path: str) -> web.Response:
+    async def _create_upload(self, request: web.Request,
+                             item_path: str) -> web.Response:
+        body: dict = {}
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except ValueError:
+                body = {}
+        item = body.get("item") or {}
+        behavior = item.get("@microsoft.graph.conflictBehavior", "fail")
         self._upload_seq += 1
-        token = f"{_norm(item_path)}#{self._upload_seq}"
-        self.uploads[token] = {"path": _norm(item_path), "buffer": bytearray()}
+        # The token must be fragment- and path-safe: a "#" would be
+        # stripped by the HTTP client as a URL fragment.
+        token = f"u{self._upload_seq}"
+        self.uploads[token] = {
+            "path": _norm(item_path),
+            "buffer": bytearray(),
+            "behavior": behavior,
+        }
         return web.json_response({
             "uploadUrl": f"{self.state.base}/upload/{token}",
             "expirationDateTime": MODIFIED,
@@ -389,8 +491,13 @@ class GraphServer:
         total = int(content_range.rsplit("/", 1)[-1]) if "/" in content_range \
             else len(session["buffer"])
         if len(session["buffer"]) >= total:
-            item = self.state._write_file(session["path"],
-                                          bytes(session["buffer"]))
+            path = session["path"]
+            # Sessions default to "fail": the conflict surfaces on the
+            # final chunk, exactly like real Graph.
+            if path in self.state.files and session["behavior"] != "replace":
+                del self.uploads[token]
+                return _name_exists()
+            item = self.state._write_file(path, bytes(session["buffer"]))
             del self.uploads[token]
             return web.json_response(item, status=201)
         return web.json_response(
