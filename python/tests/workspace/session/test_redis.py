@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 import uuid
 
@@ -22,6 +23,28 @@ from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.session.redis import RedisSessionStore
+from mirage.workspace.session.store import SessionStore
+
+
+async def cas_increment(store: SessionStore, worker: str, rounds: int) -> None:
+    """Read-modify-CAS one counter, retrying until each round lands."""
+    for _ in range(rounds):
+        for _ in range(200):
+            record = (await store.load()).get("hot", {
+                "session_id": "hot",
+                "env": {},
+            })
+            env = dict(record.get("env", {}))
+            env[worker] = str(int(env.get(worker, "0")) + 1)
+            expected = int(record.get("generation", 0))
+            fields = dict(record)
+            fields["env"] = env
+            fields["generation"] = expected + 1
+            if await store.cas_set("hot", fields, expected):
+                break
+        else:
+            raise AssertionError("cas retry budget exhausted")
+
 
 REDIS_URL = os.environ.get("REDIS_URL")
 
@@ -117,6 +140,17 @@ async def test_cas_set_legacy_record_counts_as_generation_zero(store):
     fields = {"session_id": "s1", "cwd": "/new", "generation": 1}
     assert await store.cas_set("s1", fields, 0) is True
     assert (await store.load())["s1"]["cwd"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_cas_concurrent_writers_lose_no_updates(store):
+    """Five concurrent writers race one record; every increment must
+    survive and the generation must equal the exact write count."""
+    await asyncio.gather(*(cas_increment(store, f"w{i}", 10)
+                           for i in range(5)))
+    final = (await store.load())["hot"]
+    assert final["generation"] == 50
+    assert final["env"] == {f"w{i}": "10" for i in range(5)}
 
 
 @pytest.mark.asyncio

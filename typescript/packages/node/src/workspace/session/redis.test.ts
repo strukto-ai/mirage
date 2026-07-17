@@ -31,6 +31,25 @@ function testPrefix(): string {
   return `mirage:test:session:${randomUUID().slice(0, 8)}:`
 }
 
+// Read-modify-CAS one counter, retrying until each round lands.
+async function casIncrement(
+  store: RedisSessionStore,
+  worker: string,
+  rounds: number,
+): Promise<void> {
+  for (let round = 0; round < rounds; round++) {
+    let landed = false
+    for (let attempt = 0; attempt < 200 && !landed; attempt++) {
+      const record = (await store.load()).get('hot') ?? { session_id: 'hot', env: {} }
+      const env = { ...((record.env ?? {}) as Record<string, string>) }
+      env[worker] = String(Number(env[worker] ?? '0') + 1)
+      const expected = Number(record.generation ?? 0)
+      landed = await store.casSet('hot', { ...record, env, generation: expected + 1 }, expected)
+    }
+    if (!landed) throw new Error('cas retry budget exhausted')
+  }
+}
+
 describe.skipIf(skip)('RedisSessionStore', () => {
   it('set/load roundtrip', async () => {
     const store = makeStore(testPrefix())
@@ -109,6 +128,23 @@ describe.skipIf(skip)('RedisSessionStore casSet', () => {
       await writerA.clear()
       await writerA.close()
       await writerB.close()
+    }
+  })
+
+  it('concurrent writers lose no updates', async () => {
+    const store = makeStore(testPrefix())
+    try {
+      await Promise.all(
+        Array.from({ length: 5 }, (_, i) => casIncrement(store, `w${String(i)}`, 10)),
+      )
+      const final = (await store.load()).get('hot')
+      expect(final?.generation).toBe(50)
+      expect(final?.env).toEqual(
+        Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`w${String(i)}`, '10'])),
+      )
+    } finally {
+      await store.clear()
+      await store.close()
     }
   })
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource } from '@struktoai/mirage-core'
+import { MountMode, RAMResource, type SessionStore } from '@struktoai/mirage-core'
 import { RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
@@ -142,11 +142,61 @@ async function read(prefix: string): Promise<void> {
   await store.close()
 }
 
+// Read-modify-CAS this worker's counter, retrying until it lands.
+async function casIncrement(sess: SessionStore, worker: string, rounds: number): Promise<void> {
+  for (let round = 0; round < rounds; round++) {
+    let landed = false
+    for (let attempt = 0; attempt < 500 && !landed; attempt++) {
+      const record = (await sess.load()).get('hot') ?? { session_id: 'hot', env: {} }
+      const env = { ...((record.env ?? {}) as Record<string, string>) }
+      env[worker] = String(Number(env[worker] ?? '0') + 1)
+      const expected = Number(record.generation ?? 0)
+      landed = await sess.casSet('hot', { ...record, env, generation: expected + 1 }, expected)
+    }
+    if (!landed) throw new Error(`${worker}: cas retry budget exhausted`)
+  }
+}
+
+// Race the other language's hammer process on one shared record.
+// Announce with one increment, wait until the peer's counter shows up
+// (so both main loops genuinely overlap), then run the rest.
+async function hammer(prefix: string, rounds: number): Promise<void> {
+  const store = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
+  const sess = store.sessions(WORKSPACE_ID)
+  await casIncrement(sess, 'ts', 1)
+  let peerSeen = false
+  for (let attempt = 0; attempt < 300 && !peerSeen; attempt++) {
+    const env = ((await sess.load()).get('hot')?.env ?? {}) as Record<string, string>
+    peerSeen = env.py !== undefined
+    if (!peerSeen) await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  if (!peerSeen) throw new Error('ts hammer: peer never showed up')
+  await casIncrement(sess, 'ts', rounds - 1)
+  console.log(`  OK   ts hammer: ${String(rounds)} increments landed`)
+  await store.close()
+}
+
+// Both hammers done: no increment may be lost.
+async function casVerify(prefix: string, rounds: number): Promise<void> {
+  const store = new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
+  const sess = store.sessions(WORKSPACE_ID)
+  const final = (await sess.load()).get('hot')
+  const env = (final?.env ?? {}) as Record<string, string>
+  check(
+    'ts verify: concurrent hammers lost no updates',
+    final?.generation === 2 * rounds && env.py === String(rounds) && env.ts === String(rounds),
+    JSON.stringify(final),
+  )
+  await store.close()
+}
+
 async function main(): Promise<void> {
   const role = process.argv[2]
   const prefix = process.argv[3]
   if (role === 'write') await write(prefix)
   else if (role === 'read') await read(prefix)
+  else if (role === 'hammer') await hammer(prefix, Number(process.argv[4]))
+  else if (role === 'cas-verify') await casVerify(prefix, Number(process.argv[4]))
   else throw new Error(`unknown role: ${role}`)
   if (fail !== 0) process.exit(1)
 }

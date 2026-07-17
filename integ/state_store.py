@@ -23,6 +23,7 @@ import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
+from mirage.workspace.session.store import SessionStore  # noqa: E402
 from mirage.workspace.store.redis import RedisWorkspaceStateStore  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -139,6 +140,59 @@ async def read(prefix: str) -> None:
     await store.close()
 
 
+async def cas_increment(sess: SessionStore, worker: str, rounds: int) -> None:
+    """Read-modify-CAS this worker's counter, retrying until it lands."""
+    for _ in range(rounds):
+        for _ in range(500):
+            record = (await sess.load()).get("hot", {
+                "session_id": "hot",
+                "env": {},
+            })
+            env = dict(record.get("env", {}))
+            env[worker] = str(int(env.get(worker, "0")) + 1)
+            expected = int(record.get("generation", 0))
+            fields = dict(record)
+            fields["env"] = env
+            fields["generation"] = expected + 1
+            if await sess.cas_set("hot", fields, expected):
+                break
+        else:
+            raise SystemExit(f"{worker}: cas retry budget exhausted")
+
+
+async def hammer(prefix: str, rounds: int) -> None:
+    """Race the other language's hammer process on one shared record.
+
+    Announce with one increment, wait until the peer's counter shows
+    up (so both main loops genuinely overlap), then run the rest."""
+    store = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    sess = store.sessions(WORKSPACE_ID)
+    await cas_increment(sess, "py", 1)
+    for _ in range(300):
+        entries = await sess.load()
+        if "ts" in entries.get("hot", {}).get("env", {}):
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise SystemExit("py hammer: peer never showed up")
+    await cas_increment(sess, "py", rounds - 1)
+    print(f"  OK   py hammer: {rounds} increments landed")
+    await store.close()
+
+
+async def cas_verify(prefix: str, rounds: int) -> None:
+    """Both hammers done: no increment may be lost."""
+    store = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    sess = store.sessions(WORKSPACE_ID)
+    final = (await sess.load())["hot"]
+    check(
+        "py verify: concurrent hammers lost no updates",
+        final["generation"] == 2 * rounds
+        and final["env"].get("py") == str(rounds)
+        and final["env"].get("ts") == str(rounds), f"got {final!r}")
+    await store.close()
+
+
 async def main() -> None:
     role = sys.argv[1]
     prefix = sys.argv[2]
@@ -146,6 +200,10 @@ async def main() -> None:
         await write(prefix)
     elif role == "read":
         await read(prefix)
+    elif role == "hammer":
+        await hammer(prefix, int(sys.argv[3]))
+    elif role == "cas-verify":
+        await cas_verify(prefix, int(sys.argv[3]))
     else:
         raise SystemExit(f"unknown role: {role!r}")
     if fail:
