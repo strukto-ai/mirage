@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
@@ -86,6 +86,57 @@ class FileStat(BaseModel):
     gid: int | str | None = None
     atime: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+
+
+ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
+ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
+# A "polymorphic" reader is the loose `read` contract head/tail/wc
+# accept: a backend may hand back materialized bytes, an awaitable of
+# bytes, or an async byte stream; ensure_stream normalizes downstream.
+PolymorphicReadResult: TypeAlias = (bytes | AsyncIterator[bytes]
+                                    | Awaitable[bytes | AsyncIterator[bytes]])
+PolymorphicReadFn: TypeAlias = Callable[..., PolymorphicReadResult]
+CopyFn: TypeAlias = Callable[..., Awaitable[None]]
+MoveFn: TypeAlias = Callable[..., Awaitable[None]]
+FindFn: TypeAlias = Callable[..., Awaitable[list[str]]]
+ReaddirFn: TypeAlias = Callable[..., Awaitable[list[str]]]
+StatFn: TypeAlias = Callable[..., Awaitable["FileStat"]]
+
+
+@dataclass(frozen=True, slots=True)
+class NativeCopy:
+    copy: CopyFn
+    find: FindFn
+    dir_copy: CopyFn | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PrimitiveCopy:
+    read_bytes: ReadBytesFn
+    write: CopyFn
+    mkdir: CopyFn
+    readdir: ReaddirFn
+
+
+CopyStrategy: TypeAlias = NativeCopy | PrimitiveCopy
+
+
+@dataclass(frozen=True, slots=True)
+class NativeMove:
+    rename: MoveFn
+
+
+@dataclass(frozen=True, slots=True)
+class PrimitiveMove:
+    read_bytes: ReadBytesFn
+    write: MoveFn
+    mkdir: MoveFn
+    readdir: ReaddirFn
+    unlink: MoveFn
+    rmdir: MoveFn
+
+
+MoveStrategy: TypeAlias = NativeMove | PrimitiveMove
 
 
 class MountMode(str, Enum):

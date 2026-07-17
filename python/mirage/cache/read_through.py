@@ -13,18 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import inspect
-from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, TypeAlias
+from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import CacheInvalidator, active_cache_manager
-from mirage.types import PathSpec
-
-ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
-ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
-PolymorphicReadResult: TypeAlias = (bytes | AsyncIterator[bytes]
-                                    | Awaitable[bytes | AsyncIterator[bytes]])
-PolymorphicReadFn: TypeAlias = Callable[..., PolymorphicReadResult]
+from mirage.types import PathSpec, PolymorphicReadFn, ReadBytesFn, ReadStreamFn
 
 
 async def _serve_stream(manager: CacheInvalidator | None, raw: ReadStreamFn,
@@ -96,7 +90,7 @@ def cache_aware_read_bytes(raw: ReadBytesFn) -> ReadBytesFn:
     return reader
 
 
-def cache_aware_read(raw: PolymorphicReadFn, ) -> PolymorphicReadFn:
+def cache_aware_read(raw: PolymorphicReadFn) -> PolymorphicReadFn:
     """Wrap a polymorphic reader so warm reads serve cached bytes.
 
     For the ``read`` contract used by ``head_multi`` / ``tail_multi`` /

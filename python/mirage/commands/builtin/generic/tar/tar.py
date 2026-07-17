@@ -2,27 +2,14 @@ import fnmatch
 import io
 import tarfile
 from collections.abc import Awaitable, Callable
-from typing import Literal, TypeAlias
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.generic.tar.constants import (READ_MODES,
+                                                           WRITE_MODES)
+from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
+                                                       ReadMode, WriteMode)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-CompressionSuffix: TypeAlias = Literal["", ":gz", ":bz2", ":xz"]
-WriteMode: TypeAlias = Literal["w", "w:gz", "w:bz2", "w:xz"]
-ReadMode: TypeAlias = Literal["r", "r:gz", "r:bz2", "r:xz"]
-WRITE_MODES: dict[CompressionSuffix, WriteMode] = {
-    "": "w",
-    ":gz": "w:gz",
-    ":bz2": "w:bz2",
-    ":xz": "w:xz",
-}
-READ_MODES: dict[CompressionSuffix, ReadMode] = {
-    "": "r",
-    ":gz": "r:gz",
-    ":bz2": "r:bz2",
-    ":xz": "r:xz",
-}
 
 
 def _excluded(name: str, pattern: str) -> bool:

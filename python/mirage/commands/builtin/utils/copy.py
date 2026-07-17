@@ -12,15 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Awaitable, Callable
-
 from mirage.cache.index import IndexCacheStore
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileType, PathSpec, StatFn
 from mirage.utils.key_prefix import rekey
 
 _SWALLOW = (FileNotFoundError, ValueError)
-
-StatFn = Callable[..., Awaitable[FileStat]]
 
 
 def child_path(parent: PathSpec, name: str) -> PathSpec:

@@ -14,8 +14,9 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.cp import NativeCopy, PrimitiveCopy, cp
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.commands.builtin.generic.cp import cp
+from mirage.types import (FileStat, FileType, NativeCopy, PathSpec,
+                          PrimitiveCopy)
 
 
 def _spec(path: str) -> PathSpec:

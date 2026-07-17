@@ -14,14 +14,13 @@
 
 from typing import Callable
 
-from mirage.commands.builtin.generic.cp import PrimitiveCopy
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes, transfer_primitives)
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PrimitiveCopy
 
 
 async def run_cp(scopes: list[PathSpec], flag_kwargs: dict,

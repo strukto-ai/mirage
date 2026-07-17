@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Callable
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import descendant_path, walk
@@ -21,35 +20,13 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, PathSpec
-
-MoveFn = Callable[..., Awaitable[None]]
-ReadFn = Callable[..., Awaitable[bytes]]
-ReaddirFn = Callable[..., Awaitable[list[str]]]
-
-
-@dataclass(frozen=True, slots=True)
-class NativeMove:
-    rename: MoveFn
-
-
-@dataclass(frozen=True, slots=True)
-class PrimitiveMove:
-    read_bytes: ReadFn
-    write: MoveFn
-    mkdir: MoveFn
-    readdir: ReaddirFn
-    unlink: MoveFn
-    rmdir: MoveFn
-
-
-MoveStrategy = NativeMove | PrimitiveMove
+from mirage.types import MoveStrategy, PathSpec, PrimitiveMove, StatFn
 
 
 async def mv(
     paths: list[PathSpec],
     *,
-    stat: Callable[..., Awaitable[FileStat]],
+    stat: StatFn,
     strategy: MoveStrategy,
     n: bool,
     v: bool,

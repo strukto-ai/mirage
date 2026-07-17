@@ -12,40 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Callable
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import (CopyStrategy, FileType, PathSpec, PrimitiveCopy,
+                          ReaddirFn, StatFn)
 from mirage.utils.key_prefix import mount_prefix_of, rekey
-
-CopyFn = Callable[..., Awaitable[None]]
-FindFn = Callable[..., Awaitable[list[str]]]
-ReadFn = Callable[..., Awaitable[bytes]]
-ReaddirFn = Callable[..., Awaitable[list[str]]]
-StatFn = Callable[..., Awaitable[FileStat]]
-
-
-@dataclass(frozen=True, slots=True)
-class NativeCopy:
-    copy: CopyFn
-    find: FindFn
-    dir_copy: CopyFn | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class PrimitiveCopy:
-    read_bytes: ReadFn
-    write: CopyFn
-    mkdir: CopyFn
-    readdir: ReaddirFn
-
-
-CopyStrategy = NativeCopy | PrimitiveCopy
 
 
 def descendant_path(root: PathSpec, virtual: str) -> PathSpec:

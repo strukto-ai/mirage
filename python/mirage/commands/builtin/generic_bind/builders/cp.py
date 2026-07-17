@@ -16,14 +16,13 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.cp import NativeCopy
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation,
                                                           OperationFn)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import NativeCopy, PathSpec
 from mirage.utils.key_prefix import rekey
 
 

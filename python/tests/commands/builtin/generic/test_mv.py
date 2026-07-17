@@ -14,8 +14,8 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.mv import NativeMove, mv
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.commands.builtin.generic.mv import mv
+from mirage.types import FileStat, FileType, NativeMove, PathSpec
 
 
 def _spec(path: str) -> PathSpec:

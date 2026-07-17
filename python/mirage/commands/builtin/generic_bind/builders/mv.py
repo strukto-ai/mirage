@@ -16,12 +16,11 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.mv import NativeMove
 from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import NativeMove, PathSpec
 
 
 async def mv(
