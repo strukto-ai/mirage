@@ -22,6 +22,7 @@ from mirage.workspace.session.store import SessionFields, SessionStore
 __all__ = [
     "RAMSessionStore",
     "RedisSessionStore",
+    "S3SessionStore",
     "Session",
     "SessionFields",
     "SessionManager",
@@ -37,4 +38,7 @@ def __getattr__(name: str):
     if name == "RedisSessionStore":
         from mirage.workspace.session.redis import RedisSessionStore
         return RedisSessionStore
+    if name == "S3SessionStore":
+        from mirage.workspace.session.s3 import S3SessionStore
+        return S3SessionStore
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

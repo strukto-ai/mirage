@@ -19,7 +19,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.config import (RamCacheBlock, RedisCacheBlock, RedisStoreBlock,
-                           WorkspaceConfig, load_config)
+                           S3StoreBlock, WorkspaceConfig, load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.types import ConsistencyPolicy
@@ -163,6 +163,30 @@ def test_store_group_override_redirects_one_plane():
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
     assert type(store.observer("ws1")).__name__ == "RedisObserverStore"
+
+
+def test_store_s3_workspace_group_builds_s3_provider():
+    cfg = load_config({
+        "store": {
+            "type": "ram",
+            "workspace": {
+                "type": "s3",
+                "bucket": "state-bucket",
+                "region": "us-east-1",
+                "key_prefix": "mirage/",
+            },
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    assert isinstance(cfg.store.workspace, S3StoreBlock)
+    store = cfg.to_workspace_kwargs()["store"]
+    assert isinstance(store, RAMWorkspaceStateStore)
+    assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
+    assert type(store.sessions("ws1")).__name__ == "S3SessionStore"
 
 
 def test_workspace_id_passes_through():

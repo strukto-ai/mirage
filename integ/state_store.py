@@ -22,13 +22,39 @@ import os  # noqa: E402
 import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
+from mirage.accessor.s3 import S3Config  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.workspace.session.store import SessionStore  # noqa: E402
 from mirage.workspace.store.redis import RedisWorkspaceStateStore  # noqa: E402
+from mirage.workspace.store.s3 import S3WorkspaceStateStore  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+STORE_BACKEND = os.environ.get("STORE_BACKEND", "redis")
+S3_ENDPOINT = os.environ.get("STORE_S3_ENDPOINT", "http://localhost:9000")
+S3_BUCKET = os.environ.get("STORE_S3_BUCKET", "mirage-state")
 WORKSPACE_ID = "xstore"
 MARKER = "xstore-history-marker"
+
+
+def make_state_store(prefix: str) -> RedisWorkspaceStateStore:
+    """The store under test: redis for every plane, or (STORE_BACKEND=s3)
+    the sessions+meta group riding S3 as the workspace group override."""
+    if STORE_BACKEND == "s3":
+        s3 = S3WorkspaceStateStore(
+            S3Config(bucket=S3_BUCKET,
+                     region="us-east-1",
+                     endpoint_url=S3_ENDPOINT,
+                     aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID",
+                                                      "minio"),
+                     aws_secret_access_key=os.environ.get(
+                         "AWS_SECRET_ACCESS_KEY", "minio123"),
+                     path_style=True,
+                     key_prefix=prefix))
+        return RedisWorkspaceStateStore(url=REDIS_URL,
+                                        key_prefix=prefix,
+                                        workspace=s3)
+    return RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+
 
 fail = 0
 
@@ -43,7 +69,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def make_workspace(prefix: str) -> tuple[Workspace, RedisWorkspaceStateStore]:
-    store = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    store = make_state_store(prefix)
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
                    workspace_id=WORKSPACE_ID,
@@ -74,7 +100,7 @@ async def write(prefix: str) -> None:
 async def read(prefix: str) -> None:
     """Attach with only the store config + workspace id and verify every
     plane written by the other language."""
-    probe = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    probe = make_state_store(prefix)
     meta = await probe.load_meta(WORKSPACE_ID)
     check("py read: meta record found", meta is not None)
     check("py read: meta carries a CAS generation", meta is not None
@@ -167,7 +193,7 @@ async def hammer(prefix: str, rounds: int) -> None:
 
     Announce with one increment, wait until the peer's counter shows
     up (so both main loops genuinely overlap), then run the rest."""
-    store = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    store = make_state_store(prefix)
     sess = store.sessions(WORKSPACE_ID)
     await cas_increment(sess, "py", 1)
     for _ in range(300):
@@ -184,7 +210,7 @@ async def hammer(prefix: str, rounds: int) -> None:
 
 async def cas_verify(prefix: str, rounds: int) -> None:
     """Both hammers done: no increment may be lost."""
-    store = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    store = make_state_store(prefix)
     sess = store.sessions(WORKSPACE_ID)
     final = (await sess.load())["hot"]
     check(

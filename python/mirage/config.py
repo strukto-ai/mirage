@@ -20,6 +20,7 @@ from typing import Annotated, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mirage.accessor.s3 import S3Config
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
@@ -33,6 +34,11 @@ try:
     from mirage.workspace.store import RedisWorkspaceStateStore
 except ImportError:
     RedisWorkspaceStateStore = None
+
+try:
+    from mirage.workspace.store import S3WorkspaceStateStore
+except ImportError:
+    S3WorkspaceStateStore = None
 
 
 def _coerce_mount_mode(value):
@@ -159,8 +165,19 @@ class RedisStoreBlock(BaseModel):
     key_prefix: str = "mirage:"
 
 
+class S3StoreBlock(S3Config):
+    """An ``S3Config`` plus the union discriminator: the block IS the
+    backend config, so new S3Config fields flow into the store block
+    without re-declaring them here."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    type: Literal["s3"]
+    key_prefix: str | None = "mirage/"
+
+
 StoreGroupBlock = Annotated[
-    RamStoreBlock | RedisStoreBlock,
+    RamStoreBlock | RedisStoreBlock | S3StoreBlock,
     Field(discriminator="type"),
 ]
 
@@ -175,7 +192,9 @@ class StoreBlock(BaseModel):
     logs to a separate server. Sessions and workspace metadata move
     together by design (the default-session pointer must live beside
     the session table it points into), so there is one `workspace`
-    override, not two.
+    override, not two. An ``s3`` group hosts only the sessions+meta
+    group (conditional-PUT CAS), so it is valid as the ``workspace``
+    override, never as the top-level default.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -360,13 +379,19 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
 
 
 def _build_store_group(
-        block: RamStoreBlock | RedisStoreBlock) -> WorkspaceStateStore:
+    block: RamStoreBlock | RedisStoreBlock | S3StoreBlock
+) -> WorkspaceStateStore:
     if isinstance(block, RedisStoreBlock):
         if RedisWorkspaceStateStore is None:
             raise ImportError("A redis store requires the 'redis' extra. "
                               "Install with: pip install mirage-ai[redis]")
         return RedisWorkspaceStateStore(url=block.url,
                                         key_prefix=block.key_prefix)
+    if isinstance(block, S3StoreBlock):
+        if S3WorkspaceStateStore is None:
+            raise ImportError("An s3 store requires the 's3' extra. "
+                              "Install with: pip install mirage-ai[s3]")
+        return S3WorkspaceStateStore(block)
     return RAMWorkspaceStateStore()
 
 
