@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import copy
 
 from mirage.types import MountMode
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.session import Session
-from mirage.workspace.session.store import SessionStore
+from mirage.workspace.session.store import SessionFields, SessionStore
 
 
 class SessionManager:
@@ -38,6 +39,10 @@ class SessionManager:
         self._store = store if store is not None else RAMSessionStore()
         self._sessions: dict[str, Session] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # Last state written to (or hydrated from) the store, keyed by
+        # session id: the dirty check that keeps flush from rewriting
+        # every session on every execute.
+        self._flushed: dict[str, SessionFields] = {}
         self._sessions[default_session_id] = Session(
             session_id=default_session_id)
         self._locks[default_session_id] = asyncio.Lock()
@@ -83,6 +88,7 @@ class SessionManager:
         """
         if session_id == self._default_id:
             return
+        self._flushed.pop(self._default_id, None)
         if session_id in self._sessions:
             del self._sessions[self._default_id]
             del self._locks[self._default_id]
@@ -115,17 +121,47 @@ class SessionManager:
                     default.env = stored.env
                     default.created_at = stored.created_at
                     default.mount_modes = stored.mount_modes
+                    default.generation = stored.generation
+                    self._flushed[sid] = copy.deepcopy(default.to_dict())
                     continue
                 if sid in self._sessions:
                     continue
-                self._sessions[sid] = Session.from_dict(fields)
+                session = Session.from_dict(fields)
+                self._sessions[sid] = session
                 self._locks[sid] = asyncio.Lock()
+                self._flushed[sid] = copy.deepcopy(session.to_dict())
             self._loaded = True
 
     async def flush(self) -> None:
-        """Write every session's durable fields through to the store."""
+        """Write dirty sessions through the store's generation gate."""
         for session in list(self._sessions.values()):
-            await self._store.set(session.session_id, session.to_dict())
+            await self._flush_one(session)
+
+    async def _flush_one(self, session: Session) -> None:
+        """CAS one session's durable fields, retrying on conflict.
+
+        A clean session (fields identical to what the store last saw
+        from us) is skipped. On a generation conflict the stored
+        generation is adopted and the local content retried: writers
+        serialize on the counter and content stays last-writer-wins
+        until a real merge policy exists.
+        """
+        if session.to_dict() == self._flushed.get(session.session_id):
+            return
+        for _ in range(3):
+            expected = session.generation
+            session.generation = expected + 1
+            fields = session.to_dict()
+            if await self._store.cas_set(session.session_id, fields, expected):
+                self._flushed[session.session_id] = copy.deepcopy(fields)
+                return
+            session.generation = expected
+            stored = (await self._store.load()).get(session.session_id)
+            if stored is not None:
+                session.generation = int(stored.get("generation", 0))
+        raise RuntimeError(
+            f"session {session.session_id!r} flush kept conflicting with "
+            "another writer")
 
     async def replace_from_snapshot(self, sessions: list[Session]) -> None:
         """Adopt a snapshot's session table and replace the store.
@@ -138,6 +174,7 @@ class SessionManager:
         for session in sessions:
             entries[session.session_id] = session.to_dict()
         await self._store.replace_all(entries)
+        self._flushed = copy.deepcopy(entries)
 
     def create(self,
                session_id: str,
@@ -163,6 +200,7 @@ class SessionManager:
         async with self._locks[session_id]:
             del self._sessions[session_id]
         del self._locks[session_id]
+        self._flushed.pop(session_id, None)
         await self._store.delete([session_id])
 
     async def close_all(self) -> None:

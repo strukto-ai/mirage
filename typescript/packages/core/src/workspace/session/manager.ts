@@ -35,6 +35,10 @@ export class SessionManager {
   private defaultIdInternal: string
   private loaded = false
   private loadPromise: Promise<void> | null = null
+  // Serialized last state written to (or hydrated from) the store,
+  // keyed by session id: the dirty check that keeps flush from
+  // rewriting every session on every execute.
+  private readonly flushed = new Map<string, string>()
 
   constructor(defaultSessionId: string, store?: SessionStore) {
     this.defaultIdInternal = defaultSessionId
@@ -61,6 +65,7 @@ export class SessionManager {
    */
   adoptDefault(sessionId: string): void {
     if (sessionId === this.defaultIdInternal) return
+    this.flushed.delete(this.defaultIdInternal)
     const existing = this.sessions.get(sessionId)
     if (existing !== undefined) {
       this.sessions.delete(this.defaultIdInternal)
@@ -113,19 +118,50 @@ export class SessionManager {
         dflt.env = stored.env
         dflt.createdAt = stored.createdAt
         dflt.mountModes = stored.mountModes
+        dflt.generation = stored.generation
+        this.flushed.set(sid, JSON.stringify(dflt.toJSON()))
         continue
       }
       if (this.sessions.has(sid)) continue
       this.sessions.set(sid, stored)
+      this.flushed.set(sid, JSON.stringify(stored.toJSON()))
     }
     this.loaded = true
   }
 
-  /** Write every session's durable fields through to the store. */
+  /** Write dirty sessions through the store's generation gate. */
   async flush(): Promise<void> {
     for (const session of [...this.sessions.values()]) {
-      await this.sessionStore.set(session.sessionId, session.toJSON() as SessionFields)
+      await this.flushOne(session)
     }
+  }
+
+  /**
+   * CAS one session's durable fields, retrying on conflict.
+   *
+   * A clean session (fields identical to what the store last saw from
+   * us) is skipped. On a generation conflict the stored generation is
+   * adopted and the local content retried: writers serialize on the
+   * counter and content stays last-writer-wins until a real merge
+   * policy exists.
+   */
+  private async flushOne(session: Session): Promise<void> {
+    if (JSON.stringify(session.toJSON()) === this.flushed.get(session.sessionId)) return
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const expected = session.generation
+      session.generation = expected + 1
+      const fields = session.toJSON() as SessionFields
+      if (await this.sessionStore.casSet(session.sessionId, fields, expected)) {
+        this.flushed.set(session.sessionId, JSON.stringify(fields))
+        return
+      }
+      session.generation = expected
+      const stored = (await this.sessionStore.load()).get(session.sessionId)
+      if (stored !== undefined) {
+        session.generation = Number(stored.generation ?? 0)
+      }
+    }
+    throw new Error(`session ${session.sessionId} flush kept conflicting with another writer`)
   }
 
   /**
@@ -140,6 +176,8 @@ export class SessionManager {
     for (const s of this.sessions.values()) entries.set(s.sessionId, s.toJSON() as SessionFields)
     for (const s of sessions) entries.set(s.sessionId, s.toJSON() as SessionFields)
     await this.sessionStore.replaceAll(entries)
+    this.flushed.clear()
+    for (const [sid, fields] of entries) this.flushed.set(sid, JSON.stringify(fields))
   }
 
   create(
@@ -175,6 +213,7 @@ export class SessionManager {
       throw new Error(`unknown session: ${sessionId}`)
     }
     this.sessions.delete(sessionId)
+    this.flushed.delete(sessionId)
     await this.sessionStore.delete([sessionId])
   }
 

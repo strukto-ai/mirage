@@ -153,3 +153,83 @@ describe('SessionManager with a SessionStore', () => {
     expect((await store.load()).has('gone')).toBe(false)
   })
 })
+
+class CountingStore extends RAMSessionStore {
+  casCalls = 0
+
+  override casSet(
+    sessionId: string,
+    fields: Parameters<RAMSessionStore['casSet']>[1],
+    expectedGeneration: number,
+  ): Promise<boolean> {
+    this.casCalls += 1
+    return super.casSet(sessionId, fields, expectedGeneration)
+  }
+}
+
+describe('SessionManager dirty flush + CAS', () => {
+  it('flush skips clean sessions', async () => {
+    const store = new CountingStore()
+    const m = new SessionManager('default', store)
+    await m.flush()
+    expect(store.casCalls).toBe(1)
+    await m.flush()
+    expect(store.casCalls).toBe(1)
+    m.get('default').env.K = 'v'
+    await m.flush()
+    expect(store.casCalls).toBe(2)
+  })
+
+  it('flush bumps the generation', async () => {
+    const store = new RAMSessionStore()
+    const m = new SessionManager('default', store)
+    await m.flush()
+    expect(m.get('default').generation).toBe(1)
+    m.get('default').cwd = '/data'
+    await m.flush()
+    expect(m.get('default').generation).toBe(2)
+    expect((await store.load()).get('default')?.generation).toBe(2)
+  })
+
+  it('a conflict adopts the stored generation and retries', async () => {
+    const store = new RAMSessionStore()
+    const m = new SessionManager('default', store)
+    await store.set('default', {
+      session_id: 'default',
+      cwd: '/theirs',
+      env: {},
+      generation: 5,
+    })
+    m.get('default').cwd = '/ours'
+    await m.flush()
+    const entries = await store.load()
+    expect(entries.get('default')?.cwd).toBe('/ours')
+    expect(entries.get('default')?.generation).toBe(6)
+    expect(m.get('default').generation).toBe(6)
+  })
+
+  it('exhausted retries raise', async () => {
+    class AlwaysConflict extends RAMSessionStore {
+      override casSet(): Promise<boolean> {
+        return Promise.resolve(false)
+      }
+    }
+    const m = new SessionManager('default', new AlwaysConflict())
+    m.get('default').cwd = '/data'
+    await expect(m.flush()).rejects.toThrow(/conflict/)
+  })
+
+  it('hydrated sessions start clean', async () => {
+    const store = new CountingStore()
+    await store.set('s2', { session_id: 's2', cwd: '/data', env: {}, generation: 3 })
+    const m = new SessionManager('default', store)
+    await m.ensureLoaded()
+    expect(m.get('s2').generation).toBe(3)
+    const before = store.casCalls
+    await m.flush()
+    expect(store.casCalls).toBe(before + 1)
+    m.get('s2').env.K = 'v'
+    await m.flush()
+    expect((await store.load()).get('s2')?.generation).toBe(4)
+  })
+})

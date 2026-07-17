@@ -41,6 +41,7 @@ describe('Session', () => {
       cwd: '/a',
       env: { K: 'V' },
       created_at: s.createdAt,
+      generation: 0,
     })
     expect('functions' in json).toBe(false)
     expect('lastExitCode' in json).toBe(false)

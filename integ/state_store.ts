@@ -89,6 +89,11 @@ async function read(prefix: string): Promise<void> {
     'ts read: session grant narrowed',
     session.mountModes !== null && session.mountModes.get('/data') === MountMode.READ,
   )
+  check(
+    'ts read: generation survived the wire',
+    session.generation >= 1,
+    `got ${String(session.generation)}`,
+  )
   const denied = await ws.execute('echo blocked > /data/x.txt', { sessionId: 'narrow' })
   check('ts read: narrowed write denied', denied.exitCode !== 0)
   await ws.close()

@@ -92,3 +92,38 @@ describe.skipIf(skip)('RedisSessionStore', () => {
     }
   })
 })
+
+describe.skipIf(skip)('RedisSessionStore casSet', () => {
+  it('serializes two writers on the generation counter', async () => {
+    const prefix = testPrefix()
+    const writerA = makeStore(prefix)
+    const writerB = makeStore(prefix)
+    try {
+      expect(await writerA.casSet('s', { session_id: 's', cwd: '/a', generation: 1 }, 0)).toBe(true)
+      expect(await writerB.casSet('s', { session_id: 's', cwd: '/b', generation: 1 }, 0)).toBe(
+        false,
+      )
+      expect(await writerB.casSet('s', { session_id: 's', cwd: '/b', generation: 2 }, 1)).toBe(true)
+      expect((await writerA.load()).get('s')?.cwd).toBe('/b')
+    } finally {
+      await writerA.clear()
+      await writerA.close()
+      await writerB.close()
+    }
+  })
+
+  it('treats a legacy record without the field as generation 0', async () => {
+    const prefix = testPrefix()
+    const store = makeStore(prefix)
+    try {
+      await store.set('s1', { session_id: 's1', cwd: '/old' })
+      expect(await store.casSet('s1', { session_id: 's1', cwd: '/new', generation: 1 }, 0)).toBe(
+        true,
+      )
+      expect((await store.load()).get('s1')?.cwd).toBe('/new')
+    } finally {
+      await store.clear()
+      await store.close()
+    }
+  })
+})

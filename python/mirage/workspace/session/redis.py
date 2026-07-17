@@ -31,11 +31,28 @@ class RedisSessionStore(SessionStore):
     single-command (HSET/HDEL) so mutations stay one round trip.
     """
 
+    CAS_SCRIPT = """
+local raw = redis.call('HGET', KEYS[1], ARGV[1])
+local current = 0
+if raw then
+    local record = cjson.decode(raw)
+    if record['generation'] then
+        current = tonumber(record['generation'])
+    end
+end
+if current ~= tonumber(ARGV[3]) then
+    return 0
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+return 1
+"""
+
     def __init__(self,
                  url: str = "redis://localhost:6379/0",
                  key_prefix: str = "mirage:session:") -> None:
         self._client = aioredis.from_url(url)
         self._key = f"{key_prefix}sessions"
+        self._cas = self._client.register_script(self.CAS_SCRIPT)
 
     async def load(self) -> dict[str, SessionFields]:
         raw = await cast(Awaitable, self._client.hgetall(self._key))
@@ -45,6 +62,18 @@ class RedisSessionStore(SessionStore):
         await cast(
             Awaitable,
             self._client.hset(self._key, session_id, json.dumps(fields)))
+
+    async def cas_set(self, session_id: str, fields: SessionFields,
+                      expected_generation: int) -> bool:
+        # One atomic server-side compare-and-set: Lua reads the stored
+        # record's generation and writes only on a match.
+        result = await self._cas(keys=[self._key],
+                                 args=[
+                                     session_id,
+                                     json.dumps(fields),
+                                     expected_generation,
+                                 ])
+        return bool(result)
 
     async def delete(self, session_ids: Iterable[str]) -> None:
         ids = list(session_ids)

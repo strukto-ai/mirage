@@ -95,6 +95,8 @@ async def read(prefix: str) -> None:
     check(
         "py read: session grant narrowed", session.mount_modes is not None
         and session.mount_modes.get("/data") == MountMode.READ)
+    check("py read: generation survived the wire", session.generation >= 1,
+          f"got {session.generation}")
     result = await ws.execute("echo blocked > /data/x.txt",
                               session_id="narrow")
     check("py read: narrowed write denied", result.exit_code != 0)

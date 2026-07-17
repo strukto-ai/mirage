@@ -43,6 +43,27 @@ class SessionStore(ABC):
         """Insert or update one session's fields."""
 
     @abstractmethod
+    async def cas_set(self, session_id: str, fields: SessionFields,
+                      expected_generation: int) -> bool:
+        """Write one session iff its stored generation matches.
+
+        Optimistic concurrency for the flush path: the write succeeds
+        only when the stored record's ``generation`` equals
+        ``expected_generation`` (a missing record and a record without
+        the field both count as generation 0). ``replace_all`` stays
+        unchecked on purpose: a snapshot restore wins wholesale.
+
+        Args:
+            session_id (str): session to write.
+            fields (SessionFields): full record, already carrying the
+                bumped generation.
+            expected_generation (int): generation the caller last saw.
+
+        Returns:
+            bool: True when the write landed, False on conflict.
+        """
+
+    @abstractmethod
     async def delete(self, session_ids: Iterable[str]) -> None:
         """Remove the given sessions; missing ids are ignored."""
 

@@ -31,6 +31,14 @@ export class RAMSessionStore extends SessionStore {
     return Promise.resolve()
   }
 
+  casSet(sessionId: string, fields: SessionFields, expectedGeneration: number): Promise<boolean> {
+    const stored = this.entries.get(sessionId)
+    const current = stored === undefined ? 0 : Number(stored.generation ?? 0)
+    if (current !== expectedGeneration) return Promise.resolve(false)
+    this.entries.set(sessionId, { ...fields })
+    return Promise.resolve(true)
+  }
+
   delete(sessionIds: readonly string[]): Promise<void> {
     for (const sid of sessionIds) this.entries.delete(sid)
     return Promise.resolve()

@@ -32,6 +32,7 @@ class Session:
     readonly_vars: set[str] = field(default_factory=set)
     arrays: dict[str, list[str]] = field(default_factory=dict)
     mount_modes: dict[str, MountMode] | None = None
+    generation: int = 0
     pipeline_timeout_seconds: float | None = None
     positional_args: list[str] = field(default_factory=list)
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
@@ -43,6 +44,7 @@ class Session:
             "cwd": self.cwd,
             "env": self.env,
             "created_at": self.created_at,
+            "generation": self.generation,
         }
         if self.mount_modes is not None:
             data["mount_modes"] = {
@@ -97,6 +99,8 @@ class Session:
             },
             "mount_modes":
             (dict(self.mount_modes) if self.mount_modes is not None else None),
+            "generation":
+            self.generation,
             "pipeline_timeout_seconds":
             self.pipeline_timeout_seconds,
         }

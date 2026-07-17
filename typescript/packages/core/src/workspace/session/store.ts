@@ -34,6 +34,21 @@ export abstract class SessionStore {
   abstract load(): Promise<Map<string, SessionFields>>
   // Insert or update one session's fields.
   abstract set(sessionId: string, fields: SessionFields): Promise<void>
+  /**
+   * Write one session iff its stored generation matches.
+   *
+   * Optimistic concurrency for the flush path: the write succeeds only
+   * when the stored record's `generation` equals `expectedGeneration`
+   * (a missing record and a record without the field both count as
+   * generation 0). `replaceAll` stays unchecked on purpose: a snapshot
+   * restore wins wholesale. Resolves true when the write landed, false
+   * on conflict.
+   */
+  abstract casSet(
+    sessionId: string,
+    fields: SessionFields,
+    expectedGeneration: number,
+  ): Promise<boolean>
   // Remove the given sessions; missing ids are ignored.
   abstract delete(sessionIds: readonly string[]): Promise<void>
   // Replace the full session table (snapshot restore).

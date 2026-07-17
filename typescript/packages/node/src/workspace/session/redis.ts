@@ -62,6 +62,38 @@ export class RedisSessionStore extends SessionStore {
     return this.clientPromise
   }
 
+  // One atomic server-side compare-and-set: Lua reads the stored
+  // record's generation and writes only on a match. Byte-compatible
+  // with the Python RedisSessionStore script.
+  private static readonly CAS_SCRIPT = `
+local raw = redis.call('HGET', KEYS[1], ARGV[1])
+local current = 0
+if raw then
+    local record = cjson.decode(raw)
+    if record['generation'] then
+        current = tonumber(record['generation'])
+    end
+end
+if current ~= tonumber(ARGV[3]) then
+    return 0
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+return 1
+`
+
+  async casSet(
+    sessionId: string,
+    fields: SessionFields,
+    expectedGeneration: number,
+  ): Promise<boolean> {
+    const c = await this.client()
+    const result = await c.eval(RedisSessionStore.CAS_SCRIPT, {
+      keys: [this.key],
+      arguments: [sessionId, JSON.stringify(fields), String(expectedGeneration)],
+    })
+    return result === 1
+  }
+
   async load(): Promise<Map<string, SessionFields>> {
     const c = await this.client()
     const raw = await c.hGetAll(this.key)
