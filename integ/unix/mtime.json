@@ -1,0 +1,117 @@
+{
+  "cases": [
+    {
+      "id": "mtime_seed",
+      "seq": 400000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "mkdir -p /data/mtimecheck && printf x | tee /data/mtimecheck/probe.txt > /dev/null && echo seeded",
+      "expect": {
+        "exit": 0,
+        "stdout": "seeded\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mtime_file_listing_present",
+      "seq": 400001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "ls -l /data/mtimecheck/probe.txt | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mtime_file_not_epoch",
+      "seq": 400002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "ls -l /data/mtimecheck/probe.txt | grep -c \"Jan  1 00:00\"",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mtime_dir_not_epoch",
+      "seq": 400003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "ls -l /data | grep mtimecheck | grep -c \"Jan  1 00:00\"",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mtime_cleanup",
+      "seq": 400004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rm -rf /data/mtimecheck && echo cleaned",
+      "expect": {
+        "exit": 0,
+        "stdout": "cleaned\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
