@@ -14,8 +14,10 @@
 
 import type { CommandIO } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../../accessor/redis.ts'
+import { appendBytes as redisAppend } from '../../../core/redis/append.ts'
 import { SCOPE_ERROR } from '../../../core/redis/constants.ts'
 import { copy as redisCopy } from '../../../core/redis/copy.ts'
+import { create as redisCreate } from '../../../core/redis/create.ts'
 import { du as redisDu, duAll as redisDuAll } from '../../../core/redis/du.ts'
 import { exists as redisExists } from '../../../core/redis/exists.ts'
 import { find as redisFind } from '../../../core/redis/find.ts'
@@ -25,8 +27,10 @@ import { readdir as redisReaddir } from '../../../core/redis/readdir.ts'
 import { rename as redisRename } from '../../../core/redis/rename.ts'
 import { rmR as redisRmR } from '../../../core/redis/rm.ts'
 import { rmdir as redisRmdir } from '../../../core/redis/rmdir.ts'
+import { setAttrs as redisSetAttrs } from '../../../core/redis/set_attrs.ts'
 import { stat as redisStat } from '../../../core/redis/stat.ts'
 import { stream as redisStream } from '../../../core/redis/stream.ts'
+import { truncate as redisTruncate } from '../../../core/redis/truncate.ts'
 import { unlink as redisUnlink } from '../../../core/redis/unlink.ts'
 import { writeBytes as redisWrite } from '../../../core/redis/write.ts'
 
@@ -46,6 +50,10 @@ export const REDIS_CMD_OPS: CommandIO<RedisAccessor> = {
   rmR: redisRmR,
   rename: redisRename,
   copy: redisCopy,
+  create: redisCreate,
+  truncate: redisTruncate,
+  append: redisAppend,
+  setAttrs: redisSetAttrs,
   find: redisFind,
   duTotal: redisDu,
   duAll: async (accessor, path) => {

@@ -14,8 +14,10 @@
 
 import type { CommandIO } from '@struktoai/mirage-core'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
+import { appendBytes as diskAppend } from '../../../core/disk/append.ts'
 import { SCOPE_ERROR } from '../../../core/disk/constants.ts'
 import { copy as diskCopy } from '../../../core/disk/copy.ts'
+import { create as diskCreate } from '../../../core/disk/create.ts'
 import { du as diskDu, duAll as diskDuAll } from '../../../core/disk/du.ts'
 import { exists as diskExists } from '../../../core/disk/exists.ts'
 import { find as diskFind } from '../../../core/disk/find.ts'
@@ -25,8 +27,10 @@ import { readdir as diskReaddir } from '../../../core/disk/readdir.ts'
 import { rename as diskRename } from '../../../core/disk/rename.ts'
 import { rmR as diskRmR } from '../../../core/disk/rm.ts'
 import { rmdir as diskRmdir } from '../../../core/disk/rmdir.ts'
+import { setAttrs as diskSetAttrs } from '../../../core/disk/set_attrs.ts'
 import { stat as diskStat } from '../../../core/disk/stat.ts'
 import { stream as diskStream } from '../../../core/disk/stream.ts'
+import { truncate as diskTruncate } from '../../../core/disk/truncate.ts'
 import { unlink as diskUnlink } from '../../../core/disk/unlink.ts'
 import { writeBytes as diskWrite } from '../../../core/disk/write.ts'
 
@@ -46,6 +50,10 @@ export const DISK_CMD_OPS: CommandIO<DiskAccessor> = {
   rmR: diskRmR,
   rename: diskRename,
   copy: diskCopy,
+  create: diskCreate,
+  truncate: diskTruncate,
+  append: diskAppend,
+  setAttrs: diskSetAttrs,
   find: diskFind,
   duTotal: diskDu,
   duAll: diskDuAll,

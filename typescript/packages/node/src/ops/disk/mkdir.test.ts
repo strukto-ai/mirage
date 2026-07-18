@@ -14,8 +14,10 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DiskResource } from '../../resource/disk/disk.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
-import { mkdirOp } from './mkdir.ts'
+import { opOf, spec, tmpRoot } from '../../test-utils.ts'
+import { DISK_OPS } from './index.ts'
+
+const mkdirOp = opOf(DISK_OPS, 'mkdir')
 
 let root: string
 let cleanup: () => void

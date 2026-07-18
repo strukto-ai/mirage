@@ -14,20 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ResourceName } from '@struktoai/mirage-core'
-import {
-  appendOp,
-  createOp,
-  mkdirOp,
-  readdirOp,
-  readOp,
-  renameOp,
-  rmdirOp,
-  SSH_OPS,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-} from './index.ts'
+import { SSH_OPS } from './index.ts'
 
 describe('SSH_OPS', () => {
   it('registers the expected 11 ops with resource=ssh', () => {
@@ -59,19 +46,5 @@ describe('SSH_OPS', () => {
     expect(writes).toEqual(
       new Set(['append', 'create', 'mkdir', 'rename', 'rmdir', 'truncate', 'unlink', 'write']),
     )
-  })
-
-  it('exports each op individually', () => {
-    expect(appendOp.name).toBe('append')
-    expect(createOp.name).toBe('create')
-    expect(mkdirOp.name).toBe('mkdir')
-    expect(readOp.name).toBe('read')
-    expect(readdirOp.name).toBe('readdir')
-    expect(renameOp.name).toBe('rename')
-    expect(rmdirOp.name).toBe('rmdir')
-    expect(statOp.name).toBe('stat')
-    expect(truncateOp.name).toBe('truncate')
-    expect(unlinkOp.name).toBe('unlink')
-    expect(writeOp.name).toBe('write')
   })
 })

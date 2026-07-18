@@ -12,14 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RunArgs, RunResult } from '../../runtime.ts'
 import type { BridgeDispatchFn } from '../mirage_bridge.ts'
 import { MONTY_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
-import type {
-  PythonReplRunArgs,
-  PythonReplRunResult,
-  PythonRunArgs,
-  PythonRunResult,
-} from '../types.ts'
+import type { PythonReplRunArgs, PythonReplRunResult } from '../types.ts'
 
 export class MontyUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -79,8 +75,10 @@ export type MontyRuntimeOptions = PythonRuntimeOptions
  */
 export class MontyRuntime implements PythonRuntime {
   readonly name = MONTY_RUNTIME
-  private readonly workspaceBridge: BridgeDispatchFn | null
-  private readonly listMounts: () => string[]
+  static readonly commands: readonly string[] = ['python3', 'python'] as const
+  readonly captures = MontyRuntime.commands
+  private workspaceBridge: BridgeDispatchFn | null
+  private listMounts: () => string[]
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
   private poolPromise: Promise<MontyPoolLike> | null = null
@@ -91,7 +89,14 @@ export class MontyRuntime implements PythonRuntime {
     this.listMounts = options.listMounts ?? ((): string[] => [])
   }
 
-  async run(args: PythonRunArgs): Promise<PythonRunResult> {
+  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+    if (this.workspaceBridge === null) {
+      this.workspaceBridge = dispatch
+      this.listMounts = listMounts
+    }
+  }
+
+  async run(args: RunArgs): Promise<RunResult> {
     const pool = await this.ensurePool()
     const session = await pool.checkout()
     try {
@@ -116,11 +121,12 @@ export class MontyRuntime implements PythonRuntime {
     })
     const incomplete =
       result.exitCode !== 0 &&
+      result.stderr !== null &&
       new TextDecoder().decode(result.stderr).includes('unexpected EOF while parsing')
     if (incomplete) {
       return {
         stdout: new Uint8Array(),
-        stderr: new Uint8Array(),
+        stderr: null,
         exitCode: 0,
         status: 'incomplete',
       }
@@ -168,8 +174,8 @@ export class MontyRuntime implements PythonRuntime {
   private async feedOne(
     session: MontySessionLike,
     code: string,
-    args: PythonRunArgs,
-  ): Promise<PythonRunResult> {
+    args: RunArgs,
+  ): Promise<RunResult> {
     const module = await this.loadModule()
     const out: string[] = []
     const err: string[] = []
@@ -188,7 +194,7 @@ export class MontyRuntime implements PythonRuntime {
         err.push(displayError(caught) + '\n')
         return {
           stdout: new TextEncoder().encode(out.join('')),
-          stderr: new TextEncoder().encode(err.join('')),
+          stderr: err.length > 0 ? new TextEncoder().encode(err.join('')) : null,
           exitCode: 1,
         }
       }
@@ -196,7 +202,7 @@ export class MontyRuntime implements PythonRuntime {
     }
     return {
       stdout: new TextEncoder().encode(out.join('')),
-      stderr: new TextEncoder().encode(err.join('')),
+      stderr: err.length > 0 ? new TextEncoder().encode(err.join('')) : null,
       exitCode: 0,
     }
   }

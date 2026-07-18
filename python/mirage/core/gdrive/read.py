@@ -20,7 +20,6 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdocs.read import read_doc
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir
-from mirage.core.google._client import TokenManager
 from mirage.core.google.drive import download_file
 from mirage.core.gsheets.read import read_spreadsheet
 from mirage.core.gslides.read import read_presentation
@@ -29,13 +28,6 @@ from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
-
-
-async def read_bytes(
-    token_manager: TokenManager,
-    file_id: str,
-) -> bytes:
-    return await download_file(token_manager, file_id)
 
 
 async def read(

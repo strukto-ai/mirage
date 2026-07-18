@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { PatternType } from './constants.ts'
 import {
   classifyPattern,
   compilePattern,
@@ -20,7 +21,6 @@ import {
   isRegexPattern,
   mergePatternList,
   NEVER_MATCH,
-  PatternType,
   searchQuery,
 } from './grep_helper.ts'
 

@@ -209,3 +209,4 @@ class ShellBuiltin(StrEnum):
     BREAK = "break"
     CONTINUE = "continue"
     RETURN = "return"
+    EXIT = "exit"

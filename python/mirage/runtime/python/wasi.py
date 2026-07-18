@@ -17,8 +17,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
-                                        PythonRuntime)
+from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 wasmtime: Any
@@ -35,12 +34,12 @@ _BUILD_HINT = (
     "the wasi runtime needs a CPython WASI build directory (python.wasm "
     "plus lib/): download one from "
     "https://github.com/brettcannon/cpython-wasi-build/releases, unzip it, "
-    "and point the yaml `runtime: wasi: home:` key, the Workspace "
-    f"`runtime_options` argument, or the {WASI_HOME_ENV} environment "
+    "and point the yaml `runtimes: [{name: wasi, home: ...}]` entry, the "
+    f"runtime entry's `home` option, or the {WASI_HOME_ENV} environment "
     "variable at the directory")
 
 
-class WasiRuntime(PythonRuntime):
+class WasiRuntime(Runtime):
     """Run Python code on a WASI CPython under wasmtime, in-process.
 
     Full CPython (classes, complete stdlib, real `sys`) inside a wasm
@@ -59,7 +58,7 @@ class WasiRuntime(PythonRuntime):
     safeguard timeout stops the interpreter instead of leaking it.
 
     The build directory comes from the `home` argument (the yaml
-    `runtime: wasi: home:` entry ends up here) or the MIRAGE_WASI_HOME
+    `runtimes:` entry `home` option ends up here) or the MIRAGE_WASI_HOME
     environment variable. It is read-only inside the sandbox; guest
     writes land in the workspace or answer EACCES, never in the bundle.
 
@@ -74,6 +73,7 @@ class WasiRuntime(PythonRuntime):
     """
 
     name = "wasi"
+    captures = ("python3", "python")
 
     def __init__(
         self,
@@ -101,7 +101,13 @@ class WasiRuntime(PythonRuntime):
         self._mount_prefixes = mount_prefixes
         self._runtime = WasmRuntime(self._root / "python.wasm", "python3")
 
-    async def run(self, args: PythonRunArgs) -> PythonRunResult:
+    def attach(self, dispatch: Callable[..., Any],
+               mount_prefixes: Callable[[], list[str]]) -> None:
+        if self._dispatch is None:
+            self._dispatch = dispatch
+            self._mount_prefixes = mount_prefixes
+
+    async def run(self, args: RunArgs) -> RunResult:
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never
         # collides with the interpreter's own files.
@@ -122,6 +128,4 @@ class WasiRuntime(PythonRuntime):
             ],
             fs=fs,
         )
-        return PythonRunResult(stdout=stdout,
-                               stderr=stderr,
-                               exit_code=exit_code)
+        return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)

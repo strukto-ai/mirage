@@ -13,53 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
-import { appendOp } from './append.ts'
-import { createOp } from './create.ts'
-import { mkdirOp } from './mkdir.ts'
-import { readOp } from './read.ts'
-import { readFeatherOp } from './read_feather.ts'
-import { readHdf5Op } from './read_hdf5.ts'
-import { readParquetOp } from './read_parquet.ts'
-import { readdirOp } from './readdir.ts'
-import { renameOp } from './rename.ts'
-import { rmdirOp } from './rmdir.ts'
-import { setAttrsOp } from './set_attrs.ts'
-import { statOp } from './stat.ts'
-import { truncateOp } from './truncate.ts'
-import { unlinkOp } from './unlink.ts'
-import { writeOp } from './write.ts'
+import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
+import { DISK_CMD_OPS } from '../../commands/builtin/disk/ops.ts'
 
-export const DISK_OPS: readonly RegisteredOp[] = [
-  appendOp,
-  createOp,
-  mkdirOp,
-  readOp,
-  readFeatherOp,
-  readHdf5Op,
-  readParquetOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  setAttrsOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-]
-
-export {
-  appendOp,
-  createOp,
-  mkdirOp,
-  readOp,
-  readFeatherOp,
-  readHdf5Op,
-  readParquetOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-}
+export const DISK_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.DISK, DISK_CMD_OPS, {
+  filetypeRead: ['.feather', '.hdf5', '.parquet'],
+  mkdirParents: true,
+  forwardIndex: false,
+})

@@ -39,7 +39,7 @@ async function pythonCommand(
     ]
   }
 
-  if (opts.pythonRuntime === undefined) {
+  if (opts.runtime === undefined) {
     return [
       null,
       new IOResult({
@@ -95,7 +95,7 @@ async function pythonCommand(
       env: opts.env ?? {},
       code: resolvedCode,
     },
-    { runtime: opts.pythonRuntime },
+    { runtime: opts.runtime },
   )
   return [stdout, io]
 }

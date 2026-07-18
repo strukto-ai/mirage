@@ -39,7 +39,7 @@ async function jsCommand(
     ]
   }
 
-  if (opts.jsRuntime === undefined) {
+  if (opts.runtime === undefined) {
     return [
       null,
       new IOResult({
@@ -97,7 +97,7 @@ async function jsCommand(
       code: resolvedCode,
       module,
     },
-    { runtime: opts.jsRuntime },
+    { runtime: opts.runtime },
   )
   return [stdout, io]
 }

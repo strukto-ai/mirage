@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../../accessor/ram.ts'
+import { appendBytes as ramAppend } from '../../../core/ram/append.ts'
 import { copy as ramCopy } from '../../../core/ram/copy.ts'
+import { create as ramCreate } from '../../../core/ram/create.ts'
 import { du as ramDu, duAll as ramDuAll } from '../../../core/ram/du.ts'
 import { exists as ramExists } from '../../../core/ram/exists.ts'
 import { find as ramFind } from '../../../core/ram/find.ts'
@@ -24,8 +26,10 @@ import { rename as ramRename } from '../../../core/ram/rename.ts'
 import { rmR as ramRmR } from '../../../core/ram/rm.ts'
 import { rmdir as ramRmdir } from '../../../core/ram/rmdir.ts'
 import { SCOPE_ERROR } from '../../../core/ram/constants.ts'
+import { setAttrs as ramSetAttrs } from '../../../core/ram/set_attrs.ts'
 import { stat as ramStat } from '../../../core/ram/stat.ts'
 import { stream as ramStream } from '../../../core/ram/stream.ts'
+import { truncate as ramTruncate } from '../../../core/ram/truncate.ts'
 import { unlink as ramUnlink } from '../../../core/ram/unlink.ts'
 import { writeBytes as ramWrite } from '../../../core/ram/write.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
@@ -46,6 +50,10 @@ export const RAM_CMD_OPS: CommandIO<RAMAccessor> = {
   rmR: ramRmR,
   rename: ramRename,
   copy: ramCopy,
+  create: ramCreate,
+  truncate: ramTruncate,
+  append: ramAppend,
+  setAttrs: ramSetAttrs,
   find: ramFind,
   duTotal: ramDu,
   duAll: ramDuAll,

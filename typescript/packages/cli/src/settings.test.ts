@@ -238,8 +238,8 @@ describe('config writer', () => {
   it('round-trips a backslash-containing value through setConfig/getConfig', () => {
     const { dir, path } = tmpConfigPath()
     try {
-      setConfig('version_root', 'C:\\repos', path)
-      expect(getConfig('version_root', path)).toBe('C:\\repos')
+      setConfig('socket', 'C:\\pipes\\mirage', path)
+      expect(getConfig('socket', path)).toBe('C:\\pipes\\mirage')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -317,15 +317,12 @@ describe('resolvedConfig', () => {
   it('reports env, file, and default origins', () => {
     const home = mkdtempSync(join(tmpdir(), 'mirage-cli-resolved-'))
     try {
-      writeFileSync(
-        join(home, 'config.toml'),
-        '[daemon]\nversion_root = "/file/repos"\nurl = "http://f:1"\n',
-      )
-      const env = { MIRAGE_HOME: home, MIRAGE_VERSION_ROOT: '/env/repos' }
+      writeFileSync(join(home, 'config.toml'), '[daemon]\nport = 9001\nurl = "http://f:1"\n')
+      const env = { MIRAGE_HOME: home, MIRAGE_DAEMON_PORT: '9314' }
       const resolved = resolvedConfig(env)
-      expect(resolved.version_root).toEqual(['/env/repos', 'env MIRAGE_VERSION_ROOT'])
+      expect(resolved.port).toEqual(['9314', 'env MIRAGE_DAEMON_PORT'])
       expect(resolved.url).toEqual(['http://f:1', 'file'])
-      expect(resolved.snapshot_root).toEqual([join(home, 'snapshots'), 'default'])
+      expect(resolved.idle_grace_seconds).toEqual(['30', 'default'])
     } finally {
       rmSync(home, { recursive: true, force: true })
     }
@@ -337,7 +334,6 @@ describe('resolvedConfig', () => {
       const env = { MIRAGE_HOME: home }
       const resolved = resolvedConfig(env)
       expect(resolved.url).toEqual([DEFAULT_DAEMON_URL, 'default'])
-      expect(resolved.pid_file).toEqual([join(home, 'daemon.pid'), 'default'])
       expect(resolved.idle_grace_seconds).toEqual(['30', 'default'])
     } finally {
       rmSync(home, { recursive: true, force: true })

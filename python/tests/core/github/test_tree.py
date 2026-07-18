@@ -13,12 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.tree import fetch_tree
+from mirage.core.github.tree import fetch_tree_sync
 from mirage.core.github.tree_entry import TreeEntry
 
 
@@ -27,9 +27,8 @@ def config():
     return GitHubConfig(token="ghp_test")
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.github.tree.github_get", new_callable=AsyncMock)
-async def test_fetch_tree_parses_entries(mock_get, config):
+@patch("mirage.core.github.tree.github_get_sync")
+def test_fetch_tree_parses_entries(mock_get, config):
     mock_get.return_value = {
         "truncated":
         False,
@@ -48,7 +47,7 @@ async def test_fetch_tree_parses_entries(mock_get, config):
             },
         ],
     }
-    tree, truncated = await fetch_tree(config, "acme", "proj", "main")
+    tree, truncated = fetch_tree_sync(config, "acme", "proj", "main")
     assert "src" in tree
     assert "src/main.py" in tree
     assert tree["src"] == TreeEntry(path="src",
@@ -61,21 +60,19 @@ async def test_fetch_tree_parses_entries(mock_get, config):
                                             size=120)
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.github.tree.github_get", new_callable=AsyncMock)
-async def test_fetch_tree_truncation_warning(mock_get, config, caplog):
+@patch("mirage.core.github.tree.github_get_sync")
+def test_fetch_tree_truncation_warning(mock_get, config, caplog):
     mock_get.return_value = {"truncated": True, "tree": []}
     with caplog.at_level(logging.WARNING):
-        await fetch_tree(config, "acme", "proj", "main")
+        fetch_tree_sync(config, "acme", "proj", "main")
     assert "truncated" in caplog.text
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.github.tree.github_get", new_callable=AsyncMock)
-async def test_fetch_tree_passes_params(mock_get, config):
+@patch("mirage.core.github.tree.github_get_sync")
+def test_fetch_tree_passes_params(mock_get, config):
     mock_get.return_value = {"tree": []}
-    await fetch_tree(config, "acme", "proj", "v1")
-    mock_get.assert_awaited_once_with(
+    fetch_tree_sync(config, "acme", "proj", "v1")
+    mock_get.assert_called_once_with(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{ref}",
         owner="acme",

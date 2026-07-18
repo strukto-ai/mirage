@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../accessor/base.ts'
+import { mkdir as coreMkdir } from '../../core/ram/mkdir.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { FileType, MountMode, PathSpec, ResourceName } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
@@ -239,15 +240,15 @@ describe('RAMResource rename', () => {
 })
 
 describe('RAMResource mkdir -p parents', () => {
-  it('creates intermediate directories when parents=true', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/a/b/c', true)
+  it('creates intermediate directories when parents=true (core mkdir)', async () => {
+    const { ram } = setup()
+    await coreMkdir(ram.accessor, PathSpec.fromStrPath('/a/b/c'), true)
     expect(ram.store.dirs.has('/a')).toBe(true)
     expect(ram.store.dirs.has('/a/b')).toBe(true)
     expect(ram.store.dirs.has('/a/b/c')).toBe(true)
   })
 
-  it('throws without parents=true if intermediate missing', async () => {
+  it('the mkdir op throws if an intermediate directory is missing', async () => {
     const { ram, registry } = setup()
     await expect(call(registry, 'mkdir', ram, '/x/y')).rejects.toThrow(/parent directory/)
   })

@@ -12,25 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredOp } from '../../ops/registry.ts'
-import { createOp } from './create.ts'
-import { mkdirOp } from './mkdir.ts'
-import { readOp } from './read.ts'
-import { readdirOp } from './readdir.ts'
-import { renameOp } from './rename.ts'
-import { rmdirOp } from './rmdir.ts'
-import { statOp } from './stat.ts'
-import { unlinkOp } from './unlink.ts'
-import { writeOp } from './write.ts'
+import { DATABRICKS_VOLUME_CMD_OPS } from '../../commands/builtin/databricks_volume/ops.ts'
+import { ResourceName } from '../../types.ts'
+import { makeGenericOps } from '../generic/factory.ts'
+import type { RegisteredOp } from '../registry.ts'
 
-export const DATABRICKS_VOLUME_OPS: readonly RegisteredOp[] = [
-  createOp,
-  mkdirOp,
-  readOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  statOp,
-  unlinkOp,
-  writeOp,
-]
+export const DATABRICKS_VOLUME_OPS: readonly RegisteredOp[] = makeGenericOps(
+  ResourceName.DATABRICKS_VOLUME,
+  DATABRICKS_VOLUME_CMD_OPS,
+  { mkdirParents: true },
+)

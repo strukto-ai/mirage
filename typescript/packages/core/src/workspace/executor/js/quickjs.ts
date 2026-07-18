@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RunArgs, RunResult } from '../runtime.ts'
 import {
   createMirageBridge,
   type BridgeDispatchFn,
@@ -19,7 +20,7 @@ import {
 } from '../python/mirage_bridge.ts'
 import { QUICKJS_RUNTIME, type JsRuntime, type JsRuntimeOptions } from './interface.ts'
 import { installMirageFs, MIRAGE_FS_BOOTSTRAP } from './mirage_fs.ts'
-import { QuickJsUnavailableError, type JsRunArgs, type JsRunResult } from './types.ts'
+import { QuickJsUnavailableError } from './types.ts'
 import type {
   QuickJSAsyncContext,
   QuickJSAsyncRuntime,
@@ -69,16 +70,25 @@ globalThis.std = {
 // matching the Python runtime's live file I/O.
 export class QuickJsRuntime implements JsRuntime {
   readonly name = QUICKJS_RUNTIME
+  static readonly commands: readonly string[] = ['node', 'js'] as const
+  readonly captures = QuickJsRuntime.commands
   private newAsyncModule: NewAsyncModule | null = null
-  private readonly workspaceBridge: BridgeDispatchFn | null
-  private readonly listMounts: () => string[]
+  private workspaceBridge: BridgeDispatchFn | null
+  private listMounts: () => string[]
 
   constructor(options: JsRuntimeOptions = {}) {
     this.workspaceBridge = options.workspaceBridge ?? null
     this.listMounts = options.listMounts ?? ((): string[] => [])
   }
 
-  async run(args: JsRunArgs): Promise<JsRunResult> {
+  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+    if (this.workspaceBridge === null) {
+      this.workspaceBridge = dispatch
+      this.listMounts = listMounts
+    }
+  }
+
+  async run(args: RunArgs): Promise<RunResult> {
     const newAsyncModule = await this.loadModule()
     const QuickJS = await newAsyncModule()
     const runtime: QuickJSAsyncRuntime = QuickJS.newRuntime()
@@ -103,9 +113,13 @@ export class QuickJsRuntime implements JsRuntime {
       }
       boot.value.dispose()
 
-      const result = await ctx.evalCodeAsync(args.code, args.module ? 'input.mjs' : 'input.js', {
-        type: args.module ? 'module' : 'global',
-      })
+      const result = await ctx.evalCodeAsync(
+        args.code,
+        args.flags?.module === true ? 'input.mjs' : 'input.js',
+        {
+          type: args.flags?.module === true ? 'module' : 'global',
+        },
+      )
       let exitCode = 0
       if (result.error) {
         if (exit.called) {
@@ -122,7 +136,7 @@ export class QuickJsRuntime implements JsRuntime {
       }
       return {
         stdout: ENC.encode(out.map((l) => l + '\n').join('')),
-        stderr: ENC.encode(err.map((l) => l + '\n').join('')),
+        stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
         exitCode,
       }
     } finally {
@@ -138,7 +152,7 @@ export class QuickJsRuntime implements JsRuntime {
 
   private installGlobals(
     ctx: QuickJSAsyncContext,
-    args: JsRunArgs,
+    args: RunArgs,
     out: string[],
     err: string[],
     exit: { code: number; called: boolean },

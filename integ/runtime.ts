@@ -72,6 +72,8 @@ const CASES: [string, string][] = [
     `python3 -c "from pathlib import Path; lines = Path('/mongodb/${DB}/collections/books/documents.jsonl').read_text().splitlines(); print('books:', len(lines))"`,
   ],
   ["py3_script_argv", "python3 /ram/analyze.py 40 2"],
+  ["py3_stdin_pipe", "cat /ram/pipe.py | python3"],
+  ["py3_pipe_to_grep", "python3 -c \"print('alpha'); print('beta')\" | grep beta"],
   [
     "py3_write_back",
     "python3 -c \"from pathlib import Path; Path('/ram/out.txt').write_text('written-by-python3')\" && cat /ram/out.txt",
@@ -153,6 +155,7 @@ function buildWorkspace(runId: string): Workspace {
   const ram = new RAMResource();
   ram.store.files.set("/data.txt", ENC.encode("hello from ram\n"));
   ram.store.files.set("/analyze.py", ENC.encode(ANALYZE_SCRIPT));
+  ram.store.files.set("/pipe.py", ENC.encode("print('came-through-pipe')\n"));
   const redis = new RedisResource({
     url: REDIS_URL,
     keyPrefix: `mirage-integ-runtime-ts-${runId}/`,
@@ -168,7 +171,7 @@ function buildWorkspace(runId: string): Workspace {
   const mongodb = new MongoDBResource({ uri: MONGODB_URI, databases: [DB] });
   return new Workspace(
     { "/ram": ram, "/redis": redis, "/s3": s3, "/mongodb": mongodb },
-    { mode: MountMode.EXEC, pythonRuntime: "monty" },
+    { mode: MountMode.EXEC, runtimes: ["monty", "vfs"] },
   );
 }
 
@@ -227,7 +230,7 @@ async function main(): Promise<void> {
       ],
       "/r": new RAMResource(),
     },
-    { mode: MountMode.EXEC, pythonRuntime: "monty" },
+    { mode: MountMode.EXEC, runtimes: ["monty", "vfs"] },
   );
   await wsLink.execute("echo 0123456789abcdef > /data/big.txt");
   await wsLink.execute("ln -s /data/big.txt /r/link");
@@ -243,7 +246,7 @@ async function main(): Promise<void> {
   // under the dst's virtual path (EXDEV follow-up).
   const wsMv = new Workspace(
     { "/a": new RAMResource(), "/b": new RAMResource() },
-    { mode: MountMode.EXEC, pythonRuntime: "monty" },
+    { mode: MountMode.EXEC, runtimes: ["monty", "vfs"] },
   );
   await wsMv.execute("echo moved-bytes > /a/x.txt");
   await wsMv.dispatch("rename", "/a/x.txt", [PathSpec.fromStrPath("/b/y.txt")]);
@@ -258,7 +261,7 @@ async function main(): Promise<void> {
     { "/ram": slowRam },
     {
       mode: MountMode.EXEC,
-      pythonRuntime: "monty",
+      runtimes: ["monty", "vfs"],
       commandSafeguards: {
         "/ram": { python3: new CommandSafeguard({ timeoutSeconds: 1 }) },
       },

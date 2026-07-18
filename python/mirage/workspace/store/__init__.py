@@ -15,9 +15,13 @@
 from typing import Any
 
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
+from mirage.workspace.store.disk import (DEFAULT_STATE_ROOT,
+                                         DiskWorkspaceStateStore)
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 
 __all__ = [
+    "DEFAULT_STATE_ROOT",
+    "DiskWorkspaceStateStore",
     "RAMWorkspaceStateStore",
     "RedisWorkspaceStateStore",
     "S3WorkspaceStateStore",

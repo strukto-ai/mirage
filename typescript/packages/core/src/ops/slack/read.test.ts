@@ -19,7 +19,10 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/_client.ts'
 import { PathSpec, ResourceName } from '../../types.ts'
-import { readOp } from './read.ts'
+import { SLACK_VFS_OPS } from './index.ts'
+
+const readOp = SLACK_VFS_OPS.find((o) => o.name === 'read' && o.filetype === null)
+if (!readOp) throw new Error('slack read op not registered')
 
 class FakeTransport implements SlackTransport {
   public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []

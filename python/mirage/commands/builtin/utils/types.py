@@ -12,18 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import Awaitable
 from typing import Callable
 
 from mirage.types import FileStat
 
-_ReadBytes = Callable[[str], bytes]
-_Stat = Callable[[str], FileStat]
-_Readdir = Callable[[str], list[str]]
-_WriteBytes = Callable[[str, bytes], None]
-_Exists = Callable[[str], bool]
-
 _AsyncReadBytes = Callable[[str], Awaitable[bytes]]
 _AsyncStat = Callable[[str], Awaitable[FileStat]]
 _AsyncReaddir = Callable[[str], Awaitable[list[str]]]
-_AsyncReadStream = Callable[[str], AsyncIterator[bytes]]

@@ -14,6 +14,10 @@ books: 2
 ram: hello from ram
 s3: hello from s3
 argv sum: 42
+=== py3_stdin_pipe ===
+came-through-pipe
+=== py3_pipe_to_grep ===
+beta
 === py3_write_back ===
 written-by-python3
 === python_alias ===
@@ -21,7 +25,7 @@ written-by-python3
 === py3_env ===
 hello-runtime
 === py3_iterdir ===
-['analyze.py', 'data.txt', 'out.txt']
+['analyze.py', 'data.txt', 'out.txt', 'pipe.py']
 === py3_missing_file ===
 exit_code=1
 === py3_host_fs_invisible ===

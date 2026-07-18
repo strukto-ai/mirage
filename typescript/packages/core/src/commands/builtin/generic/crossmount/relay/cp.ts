@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import type { FindOptions } from '../../../../../resource/base.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { cpGeneric, cpWalk } from '../../cp.ts'
+import { cpGeneric } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
 
@@ -49,25 +48,13 @@ export async function runCp(
     reads[p.virtual] = data
     return data
   }
-  const copy = async (src: PathSpec, target: PathSpec): Promise<void> => {
-    await write(target, await recordingRead(src))
-  }
-  const find = async (src: PathSpec, _options: FindOptions): Promise<string[]> => {
-    const tree = await cpWalk(readdir, stat, src)
-    return tree.filter((e) => !e.isDir).map((e) => e.path)
-  }
   const result = await cpGeneric(
     flat,
-    copy,
-    find,
     stat,
+    { readBytes: recordingRead, write, mkdir, readdir },
     recursive,
     noClobber,
     verbose,
-    undefined,
-    undefined,
-    undefined,
-    { readBytes: recordingRead, write, mkdir, readdir },
   )
   const [out, io] = result ?? [null, new IOResult()]
   io.reads = { ...io.reads, ...reads }

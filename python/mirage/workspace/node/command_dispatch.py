@@ -36,12 +36,12 @@ from mirage.shell.helpers import (  # isort: skip
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
     follow_paths, handle_bash, handle_cd, handle_chmod, handle_chown,
-    handle_echo, handle_eval, handle_export, handle_history, handle_ln,
-    handle_local, handle_man, handle_printenv, handle_printf, handle_read,
-    handle_readlink, handle_return, handle_set, handle_shift, handle_sleep,
-    handle_source, handle_test, handle_timeout, handle_touch, handle_trap,
-    handle_unset, handle_whoami, handle_xargs, link_flags, prepare_mv,
-    strip_link_operands)
+    handle_echo, handle_eval, handle_exit, handle_export, handle_history,
+    handle_ln, handle_local, handle_man, handle_printenv, handle_printf,
+    handle_read, handle_readlink, handle_return, handle_set, handle_shift,
+    handle_sleep, handle_source, handle_test, handle_timeout, handle_touch,
+    handle_trap, handle_unset, handle_whoami, handle_xargs, link_flags,
+    prepare_mv, strip_link_operands)
 
 _CdArgs = list[str | PathSpec]
 
@@ -369,6 +369,9 @@ async def _run_argv(
 
     if name == SB.RETURN:
         return await handle_return(args)
+
+    if name == SB.EXIT:
+        return await handle_exit(args, session)
 
     if name == SB.XARGS:
         return await handle_xargs(execute_fn, args, session, stdin)

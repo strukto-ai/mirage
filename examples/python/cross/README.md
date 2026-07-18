@@ -191,7 +191,8 @@ mirage workspace delete cross_sg
 ## 8. Versioning (Python CLI)
 
 The daemon keeps a git-backed history per workspace under
-`~/.mirage/repos/<id>` (set `MIRAGE_VERSION_ROOT` to relocate). You commit
+`~/.mirage/repos/<id>` (set `MIRAGE_HOME` to relocate the whole data
+tree). You commit
 the live state as a version, then `log` / `diff` / `branch` / `checkout`,
 following git. See the [CLI docs](https://docs.mirage.strukto.ai) for the
 full reference.

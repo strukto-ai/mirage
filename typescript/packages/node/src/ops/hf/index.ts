@@ -13,26 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
-import { createOps } from './create.ts'
-import { mkdirOps } from './mkdir.ts'
-import { readOps } from './read/read.ts'
-import { readFeatherOps } from './read/read_feather.ts'
-import { readHdf5Ops } from './read/read_hdf5.ts'
-import { readParquetOps } from './read/read_parquet.ts'
-import { readdirOps } from './readdir.ts'
-import { statOps } from './stat.ts'
-import { unlinkOps } from './unlink.ts'
-import { writeOps } from './write.ts'
+import { makeGenericOps } from '@struktoai/mirage-core'
+import { HF_RESOURCES } from '../../accessor/hf.ts'
+import { HF_CMD_OPS } from '../../commands/builtin/hf/ops.ts'
 
-export const HF_OPS: readonly RegisteredOp[] = [
-  ...createOps,
-  ...mkdirOps,
-  ...readOps,
-  ...readFeatherOps,
-  ...readHdf5Ops,
-  ...readParquetOps,
-  ...readdirOps,
-  ...statOps,
-  ...unlinkOps,
-  ...writeOps,
-]
+export const HF_OPS: readonly RegisteredOp[] = makeGenericOps(HF_RESOURCES, HF_CMD_OPS, {
+  filetypeRead: ['.feather', '.hdf5', '.parquet'],
+})

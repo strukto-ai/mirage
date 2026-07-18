@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from mirage.runtime.js.base import JsRunArgs, JsRunResult, JsRuntime
+from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 wasmtime: Any
@@ -36,12 +36,12 @@ _BUILD_HINT = (
     f"the quickjs runtime needs a {_WASM_NAME} module: download a WASI "
     "build of quickjs-ng from "
     "https://github.com/quickjs-ng/quickjs/releases, and point the yaml "
-    "`runtime: quickjs: home:` key, the Workspace `runtime_options` "
+    "`runtimes: [{name: quickjs, home: ...}]` entry, the Workspace runtime "
     f"argument, or the {QUICKJS_HOME_ENV} environment variable at the "
     "directory containing it")
 
 
-class QuickJsRuntime(JsRuntime):
+class QuickJsRuntime(Runtime):
     """Run JavaScript on a WASI quickjs-ng under wasmtime, in-process.
 
     A bare modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
@@ -61,7 +61,7 @@ class QuickJsRuntime(JsRuntime):
     thread; a safeguard timeout stops the engine instead of leaking it.
 
     The module comes from the `home` argument (the yaml
-    `runtime: quickjs: home:` entry ends up here) or the
+    `runtimes:` entry `home` option ends up here) or the
     MIRAGE_QUICKJS_HOME environment variable.
 
     Args:
@@ -75,6 +75,7 @@ class QuickJsRuntime(JsRuntime):
     """
 
     name = "quickjs"
+    captures = ("node", "js")
 
     def __init__(
         self,
@@ -98,11 +99,17 @@ class QuickJsRuntime(JsRuntime):
         self._mount_prefixes = mount_prefixes
         self._runtime = WasmRuntime(self._wasm, "js")
 
-    async def run(self, args: JsRunArgs) -> JsRunResult:
+    def attach(self, dispatch: Callable[..., Any],
+               mount_prefixes: Callable[[], list[str]]) -> None:
+        if self._dispatch is None:
+            self._dispatch = dispatch
+            self._mount_prefixes = mount_prefixes
+
+    async def run(self, args: RunArgs) -> RunResult:
         # --std exposes the std/os globals (stdin via std.in); -m selects
         # ES-module mode for .mjs sources. Trailing args become scriptArgs.
         argv = ["qjs", "--std"]
-        if args.module:
+        if args.flags.get("module"):
             argv.append("-m")
         argv += ["-e", args.code, *args.args]
         bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
@@ -114,4 +121,4 @@ class QuickJsRuntime(JsRuntime):
             env=list(args.env.items()),
             fs=fs,
         )
-        return JsRunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+        return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)

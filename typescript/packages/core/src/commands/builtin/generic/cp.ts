@@ -15,8 +15,14 @@
 import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { FindOptions } from '../../../resource/base.ts'
-import { FileType, PathSpec } from '../../../types.ts'
+import {
+  FileType,
+  PathSpec,
+  type CopyStrategy,
+  type PrimitiveCopy,
+  type ReaddirFn,
+  type StatFn,
+} from '../../../types.ts'
 import type { CommandFnResult } from '../../config.ts'
 import {
   backendKeyDefault,
@@ -24,22 +30,13 @@ import {
   isDirectory,
   pathExists,
   type BackendKeyFn,
-  type StatFn,
 } from '../utils/copy.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 
-type CopyFn = (src: PathSpec, target: PathSpec) => Promise<void>
-type FindFn = (src: PathSpec, options: FindOptions) => Promise<string[]>
-
-// Low-level primitives for the no-native-copy recursive path (cross-mount).
-// Backends that inject copy/find never use these.
-export interface CpPrimitives {
-  readBytes: (p: PathSpec) => Promise<Uint8Array>
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>
-  mkdir: (p: PathSpec) => Promise<void>
-  readdir: (p: PathSpec) => Promise<string[]>
+function isPrimitiveCopy(strategy: CopyStrategy): strategy is PrimitiveCopy {
+  return 'readBytes' in strategy
 }
 
 // List a tree as {path, isDir} pairs, parents before children. The type is
@@ -47,7 +44,7 @@ export interface CpPrimitives {
 // never re-stats a path whose virtual parent has since vanished. Mirrors the
 // Python cp `walk`; used only by the primitive (no native copy) path.
 export async function cpWalk(
-  readdir: (p: PathSpec) => Promise<string[]>,
+  readdir: ReaddirFn,
   stat: StatFn,
   root: PathSpec,
   index?: IndexCacheStore,
@@ -72,16 +69,13 @@ export async function cpWalk(
 
 export async function cpGeneric(
   paths: PathSpec[],
-  copy: CopyFn,
-  find: FindFn,
   stat: StatFn,
+  strategy: CopyStrategy,
   recursive: boolean,
   noClobber: boolean,
   verbose: boolean,
   index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
-  dirCopy?: CopyFn,
-  prim?: CpPrimitives,
 ): Promise<CommandFnResult> {
   const keyOf = backendKey ?? backendKeyDefault
   const sources = paths.slice(0, -1)
@@ -111,47 +105,51 @@ export async function cpGeneric(
     if (recursive) {
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
-      if (prim !== undefined) {
-        for (const { path: entry, isDir } of await cpWalk(prim.readdir, stat, src, index)) {
+      if (isPrimitiveCopy(strategy)) {
+        for (const { path: entry, isDir } of await cpWalk(strategy.readdir, stat, src, index)) {
           const entryDst = dstBase + entry.slice(srcBase.length)
           const entryDstSpec = PathSpec.fromStrPath(entryDst)
           if (isDir) {
             if (!(await isDirectory(stat, entryDstSpec, index))) {
-              await prim.mkdir(entryDstSpec)
+              await strategy.mkdir(entryDstSpec)
               writes[entryDst] = new Uint8Array()
               if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
             }
             continue
           }
           if (noClobber && (await pathExists(stat, entryDstSpec))) continue
-          await prim.write(entryDstSpec, await prim.readBytes(PathSpec.fromStrPath(entry)))
+          await strategy.write(entryDstSpec, await strategy.readBytes(PathSpec.fromStrPath(entry)))
           writes[entryDst] = new Uint8Array()
           if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
         }
         continue
       }
-      if (dirCopy !== undefined) {
+      if (strategy.dirCopy !== undefined) {
         if (noClobber && (await pathExists(stat, target))) continue
-        await dirCopy(src, target)
-        for (const entry of await find(src, { type: 'f' })) {
+        await strategy.dirCopy(src, target)
+        for (const entry of await strategy.find(src, { type: 'f' })) {
           const entryDst = dstBase + entry.slice(srcBase.length)
           writes[entryDst] = new Uint8Array()
           if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
         }
         continue
       }
-      for (const entry of await find(src, { type: 'f' })) {
+      for (const entry of await strategy.find(src, { type: 'f' })) {
         const entryDst = dstBase + entry.slice(srcBase.length)
         const entryDstSpec = PathSpec.fromStrPath(entryDst)
         if (noClobber && (await pathExists(stat, entryDstSpec))) continue
-        await copy(PathSpec.fromStrPath(entry), entryDstSpec)
+        await strategy.copy(PathSpec.fromStrPath(entry), entryDstSpec)
         writes[entryDst] = new Uint8Array()
         if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
       }
       continue
     }
     if (noClobber && (await pathExists(stat, target))) continue
-    await copy(src, target)
+    if (isPrimitiveCopy(strategy)) {
+      await strategy.write(target, await strategy.readBytes(src))
+    } else {
+      await strategy.copy(src, target)
+    }
     writes[target.mountPath] = new Uint8Array()
     if (verbose) lines.push(`'${src.virtual}' -> '${target.virtual}'`)
   }

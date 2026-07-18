@@ -17,7 +17,8 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.runtime.python import MontyRuntime, PythonRunArgs
+from mirage.runtime.base import RunArgs
+from mirage.runtime.python import MontyRuntime
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 
@@ -59,7 +60,7 @@ class FakeDispatch:
 
 def test_monty_runs_sandboxed_print():
     runtime = MontyRuntime()
-    result = asyncio.run(runtime.run(PythonRunArgs(code="print(21 * 2)")))
+    result = asyncio.run(runtime.run(RunArgs(code="print(21 * 2)")))
     assert result.exit_code == 0
     assert result.stdout == b"42\n"
     assert result.stderr is None
@@ -67,15 +68,14 @@ def test_monty_runs_sandboxed_print():
 
 def test_monty_syntax_error():
     runtime = MontyRuntime()
-    result = asyncio.run(runtime.run(PythonRunArgs(code="def broken(")))
+    result = asyncio.run(runtime.run(RunArgs(code="def broken(")))
     assert result.exit_code == 1
     assert b"SyntaxError" in result.stderr
 
 
 def test_monty_runtime_error_keeps_stdout():
     runtime = MontyRuntime()
-    result = asyncio.run(
-        runtime.run(PythonRunArgs(code="print('before')\n1/0")))
+    result = asyncio.run(runtime.run(RunArgs(code="print('before')\n1/0")))
     assert result.exit_code == 1
     assert result.stdout == b"before\n"
     assert b"ZeroDivisionError" in result.stderr
@@ -84,7 +84,7 @@ def test_monty_runtime_error_keeps_stdout():
 def test_monty_argv_global():
     runtime = MontyRuntime()
     result = asyncio.run(
-        runtime.run(PythonRunArgs(code="print(argv[1:])", args=["a", "b"])))
+        runtime.run(RunArgs(code="print(argv[1:])", args=["a", "b"])))
     assert result.exit_code == 0
     assert result.stdout == b"['a', 'b']\n"
 
@@ -93,16 +93,15 @@ def test_monty_env_isolated_to_run_env():
     runtime = MontyRuntime()
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(
-                code="import os; print(os.environ.get('MY_VAR', 'unset'))",
-                env={"MY_VAR": "v1"})))
+            RunArgs(code="import os; print(os.environ.get('MY_VAR', 'unset'))",
+                    env={"MY_VAR": "v1"})))
     assert result.stdout == b"v1\n"
 
 
 def test_monty_host_filesystem_invisible():
     runtime = MontyRuntime()
     result = asyncio.run(
-        runtime.run(PythonRunArgs(code="print(open('/etc/passwd').read())")))
+        runtime.run(RunArgs(code="print(open('/etc/passwd').read())")))
     assert result.exit_code == 1
     assert b"FileNotFoundError" in result.stderr
 
@@ -111,8 +110,7 @@ def test_monty_reads_virtual_file_via_dispatch():
     dispatch = FakeDispatch({"/s3/a.txt": b"virtual"})
     runtime = MontyRuntime(dispatch)
     result = asyncio.run(
-        runtime.run(
-            PythonRunArgs(code="print(open('/s3/a.txt').read().upper())")))
+        runtime.run(RunArgs(code="print(open('/s3/a.txt').read().upper())")))
     assert result.exit_code == 0
     assert result.stdout == b"VIRTUAL\n"
 
@@ -120,8 +118,7 @@ def test_monty_reads_virtual_file_via_dispatch():
 def test_monty_missing_virtual_file():
     dispatch = FakeDispatch({})
     runtime = MontyRuntime(dispatch)
-    result = asyncio.run(
-        runtime.run(PythonRunArgs(code="open('/s3/missing.txt')")))
+    result = asyncio.run(runtime.run(RunArgs(code="open('/s3/missing.txt')")))
     assert result.exit_code == 1
     assert b"FileNotFoundError" in result.stderr
 
@@ -131,8 +128,8 @@ def test_monty_write_flushes_through_dispatch():
     runtime = MontyRuntime(dispatch)
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(code="from pathlib import Path\n"
-                          "Path('/s3/out.txt').write_text('data')")))
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/out.txt').write_text('data')")))
     assert result.exit_code == 0
     assert ("/s3/out.txt", b"data") in dispatch.writes
     assert dispatch.files["/s3/out.txt"] == b"data"
@@ -143,8 +140,8 @@ def test_monty_append_flushes_full_content():
     runtime = MontyRuntime(dispatch)
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(code="with open('/s3/log.txt', 'a') as f:\n"
-                          "    f.write('b')")))
+            RunArgs(code="with open('/s3/log.txt', 'a') as f:\n"
+                    "    f.write('b')")))
     assert result.exit_code == 0
     assert dispatch.files["/s3/log.txt"] == b"ab"
 
@@ -154,9 +151,9 @@ def test_monty_iterdir_lists_virtual_dir():
     runtime = MontyRuntime(dispatch)
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(code="from pathlib import Path\n"
-                          "print(sorted(str(p) "
-                          "for p in Path('/s3').iterdir()))")))
+            RunArgs(code="from pathlib import Path\n"
+                    "print(sorted(str(p) "
+                    "for p in Path('/s3').iterdir()))")))
     assert result.exit_code == 0
     assert result.stdout == b"['/s3/a.txt', '/s3/b.txt']\n"
 
@@ -166,8 +163,8 @@ def test_monty_unlink_routes_to_dispatch():
     runtime = MontyRuntime(dispatch)
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(code="from pathlib import Path\n"
-                          "Path('/s3/a.txt').unlink()")))
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/a.txt').unlink()")))
     assert result.exit_code == 0
     assert dispatch.unlinked == ["/s3/a.txt"]
 
@@ -180,7 +177,7 @@ def test_monty_name():
 async def test_monty_runs_off_loop_and_cancellation_halts():
     rt = MontyRuntime()
     hot = "n = 0\nwhile True:\n    n = n + 1"
-    task = asyncio.ensure_future(rt.run(PythonRunArgs(code=hot)))
+    task = asyncio.ensure_future(rt.run(RunArgs(code=hot)))
     ticks = 0
     for _ in range(6):
         await asyncio.sleep(0.05)
@@ -189,7 +186,7 @@ async def test_monty_runs_off_loop_and_cancellation_halts():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    result = await rt.run(PythonRunArgs(code="print(6 * 7)"))
+    result = await rt.run(RunArgs(code="print(6 * 7)"))
     assert result.exit_code == 0
     assert result.stdout == b"42\n"
 
@@ -216,4 +213,4 @@ def test_workspace_explicit_monty_fails_loud(monkeypatch):
     with pytest.raises(ImportError, match="monty' extra"):
         Workspace({"/data": RAMResource()},
                   mode=MountMode.EXEC,
-                  python_runtime="monty")
+                  runtimes=["monty"])

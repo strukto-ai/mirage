@@ -12,37 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { HistoryAccessor } from '../../accessor/history.ts'
-import { read as coreRead } from '../../core/history/read.ts'
-import { readdir as coreReaddir } from '../../core/history/readdir.ts'
-import { stat as coreStat } from '../../core/history/stat.ts'
-import { type PathSpec, ResourceName } from '../../types.ts'
+import { HISTORY_CMD_OPS } from '../../commands/builtin/history/ops.ts'
+import { ResourceName } from '../../types.ts'
+import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-const R = ResourceName.HISTORY
-
-const readOp: RegisteredOp = {
-  name: 'read',
-  resource: R,
-  filetype: null,
-  write: false,
-  fn: (accessor: HistoryAccessor, path: PathSpec) => coreRead(accessor, path),
-}
-
-const statOp: RegisteredOp = {
-  name: 'stat',
-  resource: R,
-  filetype: null,
-  write: false,
-  fn: (accessor: HistoryAccessor, path: PathSpec) => coreStat(accessor, path),
-}
-
-const readdirOp: RegisteredOp = {
-  name: 'readdir',
-  resource: R,
-  filetype: null,
-  write: false,
-  fn: (accessor: HistoryAccessor, path: PathSpec) => coreReaddir(accessor, path),
-}
-
-export const HISTORY_OPS: readonly RegisteredOp[] = [readOp, statOp, readdirOp]
+export const HISTORY_OPS: readonly RegisteredOp[] = makeGenericOps(
+  ResourceName.HISTORY,
+  HISTORY_CMD_OPS,
+)

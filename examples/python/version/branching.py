@@ -67,7 +67,7 @@ def main() -> None:
     work = Path(tempfile.mkdtemp(prefix="mirage-version-"))
     env = dict(os.environ)
     env["MIRAGE_DAEMON_URL"] = f"http://127.0.0.1:{free_port()}"
-    env["MIRAGE_VERSION_ROOT"] = str(work / "repos")
+    env["MIRAGE_HOME"] = str(work / "mirage-home")
     env["MIRAGE_IDLE_GRACE_SECONDS"] = "60"
     cfg = work / "config.yaml"
     cfg.write_text(CONFIG_YAML, encoding="utf-8")

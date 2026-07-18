@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { LANCEDB_CMD_OPS } from '../../commands/builtin/lancedb/ops.ts'
+import { ResourceName } from '../../types.ts'
+import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
-import { readOp } from './read.ts'
-import { readdirOp } from './readdir.ts'
-import { statOp } from './stat.ts'
 
-export const LANCEDB_OPS: readonly RegisteredOp[] = [readOp, readdirOp, statOp]
+export const LANCEDB_OPS: readonly RegisteredOp[] = makeGenericOps(
+  ResourceName.LANCEDB,
+  LANCEDB_CMD_OPS,
+)

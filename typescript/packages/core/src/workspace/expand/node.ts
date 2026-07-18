@@ -94,6 +94,11 @@ export async function expandNode(
 
   if (ntype === NT.SIMPLE_EXPANSION) {
     const raw = tsNode.text
+    const special = tsNode.namedChildren.find((c) => c.type === NT.SPECIAL_VARIABLE_NAME)
+    if (special !== undefined) {
+      // lastIndexOf would split `$$` into prefix "$" + variable "".
+      return lookupVar(special.text, session, callStack)
+    }
     const dollar = raw.lastIndexOf('$')
     const prefix = raw.slice(0, dollar)
     const variable = raw.slice(dollar + 1)

@@ -12,37 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAM_CMD_OPS } from '../../commands/builtin/ram/ops.ts'
+import { ResourceName } from '../../types.ts'
+import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
-import { appendOp } from './append.ts'
-import { createOp } from './create.ts'
-import { mkdirOp } from './mkdir.ts'
-import { readOp } from './read.ts'
-import { readFeatherOp } from './read_feather.ts'
-import { readHdf5Op } from './read_hdf5.ts'
-import { readParquetOp } from './read_parquet.ts'
-import { readdirOp } from './readdir.ts'
-import { renameOp } from './rename.ts'
-import { rmdirOp } from './rmdir.ts'
-import { setAttrsOp } from './set_attrs.ts'
-import { statOp } from './stat.ts'
-import { truncateOp } from './truncate.ts'
-import { unlinkOp } from './unlink.ts'
-import { writeOp } from './write.ts'
 
-export const RAM_OPS: readonly RegisteredOp[] = [
-  appendOp,
-  createOp,
-  mkdirOp,
-  readOp,
-  readFeatherOp,
-  readHdf5Op,
-  readParquetOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  setAttrsOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-]
+export const RAM_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.RAM, RAM_CMD_OPS, {
+  filetypeRead: ['.feather', '.h5', '.parquet'],
+  forwardIndex: false,
+})

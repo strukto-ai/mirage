@@ -395,11 +395,6 @@ class CacheType(str, Enum):
     REDIS = "redis"
 
 
-class RuntimeType(str, Enum):
-    RAM = "ram"
-    DISK = "disk"
-
-
 class StateKey(StrEnum):
     VERSION = "version"
     MIRAGE_VERSION = "mirage_version"
@@ -467,25 +462,6 @@ class JobKey(StrEnum):
     CREATED_AT = "created_at"
     AGENT = "agent"
     SESSION_ID = "session_id"
-
-
-class RecordKey(StrEnum):
-    AGENT = "agent"
-    COMMAND = "command"
-    STDOUT = "stdout"
-    STDIN = "stdin"
-    EXIT_CODE = "exit_code"
-    TREE = "tree"
-    TIMESTAMP = "timestamp"
-    SESSION_ID = "session_id"
-
-
-class NodeKey(StrEnum):
-    COMMAND = "command"
-    OP = "op"
-    STDERR = "stderr"
-    EXIT_CODE = "exit_code"
-    CHILDREN = "children"
 
 
 class NodeMetaKey(StrEnum):

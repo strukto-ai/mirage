@@ -13,26 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeDispatchFn } from '../mirage_bridge.ts'
-import type {
-  PythonReplRunArgs,
-  PythonReplRunResult,
-  PythonRunArgs,
-  PythonRunResult,
-} from '../types.ts'
+import type { Runtime } from '../../runtime.ts'
+import type { PythonReplRunArgs, PythonReplRunResult } from '../types.ts'
 
 export const PYODIDE_RUNTIME = 'pyodide'
 export const MONTY_RUNTIME = 'monty'
-
-/** Runtime names the TypeScript packages can build. */
-export const PYTHON_RUNTIMES = [PYODIDE_RUNTIME, MONTY_RUNTIME] as const
-
-/**
- * Pyodide stays the TypeScript default until `@pydantic/monty` can answer
- * builtin `open()` calls (its JS binding cannot return a file handle from
- * an `os` callback yet); the Python implementation already defaults to
- * monty.
- */
-export const DEFAULT_PYTHON_RUNTIME = PYTHON_RUNTIMES[0]
 
 /**
  * Options every Python runtime understands. `workspaceBridge` routes the
@@ -53,9 +38,6 @@ export interface PythonRuntimeOptions {
  * its own concern: an in-process interpreter bridges reads through the
  * workspace dispatch, while a host subprocess only sees the host filesystem.
  */
-export interface PythonRuntime {
-  readonly name: string
-  run(args: PythonRunArgs): Promise<PythonRunResult>
+export interface PythonRuntime extends Runtime {
   runRepl(args: PythonReplRunArgs): Promise<PythonReplRunResult>
-  close(): Promise<void>
 }

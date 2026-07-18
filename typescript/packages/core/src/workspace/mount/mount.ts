@@ -36,8 +36,7 @@ import { runWithRevisions, setVirtualPrefix } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
-import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
-import type { JsRuntime } from '../executor/js/interface.ts'
+import type { Runtime } from '../executor/runtime.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { effectiveMountMode } from '../../context/session_context.ts'
 
@@ -339,8 +338,7 @@ export class MountEntry {
       sessionId?: string
       env?: Record<string, string>
       execAllowed?: boolean
-      pythonRuntime?: PythonRuntime
-      jsRuntime?: JsRuntime
+      runtime?: Runtime
       statOverlay?: StatOverlay
       safeguardOverride?: CommandSafeguard | null
     } = {},
@@ -392,8 +390,7 @@ export class MountEntry {
       ...(opts.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),
       ...(opts.env !== undefined ? { env: opts.env } : {}),
       ...(opts.execAllowed !== undefined ? { execAllowed: opts.execAllowed } : {}),
-      ...(opts.pythonRuntime !== undefined ? { pythonRuntime: opts.pythonRuntime } : {}),
-      ...(opts.jsRuntime !== undefined ? { jsRuntime: opts.jsRuntime } : {}),
+      ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
       ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
     }
 

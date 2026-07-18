@@ -36,9 +36,7 @@ describe('parseDaemonTable', () => {
   })
 
   it('unescapes backslashes in quoted values', () => {
-    expect(parseDaemonTable('[daemon]\nversion_root = "C:\\\\repos"\n').version_root).toBe(
-      'C:\\repos',
-    )
+    expect(parseDaemonTable('[daemon]\nsocket = "C:\\\\pipes"\n').socket).toBe('C:\\pipes')
   })
 
   it('unescapes escaped quotes in quoted values', () => {
@@ -54,8 +52,8 @@ describe('readDaemonTable', () => {
 
   it('reads [daemon] keys, stripping quotes', () => {
     const home = mkdtempSync(join(tmpdir(), 'mir-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\npid_file = "/tmp/p.pid"\n')
-    expect(readDaemonTable(home).pid_file).toBe('/tmp/p.pid')
+    writeFileSync(join(home, 'config.toml'), '[daemon]\nsocket = "/tmp/s.sock"\n')
+    expect(readDaemonTable(home).socket).toBe('/tmp/s.sock')
   })
 })
 
@@ -85,7 +83,7 @@ describe('validateDaemonTable', () => {
   })
 
   it('exposes the shared key registry', () => {
-    expect(ALLOWED_KEYS.has('pid_file')).toBe(true)
+    expect(ALLOWED_KEYS.has('port')).toBe(true)
     expect(ALLOWED_KEYS.has('MIRAGE_HOME')).toBe(false)
   })
 })

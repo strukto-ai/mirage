@@ -82,19 +82,20 @@ Select it per workspace (it is already the default):
 ```ts
 const ws = new Workspace(resources, {
   mode: MountMode.EXEC,
-  jsRuntime: 'quickjs',
+  runtimes: ['quickjs', 'vfs'],
 })
 ```
 
 ## Selecting in YAML
 
-Server workspace config files take a top-level `runtime` block; `js`
-selects the JavaScript runtime alongside `python`:
+Server workspace config files take a top-level `runtimes` list; the
+JavaScript runtime is just another entry:
 
 ```yaml
-runtime:
-  python: monty
-  js: quickjs
+runtimes:
+  - monty
+  - quickjs
+  - vfs
 
 mounts:
   /data:

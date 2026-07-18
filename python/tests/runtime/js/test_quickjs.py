@@ -20,7 +20,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
-from mirage.runtime.js import JsRunArgs, QuickJsRuntime
+from mirage.runtime.base import RunArgs
+from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 
 
@@ -53,7 +54,7 @@ def test_quickjs_runs_modern_js():
     code = (
         "const f = (n) => n * 6 + 1; "
         "console.log(JSON.stringify([...'ab'].map((s, i) => s + i)), f(6))")
-    result = asyncio.run(rt.run(JsRunArgs(code=code)))
+    result = asyncio.run(rt.run(RunArgs(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b'["a0","b1"] 37\n'
     assert result.stderr is None
@@ -64,31 +65,31 @@ def test_quickjs_argv_stdin_module():
     rt = QuickJsRuntime()
     result = asyncio.run(
         rt.run(
-            JsRunArgs(code="console.log(scriptArgs.join('/'))",
-                      args=["a1", "a2"])))
+            RunArgs(code="console.log(scriptArgs.join('/'))",
+                    args=["a1", "a2"])))
     assert result.stdout == b"a1/a2\n"
     # std.in reads piped stdin (the std/os globals are exposed).
     result = asyncio.run(
         rt.run(
-            JsRunArgs(
+            RunArgs(
                 code="console.log(std.in.readAsString().trim().toUpperCase())",
                 stdin=b"piped\n")))
     assert result.stdout == b"PIPED\n"
     # module mode enables top-level await.
     result = asyncio.run(
         rt.run(
-            JsRunArgs(
+            RunArgs(
                 code="const x = await Promise.resolve(41); console.log(x + 1)",
-                module=True)))
+                flags={"module": True})))
     assert result.stdout == b"42\n"
 
 
 @live
 def test_quickjs_exit_code_and_error():
     rt = QuickJsRuntime()
-    result = asyncio.run(rt.run(JsRunArgs(code="std.exit(7)")))
+    result = asyncio.run(rt.run(RunArgs(code="std.exit(7)")))
     assert result.exit_code == 7
-    result = asyncio.run(rt.run(JsRunArgs(code="this is not js")))
+    result = asyncio.run(rt.run(RunArgs(code="this is not js")))
     assert result.exit_code == 1
     assert b"SyntaxError" in (result.stderr or b"")
 
@@ -100,7 +101,7 @@ def test_quickjs_host_fs_invisible():
     # be opened (std.open returns null rather than a handle).
     result = asyncio.run(
         rt.run(
-            JsRunArgs(
+            RunArgs(
                 code="console.log(std.open('/etc/passwd', 'r') === null)")))
     assert result.exit_code == 0
     assert result.stdout == b"true\n"
@@ -113,7 +114,7 @@ async def test_quickjs_node_command_end_to_end():
     ram._store.files["/calc.mjs"] = (
         b"export const k = 6;\n"
         b"console.log(Number(scriptArgs[0]) * k)\n")
-    ws = Workspace({"/ram": ram}, mode=MountMode.EXEC, js_runtime="quickjs")
+    ws = Workspace({"/ram": ram}, mode=MountMode.EXEC, runtimes=["quickjs"])
     r = await ws.execute("node -e \"console.log('js says', 6 * 7)\"")
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "js says 42\n"
@@ -128,12 +129,12 @@ async def test_quickjs_node_command_end_to_end():
 @pytest.mark.asyncio
 async def test_quickjs_cancellation_stops_the_run():
     rt = QuickJsRuntime()
-    task = asyncio.ensure_future(rt.run(JsRunArgs(code="for (;;) {}")))
+    task = asyncio.ensure_future(rt.run(RunArgs(code="for (;;) {}")))
     await asyncio.sleep(0.5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    result = await rt.run(JsRunArgs(code="console.log('alive')"))
+    result = await rt.run(RunArgs(code="console.log('alive')"))
     assert result.exit_code == 0
     assert result.stdout == b"alive\n"
 
@@ -141,8 +142,8 @@ async def test_quickjs_cancellation_stops_the_run():
 @live
 def test_quickjs_reuses_compiled_module():
     rt = QuickJsRuntime()
-    first = asyncio.run(rt.run(JsRunArgs(code="console.log(1)")))
-    second = asyncio.run(rt.run(JsRunArgs(code="console.log(2)")))
+    first = asyncio.run(rt.run(RunArgs(code="console.log(1)")))
+    second = asyncio.run(rt.run(RunArgs(code="console.log(2)")))
     assert (first.stdout, second.stdout) == (b"1\n", b"2\n")
     root = _home_dir()
     assert root is not None
@@ -156,7 +157,7 @@ async def test_quickjs_mounts_read_write_readdir():
     # shell writes, guest writes land in the mount, readdir lists it.
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
-                   js_runtime="quickjs")
+                   runtimes=["quickjs"])
     await ws.execute("echo hello-mount > /data/in.txt")
     r = await ws.execute("js -e \"const f = std.open('/data/in.txt', 'r');"
                          "console.log(f.readAsString().trim());"
@@ -179,7 +180,7 @@ def test_quickjs_without_dispatch_sees_no_mounts():
     rt = QuickJsRuntime()
     result = asyncio.run(
         rt.run(
-            JsRunArgs(
+            RunArgs(
                 code="console.log(std.open('/data/in.txt', 'r') === null)")))
     assert result.exit_code == 0
     assert result.stdout == b"true\n"
@@ -192,7 +193,7 @@ async def test_quickjs_session_narrowing_reaches_the_guest():
     # file materializes in the mount.
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
-                   js_runtime="quickjs")
+                   runtimes=["quickjs"])
     ws.create_session("narrow", {"/data": "read"})
     r = await ws.execute(
         "js -e \"try { std.open('/data/g.txt', 'w').puts('x');"

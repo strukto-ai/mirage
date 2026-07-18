@@ -20,8 +20,7 @@ from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.ops.config import OpsMount
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
-from mirage.runtime.js.base import JsRuntime
-from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.base import Runtime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.workspace.mount.mount import MountEntry
 
@@ -66,11 +65,12 @@ class MountRegistry:
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
         self._root: MountEntry | None = None
-        # Workspace-level Python runtime for `python3`, set by Workspace
-        # after construction (same vehicle as is_exec_allowed()).
-        self.python_runtime: PythonRuntime | None = None
-        # Workspace-level JavaScript runtime for `node`/`js`.
-        self.js_runtime: JsRuntime | None = None
+        # Workspace-level command -> runtime bindings (first listed
+        # capturer wins), set by Workspace after construction (same
+        # vehicle as is_exec_allowed()). The dispatcher injects the
+        # bound runtime only for commands that have one, so it cannot
+        # tell python3 from grep.
+        self.runtime_bindings: dict[str, Runtime] = {}
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None

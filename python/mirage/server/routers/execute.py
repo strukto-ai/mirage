@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from mirage.server.io_serde import io_result_to_dict
-from mirage.server.jobs import JobEntry, JobStatus
+from mirage.server.jobs import JobStatus
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/execute")
 
@@ -71,21 +71,6 @@ async def _invoke_execute(runner, kwargs: dict[str, Any]):
 
 def _schedule_on_runner(runner, coro):
     return asyncio.run_coroutine_threadsafe(coro, runner.loop)
-
-
-def _job_to_dict(entry: JobEntry,
-                 result_dict: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {
-        "job_id": entry.id,
-        "workspace_id": entry.workspace_id,
-        "command": entry.command,
-        "status": entry.status.value,
-        "submitted_at": entry.submitted_at,
-        "started_at": entry.started_at,
-        "finished_at": entry.finished_at,
-        "result": result_dict,
-        "error": entry.error,
-    }
 
 
 @router.post("")

@@ -21,6 +21,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands import safeguard as sg
 from mirage.resource.ram import RAMResource
+from mirage.runtime.python import LocalRuntime
 from mirage.types import CommandSafeguard, OnExceed
 
 
@@ -339,7 +340,7 @@ async def test_python3_default_safeguard_fires_like_any_command(
         timeout_seconds=0.2)
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
-                   python_runtime="local")
+                   runtimes=[LocalRuntime()])
     r = await ws.execute('python3 -c "import time; time.sleep(5)"')
     assert r.exit_code == 124
     assert "python3: timed out after 0.2s" in (await r.stderr_str())
@@ -356,7 +357,7 @@ async def test_python3_mount_safeguard_fires_like_any_command(
             })
         },
         mode=MountMode.EXEC,
-        python_runtime="local")
+        runtimes=[LocalRuntime()])
     r = await ws.execute('cd /data && python3 -c "import time; time.sleep(5)"')
     assert r.exit_code == 124
     assert "python3: timed out after 0.2s" in (await r.stderr_str())
@@ -392,7 +393,7 @@ async def test_python3_mount_safeguard_follows_script_path(restore_defaults):
             })
         },
         mode=MountMode.EXEC,
-        python_runtime="local")
+        runtimes=[LocalRuntime()])
     r = await ws.execute("python3 /data/slow.py")
     assert r.exit_code == 124
     assert "python3: timed out after 0.2s" in (await r.stderr_str())

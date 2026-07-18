@@ -35,6 +35,7 @@ class Session:
     mount_modes: dict[str, MountMode] | None = None
     generation: int = 0
     pipeline_timeout_seconds: float | None = None
+    last_bg_job_id: int | None = None
     positional_args: list[str] = field(default_factory=list)
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
     _local_vars: dict[str, str | None] | None = field(default=None, repr=False)
@@ -104,6 +105,8 @@ class Session:
             self.generation,
             "pipeline_timeout_seconds":
             self.pipeline_timeout_seconds,
+            "last_bg_job_id":
+            self.last_bg_job_id,
         }
         defaults.update(overrides)
         return Session(**defaults)

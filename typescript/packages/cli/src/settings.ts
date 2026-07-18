@@ -89,12 +89,9 @@ const ENV_FOR_KEY: Record<string, string> = {
   auth_token: ENV_TOKEN,
   idle_grace_seconds: 'MIRAGE_IDLE_GRACE_SECONDS',
   port: 'MIRAGE_DAEMON_PORT',
-  pid_file: 'MIRAGE_PID_FILE',
-  version_root: 'MIRAGE_VERSION_ROOT',
-  snapshot_root: 'MIRAGE_SNAPSHOT_ROOT',
 }
 
-function defaultForKey(key: string, home: string): string {
+function defaultForKey(key: string): string {
   const defaults: Record<string, string> = {
     url: DEFAULT_DAEMON_URL,
     allowed_hosts: DEFAULT_ALLOWED_HOSTS.join(','),
@@ -109,9 +106,6 @@ function defaultForKey(key: string, home: string): string {
     auth_token: '',
     idle_grace_seconds: '30',
     port: '8765',
-    pid_file: join(home, 'daemon.pid'),
-    version_root: join(home, 'repos'),
-    snapshot_root: join(home, 'snapshots'),
   }
   return defaults[key] ?? ''
 }
@@ -135,7 +129,7 @@ export function resolvedConfig(
     if (fileValue !== undefined && fileValue !== '') {
       out[key] = [fileValue, 'file']
     } else {
-      out[key] = [defaultForKey(key, home), 'default']
+      out[key] = [defaultForKey(key), 'default']
     }
   }
   return out

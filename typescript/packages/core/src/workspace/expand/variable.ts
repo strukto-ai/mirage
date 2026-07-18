@@ -13,10 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CallStack } from '../../shell/call_stack.ts'
+import { ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
+
+// $$ reports the host process id where one exists (Node); browsers have
+// no process, so a fixed positive placeholder keeps the expansion usable.
+const REALM_PID: number = (globalThis as { process?: { pid?: number } }).process?.pid ?? 1
 
 export interface TSNodeLike {
   type: string
@@ -69,6 +74,14 @@ export function lookupVar(name: string, session: Session, callStack: CallStack |
   }
   if (name === '?') {
     return String(lastExitCode)
+  }
+  if (name === '$') {
+    return String(REALM_PID)
+  }
+  if (name === '!') {
+    // Deliberate divergence from bash: jobs are identified by job
+    // table id, not OS pid, so $! yields the id `wait`/`kill` accept.
+    return session.lastBgJobId !== null ? String(session.lastBgJobId) : ''
   }
   if (/^\d+$/.test(name)) {
     const idx = parseInt(name, 10)
@@ -207,6 +220,12 @@ export function expandBraces(
       c.type === 'regex'
     ) {
       args.push(c.text)
+      continue
+    }
+    if (c.type === NT.CONCATENATION) {
+      // A multi-word operand (`${x:?custom msg}`) parses as one
+      // concatenation node; take its text verbatim.
+      args.push(c.text)
     }
   }
 
@@ -256,5 +275,34 @@ export function expandBraces(
   }
   if (lengthOp) return String(val.length)
   if (op === null) return val
+  if (op === '?' || op === ':?') {
+    const triggered = op === '?' ? !varInEnv : val === ''
+    if (!triggered) return val
+    const message =
+      args.length > 0
+        ? args.join(' ')
+        : op === '?'
+          ? 'parameter not set'
+          : 'parameter null or not set'
+    // GNU: fatal at top level with status 127; a containing
+    // subshell/pipeline segment reports 1.
+    throw new ExitSignal(
+      127,
+      new TextEncoder().encode(`bash: ${varName ?? ''}: ${message}\n`),
+      null,
+      1,
+    )
+  }
+  if (op === '=' || op === ':=') {
+    const triggered = op === '=' ? !varInEnv : val === ''
+    if (!triggered) return val
+    const defaultVal = args[0] ?? ''
+    if (callStack !== null && callStack.getLocal(varName ?? '') !== null) {
+      callStack.setLocal(varName ?? '', defaultVal)
+    } else if (varName !== null) {
+      env[varName] = defaultVal
+    }
+    return defaultVal
+  }
   return applyOp(op, val, varInEnv, args)
 }

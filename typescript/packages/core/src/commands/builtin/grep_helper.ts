@@ -17,7 +17,9 @@ import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { getExtension } from '../resolve.ts'
+import { PatternType } from './constants.ts'
 import { grepContextLines } from './grep_context.ts'
+import type { AsyncReadBytesFn, AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
 
 export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   '.parquet',
@@ -139,12 +141,6 @@ export function isRegexPattern(pattern: string, fixedString: boolean): boolean {
   if (pattern.includes('\n')) return true
   if (fixedString) return false
   return !/^[\w\s\-.]+$/.test(pattern)
-}
-
-export enum PatternType {
-  EXACT = 'exact',
-  SIMPLE = 'simple',
-  REGEX = 'regex',
 }
 
 // Classify a grep pattern for API push-down decisions.
@@ -371,10 +367,6 @@ export async function* grepStream(
   if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
 }
 
-export type AsyncReaddir = (path: string) => Promise<string[]>
-export type AsyncStat = (path: string) => Promise<FileStat>
-export type AsyncReadBytes = (path: string) => Promise<Uint8Array>
-
 export interface GrepFilesOnlyOptions {
   recursive: boolean
   ignoreCase: boolean
@@ -388,9 +380,9 @@ export interface GrepFilesOnlyOptions {
 }
 
 export async function grepRecursive(
-  readdirFn: AsyncReaddir,
-  statFn: AsyncStat,
-  readBytesFn: AsyncReadBytes,
+  readdirFn: AsyncReaddirFn,
+  statFn: AsyncStatFn,
+  readBytesFn: AsyncReadBytesFn,
   path: string,
   compiled: RegExp,
   opts: GrepFilesOnlyOptions,
@@ -460,9 +452,9 @@ export async function grepRecursive(
 }
 
 export async function grepFilesOnly(
-  readdirFn: AsyncReaddir,
-  statFn: AsyncStat,
-  readBytesFn: AsyncReadBytes,
+  readdirFn: AsyncReaddirFn,
+  statFn: AsyncStatFn,
+  readBytesFn: AsyncReadBytesFn,
   path: string,
   pattern: string,
   opts: GrepFilesOnlyOptions,

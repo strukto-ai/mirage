@@ -24,12 +24,14 @@ from mirage.accessor.s3 import S3Config
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
-from mirage.runtime.js.select import validate_js_runtime_name
-from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
-                                          validate_python_runtime_name)
+from mirage.runtime.base import Runtime
+from mirage.runtime.table import VFS_ENTRY, build_runtime
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 from mirage.workspace.mount.spec import Mount
-from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
+from mirage.workspace.store import (DEFAULT_STATE_ROOT,
+                                    DiskWorkspaceStateStore,
+                                    RAMWorkspaceStateStore,
+                                    WorkspaceStateStore)
 
 try:
     from mirage.workspace.store import RedisWorkspaceStateStore
@@ -158,6 +160,13 @@ class RamStoreBlock(BaseModel):
     type: Literal["ram"] = "ram"
 
 
+class DiskStoreBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["disk"]
+    root: str = DEFAULT_STATE_ROOT
+
+
 class RedisStoreBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,7 +187,7 @@ class S3StoreBlock(S3Config):
 
 
 StoreGroupBlock = Annotated[
-    RamStoreBlock | RedisStoreBlock | S3StoreBlock,
+    RamStoreBlock | DiskStoreBlock | RedisStoreBlock | S3StoreBlock,
     Field(discriminator="type"),
 ]
 
@@ -195,14 +204,17 @@ class StoreBlock(BaseModel):
     the session table it points into), so there is one `workspace`
     override, not two. An ``s3`` group hosts only the sessions+meta
     group (conditional-PUT CAS), so it is valid as the ``workspace``
-    override, never as the top-level default.
+    override, never as the top-level default. A ``disk`` store hosts
+    all planes under ``root`` (lockfile CAS, machine-local); ``root``
+    is only read when a disk store is selected.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["ram", "redis"] = "ram"
+    type: Literal["ram", "disk", "redis"] = "ram"
     url: str = "redis://localhost:6379/0"
     key_prefix: str = "mirage:"
+    root: str = DEFAULT_STATE_ROOT
     namespace: StoreGroupBlock | None = None
     observer: StoreGroupBlock | None = None
     workspace: StoreGroupBlock | None = None
@@ -226,63 +238,43 @@ class MountBlock(BaseModel):
         return _coerce_mount_mode(v)
 
 
-class RuntimeBlock(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+def _build_runtime_entries(
+        entries: list[str | dict[str, Any]]) -> list["Runtime | str"]:
+    """Turn config runtime entries into workspace runtime entries.
 
-    python: str = DEFAULT_PYTHON_RUNTIME
-    # `node`/`js` runtime. None (unset) leaves it graceful: quickjs
-    # needs an external wasm build, so a workspace that does not opt in
-    # is not forced to have one. An explicit value fails loud if it
-    # cannot build.
-    js: str | None = None
-    # Per-runtime option blocks, free key/values consumed by the
-    # selected runtime; blocks for other runtimes (including the other
-    # language's) are ignored, so one config stays portable. `home`
-    # locates the interpreter or distribution: a CPython WASI build
-    # directory for `wasi` (falls back to MIRAGE_WASI_HOME), an
-    # interpreter path for `local` (falls back to MIRAGE_LOCAL_HOME),
-    # a distribution URL for `pyodide` (TypeScript), the directory with
-    # qjs-wasi.wasm for `quickjs` (falls back to MIRAGE_QUICKJS_HOME).
-    monty: dict[str, Any] | None = None
-    wasi: dict[str, Any] | None = None
-    local: dict[str, Any] | None = None
-    pyodide: dict[str, Any] | None = None
-    quickjs: dict[str, Any] | None = None
+    Args:
+        entries (list[str | dict[str, Any]]): name strings, or maps
+            carrying a name plus constructor options flat on the entry.
 
-    @field_validator("python")
-    @classmethod
-    def _v_python(cls, v):
-        return validate_python_runtime_name(v)
-
-    @field_validator("js")
-    @classmethod
-    def _v_js(cls, v):
-        if v is None:
-            return v
-        return validate_js_runtime_name(v)
-
-    def option_blocks(self) -> dict[str, dict[str, Any]]:
-        """Collect the declared per-runtime option blocks.
-
-        Returns:
-            dict[str, dict[str, Any]]: runtime name to option block,
-                omitting runtimes without one.
-        """
-        blocks = {
-            "monty": self.monty,
-            "wasi": self.wasi,
-            "local": self.local,
-            "pyodide": self.pyodide,
-            "quickjs": self.quickjs,
-        }
-        return {k: v for k, v in blocks.items() if v is not None}
+    Raises:
+        ValueError: a map entry without a name, or options on vfs.
+    """
+    out: list[Runtime | str] = []
+    for entry in entries:
+        if isinstance(entry, str):
+            out.append(entry)
+            continue
+        options = dict(entry)
+        name = options.pop("name", None)
+        if not isinstance(name, str) or not name:
+            raise ValueError("runtime entry needs a non-empty 'name'")
+        if name == VFS_ENTRY:
+            if options:
+                raise ValueError("the vfs runtime entry takes no options")
+            out.append(VFS_ENTRY)
+            continue
+        out.append(build_runtime(name, **options))
+    return out
 
 
 class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mounts: dict[str, MountBlock]
-    runtime: RuntimeBlock | None = None
+    # The workspace's ordered runtime world: name strings or maps
+    # with a name plus constructor options flat on the entry
+    # ({name: wasi, home: /opt/...}). Unset = the default world.
+    runtimes: list[str | dict[str, Any]] | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
     default_session_id: str | None = None
@@ -335,13 +327,8 @@ class WorkspaceConfig(BaseModel):
         if self.store is not None:
             kwargs["store"] = _build_state_store(self.store)
             kwargs["owns_store"] = True
-        if self.runtime is not None:
-            kwargs["python_runtime"] = self.runtime.python
-            if self.runtime.js is not None:
-                kwargs["js_runtime"] = self.runtime.js
-            blocks = self.runtime.option_blocks()
-            if blocks:
-                kwargs["runtime_options"] = blocks
+        if self.runtimes is not None:
+            kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:
@@ -382,8 +369,10 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
 
 
 def _build_store_group(
-    block: RamStoreBlock | RedisStoreBlock | S3StoreBlock
+    block: RamStoreBlock | DiskStoreBlock | RedisStoreBlock | S3StoreBlock
 ) -> WorkspaceStateStore:
+    if isinstance(block, DiskStoreBlock):
+        return DiskWorkspaceStateStore(root=block.root)
     if isinstance(block, RedisStoreBlock):
         if RedisWorkspaceStateStore is None:
             raise ImportError("A redis store requires the 'redis' extra. "
@@ -414,6 +403,11 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
                                         namespace=namespace,
                                         observer=observer,
                                         workspace=workspace)
+    if block.type == "disk":
+        return DiskWorkspaceStateStore(root=block.root,
+                                       namespace=namespace,
+                                       observer=observer,
+                                       workspace=workspace)
     return RAMWorkspaceStateStore(namespace=namespace,
                                   observer=observer,
                                   workspace=workspace)

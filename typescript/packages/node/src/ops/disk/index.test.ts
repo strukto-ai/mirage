@@ -14,23 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ResourceName } from '@struktoai/mirage-core'
-import {
-  appendOp,
-  createOp,
-  DISK_OPS,
-  mkdirOp,
-  readdirOp,
-  readFeatherOp,
-  readHdf5Op,
-  readOp,
-  readParquetOp,
-  renameOp,
-  rmdirOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-} from './index.ts'
+import { DISK_OPS } from './index.ts'
 
 describe('DISK_OPS', () => {
   it('registers the expected 15 ops with resource=disk', () => {
@@ -80,22 +64,5 @@ describe('DISK_OPS', () => {
         'write',
       ]),
     )
-  })
-
-  it('exports each op individually', () => {
-    expect(appendOp.name).toBe('append')
-    expect(createOp.name).toBe('create')
-    expect(mkdirOp.name).toBe('mkdir')
-    expect(readOp.name).toBe('read')
-    expect(readFeatherOp.filetype).toBe('.feather')
-    expect(readHdf5Op.filetype).toBe('.hdf5')
-    expect(readParquetOp.filetype).toBe('.parquet')
-    expect(readdirOp.name).toBe('readdir')
-    expect(renameOp.name).toBe('rename')
-    expect(rmdirOp.name).toBe('rmdir')
-    expect(statOp.name).toBe('stat')
-    expect(truncateOp.name).toBe('truncate')
-    expect(unlinkOp.name).toBe('unlink')
-    expect(writeOp.name).toBe('write')
   })
 })

@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
+from mirage.shell.errors import ExitSignal
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
 from mirage.utils.errors import format_fs_error
@@ -60,8 +61,23 @@ async def execute_program(
                 call_stack)
             i += 2
         else:
-            stdout, io, last_exec = await recurse(child, session, stdin,
-                                                  call_stack)
+            try:
+                stdout, io, last_exec = await recurse(child, session, stdin,
+                                                      call_stack)
+            except ExitSignal as sig:
+                # exit (or a fatal expansion error) ends the line: keep
+                # what earlier statements produced, drop the rest.
+                if sig.stdout:
+                    all_stdout.append(sig.stdout)
+                sig_io = IOResult(exit_code=sig.exit_code,
+                                  stderr=sig.stderr or None)
+                merged_io = await merged_io.merge(sig_io)
+                merged_io.exit_code = sig.exit_code
+                session.last_exit_code = sig.exit_code
+                last_exec = ExecutionNode(command="exit",
+                                          exit_code=sig.exit_code,
+                                          stderr=sig.stderr)
+                break
             # Materialize stdout so lazy exit codes (e.g. from
             # exit_on_empty in grep) are finalized before $? is set.
             drain_err: bytes | None = None

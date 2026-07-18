@@ -17,7 +17,8 @@ import { makeWorkspace } from '../../fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 const stdout = (r: { stdout: Uint8Array }): string => DEC.decode(r.stdout)
-const stderr = (r: { stderr: Uint8Array }): string => DEC.decode(r.stderr)
+const stderr = (r: { stderr: Uint8Array | null }): string =>
+  r.stderr === null ? '' : DEC.decode(r.stderr)
 
 describe('Workspace.executePythonRepl', () => {
   it('prints the value of the last expression (single-mode behavior)', async () => {

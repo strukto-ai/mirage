@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
-import { readOp } from './read.ts'
-import { readdirOp } from './readdir.ts'
-import { statOp } from './stat.ts'
+import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
+import { EMAIL_CMD_OPS } from '../../commands/builtin/email/ops.ts'
 
-export const EMAIL_OPS: readonly RegisteredOp[] = [readdirOp, readOp, statOp] as const
+export const EMAIL_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.EMAIL, EMAIL_CMD_OPS)

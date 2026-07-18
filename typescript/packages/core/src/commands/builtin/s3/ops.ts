@@ -15,6 +15,7 @@
 import type { S3Accessor } from '../../../accessor/s3.ts'
 import { SCOPE_ERROR } from '../../../core/s3/constants.ts'
 import { copy as s3Copy } from '../../../core/s3/copy.ts'
+import { create as s3Create } from '../../../core/s3/create.ts'
 import { du as s3Du, duAll as s3DuAll } from '../../../core/s3/du.ts'
 import { exists as s3Exists } from '../../../core/s3/exists.ts'
 import { find as s3Find } from '../../../core/s3/find.ts'
@@ -26,6 +27,7 @@ import { rmR as s3RmR } from '../../../core/s3/rm.ts'
 import { rmdir as s3Rmdir } from '../../../core/s3/rmdir.ts'
 import { stat as s3Stat } from '../../../core/s3/stat.ts'
 import { stream as s3Stream } from '../../../core/s3/stream.ts'
+import { truncate as s3Truncate } from '../../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../../core/s3/unlink.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
@@ -46,6 +48,8 @@ export const S3_CMD_OPS: CommandIO<S3Accessor> = {
   rmR: s3RmR,
   rename: s3Rename,
   copy: s3Copy,
+  create: s3Create,
+  truncate: s3Truncate,
   find: s3Find,
   duTotal: s3Du,
   duAll: s3DuAll,

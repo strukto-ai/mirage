@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import difflib
-import re
 
 from mirage.commands.builtin.diff_types import DiffOpTag
-from mirage.commands.builtin.utils.types import _ReadBytes
 
 
 def _ed_script(a_lines: list[str], b_lines: list[str]) -> list[str]:
@@ -80,30 +78,3 @@ def _normal_diff(a_lines: list[str], b_lines: list[str]) -> list[str]:
                 out.append("> " +
                            (line if line.endswith("\n") else line + "\n"))
     return out
-
-
-def diff(
-    read_bytes: _ReadBytes,
-    path_a: str,
-    path_b: str,
-    ignore_case: bool = False,
-    ignore_whitespace: bool = False,
-    ignore_space_change: bool = False,
-    ed_script: bool = False,
-) -> list[str]:
-    text_a = read_bytes(path_a).decode(errors="replace")
-    text_b = read_bytes(path_b).decode(errors="replace")
-    if ignore_case:
-        text_a = text_a.lower()
-        text_b = text_b.lower()
-    if ignore_whitespace:
-        text_a = re.sub(r"\s+", "", text_a)
-        text_b = re.sub(r"\s+", "", text_b)
-    if ignore_space_change:
-        text_a = re.sub(r"[ \t]+", " ", text_a)
-        text_b = re.sub(r"[ \t]+", " ", text_b)
-    a_lines = text_a.splitlines(keepends=True)
-    b_lines = text_b.splitlines(keepends=True)
-    if ed_script:
-        return _ed_script(a_lines, b_lines)
-    return _normal_diff(a_lines, b_lines)

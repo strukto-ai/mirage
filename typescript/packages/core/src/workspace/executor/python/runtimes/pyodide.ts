@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RunArgs, RunResult } from '../../runtime.ts'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
 import {
   createMirageBridge,
@@ -22,13 +23,16 @@ import {
 import { MIRAGE_FS_SHIM_PY } from '../mirage_fs_shim.ts'
 import { PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from '../wrapper.ts'
 import { PYODIDE_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
-import type {
-  PythonReplRunArgs,
-  PythonReplRunResult,
-  PythonRunArgs,
-  PythonRunResult,
-  ReplStatus,
-} from '../types.ts'
+import type { PythonReplRunArgs, PythonReplRunResult, ReplStatus } from '../types.ts'
+
+function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
+  return value instanceof Uint8Array ? value : new Uint8Array(value)
+}
+
+function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null {
+  const bytes = bridgeBytes(value)
+  return bytes.length > 0 ? bytes : null
+}
 
 function runtimeEnv(): Record<string, string> {
   const env: Record<string, string> = {}
@@ -78,15 +82,17 @@ export interface PyodideRuntimeOptions extends PythonRuntimeOptions {
 
 export class PyodideRuntime implements PythonRuntime {
   readonly name = PYODIDE_RUNTIME
+  static readonly commands: readonly string[] = ['python3', 'python'] as const
+  readonly captures = PyodideRuntime.commands
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
   private bootstrapPromise: Promise<void> | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private readonly autoLoadFromImports: boolean
   private readonly bootstrapCode: string | null
-  private readonly workspaceBridge: BridgeDispatchFn | null
+  private workspaceBridge: BridgeDispatchFn | null
   private readonly denyPackages: ReadonlySet<string>
-  private readonly listMounts: () => string[]
+  private listMounts: () => string[]
   private readonly home: string | null
   private bridge: MirageBridge | null = null
 
@@ -99,8 +105,15 @@ export class PyodideRuntime implements PythonRuntime {
     this.home = options.home ?? null
   }
 
-  async run(args: PythonRunArgs): Promise<PythonRunResult> {
-    const task = (): Promise<PythonRunResult> => this.runOne(args)
+  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+    if (this.workspaceBridge === null) {
+      this.workspaceBridge = dispatch
+      this.listMounts = listMounts
+    }
+  }
+
+  async run(args: RunArgs): Promise<RunResult> {
+    const task = (): Promise<RunResult> => this.runOne(args)
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)
     return next
@@ -173,7 +186,7 @@ export class PyodideRuntime implements PythonRuntime {
     }
   }
 
-  private async runOne(args: PythonRunArgs): Promise<PythonRunResult> {
+  private async runOne(args: RunArgs): Promise<RunResult> {
     const pyodide = await this.ensureLoaded()
     await this.loadImports(pyodide, args.code)
     const mergedEnv = { ...runtimeEnv(), ...args.env }
@@ -211,8 +224,8 @@ export class PyodideRuntime implements PythonRuntime {
         }
       }
       return {
-        stdout: arr[0] instanceof Uint8Array ? arr[0] : new Uint8Array(arr[0] as ArrayLike<number>),
-        stderr: arr[1] instanceof Uint8Array ? arr[1] : new Uint8Array(arr[1] as ArrayLike<number>),
+        stdout: bridgeBytes(arr[0]),
+        stderr: bridgeStderr(arr[1]),
         exitCode: arr[2],
       }
     } finally {
@@ -266,8 +279,8 @@ export class PyodideRuntime implements PythonRuntime {
         }
       }
       return {
-        stdout: arr[0] instanceof Uint8Array ? arr[0] : new Uint8Array(arr[0] as ArrayLike<number>),
-        stderr: arr[1] instanceof Uint8Array ? arr[1] : new Uint8Array(arr[1] as ArrayLike<number>),
+        stdout: bridgeBytes(arr[0]),
+        stderr: bridgeStderr(arr[1]),
         exitCode: arr[2],
         status: arr[3],
       }

@@ -155,12 +155,12 @@ describe('config list hardening', () => {
   })
 
   it('--resolved shows effective values with origins', async () => {
-    writeFileSync(join(dir, 'config.toml'), '[daemon]\nversion_root = "/file/repos"\n')
+    writeFileSync(join(dir, 'config.toml'), '[daemon]\nport = 9001\n')
     const r = await run(['config', 'list', '--resolved'])
     expect(r.exitCode).toBe(0)
     const parsed = JSON.parse(r.stdout) as Record<string, { value: string; origin: string }>
-    expect(parsed.version_root).toEqual({ value: '/file/repos', origin: 'file' })
-    expect(parsed.pid_file?.origin).toBe('default')
+    expect(parsed.port).toEqual({ value: '9001', origin: 'file' })
+    expect(parsed.url?.origin).toBe('default')
   })
 
   it('--resolved masks auth_token', async () => {

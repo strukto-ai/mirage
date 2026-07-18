@@ -19,6 +19,7 @@ import { gnuBasename } from '../../utils/path.ts'
 import { getExtension } from '../resolve.ts'
 import { BINARY_EXTENSIONS, compilePattern, grepLines } from './grep_helper.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
+import type { AsyncReadBytesFn, AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
 
 export const TYPE_EXTENSIONS: Record<string, string[]> = {
   py: ['.py'],
@@ -42,10 +43,6 @@ export const TYPE_EXTENSIONS: Record<string, string[]> = {
   sh: ['.sh', '.bash'],
   csv: ['.csv'],
 }
-
-export type AsyncReaddirFn = (path: string) => Promise<string[]>
-export type AsyncStatFn = (path: string) => Promise<FileStat>
-export type AsyncReadBytesFn = (path: string) => Promise<Uint8Array>
 
 export function rgMatchesFilter(
   entry: string,

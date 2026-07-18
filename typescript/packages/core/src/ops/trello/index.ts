@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { TRELLO_CMD_OPS } from '../../commands/builtin/trello/ops.ts'
+import { ResourceName } from '../../types.ts'
+import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
-import { readOp } from './read.ts'
-import { readdirOp } from './readdir.ts'
-import { statOp } from './stat.ts'
 
-export const TRELLO_VFS_OPS: readonly RegisteredOp[] = [readdirOp, readOp, statOp] as const
+export const TRELLO_VFS_OPS: readonly RegisteredOp[] = makeGenericOps(
+  ResourceName.TRELLO,
+  TRELLO_CMD_OPS,
+)

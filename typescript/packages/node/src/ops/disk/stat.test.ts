@@ -15,8 +15,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FileStat, FileType } from '@struktoai/mirage-core'
 import { DiskResource } from '../../resource/disk/disk.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
-import { statOp } from './stat.ts'
+import { opOf, spec, tmpRoot } from '../../test-utils.ts'
+import { DISK_OPS } from './index.ts'
+
+const statOp = opOf(DISK_OPS, 'stat')
 
 let root: string
 let cleanup: () => void

@@ -20,7 +20,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
-from mirage.runtime.python import PythonRunArgs, WasiRuntime
+from mirage.runtime.base import RunArgs
+from mirage.runtime.python import WasiRuntime
 from mirage.runtime.python.wasi import WASI_HOME_ENV
 
 
@@ -57,7 +58,7 @@ def test_dir_without_stdlib_raises_hint(tmp_path):
 def test_wasi_runs_full_cpython():
     rt = WasiRuntime()
     code = "class A:\n    x = 41\nprint(A.x + 1)"
-    result = asyncio.run(rt.run(PythonRunArgs(code=code)))
+    result = asyncio.run(rt.run(RunArgs(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b"42\n"
     assert result.stderr is None
@@ -72,10 +73,10 @@ def test_wasi_argv_stdin_env():
             "print(os.environ['GREETING'])")
     result = asyncio.run(
         rt.run(
-            PythonRunArgs(code=code,
-                          args=["a1", "a2"],
-                          env={"GREETING": "hi-wasi"},
-                          stdin=b"piped\n")))
+            RunArgs(code=code,
+                    args=["a1", "a2"],
+                    env={"GREETING": "hi-wasi"},
+                    stdin=b"piped\n")))
     assert result.exit_code == 0
     assert result.stdout == b"['a1', 'a2']\nPIPED\nhi-wasi\n"
 
@@ -83,9 +84,9 @@ def test_wasi_argv_stdin_env():
 @live
 def test_wasi_exit_code_and_traceback():
     rt = WasiRuntime()
-    result = asyncio.run(rt.run(PythonRunArgs(code="import sys; sys.exit(7)")))
+    result = asyncio.run(rt.run(RunArgs(code="import sys; sys.exit(7)")))
     assert result.exit_code == 7
-    result = asyncio.run(rt.run(PythonRunArgs(code="1 / 0")))
+    result = asyncio.run(rt.run(RunArgs(code="1 / 0")))
     assert result.exit_code == 1
     assert b"ZeroDivisionError" in (result.stderr or b"")
 
@@ -93,11 +94,11 @@ def test_wasi_exit_code_and_traceback():
 @live
 def test_wasi_host_fs_and_network_invisible():
     rt = WasiRuntime()
-    result = asyncio.run(rt.run(PythonRunArgs(code="open('/etc/passwd')")))
+    result = asyncio.run(rt.run(RunArgs(code="open('/etc/passwd')")))
     assert result.exit_code == 1
     assert b"FileNotFoundError" in (result.stderr or b"")
-    result = asyncio.run(
-        rt.run(PythonRunArgs(code="import socket; socket.socket()")))
+    result = asyncio.run(rt.run(
+        RunArgs(code="import socket; socket.socket()")))
     assert result.exit_code == 1
     assert b"OSError" in (result.stderr or b"")
 
@@ -108,7 +109,7 @@ async def test_wasi_python3_command_end_to_end():
     ram = RAMResource()
     ram._store.files["/calc.py"] = (b"import sys\n"
                                     b"print(int(sys.argv[1]) * 6)\n")
-    ws = Workspace({"/ram": ram}, mode=MountMode.EXEC, python_runtime="wasi")
+    ws = Workspace({"/ram": ram}, mode=MountMode.EXEC, runtimes=["wasi"])
     r = await ws.execute("python3 -c \"print('wasi says', 6 * 7)\"")
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "wasi says 42\n"
@@ -125,14 +126,14 @@ async def test_wasi_python3_command_end_to_end():
 async def test_wasi_cancellation_stops_the_run():
     rt = WasiRuntime()
     hot = "n = 0\nwhile True:\n    n = n + 1"
-    task = asyncio.ensure_future(rt.run(PythonRunArgs(code=hot)))
+    task = asyncio.ensure_future(rt.run(RunArgs(code=hot)))
     await asyncio.sleep(0.5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     # The epoch bump traps the run; a healthy follow-up run proves the
     # runtime survived and the worker thread was reclaimed.
-    result = await rt.run(PythonRunArgs(code="print('alive')"))
+    result = await rt.run(RunArgs(code="print('alive')"))
     assert result.exit_code == 0
     assert result.stdout == b"alive\n"
 
@@ -140,8 +141,8 @@ async def test_wasi_cancellation_stops_the_run():
 @live
 def test_wasi_reuses_compiled_module():
     rt = WasiRuntime()
-    first = asyncio.run(rt.run(PythonRunArgs(code="print(1)")))
-    second = asyncio.run(rt.run(PythonRunArgs(code="print(2)")))
+    first = asyncio.run(rt.run(RunArgs(code="print(1)")))
+    second = asyncio.run(rt.run(RunArgs(code="print(2)")))
     assert (first.stdout, second.stdout) == (b"1\n", b"2\n")
     root = _build_dir()
     assert root is not None
@@ -155,7 +156,7 @@ async def test_wasi_mounts_read_write_listdir():
     # shell writes, guest writes land in the mount, listdir lists it.
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
-                   python_runtime="wasi")
+                   runtimes=["wasi"])
     await ws.execute("echo hello-mount > /data/in.txt")
     code = ("import os\n"
             "print(open('/data/in.txt').read().strip())\n"
@@ -177,7 +178,7 @@ async def test_wasi_root_mount_coexists_with_the_build():
     # from the build directory, so a root mount and the stdlib coexist.
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
-                   python_runtime="wasi")
+                   runtimes=["wasi"])
     await ws.execute("echo root-mount > /f.txt")
     code = ("import sys\n"
             "print(open('/f.txt').read().strip())\n"
@@ -192,7 +193,7 @@ async def test_wasi_root_mount_coexists_with_the_build():
 def test_wasi_without_dispatch_sees_no_mounts():
     rt = WasiRuntime()
     code = "import os; print(os.path.exists('/data'))"
-    result = asyncio.run(rt.run(PythonRunArgs(code=code)))
+    result = asyncio.run(rt.run(RunArgs(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b"False\n"
 
@@ -204,7 +205,7 @@ def test_wasi_build_directory_is_read_only():
             "    open('/python.wasm', 'w')\n"
             "except PermissionError:\n"
             "    print('denied')\n")
-    result = asyncio.run(rt.run(PythonRunArgs(code=code)))
+    result = asyncio.run(rt.run(RunArgs(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b"denied\n"
 
@@ -216,7 +217,7 @@ async def test_wasi_session_narrowing_reaches_the_guest():
     # open() and still serves reads; the default session is unaffected.
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
-                   python_runtime="wasi")
+                   runtimes=["wasi"])
     await ws.execute("echo seeded > /data/f0.txt")
     ws.create_session("narrow", {"/data": "read"})
     code = ("\ntry:\n"

@@ -18,8 +18,7 @@ import pytest
 
 from mirage.resource.ram import RAMResource
 from mirage.server.version.state_tree import (blob_to_meta, meta_to_blob,
-                                              to_state, to_tree_inputs,
-                                              tree_inputs_from_state)
+                                              to_state, tree_inputs_from_state)
 from mirage.types import (CacheKey, FingerprintKey, MountKey, MountMode,
                           SessionKey, StateKey)
 from mirage.workspace import Workspace
@@ -36,13 +35,13 @@ def _mount_files(state: dict, prefix: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_to_tree_inputs_ram_files():
+async def test_tree_inputs_from_state_ram_files():
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.execute("echo hello > /m/a.txt")
     await ws.execute("mkdir -p /m/sub && echo world > /m/sub/b.txt")
 
-    entries, meta = await to_tree_inputs(ws)
+    entries, meta = tree_inputs_from_state(await to_state_dict(ws))
 
     assert entries["m/a.txt"] == b"hello\n"
     assert entries["m/sub/b.txt"] == b"world\n"
@@ -59,23 +58,10 @@ async def test_to_state_round_trips_files():
     await ws.execute("mkdir -p /m/sub && echo world > /m/sub/b.txt")
 
     original_files = _mount_files(await to_state_dict(ws), "/m/")
-    entries, meta = await to_tree_inputs(ws)
+    entries, meta = tree_inputs_from_state(await to_state_dict(ws))
     state = to_state(entries, meta)
 
     assert _mount_files(state, "/m/") == original_files
-
-
-@pytest.mark.asyncio
-async def test_tree_inputs_from_state_matches_ws_path():
-    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                   mode=MountMode.WRITE)
-    await ws.execute("echo hi > /m/a.txt")
-
-    entries_ws, _ = await to_tree_inputs(ws)
-    entries_state, _ = tree_inputs_from_state(await to_state_dict(ws))
-
-    assert entries_ws == entries_state
-    assert entries_state["m/a.txt"] == b"hi\n"
 
 
 @pytest.mark.asyncio
@@ -84,7 +70,7 @@ async def test_to_state_is_tar_loadable():
                    mode=MountMode.WRITE)
     await ws.execute("echo hello > /m/a.txt")
 
-    entries, meta = await to_tree_inputs(ws)
+    entries, meta = tree_inputs_from_state(await to_state_dict(ws))
     state = to_state(entries, meta)
 
     manifest, blobs = split_manifest_and_blobs(state)

@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.repo import fetch_default_branch
+from mirage.core.github.repo import fetch_default_branch_sync
 
 
 @pytest.fixture
@@ -25,21 +25,19 @@ def config():
     return GitHubConfig(token="ghp_test")
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.github.repo.github_get", new_callable=AsyncMock)
-async def test_fetch_default_branch_main(mock_get, config):
+@patch("mirage.core.github.repo.github_get_sync")
+def test_fetch_default_branch_main(mock_get, config):
     mock_get.return_value = {"default_branch": "main"}
-    result = await fetch_default_branch(config, "acme", "proj")
+    result = fetch_default_branch_sync(config, "acme", "proj")
     assert result == "main"
-    mock_get.assert_awaited_once_with(config.token,
-                                      "/repos/{owner}/{repo}",
-                                      owner="acme",
-                                      repo="proj")
+    mock_get.assert_called_once_with(config.token,
+                                     "/repos/{owner}/{repo}",
+                                     owner="acme",
+                                     repo="proj")
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.github.repo.github_get", new_callable=AsyncMock)
-async def test_fetch_default_branch_master(mock_get, config):
+@patch("mirage.core.github.repo.github_get_sync")
+def test_fetch_default_branch_master(mock_get, config):
     mock_get.return_value = {"default_branch": "master"}
-    result = await fetch_default_branch(config, "acme", "proj")
+    result = fetch_default_branch_sync(config, "acme", "proj")
     assert result == "master"

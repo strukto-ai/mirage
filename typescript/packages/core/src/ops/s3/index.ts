@@ -12,33 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredOp } from '../../ops/registry.ts'
-import { createOp } from './create.ts'
-import { mkdirOp } from './mkdir.ts'
-import { readOp } from './read/read.ts'
-import { readFeatherOp } from './read/read_feather.ts'
-import { readHdf5Op } from './read/read_hdf5.ts'
-import { readParquetOp } from './read/read_parquet.ts'
-import { readdirOp } from './readdir.ts'
-import { renameOp } from './rename.ts'
-import { rmdirOp } from './rmdir.ts'
-import { statOp } from './stat.ts'
-import { truncateOp } from './truncate.ts'
-import { unlinkOp } from './unlink.ts'
-import { writeOp } from './write.ts'
+import { S3_CMD_OPS } from '../../commands/builtin/s3/ops.ts'
+import { ResourceName } from '../../types.ts'
+import { makeGenericOps } from '../generic/factory.ts'
+import type { RegisteredOp } from '../registry.ts'
 
-export const S3_OPS: readonly RegisteredOp[] = [
-  createOp,
-  mkdirOp,
-  readOp,
-  readFeatherOp,
-  readHdf5Op,
-  readParquetOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-]
+export const S3_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.S3, S3_CMD_OPS, {
+  filetypeRead: ['.feather', '.hdf5', '.parquet'],
+})

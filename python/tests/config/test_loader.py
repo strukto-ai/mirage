@@ -18,14 +18,18 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
-from mirage.config import (RamCacheBlock, RedisCacheBlock, RedisStoreBlock,
-                           S3StoreBlock, WorkspaceConfig, load_config)
+from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
+                           RedisStoreBlock, S3StoreBlock, WorkspaceConfig,
+                           load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.namespace import RAMNamespaceStore
+from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
 from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
-from mirage.workspace.store import (RAMWorkspaceStateStore,
+from mirage.workspace.session.disk import DiskSessionStore
+from mirage.workspace.store import (DiskWorkspaceStateStore,
+                                    RAMWorkspaceStateStore,
                                     RedisWorkspaceStateStore)
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -141,6 +145,47 @@ def test_store_ram_block_builds_ram_provider():
     assert isinstance(kwargs["store"], RAMWorkspaceStateStore)
     assert kwargs["owns_store"] is True
     assert isinstance(kwargs["store"].namespace("ws1"), RAMNamespaceStore)
+
+
+def test_store_disk_block_builds_disk_provider(tmp_path):
+    cfg = load_config({
+        "store": {
+            "type": "disk",
+            "root": str(tmp_path),
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    assert cfg.store is not None
+    assert cfg.store.root == str(tmp_path)
+    kwargs = cfg.to_workspace_kwargs()
+    assert isinstance(kwargs["store"], DiskWorkspaceStateStore)
+    assert kwargs["owns_store"] is True
+    assert isinstance(kwargs["store"].namespace("ws1"), DiskNamespaceStore)
+
+
+def test_store_disk_group_override(tmp_path):
+    cfg = load_config({
+        "store": {
+            "type": "ram",
+            "workspace": {
+                "type": "disk",
+                "root": str(tmp_path),
+            },
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    assert isinstance(cfg.store.workspace, DiskStoreBlock)
+    store = cfg.to_workspace_kwargs()["store"]
+    assert isinstance(store, RAMWorkspaceStateStore)
+    assert isinstance(store.sessions("ws1"), DiskSessionStore)
 
 
 def test_store_group_override_redirects_one_plane():

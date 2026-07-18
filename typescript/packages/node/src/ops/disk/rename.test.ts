@@ -14,8 +14,10 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DiskResource } from '../../resource/disk/disk.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
-import { renameOp } from './rename.ts'
+import { opOf, spec, tmpRoot } from '../../test-utils.ts'
+import { DISK_OPS } from './index.ts'
+
+const renameOp = opOf(DISK_OPS, 'rename')
 
 let root: string
 let cleanup: () => void
@@ -40,7 +42,7 @@ describe('renameOp', () => {
 
   it('throws when destination is not a PathSpec', () => {
     expect(() => renameOp.fn(res.accessor, spec('/a'), ['plain string'], {})).toThrow(
-      /PathSpec destination/,
+      /dst PathSpec/,
     )
   })
 })

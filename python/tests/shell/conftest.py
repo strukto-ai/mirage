@@ -70,6 +70,16 @@ class ShellTestEnv:
         io = asyncio.run(self.ws.execute(cmd, stdin=stdin))
         return io.exit_code
 
+    def mirage_result(self,
+                      cmd: str,
+                      stdin: bytes | None = None) -> tuple[int, str, str]:
+
+        async def _run():
+            io = await self.ws.execute(cmd, stdin=stdin)
+            return io.exit_code, await io.stdout_str(), await io.stderr_str()
+
+        return asyncio.run(_run())
+
     def native_exit(self, cmd: str) -> int:
         result = subprocess.run(
             ["/bin/sh", "-c", cmd],

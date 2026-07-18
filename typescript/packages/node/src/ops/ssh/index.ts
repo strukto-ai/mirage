@@ -13,42 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
-import { appendOp } from './append.ts'
-import { createOp } from './create.ts'
-import { mkdirOp } from './mkdir.ts'
-import { readOp } from './read.ts'
-import { readdirOp } from './readdir.ts'
-import { renameOp } from './rename.ts'
-import { rmdirOp } from './rmdir.ts'
-import { statOp } from './stat.ts'
-import { truncateOp } from './truncate.ts'
-import { unlinkOp } from './unlink.ts'
-import { writeOp } from './write.ts'
+import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
+import { SSH_CMD_OPS } from '../../commands/builtin/ssh/ops.ts'
 
-export const SSH_OPS: readonly RegisteredOp[] = [
-  appendOp,
-  createOp,
-  mkdirOp,
-  readOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-]
-
-export {
-  appendOp,
-  createOp,
-  mkdirOp,
-  readOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-}
+export const SSH_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.SSH, SSH_CMD_OPS, {
+  mkdirParents: true,
+  forwardIndex: false,
+})

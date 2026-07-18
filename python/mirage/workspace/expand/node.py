@@ -104,6 +104,10 @@ async def expand_node(
 
     if ntype == NT.SIMPLE_EXPANSION:
         raw = get_text(ts_node)
+        for child in ts_node.named_children:
+            if child.type == NT.SPECIAL_VARIABLE_NAME:
+                # rfind would split `$$` into prefix "$" + var "".
+                return _lookup_var(get_text(child), session, call_stack)
         dollar = raw.rfind("$")
         prefix = raw[:dollar]
         var = raw[dollar + 1:]
