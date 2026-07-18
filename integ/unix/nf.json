@@ -15,7 +15,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/missing.txt",
       "expect": {
@@ -39,7 +40,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "head /data/missing.txt",
       "expect": {
@@ -63,7 +65,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "tail /data/missing.txt",
       "expect": {
@@ -87,7 +90,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "wc /data/missing.txt",
       "expect": {
@@ -111,7 +115,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "stat /data/missing.txt",
       "expect": {
@@ -135,7 +140,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep x /data/missing.txt",
       "expect": {
@@ -159,7 +165,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/sub/missing.txt",
       "expect": {
@@ -183,7 +190,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/missing.txt | cat",
       "expect": {
@@ -207,7 +215,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(cd /data && cat missing.txt)",
       "expect": {
@@ -231,7 +240,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(cd /data && cat sub/missing.txt)",
       "expect": {
@@ -255,7 +265,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(cd /data && grep -r x missing)",
       "expect": {

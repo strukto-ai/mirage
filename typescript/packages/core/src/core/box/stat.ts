@@ -16,6 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { getFolderInfo } from './api.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -46,10 +47,20 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  void accessor
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const key = path.resourcePath
-  if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
+  if (key === '') {
+    // The mount root has no parent listing to inherit an mtime from; fetch
+    // the folder's own metadata so find -mtime and ls -ld see a real
+    // timestamp (mirrors the onedrive Graph-root stat).
+    const info = await getFolderInfo(accessor.tokenManager, accessor.rootFolderId)
+    return new FileStat({
+      name: '/',
+      type: FileType.DIRECTORY,
+      modified: info.modified_at ?? '',
+      extra: { box_id: accessor.rootFolderId },
+    })
+  }
 
   if (index === undefined) throw enoent(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`

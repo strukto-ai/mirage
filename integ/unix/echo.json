@@ -15,7 +15,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo hi -n",
       "expect": {
@@ -39,7 +40,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo -ne 'ab\\tcd'; echo",
       "expect": {
@@ -63,7 +65,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo -nq hi",
       "expect": {
@@ -87,7 +90,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo a '' b",
       "expect": {
@@ -111,7 +115,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo a \"\" b",
       "expect": {

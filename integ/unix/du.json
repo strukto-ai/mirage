@@ -15,7 +15,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "du /data/a.txt /data/b.txt",
       "expect": {
@@ -39,7 +40,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "du --max-depth=1 /data/sub",
       "expect": {
@@ -63,7 +65,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "du --max-depth 2>&1; echo code=$?",
       "expect": {
@@ -87,7 +90,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "du /data/a.txt",
       "expect": {
@@ -135,7 +139,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "du -h /data/a.txt",
       "expect": {

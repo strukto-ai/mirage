@@ -102,6 +102,10 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: HF_ENDPOINT not set\n`)
       continue
     }
+    if (target.service === 'box' && !process.env.BOX_ENDPOINT) {
+      process.stderr.write(`skip [${id}]: BOX_ENDPOINT not set\n`)
+      continue
+    }
     await runTarget(target, cases, root, report, emit)
   }
 

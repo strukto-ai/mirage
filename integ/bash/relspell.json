@@ -81,7 +81,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat sub/missing.txt 2>&1",
       "expect": {
@@ -105,7 +106,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep hello sub/missing.txt 2>&1",
       "expect": {

@@ -15,7 +15,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "comm /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {
@@ -39,7 +40,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "comm -12 /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {
@@ -63,7 +65,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "comm -23 /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {
@@ -87,7 +90,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "comm -13 /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {

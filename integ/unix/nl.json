@@ -15,7 +15,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "nl /data/a.txt",
       "expect": {
@@ -39,7 +40,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "nl -b a /data/a.txt",
       "expect": {
@@ -63,7 +65,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "nl -d ! /data/a.txt",
       "expect": {
@@ -87,7 +90,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "nl -w 3 /data/a.txt",
       "expect": {
@@ -111,7 +115,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "du /data/b.txt | wc -c",
       "expect": {
@@ -135,7 +140,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "stat -c %n /data/b.txt | wc -c",
       "expect": {
@@ -159,7 +165,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "file /data/b.txt | wc -c",
       "expect": {
@@ -229,7 +236,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "wc -l /data/b.txt | wc -c",
       "expect": {
@@ -253,7 +261,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "md5 /data/b.txt | wc -c",
       "expect": {
@@ -277,7 +286,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cmp /data/a.txt /data/b.txt | wc -c",
       "expect": {

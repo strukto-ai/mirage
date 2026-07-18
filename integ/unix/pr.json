@@ -615,7 +615,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "wc -l /data/pr/m1.txt /data/pr/m2.txt",
       "expect": {

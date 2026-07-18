@@ -74,6 +74,9 @@ const TABLES = {
 const OPS_INVENTORY: Record<string, Row[]> = {
   box: [
     ['read', 'box', '', false],
+    ['read', 'box', '.feather', false],
+    ['read', 'box', '.hdf5', false],
+    ['read', 'box', '.parquet', false],
     ['readdir', 'box', '', false],
     ['stat', 'box', '', false],
   ],

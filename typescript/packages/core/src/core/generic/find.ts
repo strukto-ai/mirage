@@ -18,6 +18,7 @@ import type { FindOptions } from '../../resource/base.ts'
 import {
   optionsTree,
   prefixPathNodes,
+  treeHasEmpty,
   type FindEntry,
   keep,
 } from '../../commands/builtin/findEval.ts'
@@ -68,6 +69,31 @@ async function statEntry(
     if (isEnoent(err)) return null
     throw err
   }
+}
+
+async function isEmptyEntry(
+  deps: WalkFindDeps,
+  path: string,
+  isDir: boolean,
+  prefix: string,
+  index: IndexCacheStore | undefined,
+): Promise<boolean> {
+  if (isDir) {
+    const spec = new PathSpec({
+      virtual: path,
+      directory: path,
+      resolved: false,
+      resourcePath: mountKey(path, prefix),
+    })
+    try {
+      return (await deps.readdir(spec, index)).length === 0
+    } catch (err) {
+      if (isEnoent(err)) return false
+      throw err
+    }
+  }
+  const st = await statEntry(deps, path, prefix, index)
+  return st !== null && (st.size ?? 0) === 0
 }
 
 async function walk(
@@ -129,7 +155,7 @@ export async function walkFind(
   const results: string[] = []
   const tree = prefixPathNodes(optionsTree(options), prefix)
   const searchKey = stripSlash(path.mountPath)
-  if (searchKey !== '' && (options.maxDepth == null || options.maxDepth >= 0)) {
+  if (options.maxDepth == null || options.maxDepth >= 0) {
     let rootStat: FileStat | null = null
     try {
       rootStat = await deps.stat(path, index)
@@ -137,11 +163,21 @@ export async function walkFind(
       if (!isEnoent(err)) throw err
     }
     if (rootStat !== null) {
-      const rootPath = prefix !== '' ? `${prefix}/${searchKey}` : `/${searchKey}`
+      // A mount-root operand has an empty searchKey; its display path is the
+      // mount prefix itself (mirrors the Python walk_find root emission).
+      const rootPath =
+        searchKey !== ''
+          ? prefix !== ''
+            ? `${prefix}/${searchKey}`
+            : `/${searchKey}`
+          : prefix !== ''
+            ? prefix
+            : '/'
       collected.push({ path: rootPath, depth: 0, file: rootStat.type !== FileType.DIRECTORY })
     }
   }
   collected.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const needEmpty = treeHasEmpty(tree)
   for (const entry of collected) {
     const name = entry.path.split('/').pop() ?? ''
     const key =
@@ -151,6 +187,9 @@ export async function walkFind(
       name,
       kind: entry.file ? 'f' : 'd',
       depth: entry.depth,
+    }
+    if (needEmpty) {
+      findEntry.isEmpty = await isEmptyEntry(deps, entry.path, !entry.file, prefix, index)
     }
     if (!keep(findEntry, tree, options.minDepth)) continue
     const needSize = options.minSize != null || options.maxSize != null

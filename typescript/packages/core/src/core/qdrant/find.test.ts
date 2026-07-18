@@ -103,28 +103,39 @@ describe('qdrant core find', () => {
   beforeEach(() => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
+    // The start-point stat that emits the search root.
+    vi.mocked(statMod.stat).mockResolvedValue(new FileStat({ name: '/', type: FileType.DIRECTORY }))
   })
 
   it('walks recursively classifying row files by extension', async () => {
     mockTree(TREE)
     const out = await find(makeAccessor(), ROOT)
-    expect(out).toEqual(['/col', '/col/a.json', '/col/b.json', '/col/grp', '/col/grp/c.json'])
+    expect(out).toEqual(['/', '/col', '/col/a.json', '/col/b.json', '/col/grp', '/col/grp/c.json'])
     const files = await find(makeAccessor(), ROOT, { type: 'f' })
     expect(files).toEqual(['/col/a.json', '/col/b.json', '/col/grp/c.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
-    expect(dirs).toEqual(['/col', '/col/grp'])
+    expect(dirs).toEqual(['/', '/col', '/col/grp'])
   })
 
   it('never stats entries for classification', async () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT)
-    expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
+    // Only the start point is statted; children classify from the readdir
+    // slash convention.
+    const statted = [
+      ...new Set(
+        vi
+          .mocked(statMod.stat)
+          .mock.calls.map((c) => (typeof c[1] === 'string' ? c[1] : c[1].virtual)),
+      ),
+    ]
+    expect(statted).toEqual(['/'])
   })
 
   it('keeps a child whose readdir raises ENOENT but stops descending', async () => {
     mockTree({ '/': ['/ghost'] })
     const out = await find(makeAccessor(), ROOT)
-    expect(out).toEqual(['/ghost'])
+    expect(out).toEqual(['/', '/ghost'])
   })
 
   it('propagates non-ENOENT readdir errors', async () => {

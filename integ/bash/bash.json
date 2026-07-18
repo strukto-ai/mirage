@@ -39,7 +39,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -v '^#' /.bash_history | tail -n 1",
       "expect": {
@@ -63,7 +64,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /.bash_history | sed 's/^#[0-9]*$/#TS/' | tail -n 4",
       "expect": {

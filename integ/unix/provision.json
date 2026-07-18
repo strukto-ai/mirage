@@ -15,7 +15,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt",
       "provision": true,
@@ -41,7 +42,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt /data/b.txt",
       "provision": true,
@@ -66,7 +68,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "wc -l /data/a.txt",
       "provision": true,
@@ -91,7 +94,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "sort /data/numbers.txt",
       "provision": true,
@@ -116,7 +120,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "md5 /data/b.txt",
       "provision": true,
@@ -141,7 +146,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep world /data/a.txt",
       "provision": true,
@@ -166,7 +172,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep hello /data/a.txt /data/mixed.txt",
       "provision": true,
@@ -191,7 +198,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg world /data/a.txt",
       "provision": true,
@@ -216,7 +224,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "head /data/a.txt",
       "provision": true,
@@ -241,7 +250,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "head -c 5 /data/a.txt",
       "provision": true,
@@ -266,7 +276,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "tail -n 1 /data/a.txt",
       "provision": true,
@@ -291,7 +302,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "ls /data",
       "provision": true,
@@ -316,7 +328,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data -name \"*.txt\"",
       "provision": true,
@@ -364,7 +377,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "stat /data/a.txt",
       "provision": true,
@@ -389,7 +403,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "jq \".name\" /data/user.json",
       "provision": true,
@@ -414,7 +429,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "jq \".id\" /data/data.jsonl",
       "provision": true,
@@ -439,7 +455,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/missing.txt",
       "provision": true,
@@ -464,7 +481,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "sed s/a/b/ /data/a.txt",
       "provision": true,
@@ -539,7 +557,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt | head -c 4",
       "provision": true,
@@ -564,7 +583,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep world /data/a.txt | wc -l",
       "provision": true,
@@ -589,7 +609,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt && cat /data/b.txt",
       "provision": true,
@@ -614,7 +635,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt; cat /data/b.txt",
       "provision": true,
@@ -639,7 +661,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/b.txt || cat /data/a.txt",
       "provision": true,
@@ -664,7 +687,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "for i in 1 2 3; do cat /data/a.txt; done",
       "provision": true,
@@ -689,7 +713,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "while true; do cat /data/a.txt; done",
       "provision": true,
@@ -714,7 +739,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "file /data/a.txt",
       "provision": true,
@@ -912,7 +938,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "seq 3",
       "provision": true,
@@ -937,7 +964,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "date",
       "provision": true,
@@ -962,7 +990,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt | grep hello | wc -l",
       "provision": true,
@@ -987,7 +1016,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt && cat /data/b.txt || cat /data/numbers.txt",
       "provision": true,
@@ -1012,7 +1042,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt || cat /data/b.txt && cat /data/numbers.txt",
       "provision": true,
@@ -1037,7 +1068,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "if true; then cat /data/a.txt; else cat /data/b.txt; fi",
       "provision": true,
@@ -1062,7 +1094,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "if grep -q hello /data/a.txt; then cat /data/b.txt; fi",
       "provision": true,
@@ -1087,7 +1120,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "case x in x) cat /data/a.txt;; *) cat /data/b.txt;; esac",
       "provision": true,
@@ -1112,7 +1146,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(cat /data/a.txt; cat /data/b.txt)",
       "provision": true,
@@ -1137,7 +1172,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "{ cat /data/a.txt; cat /data/b.txt; }",
       "provision": true,
@@ -1162,7 +1198,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "! grep zzz /data/a.txt",
       "provision": true,
@@ -1237,7 +1274,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "for i in 1 2; do cat /data/a.txt | wc -l; done",
       "provision": true,
@@ -1262,7 +1300,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "for i in 1 2; do for j in 1 2; do cat /data/b.txt; done; done",
       "provision": true,
@@ -1287,7 +1326,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat $(echo /data/a.txt)",
       "provision": true,
@@ -1312,7 +1352,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "for i in 1 2; do cat /data/a.txt | wc -l && cat /data/b.txt; done",
       "provision": true,
@@ -1337,7 +1378,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "FOO=1 cat /data/a.txt",
       "provision": true,
@@ -1362,7 +1404,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "pfn() { cat /data/b.txt; }; pfn; pfn",
       "provision": true,
@@ -1387,7 +1430,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "prec() { prec; }; prec",
       "provision": true,
@@ -1412,7 +1456,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "eval 'cat /data/a.txt'",
       "provision": true,
@@ -1437,7 +1482,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "select x in a b; do cat /data/a.txt; done",
       "provision": true,
@@ -1462,7 +1508,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "until false; do cat /data/a.txt; done",
       "provision": true,
@@ -1487,7 +1534,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "wc -l < /data/a.txt",
       "provision": true,
@@ -1512,7 +1560,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt > /dev/null",
       "provision": true,
@@ -1733,7 +1782,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/rgm/d1/*.nope",
       "provision": true,
@@ -1781,7 +1831,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "wc -l",
       "provision": true,
@@ -1806,7 +1857,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "wc -c <<EOF\nhello\nEOF",
       "provision": true,
@@ -1831,7 +1883,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "for i in $(echo 1 2); do cat /data/a.txt; done",
       "provision": true,
@@ -1856,7 +1909,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "cat /data/a.txt > $(echo /data/prov_out.txt)",
       "provision": true,

@@ -39,7 +39,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /.bash_history",
       "expect": {
@@ -63,7 +64,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /.bash_history -type d",
       "expect": {

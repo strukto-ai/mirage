@@ -105,34 +105,45 @@ describe('lancedb core find', () => {
   beforeEach(() => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
+    // The start-point stat that emits the search root.
+    vi.mocked(statMod.stat).mockResolvedValue(new FileStat({ name: '/', type: FileType.DIRECTORY }))
   })
 
   it('walks recursively classifying row files by extension', async () => {
     mockTree(TREE)
     const out = await find(makeAccessor(), ROOT)
-    expect(out).toEqual(['/tbl', '/tbl/a.md', '/tbl/b.md', '/tbl/grp', '/tbl/grp/c.md'])
+    expect(out).toEqual(['/', '/tbl', '/tbl/a.md', '/tbl/b.md', '/tbl/grp', '/tbl/grp/c.md'])
     const files = await find(makeAccessor(), ROOT, { type: 'f' })
     expect(files).toEqual(['/tbl/a.md', '/tbl/b.md', '/tbl/grp/c.md'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
-    expect(dirs).toEqual(['/tbl', '/tbl/grp'])
+    expect(dirs).toEqual(['/', '/tbl', '/tbl/grp'])
   })
 
   it('never stats entries for classification', async () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT)
-    expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
+    // Only the start point is statted; children classify from the readdir
+    // slash convention.
+    const statted = [
+      ...new Set(
+        vi
+          .mocked(statMod.stat)
+          .mock.calls.map((c) => (typeof c[1] === 'string' ? c[1] : c[1].virtual)),
+      ),
+    ]
+    expect(statted).toEqual(['/'])
   })
 
   it('sorts by codepoint, not locale', async () => {
     mockTree({ '/': ['/Zeta.md', '/alpha.md'] })
     const out = await find(makeAccessor(), ROOT)
-    expect(out).toEqual(['/Zeta.md', '/alpha.md'])
+    expect(out).toEqual(['/', '/Zeta.md', '/alpha.md'])
   })
 
   it('keeps a child whose readdir raises ENOENT but stops descending', async () => {
     mockTree({ '/': ['/ghost'] })
     const out = await find(makeAccessor(), ROOT)
-    expect(out).toEqual(['/ghost'])
+    expect(out).toEqual(['/', '/ghost'])
   })
 
   it('propagates non-ENOENT readdir errors', async () => {
@@ -165,6 +176,8 @@ describe('lancedb core find', () => {
       resourcePath: mountKey('/mnt/ldb', '/mnt/ldb'),
     })
     const out = await find(makeAccessor(), root)
-    expect(out).toEqual(['/tbl', '/tbl/a.md'])
+    // '' is the search root itself: its key is the whole mount prefix, which
+    // the command layer re-applies for display.
+    expect(out).toEqual(['', '/tbl', '/tbl/a.md'])
   })
 })

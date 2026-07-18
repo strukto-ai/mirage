@@ -12,14 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  BOX_API_BASE,
-  BoxApiError,
-  boxAuthHeaders,
-  boxGet,
-  boxGetBytes,
-  boxGetStream,
-} from './_client.ts'
+import { BoxApiError, boxAuthHeaders, boxGet, boxGetBytes, boxGetStream } from './_client.ts'
 import type { BoxTokenManager } from './_client.ts'
 
 export type BoxItemType = 'file' | 'folder' | 'web_link'
@@ -53,7 +46,7 @@ export async function listFolderItems(
   const out: BoxItem[] = []
   let offset = 0
   for (;;) {
-    const data = (await boxGet(tm, `${BOX_API_BASE}/folders/${folderId}/items`, {
+    const data = (await boxGet(tm, `${tm.apiBase}/folders/${folderId}/items`, {
       fields: LIST_FIELDS,
       limit,
       offset,
@@ -67,15 +60,19 @@ export async function listFolderItems(
   return out
 }
 
+export async function getFolderInfo(tm: BoxTokenManager, folderId: string): Promise<BoxItem> {
+  return (await boxGet(tm, `${tm.apiBase}/folders/${folderId}`)) as BoxItem
+}
+
 export async function downloadFile(tm: BoxTokenManager, fileId: string): Promise<Uint8Array> {
-  return boxGetBytes(tm, `${BOX_API_BASE}/files/${fileId}/content`)
+  return boxGetBytes(tm, `${tm.apiBase}/files/${fileId}/content`)
 }
 
 export async function* downloadFileStream(
   tm: BoxTokenManager,
   fileId: string,
 ): AsyncIterable<Uint8Array> {
-  for await (const chunk of boxGetStream(tm, `${BOX_API_BASE}/files/${fileId}/content`)) {
+  for await (const chunk of boxGetStream(tm, `${tm.apiBase}/files/${fileId}/content`)) {
     yield chunk
   }
 }
@@ -96,7 +93,7 @@ export async function searchItems(
     limit: opts.limit ?? 100,
   }
   if (opts.type !== undefined) params.type = opts.type
-  const data = (await boxGet(tm, `${BOX_API_BASE}/search`, params)) as SearchResponse
+  const data = (await boxGet(tm, `${tm.apiBase}/search`, params)) as SearchResponse
   return data.entries
 }
 
@@ -118,7 +115,7 @@ interface RepresentationsResponse {
  */
 export async function getExtractedText(tm: BoxTokenManager, fileId: string): Promise<string> {
   const headers = await boxAuthHeaders(tm)
-  const metaUrl = `${BOX_API_BASE}/files/${fileId}?fields=representations`
+  const metaUrl = `${tm.apiBase}/files/${fileId}?fields=representations`
   const r = await fetch(metaUrl, {
     headers: { ...headers, 'X-Rep-Hints': '[extracted_text]' },
   })

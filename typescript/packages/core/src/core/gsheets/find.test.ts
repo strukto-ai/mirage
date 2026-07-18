@@ -27,7 +27,7 @@ vi.mock('./stat.ts', async () => {
 })
 
 import { GSheetsAccessor } from '../../accessor/gsheets.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
@@ -87,14 +87,19 @@ describe('gsheets core find', () => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
     mockTree(TREE)
+    // The start-point stat that emits the search root.
+    vi.mocked(statMod.stat).mockResolvedValue(new FileStat({ name: '/', type: FileType.DIRECTORY }))
   })
 
   it('classifies .gsheet.json entries as files and the rest as dirs without stat', async () => {
     const files = await find(makeAccessor(), ROOT, { type: 'f' })
     expect(files).toEqual(['/owned/Sheet_A__s1.gsheet.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
-    expect(dirs).toEqual(['/owned', '/shared'])
-    expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
+    expect(dirs).toEqual(['/', '/owned', '/shared'])
+    // Only the start point is statted; children classify from the readdir
+    // slash convention.
+    const statted = [...new Set(vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual))]
+    expect(statted).toEqual(['/'])
   })
 
   it('matches names with globs', async () => {

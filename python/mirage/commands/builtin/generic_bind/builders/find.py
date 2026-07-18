@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.path import rebase_raw
 
 
 async def find(
@@ -103,12 +104,15 @@ async def _find_walk(
     # GNU find walks every start point in operand order.
     results: list[str] = []
     for search in searches:
-        results.extend(await walk_find(search,
-                                       readdir=partial(ops.readdir, accessor),
-                                       stat=partial(ops.stat, accessor),
-                                       is_dir_name=hint,
-                                       index=index,
-                                       args=args))
+        found = await walk_find(search,
+                                readdir=partial(ops.readdir, accessor),
+                                stat=partial(ops.stat, accessor),
+                                is_dir_name=hint,
+                                index=index,
+                                args=args)
+        # Print entries under the operand as spelled (relative operands
+        # yield relative output), mirroring generic_find's rebase.
+        results.extend(rebase_raw(found, search.virtual, search.raw_path))
     return format_records(results), IOResult()
 
 

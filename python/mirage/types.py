@@ -284,6 +284,7 @@ class ResourceName(str, Enum):
     ONEDRIVE = "onedrive"
     QDRANT = "qdrant"
     SHAREPOINT = "sharepoint"
+    BOX = "box"
 
 
 @dataclass(frozen=True, init=False)

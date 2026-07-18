@@ -15,7 +15,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep --bogus s /data/a.txt /data2/xm.txt 2>&1; echo code=$?",
       "expect": {

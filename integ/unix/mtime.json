@@ -87,7 +87,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "clear_cache": true,
       "command": "ls -l /data | grep mtimecheck | grep -c \"Jan  1 00:00\"",

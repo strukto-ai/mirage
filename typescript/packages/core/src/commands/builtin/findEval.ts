@@ -104,6 +104,13 @@ export function keep(
   return evalPredicate(tree, entry)
 }
 
+export function treeHasEmpty(node: PredNode): boolean {
+  if (node.op === 'empty') return true
+  if (node.op === 'not') return treeHasEmpty(node.kid)
+  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasEmpty)
+  return false
+}
+
 // Basename of a find start path, as GNU prints and matches it. Single source
 // of truth for the start path's own name across every backend find op; reads
 // `path.virtual` so the name is correct whether the start is the mount root

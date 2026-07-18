@@ -29,6 +29,7 @@ from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
+from mirage.resource.box import BoxConfig, BoxResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
@@ -123,6 +124,11 @@ def _load_hf_server() -> ModuleType:
 def _load_ssh_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "ssh_server.py")
+
+
+def _load_box_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" / "box_server.py")
 
 
 async def _admin_exec(ws: Workspace, command: str) -> None:
@@ -274,6 +280,45 @@ class HfService:
         await self.runner.cleanup()
 
 
+class BoxService:
+
+    def __init__(self, run_id: str, state, runner, endpoint: str) -> None:
+        self.run_id = run_id
+        self.state = state
+        self.runner = runner
+        self.endpoint = endpoint
+
+    @classmethod
+    async def create(cls, run_id: str) -> "BoxService":
+        module = _load_box_server()
+        state, _server, runner = await module.start_fake_box()
+        return cls(run_id, state, runner, state.base)
+
+    def resource(self, mount: dict) -> BoxResource:
+        # Box is read-only through the workspace, so the harness tee-seeding
+        # can't run; each mount gets its own root folder seeded in-process
+        # and mounted by id (mirrors how a real Box app scopes to a folder).
+        folder = self.state.add_folder("0", mount["folder"])
+        seed = mount.get("seed")
+        if seed:
+            base = Path(__file__).resolve().parents[2] / "fixtures" / seed
+            for src in sorted(base.rglob("*")):
+                if not src.is_file():
+                    continue
+                rel = src.relative_to(base).as_posix()
+                self.state.seed_path(f"{mount['folder']}/{rel}",
+                                     src.read_bytes())
+        return BoxResource(
+            BoxConfig(
+                access_token="integ-box-token",
+                endpoint=self.endpoint,
+                root_folder_id=folder["id"],
+            ))
+
+    async def teardown(self) -> None:
+        await self.runner.cleanup()
+
+
 def _clear_sharepoint_caches() -> None:
     # The resolver's site/drive id caches are module globals; a fresh
     # fake tenant per run must not see ids from the previous one.
@@ -307,7 +352,7 @@ class SharePointService:
 
 
 Service = (S3Service | OneDriveService | SharePointService | SSHService
-           | NextcloudService | HfService)
+           | NextcloudService | HfService | BoxService)
 
 
 def build_ram(
@@ -363,6 +408,13 @@ def build_hf(
     return service.resource(mount), _noop
 
 
+def build_box(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, BoxService)
+    return service.resource(mount), _noop
+
+
 def build_ssh(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -387,6 +439,7 @@ BUILDERS = {
     "ssh": build_ssh,
     "nextcloud": build_nextcloud,
     "hf": build_hf,
+    "box": build_box,
 }
 
 
@@ -406,6 +459,8 @@ async def open_target(
         service = await NextcloudService.create(run_id, target)
     elif target.get("service") == "hf":
         service = await HfService.create(run_id)
+    elif target.get("service") == "box":
+        service = await BoxService.create(run_id)
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
     for mount in target["mounts"]:
