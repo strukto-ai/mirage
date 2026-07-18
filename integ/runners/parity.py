@@ -23,7 +23,7 @@ INTEG = Path(__file__).resolve().parents[1]
 SHARED_TARGETS = ["ram", "disk", "redis"]
 S3_TARGETS = ["s3", "s3-prefix"]
 SSH_TARGETS = ["ssh"]
-GDRIVE_TARGETS = ["gdrive", "gdrive-folder", "gdrive-shared"]
+GDRIVE_TARGETS = ["gdrive", "gdrive-folder", "gdrive-shared", "gapps"]
 
 
 def load(path: str) -> dict[tuple[str, str], dict]:

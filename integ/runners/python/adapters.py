@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import importlib.util
+import json
 import logging
 import os
 import shutil
@@ -31,8 +32,14 @@ from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.disk import DiskResource
+from mirage.resource.gdocs.config import GDocsConfig
+from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
 from mirage.resource.gdrive.gdrive import GoogleDriveResource
+from mirage.resource.gsheets.config import GSheetsConfig
+from mirage.resource.gsheets.gsheets import GSheetsResource
+from mirage.resource.gslides.config import GSlidesConfig
+from mirage.resource.gslides.gslides import GSlidesResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.resource.onedrive.onedrive import OneDriveResource
@@ -250,10 +257,16 @@ class GwsService:
         url = os.environ["GWS_URL"].rstrip("/")
         folder_ids: dict[str, str] = {}
         drive_ids: dict[str, str] = {}
+        # Native mounts (gdocs/gsheets/gslides) render the modified date
+        # into filenames, so those targets pin the server clock.
+        epoch = target.get("epoch")
+        reset_body = {"epoch": epoch} if epoch else {}
         async with aiohttp.ClientSession() as session:
-            async with session.post(f"{url}/reset") as resp:
+            async with session.post(f"{url}/reset", json=reset_body) as resp:
                 resp.raise_for_status()
             for mount in target["mounts"]:
+                if "root" not in mount:
+                    continue
                 # A mount may live inside a Shared Drive: the drive is
                 # created once per name and its id is the walk's start.
                 drive = mount.get("drive")
@@ -266,7 +279,57 @@ class GwsService:
                 for segment in str(mount["root"]).split("/"):
                     parent = await cls._folder(session, url, segment, parent)
                 folder_ids[mount["path"]] = parent
+            apps = target.get("apps")
+            if apps:
+                manifest = Path(__file__).resolve(
+                ).parents[2] / "fixtures" / f"{apps}.json"
+                await cls._seed_apps(session, url,
+                                     json.loads(manifest.read_text()))
         return cls(url, folder_ids)
+
+    @staticmethod
+    async def _seed_apps(session: aiohttp.ClientSession, url: str,
+                         entries: list[dict]) -> None:
+        # Native files are API objects, not byte blobs, so they seed through
+        # the same editor APIs the backends speak instead of fixture uploads.
+        for entry in entries:
+            kind = entry["kind"]
+            if kind == "doc":
+                async with session.post(f"{url}/v1/documents",
+                                        json={"title": entry["name"]}) as resp:
+                    resp.raise_for_status()
+                    doc_id = (await resp.json())["documentId"]
+                requests = [{
+                    "insertText": {
+                        "location": {
+                            "index": 1
+                        },
+                        "text": entry["text"],
+                    }
+                }]
+                async with session.post(
+                        f"{url}/v1/documents/{doc_id}:batchUpdate",
+                        json={"requests": requests}) as resp:
+                    resp.raise_for_status()
+            elif kind == "sheet":
+                async with session.post(
+                        f"{url}/v4/spreadsheets",
+                        json={"properties": {
+                            "title": entry["name"]
+                        }}) as resp:
+                    resp.raise_for_status()
+                    sheet_id = (await resp.json())["spreadsheetId"]
+                async with session.post(
+                        f"{url}/v4/spreadsheets/{sheet_id}"
+                        "/values/Sheet1:append",
+                        json={"values": entry["rows"]}) as resp:
+                    resp.raise_for_status()
+            elif kind == "slide":
+                async with session.post(f"{url}/v1/presentations",
+                                        json={"title": entry["name"]}) as resp:
+                    resp.raise_for_status()
+            else:
+                raise ValueError(f"unknown google-apps kind: {kind}")
 
     @staticmethod
     async def _folder(session: aiohttp.ClientSession, url: str, name: str,
@@ -294,6 +357,24 @@ class GwsService:
                               refresh_token="integ",
                               api_base=self.url,
                               folder_id=self.folder_ids[mount["path"]]))
+
+    def gdocs_resource(self) -> GDocsResource:
+        return GDocsResource(
+            GDocsConfig(client_id="integ",
+                        refresh_token="integ",
+                        api_base=self.url))
+
+    def gsheets_resource(self) -> GSheetsResource:
+        return GSheetsResource(
+            GSheetsConfig(client_id="integ",
+                          refresh_token="integ",
+                          api_base=self.url))
+
+    def gslides_resource(self) -> GSlidesResource:
+        return GSlidesResource(
+            GSlidesConfig(client_id="integ",
+                          refresh_token="integ",
+                          api_base=self.url))
 
     async def teardown(self) -> None:
         return None
@@ -450,6 +531,27 @@ def build_gdrive(
     return service.resource(mount), _noop
 
 
+def build_gdocs(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GwsService)
+    return service.gdocs_resource(), _noop
+
+
+def build_gsheets(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GwsService)
+    return service.gsheets_resource(), _noop
+
+
+def build_gslides(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GwsService)
+    return service.gslides_resource(), _noop
+
+
 def build_nextcloud(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -467,6 +569,9 @@ BUILDERS = {
     "ssh": build_ssh,
     "nextcloud": build_nextcloud,
     "gdrive": build_gdrive,
+    "gdocs": build_gdocs,
+    "gsheets": build_gsheets,
+    "gslides": build_gslides,
     "hf": build_hf,
 }
 

@@ -1,494 +1,746 @@
 {
-  "cases": [
-    {
-      "id": "g_doc_create",
-      "seq": 500000,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws docs documents create --json '{\"title\": \"Notes\"}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Notes\",\"body\":{\"content\":[{\"startIndex\":1,\"endIndex\":1,\"sectionBreak\":{\"sectionStyle\":{\"columnSeparatorStyle\":\"NONE\",\"contentDirection\":\"LEFT_TO_RIGHT\",\"sectionType\":\"CONTINUOUS\"}}},{\"startIndex\":1,\"endIndex\":2,\"paragraph\":{\"elements\":[{\"startIndex\":1,\"endIndex\":2,\"textRun\":{\"content\":\"\\n\",\"textStyle\":{}}}],\"paragraphStyle\":{\"namedStyleType\":\"NORMAL_TEXT\",\"direction\":\"LEFT_TO_RIGHT\"}}}]},\"revisionId\":\"rev-0\"}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_doc_write",
-      "seq": 500001,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws docs +write --document doc0001 --text 'hello gdoc'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{}]}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_doc_get",
-      "seq": 500002,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws docs documents get --params '{\"documentId\": \"doc0001\"}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Notes\",\"body\":{\"content\":[{\"startIndex\":1,\"endIndex\":1,\"sectionBreak\":{\"sectionStyle\":{\"columnSeparatorStyle\":\"NONE\",\"contentDirection\":\"LEFT_TO_RIGHT\",\"sectionType\":\"CONTINUOUS\"}}},{\"startIndex\":1,\"endIndex\":12,\"paragraph\":{\"elements\":[{\"startIndex\":1,\"endIndex\":12,\"textRun\":{\"content\":\"hello gdoc\\n\",\"textStyle\":{}}}],\"paragraphStyle\":{\"namedStyleType\":\"NORMAL_TEXT\",\"direction\":\"LEFT_TO_RIGHT\"}}}]},\"revisionId\":\"rev-0\"}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_doc_replace",
-      "seq": 500003,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws docs documents batchUpdate --params '{\"documentId\": \"doc0001\"}' --json '{\"requests\": [{\"replaceAllText\": {\"containsText\": {\"text\": \"hello\"}, \"replaceText\": \"HELLO\"}}]}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{\"replaceAllText\":{\"occurrencesChanged\":1}}]}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_doc_export",
-      "seq": 500004,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive files export --params '{\"fileId\": \"doc0001\", \"mimeType\": \"text/plain\"}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "HELLO gdoc",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_native_in_listing",
-      "seq": 500005,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive files create --json '{\"name\": \"Plan\", \"mimeType\": \"application/vnd.google-apps.document\", \"parents\": [\"f0001\"]}' > /dev/null && ls /data | grep gdoc",
-      "expect": {
-        "exit": 0,
-        "stdout": "Plan.gdoc.json\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_native_cat",
-      "seq": 500006,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "cat /data/Plan.gdoc.json | jq -c '{documentId: (.documentId | length > 0), title, body: (.body.content | length)}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"documentId\":true,\"title\":\"Plan\",\"body\":2}\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_native_gws_parity",
-      "seq": 500007,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws docs +write --document $D --text 'from drive' | jq -c '.replies'",
-      "expect": {
-        "exit": 0,
-        "stdout": "[{}]\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_native_gws_readback",
-      "seq": 500008,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "cat /data/Plan.gdoc.json | jq -r '.body.content[1].paragraph.elements[0].textRun.content'",
-      "expect": {
-        "exit": 0,
-        "stdout": "from drive\n\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_sheet_create",
-      "seq": 500009,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Data\"}}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_sheet_append",
-      "seq": 500010,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws sheets +append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"updates\":{\"spreadsheetId\":\"sheet0001\",\"updatedRange\":\"Sheet1!A1:C1\",\"updatedRows\":1,\"updatedColumns\":3,\"updatedCells\":3}}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_sheet_read",
-      "seq": 500011,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"range\":\"Sheet1!A1:C1\",\"majorDimension\":\"ROWS\",\"values\":[[\"a\",\"b\",\"c\"]]}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_sheet_get",
-      "seq": 500012,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws sheets spreadsheets get --params '{\"spreadsheetId\": \"sheet0001\"}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_sheet_add_tab",
-      "seq": 500013,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": \"Extra\"}}}]}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"replies\":[{\"addSheet\":{\"properties\":{\"sheetId\":1,\"title\":\"Extra\"}}}]}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_slide_create",
-      "seq": 500014,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws slides presentations create --json '{\"title\": \"Deck\"}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Deck\",\"pageSize\":{\"width\":{\"magnitude\":9144000,\"unit\":\"EMU\"},\"height\":{\"magnitude\":6858000,\"unit\":\"EMU\"}},\"slides\":[{\"objectId\":\"slide0001\",\"pageElements\":[]}],\"revisionId\":\"rev-1\"}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_slide_add",
-      "seq": 500015,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws slides presentations batchUpdate --params '{\"presentationId\": \"pres0001\"}' --json '{\"requests\": [{\"createSlide\": {}}]}' | jq -c '.replies'",
-      "expect": {
-        "exit": 0,
-        "stdout": "[{\"createSlide\":{\"objectId\":\"slide0002\"}}]\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_slide_get",
-      "seq": 500016,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws slides presentations get --params '{\"presentationId\": \"pres0001\"}' | jq -c '{presentationId, title, slides: (.slides | length)}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Deck\",\"slides\":2}\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_perm_create",
-      "seq": 500017,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive permissions create --params '{\"fileId\": \"doc0001\"}' --json '{\"role\": \"reader\", \"type\": \"anyone\"}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"kind\":\"drive#permission\",\"id\":\"perm0001\",\"role\":\"reader\",\"type\":\"anyone\"}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_perm_list",
-      "seq": 500018,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive permissions list --params '{\"fileId\": \"doc0001\"}'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"kind\":\"drive#permissionList\",\"permissions\":[{\"id\":\"perm0001\",\"role\":\"reader\",\"type\":\"anyone\"}]}",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_perm_delete",
-      "seq": 500019,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive permissions delete --params '{\"fileId\": \"doc0001\", \"permissionId\": \"perm0001\"}' && echo deleted",
-      "expect": {
-        "exit": 0,
-        "stdout": "deleted\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_files_list_q",
-      "seq": 500020,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes'\\\"}\" | jq -c '[.files[] | {name, mimeType}]'",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_files_update",
-      "seq": 500021,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "F=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws drive files update --params \"{\\\"fileId\\\": \\\"$F\\\"}\" --json '{\"name\": \"Plan2\"}' > /dev/null && ls /data | grep gdoc",
-      "expect": {
-        "exit": 0,
-        "stdout": "Plan.gdoc.json\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_revisions_head",
-      "seq": 500022,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "printf v1 | tee /data/rev.txt > /dev/null && printf v2 | tee /data/rev.txt > /dev/null && F=$(gws drive files list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].id') && gws drive files list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].headRevisionId' | grep -c \"$F-r2\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_files_delete",
-      "seq": 500023,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "F=$(cat /data/Plan2.gdoc.json | jq -r .documentId) && gws drive files delete --params \"{\\\"fileId\\\": \\\"$F\\\"}\" && ls /data | grep -c gdoc",
-      "expect": {
-        "exit": 0,
-        "stdout": "1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "g_files_get",
-      "seq": 500024,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive files get --params '{\"fileId\": \"doc0001\"}' | jq -c '{id, name, mimeType}'",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "{\"id\":\"doc0001\",\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n"
-      }
-    },
-    {
-      "id": "g_files_copy",
-      "seq": 500025,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws drive files copy --params '{\"fileId\": \"doc0001\"}' --json '{\"name\": \"Notes copy\"}' | jq -c '{name, mimeType}' && gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes copy'\\\"}\" | jq -c '[.files[].name]'",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n\"Notes copy\"\n"
-      }
-    },
-    {
-      "id": "g_sheet_write",
-      "seq": 500026,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "gws sheets +write --spreadsheet sheet0001 --range 'Sheet1!A2:C2' --values 'x,y,z' > /dev/null && gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "{\"range\":\"Sheet1!A2:C2\",\"majorDimension\":\"ROWS\",\"values\":[[\"x\",\"y\",\"z\"]]}"
-      }
-    },
-    {
-      "id": "gsh_seed",
-      "seq": 510000,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "printf 'inside shared drive' | tee /data/note.txt > /dev/null && echo seeded",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "seeded\n"
-      }
-    },
-    {
-      "id": "gsh_ls_root",
-      "seq": 510001,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "ls /data",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "note.txt\n"
-      }
-    },
-    {
-      "id": "gsh_cat",
-      "seq": 510002,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "cat /data/note.txt",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "inside shared drive"
-      }
-    },
-    {
-      "id": "gsh_mkdir_nested",
-      "seq": 510003,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "mkdir -p /data/reports/q1 && printf 'q1 numbers' | tee /data/reports/q1/kpi.txt > /dev/null && find /data -type f | sort",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "/data/note.txt\n/data/reports/q1/kpi.txt\n"
-      }
-    },
-    {
-      "id": "gsh_grep_r",
-      "seq": 510004,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "grep -r numbers /data",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "/data/reports/q1/kpi.txt:q1 numbers\n"
-      }
-    },
-    {
-      "id": "gsh_mv_rm",
-      "seq": 510005,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "mv /data/note.txt /data/reports/note.txt && rm -r /data/reports && ls /data",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": ""
-      }
-    },
-    {
-      "id": "gsh_isolation",
-      "seq": 510006,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "printf 'two' | tee /data2/two.txt > /dev/null && ls /data | wc -l && ls /data2",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "0\ntwo.txt\n"
-      }
-    },
-    {
-      "id": "gsh_native_create",
-      "seq": 510007,
-      "targets": [
-        "gdrive-shared"
-      ],
-      "clear_cache": true,
-      "command": "D=$(gws drive files create --json '{\"name\": \"Spec\", \"mimeType\": \"application/vnd.google-apps.document\"}' | jq -r .id) && gws docs +write --document $D --text 'shared doc' | jq -c '.replies | length'",
-      "expect": {
-        "exit": 0,
-        "stderr": "",
-        "stdout": "1\n"
-      }
-    }
-  ]
+ "cases": [
+  {
+   "id": "g_doc_create",
+   "seq": 500000,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws docs documents create --json '{\"title\": \"Notes\"}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Notes\",\"body\":{\"content\":[{\"startIndex\":1,\"endIndex\":1,\"sectionBreak\":{\"sectionStyle\":{\"columnSeparatorStyle\":\"NONE\",\"contentDirection\":\"LEFT_TO_RIGHT\",\"sectionType\":\"CONTINUOUS\"}}},{\"startIndex\":1,\"endIndex\":2,\"paragraph\":{\"elements\":[{\"startIndex\":1,\"endIndex\":2,\"textRun\":{\"content\":\"\\n\",\"textStyle\":{}}}],\"paragraphStyle\":{\"namedStyleType\":\"NORMAL_TEXT\",\"direction\":\"LEFT_TO_RIGHT\"}}}]},\"revisionId\":\"rev-0\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_doc_write",
+   "seq": 500001,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws docs +write --document doc0001 --text 'hello gdoc'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{}]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_doc_get",
+   "seq": 500002,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws docs documents get --params '{\"documentId\": \"doc0001\"}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Notes\",\"body\":{\"content\":[{\"startIndex\":1,\"endIndex\":1,\"sectionBreak\":{\"sectionStyle\":{\"columnSeparatorStyle\":\"NONE\",\"contentDirection\":\"LEFT_TO_RIGHT\",\"sectionType\":\"CONTINUOUS\"}}},{\"startIndex\":1,\"endIndex\":12,\"paragraph\":{\"elements\":[{\"startIndex\":1,\"endIndex\":12,\"textRun\":{\"content\":\"hello gdoc\\n\",\"textStyle\":{}}}],\"paragraphStyle\":{\"namedStyleType\":\"NORMAL_TEXT\",\"direction\":\"LEFT_TO_RIGHT\"}}}]},\"revisionId\":\"rev-0\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_doc_replace",
+   "seq": 500003,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws docs documents batchUpdate --params '{\"documentId\": \"doc0001\"}' --json '{\"requests\": [{\"replaceAllText\": {\"containsText\": {\"text\": \"hello\"}, \"replaceText\": \"HELLO\"}}]}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{\"replaceAllText\":{\"occurrencesChanged\":1}}]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_doc_export",
+   "seq": 500004,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive files export --params '{\"fileId\": \"doc0001\", \"mimeType\": \"text/plain\"}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "HELLO gdoc",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_native_in_listing",
+   "seq": 500005,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive files create --json '{\"name\": \"Plan\", \"mimeType\": \"application/vnd.google-apps.document\", \"parents\": [\"f0001\"]}' > /dev/null && ls /data | grep gdoc",
+   "expect": {
+    "exit": 0,
+    "stdout": "Plan.gdoc.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_native_cat",
+   "seq": 500006,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "cat /data/Plan.gdoc.json | jq -c '{documentId: (.documentId | length > 0), title, body: (.body.content | length)}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"documentId\":true,\"title\":\"Plan\",\"body\":2}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_native_gws_parity",
+   "seq": 500007,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws docs +write --document $D --text 'from drive' | jq -c '.replies'",
+   "expect": {
+    "exit": 0,
+    "stdout": "[{}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_native_gws_readback",
+   "seq": 500008,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "cat /data/Plan.gdoc.json | jq -r '.body.content[1].paragraph.elements[0].textRun.content'",
+   "expect": {
+    "exit": 0,
+    "stdout": "from drive\n\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_sheet_create",
+   "seq": 500009,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Data\"}}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_sheet_append",
+   "seq": 500010,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws sheets +append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"spreadsheetId\":\"sheet0001\",\"updates\":{\"spreadsheetId\":\"sheet0001\",\"updatedRange\":\"Sheet1!A1:C1\",\"updatedRows\":1,\"updatedColumns\":3,\"updatedCells\":3}}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_sheet_read",
+   "seq": 500011,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"range\":\"Sheet1!A1:C1\",\"majorDimension\":\"ROWS\",\"values\":[[\"a\",\"b\",\"c\"]]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_sheet_get",
+   "seq": 500012,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws sheets spreadsheets get --params '{\"spreadsheetId\": \"sheet0001\"}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_sheet_add_tab",
+   "seq": 500013,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": \"Extra\"}}}]}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"spreadsheetId\":\"sheet0001\",\"replies\":[{\"addSheet\":{\"properties\":{\"sheetId\":1,\"title\":\"Extra\"}}}]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_slide_create",
+   "seq": 500014,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws slides presentations create --json '{\"title\": \"Deck\"}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Deck\",\"pageSize\":{\"width\":{\"magnitude\":9144000,\"unit\":\"EMU\"},\"height\":{\"magnitude\":6858000,\"unit\":\"EMU\"}},\"slides\":[{\"objectId\":\"slide0001\",\"pageElements\":[]}],\"revisionId\":\"rev-1\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_slide_add",
+   "seq": 500015,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws slides presentations batchUpdate --params '{\"presentationId\": \"pres0001\"}' --json '{\"requests\": [{\"createSlide\": {}}]}' | jq -c '.replies'",
+   "expect": {
+    "exit": 0,
+    "stdout": "[{\"createSlide\":{\"objectId\":\"slide0002\"}}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_slide_get",
+   "seq": 500016,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws slides presentations get --params '{\"presentationId\": \"pres0001\"}' | jq -c '{presentationId, title, slides: (.slides | length)}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Deck\",\"slides\":2}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_perm_create",
+   "seq": 500017,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive permissions create --params '{\"fileId\": \"doc0001\"}' --json '{\"role\": \"reader\", \"type\": \"anyone\"}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"kind\":\"drive#permission\",\"id\":\"perm0001\",\"role\":\"reader\",\"type\":\"anyone\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_perm_list",
+   "seq": 500018,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive permissions list --params '{\"fileId\": \"doc0001\"}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"kind\":\"drive#permissionList\",\"permissions\":[{\"id\":\"perm0001\",\"role\":\"reader\",\"type\":\"anyone\"}]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_perm_delete",
+   "seq": 500019,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive permissions delete --params '{\"fileId\": \"doc0001\", \"permissionId\": \"perm0001\"}' && echo deleted",
+   "expect": {
+    "exit": 0,
+    "stdout": "deleted\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_files_list_q",
+   "seq": 500020,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes'\\\"}\" | jq -c '[.files[] | {name, mimeType}]'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_files_update",
+   "seq": 500021,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "F=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws drive files update --params \"{\\\"fileId\\\": \\\"$F\\\"}\" --json '{\"name\": \"Plan2\"}' > /dev/null && ls /data | grep gdoc",
+   "expect": {
+    "exit": 0,
+    "stdout": "Plan.gdoc.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_revisions_head",
+   "seq": 500022,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "printf v1 | tee /data/rev.txt > /dev/null && printf v2 | tee /data/rev.txt > /dev/null && F=$(gws drive files list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].id') && gws drive files list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].headRevisionId' | grep -c \"$F-r2\"",
+   "expect": {
+    "exit": 0,
+    "stdout": "1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_files_delete",
+   "seq": 500023,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "F=$(cat /data/Plan2.gdoc.json | jq -r .documentId) && gws drive files delete --params \"{\\\"fileId\\\": \\\"$F\\\"}\" && ls /data | grep -c gdoc",
+   "expect": {
+    "exit": 0,
+    "stdout": "1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_files_get",
+   "seq": 500024,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive files get --params '{\"fileId\": \"doc0001\"}' | jq -c '{id, name, mimeType}'",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "{\"id\":\"doc0001\",\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n"
+   }
+  },
+  {
+   "id": "g_files_copy",
+   "seq": 500025,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive files copy --params '{\"fileId\": \"doc0001\"}' --json '{\"name\": \"Notes copy\"}' | jq -c '{name, mimeType}' && gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes copy'\\\"}\" | jq -c '[.files[].name]'",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n\"Notes copy\"\n"
+   }
+  },
+  {
+   "id": "g_sheet_write",
+   "seq": 500026,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws sheets +write --spreadsheet sheet0001 --range 'Sheet1!A2:C2' --values 'x,y,z' > /dev/null && gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "{\"range\":\"Sheet1!A2:C2\",\"majorDimension\":\"ROWS\",\"values\":[[\"x\",\"y\",\"z\"]]}"
+   }
+  },
+  {
+   "id": "gsh_seed",
+   "seq": 510000,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "printf 'inside shared drive' | tee /data/note.txt > /dev/null && echo seeded",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "seeded\n"
+   }
+  },
+  {
+   "id": "gsh_ls_root",
+   "seq": 510001,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "ls /data",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "note.txt\n"
+   }
+  },
+  {
+   "id": "gsh_cat",
+   "seq": 510002,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "cat /data/note.txt",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "inside shared drive"
+   }
+  },
+  {
+   "id": "gsh_mkdir_nested",
+   "seq": 510003,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "mkdir -p /data/reports/q1 && printf 'q1 numbers' | tee /data/reports/q1/kpi.txt > /dev/null && find /data -type f | sort",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "/data/note.txt\n/data/reports/q1/kpi.txt\n"
+   }
+  },
+  {
+   "id": "gsh_grep_r",
+   "seq": 510004,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "grep -r numbers /data",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "/data/reports/q1/kpi.txt:q1 numbers\n"
+   }
+  },
+  {
+   "id": "gsh_mv_rm",
+   "seq": 510005,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "mv /data/note.txt /data/reports/note.txt && rm -r /data/reports && ls /data",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": ""
+   }
+  },
+  {
+   "id": "gsh_isolation",
+   "seq": 510006,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "printf 'two' | tee /data2/two.txt > /dev/null && ls /data | wc -l && ls /data2",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "0\ntwo.txt\n"
+   }
+  },
+  {
+   "id": "gsh_native_create",
+   "seq": 510007,
+   "targets": [
+    "gdrive-shared"
+   ],
+   "clear_cache": true,
+   "command": "D=$(gws drive files create --json '{\"name\": \"Spec\", \"mimeType\": \"application/vnd.google-apps.document\"}' | jq -r .id) && gws docs +write --document $D --text 'shared doc' | jq -c '.replies | length'",
+   "expect": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "1\n"
+   }
+  },
+  {
+   "id": "g_native_sheet_in_listing",
+   "seq": 501000,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive files create --json '{\"name\": \"Board\", \"mimeType\": \"application/vnd.google-apps.spreadsheet\", \"parents\": [\"f0001\"]}' > /dev/null && ls /data | grep gsheet",
+   "expect": {
+    "exit": 0,
+    "stdout": "Board.gsheet.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_native_sheet_values",
+   "seq": 501001,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "S=$(cat /data/Board.gsheet.json | jq -r .spreadsheetId) && gws sheets +append --spreadsheet $S --range Sheet1 --values 'x,y' > /dev/null && gws sheets +read --spreadsheet $S --range 'Sheet1!A1:B1'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"range\":\"Sheet1!A1:B1\",\"majorDimension\":\"ROWS\",\"values\":[[\"x\",\"y\"]]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_native_slide_in_listing",
+   "seq": 501002,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "gws drive files create --json '{\"name\": \"Deck\", \"mimeType\": \"application/vnd.google-apps.presentation\", \"parents\": [\"f0001\"]}' > /dev/null && ls /data | grep gslide",
+   "expect": {
+    "exit": 0,
+    "stdout": "Deck.gslide.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "g_native_slide_cat",
+   "seq": 501003,
+   "targets": [
+    "gdrive"
+   ],
+   "clear_cache": true,
+   "command": "cat /data/Deck.gslide.json | jq -c '{presentationId: (.presentationId | length > 0), title, slides: (.slides | length)}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"presentationId\":true,\"title\":\"Deck\",\"slides\":1}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_docs_root",
+   "seq": 520000,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "ls /docs",
+   "expect": {
+    "exit": 0,
+    "stdout": "owned\nshared\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_docs_ls",
+   "seq": 520001,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "ls /docs/owned",
+   "expect": {
+    "exit": 0,
+    "stdout": "2026-01-01_Q1_Plan__doc0001.gdoc.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_docs_cat",
+   "seq": 520002,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "cat /docs/owned/2026-01-01_Q1_Plan__doc0001.gdoc.json | jq -c '{documentId, title}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Q1 Plan\"}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_docs_update",
+   "seq": 520003,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "D=$(cat /docs/owned/*.gdoc.json | jq -r .documentId) && gws docs documents batchUpdate --params \"{\\\"documentId\\\": \\\"$D\\\"}\" --json '{\"requests\": [{\"replaceAllText\": {\"containsText\": {\"text\": \"hello\"}, \"replaceText\": \"HELLO\"}}]}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{\"replaceAllText\":{\"occurrencesChanged\":1}}]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_docs_readback",
+   "seq": 520004,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "cat /docs/owned/*.gdoc.json | jq -r '.body.content[1].paragraph.elements[0].textRun.content'",
+   "expect": {
+    "exit": 0,
+    "stdout": "HELLO gdoc\n\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_sheets_ls",
+   "seq": 520005,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "ls /sheets/owned",
+   "expect": {
+    "exit": 0,
+    "stdout": "2026-01-01_Metrics__sheet0001.gsheet.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_sheets_cat",
+   "seq": 520006,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "cat /sheets/owned/*.gsheet.json | jq -c '{spreadsheetId, title: .properties.title}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"spreadsheetId\":\"sheet0001\",\"title\":\"Metrics\"}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_sheets_read",
+   "seq": 520007,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets +read --spreadsheet $S --range 'Sheet1!A1:B2'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"range\":\"Sheet1!A1:B2\",\"majorDimension\":\"ROWS\",\"values\":[[\"region\",\"revenue\"],[\"emea\",\"120\"]]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_sheets_append",
+   "seq": 520008,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets +append --spreadsheet $S --range Sheet1 --values 'apac,90' > /dev/null && gws sheets +read --spreadsheet $S --range 'Sheet1!A3:B3'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"range\":\"Sheet1!A3:B3\",\"majorDimension\":\"ROWS\",\"values\":[[\"apac\",\"90\"]]}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_slides_ls",
+   "seq": 520009,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "ls /slides/owned",
+   "expect": {
+    "exit": 0,
+    "stdout": "2026-01-01_Launch_Deck__pres0001.gslide.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_slides_cat",
+   "seq": 520010,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "cat /slides/owned/*.gslide.json | jq -c '{presentationId, title, slides: (.slides | length)}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Launch Deck\",\"slides\":1}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_slides_update",
+   "seq": 520011,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "P=$(cat /slides/owned/*.gslide.json | jq -r .presentationId) && gws slides presentations batchUpdate --params \"{\\\"presentationId\\\": \\\"$P\\\"}\" --json '{\"requests\": [{\"createSlide\": {}}]}' | jq -c .replies",
+   "expect": {
+    "exit": 0,
+    "stdout": "[{\"createSlide\":{\"objectId\":\"slide0002\"}}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_rm",
+   "seq": 520013,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "rm /slides/owned/*.gslide.json && ls /slides/owned | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "0\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gapp_slides_readback",
+   "seq": 520012,
+   "targets": [
+    "gapps"
+   ],
+   "clear_cache": true,
+   "command": "cat /slides/owned/*.gslide.json | jq -c '.slides | length'",
+   "expect": {
+    "exit": 0,
+    "stdout": "2\n",
+    "stderr": ""
+   }
+  }
+ ]
 }

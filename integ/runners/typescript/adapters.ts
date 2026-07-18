@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -25,7 +25,10 @@ import {
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import {
   DiskResource,
+  GDocsResource,
   GDriveResource,
+  GSheetsResource,
+  GSlidesResource,
   HfBucketsResource,
   MountMode,
   RAMResource,
@@ -35,6 +38,7 @@ import {
   Workspace,
 } from '@struktoai/mirage-node'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
+import { integRoot } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
 
 export interface Open {
@@ -232,14 +236,76 @@ async function gwsFolder(base: string, name: string, parent: string): Promise<st
 // The fake Google Workspace server is external and shared; /reset gives
 // each run a clean, deterministic state. Each mount is scoped to a
 // per-mount folder via GoogleConfig.folderId, the s3 key_prefix analog.
+interface GwsAppEntry {
+  kind: 'doc' | 'sheet' | 'slide'
+  name: string
+  text?: string
+  rows?: string[][]
+}
+
+// Native files are API objects, not byte blobs, so they seed through the
+// same editor APIs the backends speak instead of fixture uploads.
+async function seedGwsApps(base: string, entries: GwsAppEntry[]): Promise<void> {
+  for (const entry of entries) {
+    if (entry.kind === 'doc') {
+      const doc = await gwsJson(`${base}/v1/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: entry.name }),
+      })
+      const requests = [{ insertText: { location: { index: 1 }, text: entry.text ?? '' } }]
+      await gwsJson(`${base}/v1/documents/${doc.documentId as string}:batchUpdate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests }),
+      })
+    } else if (entry.kind === 'sheet') {
+      const sheet = await gwsJson(`${base}/v4/spreadsheets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ properties: { title: entry.name } }),
+      })
+      const id = sheet.spreadsheetId as string
+      await gwsJson(`${base}/v4/spreadsheets/${id}/values/Sheet1:append`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: entry.rows ?? [] }),
+      })
+    } else {
+      await gwsJson(`${base}/v1/presentations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: entry.name }),
+      })
+    }
+  }
+}
+
+function gwsNativeResource(base: string, resource: string): GDocsResource | GSheetsResource | GSlidesResource {
+  const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
+  if (resource === 'gdocs') return new GDocsResource(config)
+  if (resource === 'gsheets') return new GSheetsResource(config)
+  return new GSlidesResource(config)
+}
+
 async function openGws(target: Target): Promise<Open> {
   let base = process.env.GWS_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('gdrive target requires GWS_URL')
-  await gwsJson(`${base}/reset`, { method: 'POST' })
-  const mounts: Record<string, GDriveResource> = {}
+  // Native mounts (gdocs/gsheets/gslides) render the modified date into
+  // filenames, so those targets pin the server clock.
+  await gwsJson(`${base}/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target.epoch !== undefined ? { epoch: target.epoch } : {}),
+  })
+  const mounts: Record<string, GDriveResource | GDocsResource | GSheetsResource | GSlidesResource> = {}
   const driveIds: Record<string, string> = {}
   for (const m of target.mounts) {
+    if (m.resource !== 'gdrive') {
+      mounts[m.path] = gwsNativeResource(base, m.resource)
+      continue
+    }
     // A mount may live inside a Shared Drive: the drive is created once
     // per name and its id is the walk's start.
     const drive = m.drive
@@ -263,6 +329,10 @@ async function openGws(target: Target): Promise<Open> {
       folderId: parent,
     })
   }
+  if (target.apps !== undefined) {
+    const manifest = join(integRoot(), 'fixtures', `${target.apps}.json`)
+    await seedGwsApps(base, JSON.parse(readFileSync(manifest, 'utf8')) as GwsAppEntry[])
+  }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
     await ws.close()
@@ -278,5 +348,8 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   s3: openS3,
   ssh: openSsh,
   gdrive: openGws,
+  gdocs: openGws,
+  gsheets: openGws,
+  gslides: openGws,
   hf: openHf,
 }

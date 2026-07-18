@@ -97,8 +97,14 @@ class GwsState {
   private ticks = 0
   // Frozen at construction (i.e. per /reset) so find -mtime windows
   // relative to "now" behave like a live backend, while the +1s tick per
-  // touch keeps ordering deterministic.
-  private readonly baseMs = Date.now()
+  // touch keeps ordering deterministic. /reset may pin an explicit epoch
+  // instead: mounts that render timestamps into filenames (gdocs/gsheets/
+  // gslides date prefixes) need fully baked-in listings.
+  private readonly baseMs: number
+
+  constructor(epoch?: string) {
+    this.baseMs = epoch === undefined ? Date.now() : Date.parse(epoch)
+  }
 
   nextId(kind: string): string {
     const n = (this.counters.get(kind) ?? 0) + 1
@@ -768,7 +774,8 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
     return [200, { access_token: 'gws-integ-token', expires_in: 3600, token_type: 'Bearer' }]
   }
   if (method === 'POST' && path === '/reset') {
-    state = new GwsState()
+    const body = ctx.body.length > 0 ? (json(ctx) as { epoch?: string }) : {}
+    state = new GwsState(body.epoch)
     return [200, { ok: true }]
   }
 

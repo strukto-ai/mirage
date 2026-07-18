@@ -430,6 +430,33 @@
           "root": "team/data2"
         }
       ]
+    },
+    {
+      "id": "gapps",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "epoch": "2026-01-01T00:00:00Z",
+      "apps": "google-apps/v1",
+      "mounts": [
+        {
+          "path": "/docs",
+          "resource": "gdocs",
+          "backend": "gdocs"
+        },
+        {
+          "path": "/sheets",
+          "resource": "gsheets",
+          "backend": "gsheets"
+        },
+        {
+          "path": "/slides",
+          "resource": "gslides",
+          "backend": "gslides"
+        }
+      ]
     }
   ]
 }
