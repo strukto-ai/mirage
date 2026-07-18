@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import importlib.metadata
+import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from mirage.resource.loader import load_backend_class
@@ -19,10 +21,14 @@ from mirage.resource.loader import load_backend_class
 if TYPE_CHECKING:
     from mirage.resource.base import BaseResource
 
+logger = logging.getLogger(__name__)
+
+ENTRY_POINT_GROUP = "mirage.resources"
+
 
 class ResourceEntry(NamedTuple):
-    resource_path: str
-    config_path: str | None
+    resource_path: str | type
+    config_path: str | type | None
 
 
 REGISTRY: dict[str, ResourceEntry] = {
@@ -163,6 +169,76 @@ REGISTRY: dict[str, ResourceEntry] = {
                   "mirage.resource.qdrant:QdrantConfig"),
 }
 
+_CUSTOM: dict[str, ResourceEntry] = {}
+_entry_points_loaded = False
+
+
+def register_resource(
+    name: str,
+    resource: str | type,
+    config: str | type | None = None,
+) -> None:
+    """Register a third-party resource under a registry name.
+
+    Registered names work everywhere builtin names do: workspace YAML,
+    snapshots, and the daemon construct the resource via
+    :func:`build_resource`. Builtin names cannot be shadowed;
+    re-registering a custom name replaces it.
+
+    Args:
+        name (str): registry key such as ``"jira"``.
+        resource (str | type): the resource class, or a loader spec —
+            ``"./my_backend.py:MyResource"`` or
+            ``"mypackage.backends:MyResource"``.
+        config (str | type | None): the config class (or loader spec)
+            when the resource takes a typed config; None passes raw
+            kwargs to the resource constructor.
+    """
+    if name in REGISTRY:
+        raise ValueError(f"cannot register {name!r}: shadows a builtin")
+    _CUSTOM[name] = ResourceEntry(resource, config)
+
+
+def _load_entry_point_resources() -> None:
+    """Discover resources installed packages expose via entry points.
+
+    Any package can ship a resource by declaring, in its own
+    pyproject.toml::
+
+        [project.entry-points."mirage.resources"]
+        jira = "mypackage.backends:JiraResource"
+
+    The entry point must resolve to the resource class; a typed config
+    class is picked up from its ``CONFIG_CLS`` attribute when present.
+    Builtin and explicitly registered names win over entry points.
+    """
+    global _entry_points_loaded
+    if _entry_points_loaded:
+        return
+    _entry_points_loaded = True
+    for ep in importlib.metadata.entry_points(group=ENTRY_POINT_GROUP):
+        if ep.name in REGISTRY or ep.name in _CUSTOM:
+            logger.debug("entry point %r shadowed by existing resource",
+                         ep.name)
+            continue
+        _CUSTOM[ep.name] = ResourceEntry(ep.value, None)
+
+
+def known_resources() -> list[str]:
+    """All constructible registry names (builtin, registered, installed)."""
+    _load_entry_point_resources()
+    return sorted({*REGISTRY, *_CUSTOM})
+
+
+def resolve_class(ref: str | type) -> type:
+    """Resolve a registry class reference: a class passes through, a
+    loader spec string loads via :func:`load_backend_class`.
+
+    Args:
+        ref (str | type): class object or ``"source:ClassName"`` spec.
+    """
+    return ref if isinstance(ref, type) else load_backend_class(ref)
+
 
 def build_resource(name: str,
                    config: dict[str, Any] | None = None) -> "BaseResource":
@@ -170,7 +246,9 @@ def build_resource(name: str,
 
     Resolves resource and config classes lazily via importlib, so
     importing this module does not pull in every resource's
-    dependencies. Only the resources actually used get loaded.
+    dependencies. Only the resources actually used get loaded. Lookup
+    order: builtin ``REGISTRY``, then :func:`register_resource` names,
+    then ``mirage.resources`` entry points from installed packages.
 
     Args:
         name (str): registry key such as ``"s3"`` or ``"ram"``.
@@ -182,14 +260,22 @@ def build_resource(name: str,
         BaseResource: a fresh resource instance.
 
     Raises:
-        KeyError: ``name`` is not in ``REGISTRY``.
+        KeyError: ``name`` is neither builtin, registered, nor
+            installed.
     """
-    if name not in REGISTRY:
-        raise KeyError(f"unknown resource {name!r}; known: {sorted(REGISTRY)}")
-    entry = REGISTRY[name]
-    resource_cls = load_backend_class(entry.resource_path)
+    entry = REGISTRY.get(name)
+    if entry is None:
+        _load_entry_point_resources()
+        entry = _CUSTOM.get(name)
+    if entry is None:
+        raise KeyError(
+            f"unknown resource {name!r}; known: {known_resources()}")
+    resource_cls = resolve_class(entry.resource_path)
     cfg_dict = dict(config or {})
-    if entry.config_path is None:
+    config_ref = entry.config_path
+    if config_ref is None:
+        config_ref = getattr(resource_cls, "CONFIG_CLS", None)
+    if config_ref is None:
         return resource_cls(**cfg_dict)
-    config_cls = load_backend_class(entry.config_path)
+    config_cls = resolve_class(config_ref)
     return resource_cls(config_cls(**cfg_dict))

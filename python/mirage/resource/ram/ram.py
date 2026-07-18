@@ -18,12 +18,12 @@ from typing import Any
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.core.ram.append import append_bytes
+from mirage.core.ram.constants import SCOPE_ERROR
 from mirage.core.ram.copy import copy
 from mirage.core.ram.create import create
 from mirage.core.ram.du import du, du_all
 from mirage.core.ram.exists import exists
 from mirage.core.ram.find import find
-from mirage.core.ram.glob import resolve_glob as _resolve_glob
 from mirage.core.ram.mkdir import mkdir
 from mirage.core.ram.read import read_bytes
 from mirage.core.ram.readdir import readdir
@@ -40,7 +40,10 @@ from mirage.resource.base import BaseResource
 from mirage.resource.ram.prompt import PROMPT
 from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _RAM_OPS = {
     "read_bytes": read_bytes,

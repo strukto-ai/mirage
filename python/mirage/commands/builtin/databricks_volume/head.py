@@ -15,13 +15,14 @@
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.cache.read_through import cached_prefix_bytes
+from mirage.commands.builtin.databricks_volume.ops import \
+    RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.databricks_volume.glob import resolve_glob
 from mirage.core.databricks_volume.stream import range_read, read_stream
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult

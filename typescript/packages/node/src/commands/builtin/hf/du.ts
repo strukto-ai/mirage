@@ -15,6 +15,7 @@
 import {
   command,
   duGeneric,
+  resolveGlobOf,
   specOf,
   type CommandFnResult,
   type CommandOpts,
@@ -22,7 +23,9 @@ import {
 } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { du as hfDu, duAll as hfDuAll } from '../../../core/hf/du.ts'
-import { resolveGlob } from '../../../core/hf/glob.ts'
+import { HF_CMD_OPS } from './ops.ts'
+
+const resolveGlob = resolveGlobOf(HF_CMD_OPS)
 
 async function duCommand(
   accessor: HfAccessor,

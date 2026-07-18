@@ -15,20 +15,14 @@
 import pytest
 
 from mirage.accessor.base import NOOPAccessor
-from mirage.commands.builtin.generic_bind.adapter import make_resolve_glob
+from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 
 TREE = {
     "/notion/pages": [
         "/notion/pages/Demo_page__uuid1",
         "/notion/pages/Roadmap__uuid2",
-    ],
-    "/notion/pages/Demo_page__uuid1": [
-        "/notion/pages/Demo_page__uuid1/page.md",
-        "/notion/pages/Demo_page__uuid1/page.json",
-    ],
-    "/notion/pages/Roadmap__uuid2": [
-        "/notion/pages/Roadmap__uuid2/page.json",
     ],
 }
 
@@ -51,54 +45,37 @@ def glob_spec(virtual: str, prefix: str) -> PathSpec:
     )
 
 
-@pytest.mark.asyncio
-async def test_resolve_glob_mid_path_pattern():
-    resolve = make_resolve_glob(fake_readdir)
-    spec = glob_spec("/notion/pages/Demo_page__*/page.md", "/notion")
-    result = await resolve(NOOPAccessor(), [spec], None)
-    assert [p.virtual
-            for p in result] == ["/notion/pages/Demo_page__uuid1/page.md"]
+def make_io(**kwargs) -> CommandIO:
+    return CommandIO(readdir=fake_readdir,
+                     read_bytes=fake_readdir,
+                     read_stream=fake_readdir,
+                     stat=fake_readdir,
+                     is_mounted=lambda a: True,
+                     **kwargs)
+
+
+def test_command_io_default_glob_cap():
+    assert make_io().max_glob_matches == DEFAULT_MAX_GLOB_MATCHES
 
 
 @pytest.mark.asyncio
-async def test_resolve_glob_last_component():
-    resolve = make_resolve_glob(fake_readdir)
+async def test_command_io_resolve_glob_binds_readdir():
+    resolve = make_io().resolve_glob
     spec = glob_spec("/notion/pages/Demo*", "/notion")
     result = await resolve(NOOPAccessor(), [spec], None)
     assert [p.virtual for p in result] == ["/notion/pages/Demo_page__uuid1"]
 
 
 @pytest.mark.asyncio
-async def test_resolve_glob_passthrough():
-    resolve = make_resolve_glob(fake_readdir)
-    resolved_spec = PathSpec.from_str_path("/notion/pages/Roadmap__uuid2",
-                                           "pages/Roadmap__uuid2")
-    result = await resolve(NOOPAccessor(), [resolved_spec], None)
-    assert result[0] is resolved_spec
-
-
-@pytest.mark.asyncio
-async def test_resolve_glob_truncates(caplog):
-    resolve = make_resolve_glob(fake_readdir, max_glob_matches=1)
+async def test_command_io_resolve_glob_honors_cap():
+    resolve = make_io(max_glob_matches=1).resolve_glob
     spec = glob_spec("/notion/pages/*", "/notion")
     result = await resolve(NOOPAccessor(), [spec], None)
     assert len(result) == 1
 
 
-@pytest.mark.asyncio
-async def test_resolve_glob_zero_match_word_keeps_literal():
-    resolve = make_resolve_glob(fake_readdir)
-    spec = glob_spec("/notion/pages/*.nope", "/notion")
-    out = await resolve(NOOPAccessor(), [spec], None)
-    assert len(out) == 1
-    assert out[0].virtual == "/notion/pages/*.nope"
-    assert out[0].pattern is None
-    assert out[0].resolved
-
-
-@pytest.mark.asyncio
-async def test_resolve_glob_zero_match_dir_shape_stays_empty():
-    resolve = make_resolve_glob(fake_readdir)
-    spec = glob_spec("/notion/pages/*.nope", "/notion").dir
-    out = await resolve(NOOPAccessor(), [spec], None)
-    assert out == []
+def test_command_io_require_missing_op():
+    io = make_io()
+    with pytest.raises(NotImplementedError):
+        io.require(Operation.WRITE)
+    assert make_io(write=fake_readdir).require(Operation.WRITE) is fake_readdir

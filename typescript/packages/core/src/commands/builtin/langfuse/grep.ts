@@ -20,7 +20,8 @@ import {
   fetchSessions,
   fetchTraces,
 } from '../../../core/langfuse/_client.ts'
-import { resolveLangfuseGlob } from '../../../core/langfuse/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { LANGFUSE_CMD_OPS } from './ops.ts'
 import { read as langfuseRead } from '../../../core/langfuse/read.ts'
 import { readdir as langfuseReaddir } from '../../../core/langfuse/readdir.ts'
 import { detectScope } from '../../../core/langfuse/scope.ts'
@@ -33,6 +34,8 @@ import { grepGeneric } from '../generic/grep.ts'
 import { compilePattern, patternArg } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
+
+const resolveLangfuseGlob = resolveGlobOf(LANGFUSE_CMD_OPS)
 
 function pickString(record: Record<string, unknown>, key: string): string {
   const value = record[key]

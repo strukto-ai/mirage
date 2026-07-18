@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.resource.ram import RAMResource
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.expand.globs import resolve_globs
 
@@ -207,7 +209,7 @@ def test_pathspec_dir_no_pattern():
 
 
 def test_scope_error_truncates_instead_of_crash():
-    from mirage.core.ram.glob import resolve_glob as ram_resolve_glob
+    ram_resolve_glob = make_resolve_glob(ram_readdir, 5)
 
     resource = RAMResource()
     for i in range(20):
@@ -223,10 +225,7 @@ def test_scope_error_truncates_instead_of_crash():
     )
 
     async def _run():
-        with patch("mirage.core.ram.glob.SCOPE_ERROR", 5):
-            result = await ram_resolve_glob(resource.accessor, [glob_ps],
-                                            index)
-        return result
+        return await ram_resolve_glob(resource.accessor, [glob_ps], index)
 
     result = asyncio.run(_run())
     assert len(result) == 5

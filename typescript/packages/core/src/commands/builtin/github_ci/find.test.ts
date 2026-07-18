@@ -15,7 +15,8 @@
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../../core/github_ci/readdir.ts', () => ({
+vi.mock('../../../core/github_ci/readdir.ts', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   readdir: vi.fn(),
   isDirName: (child: string) => {
     const name = child.split('/').pop() ?? ''

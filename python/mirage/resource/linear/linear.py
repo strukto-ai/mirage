@@ -15,7 +15,6 @@
 from typing import Any
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.core.linear.glob import resolve_glob as _resolve_glob
 from mirage.core.linear.read import read
 from mirage.core.linear.readdir import readdir
 from mirage.core.linear.stat import stat
@@ -23,6 +22,9 @@ from mirage.resource.base import BaseResource
 from mirage.resource.linear.config import LinearConfig
 from mirage.resource.linear.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _LINEAR_OPS = {
     "read_bytes": read,

@@ -17,6 +17,7 @@ import {
   PathSpec,
   REDACTED_SECRET,
   ResourceName,
+  makeResolveGlob,
   mountKey,
   mountPrefixOf,
   type FileStat,
@@ -29,12 +30,12 @@ import { REDIS_COMMANDS } from '../../commands/builtin/redis/index.ts'
 import type { RedisClientType } from 'redis'
 import { RedisAccessor } from '../../accessor/redis.ts'
 import { appendBytes } from '../../core/redis/append.ts'
+import { SCOPE_ERROR } from '../../core/redis/constants.ts'
 import { copy as copyCore } from '../../core/redis/copy.ts'
 import { create as createCore } from '../../core/redis/create.ts'
 import { du as duCore, duAll as duAllCore } from '../../core/redis/du.ts'
 import { exists as existsCore } from '../../core/redis/exists.ts'
 import { find as findCore, type FindOptions as RedisFindOptions } from '../../core/redis/find.ts'
-import { resolveGlob as globCore } from '../../core/redis/glob.ts'
 import { mkdir as mkdirCore } from '../../core/redis/mkdir.ts'
 import { read as readCore } from '../../core/redis/read.ts'
 import { readdir as readdirCore } from '../../core/redis/readdir.ts'
@@ -49,6 +50,8 @@ import { writeBytes as writeCore } from '../../core/redis/write.ts'
 import { REDIS_OPS } from '../../ops/redis/index.ts'
 import { REDIS_PROMPT } from './prompt.ts'
 import { RedisStore } from './store.ts'
+
+const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
 
 export interface RedisResourceOptions {
   url?: string

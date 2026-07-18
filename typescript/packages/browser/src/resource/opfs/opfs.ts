@@ -21,15 +21,16 @@ import {
   type Resource,
   ResourceName,
   lstripSlash,
+  makeResolveGlob,
 } from '@struktoai/mirage-core'
 import { OPFSAccessor } from '../../accessor/opfs.ts'
 import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
 import { appendBytes as appendCore } from '../../core/opfs/append.ts'
+import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 import { copy as copyCore } from '../../core/opfs/copy.ts'
 import { du as duCore } from '../../core/opfs/du.ts'
 import { exists as existsCore } from '../../core/opfs/exists.ts'
 import { find as findCore, type FindOptions as OPFSFindOptions } from '../../core/opfs/find.ts'
-import { resolveGlob as globCore } from '../../core/opfs/glob.ts'
 import { mkdir as mkdirCore } from '../../core/opfs/mkdir.ts'
 import { read as readCoreFn } from '../../core/opfs/read.ts'
 import { readdir as readdirCore } from '../../core/opfs/readdir.ts'
@@ -44,6 +45,8 @@ import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
 import { writeBytes as writeCore } from '../../core/opfs/write.ts'
 import { OPFS_OPS } from '../../ops/opfs/index.ts'
 import { OPFS_PROMPT } from './prompt.ts'
+
+const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
 
 export interface OPFSResourceOptions {
   root?: string

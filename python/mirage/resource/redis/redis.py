@@ -24,12 +24,12 @@ except ImportError as _err:
 from mirage.accessor.redis import RedisAccessor
 from mirage.commands.builtin.redis import COMMANDS as REDIS_COMMANDS
 from mirage.core.redis.append import append_bytes
+from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy
 from mirage.core.redis.create import create
 from mirage.core.redis.du import du, du_all
 from mirage.core.redis.exists import exists
 from mirage.core.redis.find import find
-from mirage.core.redis.glob import resolve_glob as _resolve_glob
 from mirage.core.redis.mkdir import mkdir
 from mirage.core.redis.read import read_bytes
 from mirage.core.redis.readdir import readdir
@@ -47,7 +47,10 @@ from mirage.resource.redis.prompt import PROMPT
 from mirage.resource.redis.store import RedisStore
 from mirage.resource.secrets import REDACTED_SECRET
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _REDIS_OPS = {
     "read_bytes": read_bytes,

@@ -27,7 +27,7 @@ import {
   mountKey,
   mountPrefixOf,
   resolveMongoDBConfig,
-  resolveMongoGlob,
+  makeResolveGlob,
   type FileStat,
   type MongoDBConfig,
   type MongoDBConfigResolved,
@@ -36,6 +36,8 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { MongoDBStore } from './store.ts'
+
+const resolveMongoGlob = makeResolveGlob(mongoReaddir)
 
 void detectMongoScope
 

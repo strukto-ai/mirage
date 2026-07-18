@@ -2,9 +2,9 @@ import asyncio
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy
 from mirage.core.s3.exists import exists
-from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.read import read_bytes
 from mirage.core.s3.readdir import readdir
 from mirage.core.s3.rename import rename
@@ -14,7 +14,10 @@ from mirage.core.s3.write import write_bytes
 from mirage.resource.s3 import S3Config
 from mirage.resource.s3.s3 import S3Resource
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import make_resolve_glob
 from tests.integration.s3_mock import patch_s3_multi
+
+resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 PREFIX = "users/abc/"
 BUCKET = "test-bucket"

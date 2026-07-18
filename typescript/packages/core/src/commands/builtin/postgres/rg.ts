@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
-import { resolveGlob } from '../../../core/postgres/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { POSTGRES_CMD_OPS } from './ops.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../../core/postgres/readdir.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
@@ -21,6 +22,8 @@ import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { rgGeneric } from '../generic/rg.ts'
+
+const resolveGlob = resolveGlobOf(POSTGRES_CMD_OPS)
 
 async function rgCommand(
   accessor: PostgresAccessor,

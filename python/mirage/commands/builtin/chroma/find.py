@@ -1,13 +1,13 @@
 from functools import partial
 
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.chroma.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.chroma.find import find as find_core
-from mirage.core.chroma.glob import resolve_glob
 from mirage.core.chroma.stat import stat as stat_core
 from mirage.core.chroma.stat import stat_light
 from mirage.io.types import ByteSource, IOResult

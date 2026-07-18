@@ -15,11 +15,14 @@
 from typing import Any
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.core.trello.glob import resolve_glob as _resolve_glob
+from mirage.core.trello.readdir import readdir
 from mirage.resource.base import BaseResource
 from mirage.resource.trello.config import TrelloConfig
 from mirage.resource.trello.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 
 class TrelloResource(BaseResource):

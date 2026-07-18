@@ -14,7 +14,7 @@
 
 import type { CommandIO } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
-import { SCOPE_ERROR } from '../../../core/disk/constants.ts'
+import { SCOPE_ERROR } from '../../../core/ssh/constants.ts'
 import { copy as sshCopy } from '../../../core/ssh/copy.ts'
 import { du as sshDu, duAll as sshDuAll } from '../../../core/ssh/du.ts'
 import { exists as sshExists } from '../../../core/ssh/exists.ts'
@@ -31,13 +31,13 @@ import { unlink as sshUnlink } from '../../../core/ssh/unlink.ts'
 import { writeBytes as sshWrite } from '../../../core/ssh/write.ts'
 
 export const SSH_CMD_OPS: CommandIO<SSHAccessor> = {
+  maxGlobMatches: SCOPE_ERROR,
   readdir: sshReaddir,
   readBytes: sshRead,
   readStream: sshStream,
   stat: sshStat,
   isMounted: () => true,
   local: false,
-  maxGlobMatches: SCOPE_ERROR,
   write: sshWrite,
   exists: sshExists,
   mkdir: (accessor, path, parents) => sshMkdir(accessor, path, parents === true),

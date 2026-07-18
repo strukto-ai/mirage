@@ -26,13 +26,15 @@ import {
   langfuseStat,
   mountKey,
   mountPrefixOf,
-  resolveLangfuseGlob,
+  makeResolveGlob,
   type FileStat,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
+
+const resolveLangfuseGlob = makeResolveGlob(langfuseReaddir)
 
 export interface LangfuseResourceState {
   type: string

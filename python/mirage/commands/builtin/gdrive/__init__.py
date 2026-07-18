@@ -36,7 +36,6 @@ from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import
 from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
     gws_slides_presentations_create  # noqa: E501
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.core.gdrive.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.gdrive.read import read as _read
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.core.gdrive.stat import stat as _stat
@@ -58,7 +57,7 @@ _GDRIVE_CMD_OPS = CommandIO(
 
 COMMANDS = [
     *make_filetype_commands("gdrive",
-                            _ft_resolve_glob,
+                            _GDRIVE_CMD_OPS.resolve_glob,
                             _read,
                             read_takes_index=True,
                             provision=_ft_provision),

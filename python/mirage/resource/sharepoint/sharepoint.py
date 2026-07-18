@@ -8,7 +8,6 @@ from mirage.core.sharepoint.create import create
 from mirage.core.sharepoint.du import du, du_all
 from mirage.core.sharepoint.exists import exists
 from mirage.core.sharepoint.find import find
-from mirage.core.sharepoint.glob import resolve_glob as _resolve_glob
 from mirage.core.sharepoint.mkdir import mkdir
 from mirage.core.sharepoint.read import read_bytes
 from mirage.core.sharepoint.readdir import readdir
@@ -24,7 +23,10 @@ from mirage.ops.sharepoint import OPS as SHAREPOINT_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.sharepoint.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _SHAREPOINT_OPS = {
     "read_bytes": read_bytes,

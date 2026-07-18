@@ -21,7 +21,6 @@ from mirage.core.disk.du import du as _du
 from mirage.core.disk.du import du_all as _du_all
 from mirage.core.disk.exists import exists as _exists
 from mirage.core.disk.find import find as _find
-from mirage.core.disk.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.read import read_bytes as _read
 from mirage.core.disk.readdir import readdir as _readdir
@@ -55,6 +54,6 @@ _DISK_CMD_OPS = CommandIO(
 )
 
 COMMANDS = [
-    *make_filetype_commands("disk", _ft_resolve_glob, _read),
+    *make_filetype_commands("disk", _DISK_CMD_OPS.resolve_glob, _read),
     *make_generic_commands("disk", _DISK_CMD_OPS),
 ]

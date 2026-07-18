@@ -28,6 +28,17 @@ def _safe_name(name: str) -> str:
     return name.replace("/", "\u2215")
 
 
+def is_cross_run_root(path: PathSpec) -> bool:
+    original = path.virtual if isinstance(path, PathSpec) else path
+    prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
+        path, PathSpec) else ""
+    if prefix and original.startswith(prefix):
+        rest = original[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            original = rest or "/"
+    return original.strip("/") in ("", "runs")
+
+
 async def readdir(
     accessor: GitHubCIAccessor,
     path_spec: PathSpec,

@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from enum import Enum
 from typing import Any
 
 from mirage.core.google._client import (DRIVE_API_BASE, TokenManager,
                                         google_delete, google_get,
-                                        google_get_bytes, google_get_stream)
+                                        google_get_bytes)
 
 
 class GoogleFileSuffix(str, Enum):
@@ -223,21 +222,3 @@ async def download_file(
     url = (f"{DRIVE_API_BASE}/files/{file_id}"
            "?alt=media&supportsAllDrives=true")
     return await google_get_bytes(token_manager, url)
-
-
-async def download_file_stream(
-    token_manager: TokenManager,
-    file_id: str,
-    chunk_size: int = 8192,
-) -> AsyncIterator[bytes]:
-    """Stream a regular file from Drive in chunks.
-
-    Args:
-        token_manager (TokenManager): OAuth2 token manager.
-        file_id (str): file ID.
-        chunk_size (int): chunk size in bytes.
-    """
-    url = (f"{DRIVE_API_BASE}/files/{file_id}"
-           "?alt=media&supportsAllDrives=true")
-    async for chunk in google_get_stream(token_manager, url, chunk_size):
-        yield chunk

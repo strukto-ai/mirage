@@ -16,13 +16,17 @@ import pytest
 
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.disk.glob import resolve_glob
+from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.read import read_bytes
+from mirage.core.disk.readdir import readdir
 from mirage.io.types import IOResult
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.workspace import Workspace
+
+resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 
 @command("stat", resource="disk", spec=SPECS["stat"], filetype=".zzz")

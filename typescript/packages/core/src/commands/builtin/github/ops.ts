@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
+import { SCOPE_ERROR } from '../../../core/github/constants.ts'
 import { read as githubRead, stream as githubStream } from '../../../core/github/read.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
@@ -25,4 +26,5 @@ export const GITHUB_CMD_OPS: CommandIO<GitHubAccessor> = {
   stat: githubStat,
   isMounted: () => true,
   local: false,
+  maxGlobMatches: SCOPE_ERROR,
 }

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.rm_command import make_rm
-from mirage.core.gsheets.glob import resolve_glob
+from mirage.commands.builtin.gsheets.ops import RESOLVE_GLOB as resolve_glob
 from mirage.core.gsheets.unlink import unlink
 
 rm = make_rm(resource="gsheets", glob_fn=resolve_glob, unlink=unlink)

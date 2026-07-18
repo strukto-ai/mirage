@@ -16,11 +16,12 @@ from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.github_ci.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.core.github_ci.glob import is_cross_run_root, resolve_glob
 from mirage.core.github_ci.read import read as ci_read
+from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult

@@ -20,12 +20,12 @@ from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.mongodb._provision import search_provision
+from mirage.commands.builtin.mongodb.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.core.mongodb._client import list_databases
-from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.scope import (MongoDBDatabaseScope,

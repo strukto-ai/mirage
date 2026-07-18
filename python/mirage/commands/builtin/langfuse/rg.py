@@ -21,13 +21,13 @@ from mirage.commands.builtin.langfuse.grep import (_filter_traces,
                                                    _format_dataset_results,
                                                    _format_prompt_results,
                                                    _format_session_results)
+from mirage.commands.builtin.langfuse.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.core.langfuse._client import (fetch_datasets, fetch_prompts,
                                           fetch_sessions, fetch_traces)
-from mirage.core.langfuse.glob import resolve_glob
 from mirage.core.langfuse.read import read as langfuse_read
 from mirage.core.langfuse.readdir import readdir as _readdir
 from mirage.core.langfuse.scope import detect_scope

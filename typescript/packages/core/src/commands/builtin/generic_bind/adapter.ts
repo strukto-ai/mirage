@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { eisdir } from '../../../utils/errors.ts'
-import { resolveGlobWith } from '../../../utils/glob_walk.ts'
+import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
@@ -102,7 +102,7 @@ export type ResolveGlobOp<A extends Accessor = Accessor> = (
 
 export function makeResolveGlob<A extends Accessor = Accessor>(
   readdir: ReaddirOp<A>,
-  maxGlobMatches?: number,
+  maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
 ): ResolveGlobOp<A> {
   return async (accessor, paths, index) =>
     resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches)

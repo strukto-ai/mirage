@@ -15,7 +15,8 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { countRows } from '../../../core/postgres/_client.ts'
-import { resolveGlob } from '../../../core/postgres/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { POSTGRES_CMD_OPS } from './ops.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
@@ -24,6 +25,8 @@ import { specOf } from '../../spec/builtins.ts'
 import { tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_helper.ts'
 import { headTailProvision } from './_provision.ts'
+
+const resolveGlob = resolveGlobOf(POSTGRES_CMD_OPS)
 
 // Row reads on tables/views fetch only the last N rows (COUNT + OFFSET)
 // instead of the whole relation; tailGeneric then trims the already-small

@@ -18,6 +18,7 @@ import {
   BaseResource,
   PathSpec,
   ResourceName,
+  makeResolveGlob,
   mountKey,
   mountPrefixOf,
   type FileStat,
@@ -28,12 +29,12 @@ import {
 } from '@struktoai/mirage-core'
 import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
 import { appendBytes as appendCore } from '../../core/disk/append.ts'
+import { SCOPE_ERROR } from '../../core/disk/constants.ts'
 import { copy as copyCore } from '../../core/disk/copy.ts'
 import { create as createCore } from '../../core/disk/create.ts'
 import { du as duCore, duAll as duAllCore } from '../../core/disk/du.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { find as findCore, type FindOptions as DiskFindOptions } from '../../core/disk/find.ts'
-import { resolveGlob as globCore } from '../../core/disk/glob.ts'
 import { mkdir as mkdirCore } from '../../core/disk/mkdir.ts'
 import { read as readCoreFn } from '../../core/disk/read.ts'
 import { readdir as readdirCore } from '../../core/disk/readdir.ts'
@@ -48,6 +49,8 @@ import { writeBytes as writeCore } from '../../core/disk/write.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { DISK_OPS } from '../../ops/disk/index.ts'
 import { DISK_PROMPT } from './prompt.ts'
+
+const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
 
 export interface DiskResourceOptions {
   root: string

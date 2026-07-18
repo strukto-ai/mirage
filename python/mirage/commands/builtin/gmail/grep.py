@@ -17,12 +17,12 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.gmail._provision import file_read_provision
+from mirage.commands.builtin.gmail.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.core.gmail.glob import resolve_glob
 from mirage.core.gmail.read import read as gmail_read
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.scope import detect_scope

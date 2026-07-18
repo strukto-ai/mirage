@@ -21,7 +21,8 @@ import { create as createCore } from '../../core/ram/create.ts'
 import { du as duCore, duAll as duAllCore } from '../../core/ram/du.ts'
 import { exists as existsCore } from '../../core/ram/exists.ts'
 import { find as findCore, type FindOptions as RAMFindOptions } from '../../core/ram/find.ts'
-import { resolveGlob as globCore } from '../../core/ram/glob.ts'
+import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
+import { SCOPE_ERROR } from '../../core/ram/constants.ts'
 import { mkdir as mkdirCore } from '../../core/ram/mkdir.ts'
 import { read as readCore } from '../../core/ram/read.ts'
 import { readdir as readdirCore } from '../../core/ram/readdir.ts'
@@ -40,6 +41,8 @@ import { PathSpec, ResourceName, type FileStat } from '../../types.ts'
 import { BaseResource, type FindOptions, type Resource } from '../base.ts'
 import { RAM_PROMPT } from './prompt.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
+
+const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
 
 export interface RAMResourceState {
   type: string

@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.commands.builtin.discord.discord_add_reaction import \
     discord_add_reaction
 from mirage.commands.builtin.discord.discord_get_server_info import \
@@ -24,34 +22,16 @@ from mirage.commands.builtin.discord.discord_send_message import \
     discord_send_message
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
+from mirage.commands.builtin.discord.ops import OPS as _DISCORD_CMD_OPS
 from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
-from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands)
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.core.discord.glob import resolve_glob as _ft_resolve_glob
+from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.core.discord.read import read as _read
-from mirage.core.discord.readdir import is_dir_name as _is_dir_name
-from mirage.core.discord.readdir import readdir as _readdir
-from mirage.core.discord.stat import stat as _stat
-
-# Channel history is read through the generic factory (find walks readdir
-# with the is_dir_name hint); grep/rg/head are bespoke (channel search
-# push-down, history pagination) and writes go through the discord_* commands,
-# so the generic byte-mutation commands are absent.
-_DISCORD_CMD_OPS = CommandIO(
-    readdir=_readdir,
-    read_bytes=_read,
-    read_stream=partial(stream_from_bytes, _read),
-    stat=_stat,
-    is_mounted=lambda a: True,
-    is_dir_name=lambda a, name: _is_dir_name(name),
-    local=False,
-)
 
 COMMANDS = [
     *make_filetype_commands(
-        "discord", _ft_resolve_glob, _read, read_takes_index=True),
+        "discord", _DISCORD_CMD_OPS.resolve_glob, _read,
+        read_takes_index=True),
     *make_generic_commands(
         "discord",
         _DISCORD_CMD_OPS,

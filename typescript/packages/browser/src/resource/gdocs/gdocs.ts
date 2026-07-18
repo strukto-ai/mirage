@@ -30,10 +30,12 @@ import {
   TokenManager,
   gdocsRead,
   gdocsReaddir,
-  gdocsResolveGlob,
+  makeResolveGlob,
   gdocsStat,
 } from '@struktoai/mirage-core'
 import { redactGDocsConfig, type GDocsConfig, type GDocsConfigRedacted } from './config.ts'
+
+const gdocsResolveGlob = makeResolveGlob(gdocsReaddir)
 
 export interface GDocsResourceState {
   type: string

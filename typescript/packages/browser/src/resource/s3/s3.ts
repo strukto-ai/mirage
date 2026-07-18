@@ -23,6 +23,7 @@ import {
   type FindOptions,
   find as findCore,
   type IndexCacheStore,
+  makeResolveGlob,
   mkdir as mkdirCore,
   PathSpec,
   RAMIndexCacheStore,
@@ -35,7 +36,7 @@ import {
   rename as renameCore,
   type Resource,
   ResourceName,
-  resolveS3Glob as globCore,
+  S3_SCOPE_ERROR,
   rmR as rmRCore,
   rmdir as rmdirCore,
   S3_OPS,
@@ -47,6 +48,8 @@ import {
   write as writeCore,
 } from '@struktoai/mirage-core'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
+
+const globCore = makeResolveGlob(readdirCore, S3_SCOPE_ERROR)
 
 export const S3_BROWSER_PROMPT = `{prefix}
   Remote S3 bucket accessed via presigned URLs (browser runtime).

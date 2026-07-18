@@ -14,8 +14,10 @@
 
 import pytest
 
+from mirage.resource import registry
 from mirage.resource.hf_buckets import HfBucketsResource
-from mirage.resource.registry import REGISTRY, build_resource
+from mirage.resource.registry import (REGISTRY, build_resource,
+                                      known_resources, register_resource)
 
 EXPECTED_RESOURCES = {
     "ram",
@@ -134,3 +136,113 @@ def test_registry_module_import_is_free_of_resource_deps():
 def test_build_hf_buckets_resource():
     r = build_resource("hf_buckets", {"bucket": "o/b"})
     assert isinstance(r, HfBucketsResource)
+
+
+class FakeCustomConfig:
+
+    def __init__(self, url: str = "") -> None:
+        self.url = url
+
+
+class FakeCustomResource:
+
+    def __init__(self, config: FakeCustomConfig) -> None:
+        self.config = config
+
+
+class FakeKwargsResource:
+
+    def __init__(self, root: str = "/") -> None:
+        self.root = root
+
+
+class FakeConfigClsResource:
+
+    CONFIG_CLS = FakeCustomConfig
+
+    def __init__(self, config: FakeCustomConfig) -> None:
+        self.config = config
+
+
+@pytest.fixture
+def clean_registry(monkeypatch):
+    monkeypatch.setattr(registry, "_CUSTOM", {})
+    monkeypatch.setattr(registry, "_entry_points_loaded", False)
+
+
+def test_register_resource_class_and_config(clean_registry):
+    register_resource("fake_custom", FakeCustomResource, FakeCustomConfig)
+    built = build_resource("fake_custom", {"url": "http://x"})
+    assert isinstance(built, FakeCustomResource)
+    assert built.config.url == "http://x"
+
+
+def test_register_resource_kwargs_config(clean_registry):
+    register_resource("fake_kwargs", FakeKwargsResource)
+    built = build_resource("fake_kwargs", {"root": "/data"})
+    assert isinstance(built, FakeKwargsResource)
+    assert built.root == "/data"
+
+
+def test_register_resource_config_cls_attribute(clean_registry):
+    register_resource("fake_attr", FakeConfigClsResource)
+    built = build_resource("fake_attr", {"url": "http://y"})
+    assert built.config.url == "http://y"
+
+
+def test_register_resource_rejects_builtin_shadow(clean_registry):
+    with pytest.raises(ValueError):
+        register_resource("s3", FakeCustomResource)
+
+
+def test_register_resource_spec_string(clean_registry):
+    register_resource("fake_spec",
+                      "tests.resource.test_registry:FakeKwargsResource")
+    built = build_resource("fake_spec", {"root": "/spec"})
+    assert built.root == "/spec"
+
+
+def test_known_resources_includes_custom(clean_registry):
+    register_resource("fake_custom", FakeCustomResource, FakeCustomConfig)
+    names = known_resources()
+    assert "fake_custom" in names
+    assert "s3" in names
+
+
+def test_entry_point_discovery(clean_registry, monkeypatch):
+    import importlib.metadata
+
+    ep = importlib.metadata.EntryPoint(
+        name="fake_ep",
+        value="tests.resource.test_registry:FakeKwargsResource",
+        group="mirage.resources",
+    )
+
+    def fake_entry_points(*, group):
+        assert group == "mirage.resources"
+        return [ep]
+
+    monkeypatch.setattr(importlib.metadata, "entry_points", fake_entry_points)
+    built = build_resource("fake_ep", {"root": "/ep"})
+    assert built.root == "/ep"
+    assert "fake_ep" in known_resources()
+
+
+def test_entry_point_does_not_shadow_registered(clean_registry, monkeypatch):
+    import importlib.metadata
+
+    ep = importlib.metadata.EntryPoint(
+        name="fake_custom",
+        value="tests.resource.test_registry:FakeKwargsResource",
+        group="mirage.resources",
+    )
+    monkeypatch.setattr(importlib.metadata, "entry_points",
+                        lambda *, group: [ep])
+    register_resource("fake_custom", FakeCustomResource, FakeCustomConfig)
+    built = build_resource("fake_custom", {"url": "http://z"})
+    assert isinstance(built, FakeCustomResource)
+
+
+def test_unknown_resource_lists_known(clean_registry):
+    with pytest.raises(KeyError, match="unknown resource"):
+        build_resource("nope_not_real")

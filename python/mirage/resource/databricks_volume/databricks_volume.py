@@ -21,7 +21,6 @@ from mirage.commands.builtin.databricks_volume import \
 from mirage.core.databricks_volume.copy import copy
 from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.exists import exists
-from mirage.core.databricks_volume.glob import resolve_glob as _resolve_glob
 from mirage.core.databricks_volume.mkdir import mkdir
 from mirage.core.databricks_volume.read import read_bytes
 from mirage.core.databricks_volume.readdir import readdir
@@ -37,7 +36,10 @@ from mirage.resource.base import BaseResource
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
 from mirage.resource.databricks_volume.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _DATABRICKS_VOLUME_OPS = {
     "read_bytes": read_bytes,

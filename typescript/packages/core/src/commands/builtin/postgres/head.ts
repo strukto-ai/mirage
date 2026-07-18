@@ -14,7 +14,8 @@
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { resolveGlob } from '../../../core/postgres/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { POSTGRES_CMD_OPS } from './ops.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
@@ -23,6 +24,8 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
 import { headTailProvision } from './_provision.ts'
+
+const resolveGlob = resolveGlobOf(POSTGRES_CMD_OPS)
 
 // Row reads on tables/views push LIMIT into the query instead of fetching
 // the whole relation; headGeneric then trims the already-small chunk. Falls

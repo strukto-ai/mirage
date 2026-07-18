@@ -18,11 +18,11 @@ from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du_multi
+from mirage.commands.builtin.hf_buckets.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.hf_buckets.du import du as du_impl
 from mirage.core.hf_buckets.du import du_all as du_all_impl
-from mirage.core.hf_buckets.glob import resolve_glob
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 

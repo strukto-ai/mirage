@@ -14,7 +14,6 @@
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
 from typing import Any
 
 import aiohttp
@@ -135,23 +134,3 @@ async def google_get_bytes(
         async with session.get(url, headers=headers) as resp:
             resp.raise_for_status()
             return await resp.read()
-
-
-async def google_get_stream(
-    token_manager: TokenManager,
-    url: str,
-    chunk_size: int = 8192,
-) -> AsyncIterator[bytes]:
-    """Stream bytes from a Google API endpoint.
-
-    Args:
-        token_manager (TokenManager): OAuth2 token manager.
-        url (str): API URL.
-        chunk_size (int): chunk size in bytes.
-    """
-    headers = await google_headers(token_manager)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            resp.raise_for_status()
-            async for chunk in resp.content.iter_chunked(chunk_size):
-                yield chunk

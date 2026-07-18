@@ -17,11 +17,11 @@ from collections.abc import Callable
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import PatternType
+from mirage.commands.builtin.github.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.grep_helper import classify_pattern, search_query
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.spec.types import FlagView
 from mirage.core.github.constants import SCOPE_WARN
-from mirage.core.github.glob import resolve_glob
 from mirage.core.github.scope import (count_scope_files, scope_relative_key,
                                       should_use_search)
 from mirage.core.github.search import narrow_paths

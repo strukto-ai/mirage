@@ -16,13 +16,13 @@ from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.gmail.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.core.gmail.glob import resolve_glob
 from mirage.core.gmail.read import read as gmail_read
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.scope import detect_scope

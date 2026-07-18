@@ -15,7 +15,7 @@
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { QDRANT_COMMANDS } from '../../commands/builtin/qdrant/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
-import { resolveGlob } from '../../core/qdrant/glob.ts'
+import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
 import { read } from '../../core/qdrant/read.ts'
 import { readdir as qdrantReaddir } from '../../core/qdrant/readdir.ts'
 import { stat as qdrantStat } from '../../core/qdrant/stat.ts'
@@ -25,6 +25,8 @@ import { ResourceName, type FileStat, type PathSpec } from '../../types.ts'
 import { BaseResource, type Resource } from '../base.ts'
 import { resolveQdrantConfig, type QdrantConfig, type QdrantConfigResolved } from './config.ts'
 import { QDRANT_PROMPT } from './prompt.ts'
+
+const resolveGlob = makeResolveGlob(qdrantReaddir)
 
 export interface QdrantResourceOptions {
   config: QdrantConfig

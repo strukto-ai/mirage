@@ -23,7 +23,7 @@ import {
   ResourceName,
   githubCiRead,
   githubCiReaddir,
-  githubCiResolveGlob,
+  makeResolveGlob,
   githubCiStat,
   mountKey,
   mountPrefixOf,
@@ -33,6 +33,8 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactGitHubCIConfig, type GitHubCIConfig, type GitHubCIConfigRedacted } from './config.ts'
+
+const githubCiResolveGlob = makeResolveGlob(githubCiReaddir)
 
 export interface GitHubCIResourceState {
   type: string

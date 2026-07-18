@@ -15,6 +15,7 @@
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
+from mirage.commands.builtin.email.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import (compile_pattern,
@@ -24,7 +25,6 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.core.email.glob import resolve_glob
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import EmailScope, detect_scope

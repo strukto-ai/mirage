@@ -15,7 +15,6 @@
 from typing import Any
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.core.notion.glob import resolve_glob as _resolve_glob
 from mirage.core.notion.read import read
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
@@ -23,6 +22,9 @@ from mirage.resource.base import BaseResource
 from mirage.resource.notion.config import NotionConfig
 from mirage.resource.notion.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _NOTION_OPS = {
     "read_bytes": read,

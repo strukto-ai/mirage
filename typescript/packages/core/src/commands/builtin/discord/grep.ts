@@ -17,7 +17,8 @@ import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { DiscordApiError } from '../../../core/discord/_client.ts'
 import { listChannels } from '../../../core/discord/channels.ts'
-import { resolveDiscordGlob } from '../../../core/discord/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { DISCORD_CMD_OPS } from './ops.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { detectScope } from '../../../core/discord/scope.ts'
@@ -31,6 +32,8 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { prependStderr } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
+
+const resolveDiscordGlob = resolveGlobOf(DISCORD_CMD_OPS)
 
 const ENC = new TextEncoder()
 

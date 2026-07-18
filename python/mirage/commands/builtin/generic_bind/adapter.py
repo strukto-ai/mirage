@@ -18,11 +18,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, overload
 
-from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.ops.config import StatOverlay
 from mirage.types import FileStat, PathSpec
-from mirage.utils.glob_walk import resolve_glob_with
+from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 
 OperationFn = Callable[..., Any]
 
@@ -97,24 +96,6 @@ class Builder:
     requirements: frozenset[Operation] = frozenset()
 
 
-def make_resolve_glob(readdir: OperationFn,
-                      max_glob_matches: int | None = None) -> OperationFn:
-    """Build a resolve_glob generic over a backend's readdir.
-
-    Args:
-        readdir (OperationFn): backend readdir ``(accessor, path, index)``.
-        max_glob_matches (int | None): cap on matches per pattern before
-            truncation.
-    """
-
-    async def resolve_glob(accessor: Accessor, paths: list[PathSpec],
-                           index: IndexCacheStore) -> list[PathSpec]:
-        return await resolve_glob_with(readdir, accessor, paths, index,
-                                       max_glob_matches)
-
-    return resolve_glob
-
-
 @dataclass(frozen=True)
 class CommandIO:
     readdir: OperationFn
@@ -123,7 +104,7 @@ class CommandIO:
     stat: OperationFn
     is_mounted: OperationFn
     local: bool = True
-    max_glob_matches: int | None = None
+    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
     write: OperationFn | None = None
     exists: OperationFn | None = None
     mkdir: OperationFn | None = None

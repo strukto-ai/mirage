@@ -17,12 +17,12 @@ from typing import Any
 
 from mirage.accessor.s3 import S3Accessor, S3Config
 from mirage.commands.builtin.s3 import COMMANDS as S3_COMMANDS
+from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy
 from mirage.core.s3.create import create
 from mirage.core.s3.du import du, du_all
 from mirage.core.s3.exists import exists
 from mirage.core.s3.find import find
-from mirage.core.s3.glob import resolve_glob as _resolve_glob
 from mirage.core.s3.mkdir import mkdir
 from mirage.core.s3.read import read_bytes
 from mirage.core.s3.readdir import readdir
@@ -38,7 +38,10 @@ from mirage.ops.s3 import OPS as S3_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.s3.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _S3_OPS = {
     "read_bytes": read_bytes,

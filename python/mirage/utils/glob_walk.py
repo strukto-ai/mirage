@@ -19,13 +19,15 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import rekey
 
 logger = logging.getLogger(__name__)
 
 GLOB_CHARS = ("*", "?", "[")
+
+DEFAULT_MAX_GLOB_MATCHES = 10000
 
 
 def has_glob(segment: str) -> bool:
@@ -136,6 +138,29 @@ async def expand_pattern(
                             raw_path=spell_match(path.raw_path, m.virtual,
                                                  walked)) for m in matches
     ]
+
+
+def make_resolve_glob(
+    readdir: Callable,
+    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES,
+) -> Callable:
+    """Build a resolve_glob generic over a backend's readdir.
+
+    Args:
+        readdir (Callable): backend readdir ``(accessor, path, index)``.
+        max_glob_matches (int | None): cap on matches per pattern before
+            truncation.
+    """
+
+    async def resolve_glob(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        index: IndexCacheStore | None = NULL_INDEX,
+    ) -> list[PathSpec]:
+        return await resolve_glob_with(readdir, accessor, paths, index,
+                                       max_glob_matches)
+
+    return resolve_glob
 
 
 async def resolve_glob_with(

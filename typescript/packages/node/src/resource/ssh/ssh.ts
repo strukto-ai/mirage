@@ -16,6 +16,7 @@ import {
   BaseResource,
   PathSpec,
   ResourceName,
+  makeResolveGlob,
   mountKey,
   mountPrefixOf,
   type FileStat,
@@ -32,9 +33,9 @@ import { create as createCore } from '../../core/ssh/create.ts'
 import { du as duCore, duAll as duAllCore } from '../../core/ssh/du.ts'
 import { exists as existsCore } from '../../core/ssh/exists.ts'
 import { find as findCore, type FindOptions as SshFindOptions } from '../../core/ssh/find.ts'
-import { resolveGlob as globCore } from '../../core/ssh/glob.ts'
 import { mkdir as mkdirCore } from '../../core/ssh/mkdir.ts'
 import { read as readCoreFn } from '../../core/ssh/read.ts'
+import { SCOPE_ERROR } from '../../core/ssh/constants.ts'
 import { readdir as readdirCore } from '../../core/ssh/readdir.ts'
 import { rename as renameCore } from '../../core/ssh/rename.ts'
 import { rmR as rmRCore } from '../../core/ssh/rm.ts'
@@ -47,6 +48,8 @@ import { writeBytes as writeCore } from '../../core/ssh/write.ts'
 import { SSH_OPS } from '../../ops/ssh/index.ts'
 import { type SSHConfig, type SSHConfigRedacted, redactSshConfig } from './config.ts'
 import { SSH_PROMPT } from './prompt.ts'
+
+const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
 
 export interface SSHResourceState {
   type: string

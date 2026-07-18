@@ -14,7 +14,8 @@
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
 import { exists as s3Exists } from '../../../core/s3/exists.ts'
-import { resolveGlob } from '../../../core/s3/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { S3_CMD_OPS } from './ops.ts'
 import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -22,6 +23,8 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+
+const resolveGlob = resolveGlobOf(S3_CMD_OPS)
 
 const ENC = new TextEncoder()
 

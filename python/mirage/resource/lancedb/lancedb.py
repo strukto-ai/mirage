@@ -15,11 +15,14 @@
 from typing import Any
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.core.lancedb.glob import resolve_glob as _resolve_glob
+from mirage.core.lancedb.readdir import readdir
 from mirage.resource.base import BaseResource
 from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.resource.lancedb.prompt import PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _REMOTE_SCHEMES = ("s3://", "gs://", "az://", "hf://", "db://")
 

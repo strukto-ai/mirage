@@ -29,10 +29,12 @@ import {
   TokenManager,
   gdriveRead,
   gdriveReaddir,
-  gdriveResolveGlob,
+  makeResolveGlob,
   gdriveStat,
 } from '@struktoai/mirage-core'
 import { redactGDriveConfig, type GDriveConfig, type GDriveConfigRedacted } from './config.ts'
+
+const gdriveResolveGlob = makeResolveGlob(gdriveReaddir)
 
 export interface GDriveResourceState {
   type: string

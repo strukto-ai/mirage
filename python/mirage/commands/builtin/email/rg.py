@@ -16,6 +16,7 @@ import json
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.email.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import (compile_pattern,
@@ -27,7 +28,6 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message
-from mirage.core.email.glob import resolve_glob
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import extract_folder

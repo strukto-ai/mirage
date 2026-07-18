@@ -245,3 +245,16 @@ export function isDirName(child: string): boolean {
     name.endsWith('.zip')
   )
 }
+
+export function isCrossRunRoot(path: PathSpec): boolean {
+  let original = path.virtual
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  if (prefix !== '' && original.startsWith(prefix)) {
+    const rest = original.slice(prefix.length)
+    if (prefix.endsWith('/') || rest === '' || rest.startsWith('/')) {
+      original = rest === '' ? '/' : rest
+    }
+  }
+  const stripped = stripSlash(original)
+  return stripped === '' || stripped === 'runs'
+}

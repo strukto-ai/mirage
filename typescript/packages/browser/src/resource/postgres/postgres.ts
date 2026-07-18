@@ -33,9 +33,11 @@ import {
   type Resource,
   ResourceName,
   resolvePostgresConfig,
-  resolvePostgresGlob,
+  makeResolveGlob,
 } from '@struktoai/mirage-core'
 import { NeonPgDriver } from './neon_driver.ts'
+
+const resolvePostgresGlob = makeResolveGlob(postgresReaddir)
 
 export interface PostgresResourceOptions {
   config: PostgresConfig

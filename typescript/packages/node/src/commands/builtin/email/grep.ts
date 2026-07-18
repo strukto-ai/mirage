@@ -27,6 +27,7 @@ import {
   mountPrefixOf,
   prefixAggregate,
   quietMatch,
+  resolveGlobOf,
   resolveSource,
   specOf,
   type AsyncReadBytesFn,
@@ -38,13 +39,15 @@ import {
   yieldBytes,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
-import { resolveGlob } from '../../../core/email/glob.ts'
 import { read as emailRead } from '../../../core/email/read.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
 import { stat as emailStat } from '../../../core/email/stat.ts'
 import { detectScope } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
+import { EMAIL_CMD_OPS } from './ops.ts'
 import { fileReadProvision } from './provision.ts'
+
+const resolveGlob = resolveGlobOf(EMAIL_CMD_OPS)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })

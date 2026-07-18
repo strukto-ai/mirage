@@ -1,9 +1,9 @@
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.chroma.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.chroma import search as search_core
-from mirage.core.chroma.glob import resolve_glob
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of

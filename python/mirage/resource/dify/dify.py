@@ -2,7 +2,6 @@ from typing import Any
 
 from mirage.accessor.dify import DifyAccessor
 from mirage.commands.builtin.dify import COMMANDS
-from mirage.core.dify.glob import resolve_glob as _resolve_glob
 from mirage.core.dify.read import read_bytes, read_stream
 from mirage.core.dify.readdir import readdir
 from mirage.core.dify.stat import stat
@@ -11,6 +10,9 @@ from mirage.resource.base import BaseResource
 from mirage.resource.dify.config import DifyConfig
 from mirage.resource.dify.prompt import PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _DIFY_OPS = {
     "read_bytes": read_bytes,

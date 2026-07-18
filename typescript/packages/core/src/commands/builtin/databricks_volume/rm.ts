@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
-import { resolveGlob } from '../../../core/databricks_volume/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
 import { readdir as dbxReaddir } from '../../../core/databricks_volume/readdir.ts'
 import { rmRecursive as dbxRmR } from '../../../core/databricks_volume/rm.ts'
 import { rmdir as dbxRmdir } from '../../../core/databricks_volume/rmdir.ts'
@@ -24,6 +25,8 @@ import { FileType, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
+
+const resolveGlob = resolveGlobOf(DATABRICKS_VOLUME_CMD_OPS)
 
 const ENC = new TextEncoder()
 

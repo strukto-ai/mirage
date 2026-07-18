@@ -23,7 +23,7 @@ import {
   type RegisteredOp,
   type Resource,
   ResourceName,
-  resolveTrelloGlob,
+  makeResolveGlob,
   TRELLO_COMMANDS,
   TRELLO_PROMPT,
   TRELLO_VFS_OPS,
@@ -35,6 +35,16 @@ import {
   trelloStat,
 } from '@struktoai/mirage-core'
 import { redactTrelloConfig, type TrelloConfig, type TrelloConfigRedacted } from './config.ts'
+
+const resolveTrelloGlob = (
+  accessor: TrelloAccessor,
+  paths: readonly PathSpec[],
+  index: IndexCacheStore | undefined,
+  filter: TrelloReaddirFilter,
+): Promise<PathSpec[]> =>
+  makeResolveGlob((a: TrelloAccessor, p: PathSpec, i?: IndexCacheStore) =>
+    trelloReaddir(a, p, i, filter),
+  )(accessor, paths, index)
 
 export interface TrelloResourceState {
   type: string

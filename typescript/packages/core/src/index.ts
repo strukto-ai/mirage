@@ -248,6 +248,7 @@ export { dirnameFn } from './commands/builtin/generic/dirname.ts'
 export { gnuBasename, gnuDirname, norm, parent, posixNormpath, resolvePath } from './utils/path.ts'
 export { shlexSplit } from './utils/shlex.ts'
 export {
+  DEFAULT_MAX_GLOB_MATCHES,
   expandPattern,
   hasGlob,
   isWordShaped,
@@ -562,7 +563,6 @@ export { create } from './core/s3/create.ts'
 export { du, duAll } from './core/s3/du.ts'
 export { exists } from './core/s3/exists.ts'
 export { find } from './core/s3/find.ts'
-export { resolveGlob as resolveS3Glob } from './core/s3/glob.ts'
 export { mkdir } from './core/s3/mkdir.ts'
 export { fpRevFromS3Response, read } from './core/s3/read.ts'
 export { readdir } from './core/s3/readdir.ts'
@@ -605,14 +605,12 @@ export { SLACK_VFS_OPS } from './ops/slack/index.ts'
 export { read as slackRead } from './core/slack/read.ts'
 export { readdir as slackReaddir } from './core/slack/readdir.ts'
 export { stat as slackStat } from './core/slack/stat.ts'
-export { resolveSlackGlob } from './core/slack/glob.ts'
 export { SLACK_PROMPT, SLACK_WRITE_PROMPT } from './resource/slack/prompt.ts'
 export { DISCORD_COMMANDS } from './commands/builtin/discord/index.ts'
 export { DISCORD_VFS_OPS } from './ops/discord/index.ts'
 export { read as discordRead } from './core/discord/read.ts'
 export { readdir as discordReaddir } from './core/discord/readdir.ts'
 export { stat as discordStat } from './core/discord/stat.ts'
-export { resolveDiscordGlob } from './core/discord/glob.ts'
 export { DISCORD_PROMPT, DISCORD_WRITE_PROMPT } from './resource/discord/prompt.ts'
 export {
   HttpTrelloTransport,
@@ -635,7 +633,6 @@ export { LINEAR_VFS_OPS } from './ops/linear/index.ts'
 export { read as linearRead } from './core/linear/read.ts'
 export { readdir as linearReaddir, type LinearReaddirFilter } from './core/linear/readdir.ts'
 export { stat as linearStat } from './core/linear/stat.ts'
-export { resolveLinearGlob } from './core/linear/glob.ts'
 export { LINEAR_PROMPT, LINEAR_WRITE_PROMPT } from './resource/linear/prompt.ts'
 export { NotionAccessor, type NotionResourceLike } from './accessor/notion.ts'
 export {
@@ -654,7 +651,6 @@ export {
 export { read as notionRead } from './core/notion/read.ts'
 export { readdir as notionReaddir } from './core/notion/readdir.ts'
 export { stat as notionStat } from './core/notion/stat.ts'
-export { resolveNotionGlob } from './core/notion/glob.ts'
 export { NOTION_PROMPT, NOTION_WRITE_PROMPT } from './resource/notion/prompt.ts'
 export { NOTION_COMMANDS } from './commands/builtin/notion/index.ts'
 export { NOTION_VFS_OPS } from './ops/notion/index.ts'
@@ -670,13 +666,11 @@ export { LANGFUSE_VFS_OPS } from './ops/langfuse/index.ts'
 export { read as langfuseRead } from './core/langfuse/read.ts'
 export { readdir as langfuseReaddir } from './core/langfuse/readdir.ts'
 export { stat as langfuseStat } from './core/langfuse/stat.ts'
-export { resolveLangfuseGlob } from './core/langfuse/glob.ts'
 export { LANGFUSE_PROMPT } from './resource/langfuse/prompt.ts'
 export { detectScope as langfuseDetectScope, type LangfuseScope } from './core/langfuse/scope.ts'
 export { read as trelloRead } from './core/trello/read.ts'
 export { readdir as trelloReaddir, type TrelloReaddirFilter } from './core/trello/readdir.ts'
 export { stat as trelloStat } from './core/trello/stat.ts'
-export { resolveTrelloGlob } from './core/trello/glob.ts'
 export { TRELLO_PROMPT, TRELLO_WRITE_PROMPT } from './resource/trello/prompt.ts'
 export {
   GitHubApiError,
@@ -702,7 +696,6 @@ export {
   populateIndex as githubPopulateIndex,
 } from './core/github/tree.ts'
 export { stat as githubStat } from './core/github/stat.ts'
-export { resolveGlob as githubResolveGlob } from './core/github/glob.ts'
 export {
   type TreeEntry as GitHubTreeEntry,
   makeTreeEntry as githubMakeTreeEntry,
@@ -720,7 +713,6 @@ export { GITHUB_CI_VFS_OPS } from './ops/github_ci/index.ts'
 export { read as githubCiRead, stream as githubCiStream } from './core/github_ci/read.ts'
 export { readdir as githubCiReaddir } from './core/github_ci/readdir.ts'
 export { stat as githubCiStat } from './core/github_ci/stat.ts'
-export { resolveGlob as githubCiResolveGlob } from './core/github_ci/glob.ts'
 export {
   type CIWorkflow,
   listWorkflows as githubCiListWorkflows,
@@ -787,7 +779,6 @@ export {
 } from './core/gdocs/read.ts'
 export { readdir as gdocsReaddir } from './core/gdocs/readdir.ts'
 export { stat as gdocsStat } from './core/gdocs/stat.ts'
-export { resolveGlob as gdocsResolveGlob } from './core/gdocs/glob.ts'
 export { appendText as gdocsAppendText } from './core/gdocs/write.ts'
 export { batchUpdate as gdocsBatchUpdate } from './core/gdocs/update.ts'
 export { createDoc as gdocsCreateDoc } from './core/gdocs/create.ts'
@@ -808,7 +799,6 @@ export {
 } from './core/gsheets/read.ts'
 export { readdir as gsheetsReaddir } from './core/gsheets/readdir.ts'
 export { stat as gsheetsStat } from './core/gsheets/stat.ts'
-export { resolveGlob as gsheetsResolveGlob } from './core/gsheets/glob.ts'
 export { appendValues as gsheetsAppendValues, SheetsApiError } from './core/gsheets/write.ts'
 export { batchUpdate as gsheetsBatchUpdate } from './core/gsheets/update.ts'
 export { createSpreadsheet as gsheetsCreateSpreadsheet } from './core/gsheets/create.ts'
@@ -828,7 +818,6 @@ export {
 } from './core/gslides/read.ts'
 export { readdir as gslidesReaddir } from './core/gslides/readdir.ts'
 export { stat as gslidesStat } from './core/gslides/stat.ts'
-export { resolveGlob as gslidesResolveGlob } from './core/gslides/glob.ts'
 export { batchUpdate as gslidesBatchUpdate } from './core/gslides/update.ts'
 export { createPresentation as gslidesCreatePresentation } from './core/gslides/create.ts'
 export { GSLIDES_PROMPT, GSLIDES_WRITE_PROMPT } from './resource/gslides/prompt.ts'
@@ -848,7 +837,6 @@ export {
 } from './core/gdrive/read.ts'
 export { readdir as gdriveReaddir } from './core/gdrive/readdir.ts'
 export { stat as gdriveStat } from './core/gdrive/stat.ts'
-export { resolveGlob as gdriveResolveGlob } from './core/gdrive/glob.ts'
 export { GDRIVE_PROMPT } from './resource/gdrive/prompt.ts'
 export {
   DROPBOX_API_BASE,
@@ -876,7 +864,6 @@ export { DROPBOX_VFS_OPS } from './ops/dropbox/index.ts'
 export { read as dropboxRead, stream as dropboxStream } from './core/dropbox/read.ts'
 export { readdir as dropboxReaddir } from './core/dropbox/readdir.ts'
 export { stat as dropboxStat } from './core/dropbox/stat.ts'
-export { resolveGlob as dropboxResolveGlob } from './core/dropbox/glob.ts'
 export { DROPBOX_PROMPT } from './resource/dropbox/prompt.ts'
 export {
   BOX_API_BASE,
@@ -905,7 +892,6 @@ export { BOX_VFS_OPS } from './ops/box/index.ts'
 export { read as boxRead, stream as boxStream } from './core/box/read.ts'
 export { readdir as boxReaddir } from './core/box/readdir.ts'
 export { stat as boxStat } from './core/box/stat.ts'
-export { resolveGlob as boxResolveGlob } from './core/box/glob.ts'
 export { BOX_PROMPT } from './resource/box/prompt.ts'
 export {
   type BoxnoteParagraph,
@@ -923,7 +909,6 @@ export { GMAIL_VFS_OPS } from './ops/gmail/index.ts'
 export { read as gmailRead } from './core/gmail/read.ts'
 export { readdir as gmailReaddir } from './core/gmail/readdir.ts'
 export { stat as gmailStat } from './core/gmail/stat.ts'
-export { resolveGlob as gmailResolveGlob } from './core/gmail/glob.ts'
 export { type GmailScope, detectScope as gmailDetectScope } from './core/gmail/scope.ts'
 export { listLabels as gmailListLabels, type GmailLabel } from './core/gmail/labels.ts'
 export {
@@ -977,7 +962,6 @@ export { POSTGRES_COMMANDS } from './commands/builtin/postgres/index.ts'
 export { read as postgresRead } from './core/postgres/read.ts'
 export { readdir as postgresReaddir } from './core/postgres/readdir.ts'
 export { stat as postgresStat } from './core/postgres/stat.ts'
-export { resolveGlob as resolvePostgresGlob } from './core/postgres/glob.ts'
 export { detectScope as detectPostgresScope } from './core/postgres/scope.ts'
 export {
   formatGrepResults as postgresFormatGrepResults,
@@ -1019,7 +1003,6 @@ export { MONGODB_COMMANDS } from './commands/builtin/mongodb/index.ts'
 export { read as mongoRead } from './core/mongodb/read.ts'
 export { readdir as mongoReaddir } from './core/mongodb/readdir.ts'
 export { stat as mongoStat } from './core/mongodb/stat.ts'
-export { resolveGlob as resolveMongoGlob } from './core/mongodb/glob.ts'
 export { detectScope as detectMongoScope, type MongoDBScope } from './core/mongodb/scope.ts'
 export type { LanceDriver, LanceRow } from './core/lancedb/_driver.ts'
 export { LanceDBAccessor } from './accessor/lancedb.ts'
@@ -1034,7 +1017,6 @@ export { LANCEDB_COMMANDS } from './commands/builtin/lancedb/index.ts'
 export { read as lanceRead } from './core/lancedb/read.ts'
 export { readdir as lanceReaddir } from './core/lancedb/readdir.ts'
 export { stat as lanceStat } from './core/lancedb/stat.ts'
-export { resolveGlob as resolveLanceGlob } from './core/lancedb/glob.ts'
 export { searchRowsOutput as lanceSearch } from './core/lancedb/search.ts'
 export {
   detectScope as detectLanceScope,
@@ -1054,7 +1036,6 @@ export { ChromaResource, type ChromaResourceOptions } from './resource/chroma/ch
 export { readBytes as chromaRead, readStream as chromaReadStream } from './core/chroma/read.ts'
 export { readdir as chromaReaddir } from './core/chroma/readdir.ts'
 export { stat as chromaStat } from './core/chroma/stat.ts'
-export { resolveGlob as resolveChromaGlob } from './core/chroma/glob.ts'
 export { searchSegments as chromaSearch } from './core/chroma/search.ts'
 export type { QdrantPoint, QdrantRow } from './core/qdrant/_client.ts'
 export { QdrantAccessor } from './accessor/qdrant.ts'
@@ -1070,7 +1051,6 @@ export { QdrantResource, type QdrantResourceOptions } from './resource/qdrant/qd
 export { read as qdrantRead } from './core/qdrant/read.ts'
 export { readdir as qdrantReaddir } from './core/qdrant/readdir.ts'
 export { stat as qdrantStat } from './core/qdrant/stat.ts'
-export { resolveGlob as resolveQdrantGlob } from './core/qdrant/glob.ts'
 export { searchRowsOutput as qdrantSearch } from './core/qdrant/search.ts'
 export { scoreFromDistance } from './utils/score.ts'
 export {
@@ -1142,7 +1122,6 @@ export {
 export { readdir as databricksVolumeReaddir } from './core/databricks_volume/readdir.ts'
 export { stat as databricksVolumeStat } from './core/databricks_volume/stat.ts'
 export { exists as databricksVolumeExists } from './core/databricks_volume/exists.ts'
-export { resolveGlob as resolveDatabricksVolumeGlob } from './core/databricks_volume/glob.ts'
 export { writeBytes as databricksVolumeWrite } from './core/databricks_volume/write.ts'
 export { create as databricksVolumeCreate } from './core/databricks_volume/create.ts'
 export { mkdir as databricksVolumeMkdir } from './core/databricks_volume/mkdir.ts'

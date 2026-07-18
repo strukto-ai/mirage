@@ -5,12 +5,16 @@ from pydantic import BaseModel, ConfigDict
 
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.commands.builtin.nextcloud import COMMANDS as NEXTCLOUD_COMMANDS
-from mirage.core.nextcloud.glob import resolve_glob as _resolve_glob
+from mirage.core.nextcloud.constants import SCOPE_ERROR
+from mirage.core.nextcloud.readdir import readdir
 from mirage.ops.nextcloud import OPS as NEXTCLOUD_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.nextcloud.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _NEXTCLOUD_OPS: dict[str, Any] = {}
 

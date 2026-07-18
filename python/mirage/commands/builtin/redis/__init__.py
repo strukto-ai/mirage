@@ -21,7 +21,6 @@ from mirage.core.redis.du import du as _du
 from mirage.core.redis.du import du_all as _du_all
 from mirage.core.redis.exists import exists as _exists
 from mirage.core.redis.find import find as _find
-from mirage.core.redis.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.redis.mkdir import mkdir as _mkdir
 from mirage.core.redis.read import read as _read
 from mirage.core.redis.read import read_bytes as _ft_read
@@ -56,6 +55,6 @@ _REDIS_CMD_OPS = CommandIO(
 )
 
 COMMANDS = [
-    *make_filetype_commands("redis", _ft_resolve_glob, _ft_read),
+    *make_filetype_commands("redis", _REDIS_CMD_OPS.resolve_glob, _ft_read),
     *make_generic_commands("redis", _REDIS_CMD_OPS),
 ]

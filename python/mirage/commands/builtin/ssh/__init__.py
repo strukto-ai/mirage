@@ -23,7 +23,6 @@ from mirage.core.ssh.du import du as _du
 from mirage.core.ssh.du import du_all as _du_all
 from mirage.core.ssh.exists import exists as _exists
 from mirage.core.ssh.find import find as _find
-from mirage.core.ssh.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.ssh.mkdir import mkdir as _mkdir
 from mirage.core.ssh.read import read_bytes as _read
 from mirage.core.ssh.readdir import readdir as _readdir
@@ -58,7 +57,7 @@ _SSH_CMD_OPS = CommandIO(
 
 COMMANDS = [
     *make_filetype_commands(
-        "ssh", _ft_resolve_glob, _read, provision=_ft_provision),
+        "ssh", _SSH_CMD_OPS.resolve_glob, _read, provision=_ft_provision),
     *make_generic_commands(
         "ssh",
         _SSH_CMD_OPS,

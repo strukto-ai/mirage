@@ -21,7 +21,6 @@ from mirage.core.ram.du import du as _du
 from mirage.core.ram.du import du_all as _du_all
 from mirage.core.ram.exists import exists as _exists
 from mirage.core.ram.find import find as _find
-from mirage.core.ram.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.ram.mkdir import mkdir as _mkdir
 from mirage.core.ram.read import read as _read
 from mirage.core.ram.read import read_bytes as _ft_read
@@ -56,6 +55,6 @@ _RAM_CMD_OPS = CommandIO(
 )
 
 COMMANDS = [
-    *make_filetype_commands("ram", _ft_resolve_glob, _ft_read),
+    *make_filetype_commands("ram", _RAM_CMD_OPS.resolve_glob, _ft_read),
     *make_generic_commands("ram", _RAM_CMD_OPS),
 ]

@@ -15,7 +15,7 @@
 import { ChromaAccessor } from '../../accessor/chroma.ts'
 import { CHROMA_COMMANDS } from '../../commands/builtin/chroma/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
-import { resolveGlob } from '../../core/chroma/glob.ts'
+import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
 import { readBytes } from '../../core/chroma/read.ts'
 import { readdir as chromaReaddir } from '../../core/chroma/readdir.ts'
 import { stat as chromaStat } from '../../core/chroma/stat.ts'
@@ -25,6 +25,8 @@ import { ResourceName, type FileStat, type PathSpec } from '../../types.ts'
 import { BaseResource, type Resource } from '../base.ts'
 import { resolveChromaConfig, type ChromaConfig, type ChromaConfigResolved } from './config.ts'
 import { CHROMA_PROMPT } from './prompt.ts'
+
+const resolveGlob = makeResolveGlob(chromaReaddir)
 
 export interface ChromaResourceOptions {
   config: ChromaConfig

@@ -31,9 +31,11 @@ import {
   discordRead,
   discordReaddir,
   discordStat,
-  resolveDiscordGlob,
+  makeResolveGlob,
 } from '@struktoai/mirage-core'
 import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } from './config.ts'
+
+const resolveDiscordGlob = makeResolveGlob(discordReaddir)
 
 export interface DiscordResourceState {
   type: string

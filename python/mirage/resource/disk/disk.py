@@ -20,9 +20,9 @@ from typing import Any
 from mirage.accessor.disk import DiskAccessor
 from mirage.commands.builtin.disk import COMMANDS as DISK_COMMANDS
 from mirage.core.disk.append import append_bytes
+from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.copy import copy
 from mirage.core.disk.create import create
-from mirage.core.disk.glob import resolve_glob as _resolve_glob
 from mirage.core.disk.mkdir import mkdir
 from mirage.core.disk.read import read_bytes
 from mirage.core.disk.readdir import readdir
@@ -38,7 +38,10 @@ from mirage.ops.disk import OPS as DISK_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.disk.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _DISK_OPS = {
     "read_bytes": read_bytes,

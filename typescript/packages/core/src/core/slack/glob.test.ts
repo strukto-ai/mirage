@@ -19,8 +19,11 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { SlackResponse, SlackTransport } from './_client.ts'
-import { SCOPE_ERROR } from '../s3/constants.ts'
-import { resolveSlackGlob } from './glob.ts'
+import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
+import { SLACK_CMD_OPS } from '../../commands/builtin/slack/ops.ts'
+import { DEFAULT_MAX_GLOB_MATCHES } from '../../utils/glob_walk.ts'
+
+const resolveSlackGlob = resolveGlobOf(SLACK_CMD_OPS)
 
 class FakeSlackTransport implements SlackTransport {
   public readonly calls: string[] = []
@@ -144,11 +147,11 @@ describe('resolveSlackGlob', () => {
     expect(out[0]?.pattern).toBeNull()
   })
 
-  it('truncates matched entries at SCOPE_ERROR', async () => {
+  it('truncates matched entries at DEFAULT_MAX_GLOB_MATCHES', async () => {
     const t = new FakeSlackTransport()
     const idx = new RAMIndexCacheStore()
     const filenames: string[] = []
-    for (let i = 0; i < SCOPE_ERROR + 5; i++) {
+    for (let i = 0; i < DEFAULT_MAX_GLOB_MATCHES + 5; i++) {
       filenames.push(`file-${String(i).padStart(5, '0')}.jsonl`)
     }
     await seedChannelDir(idx, '/mnt/slack', 'general__C1', 'C1', filenames)
@@ -160,7 +163,7 @@ describe('resolveSlackGlob', () => {
       resolved: false,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [spec], idx)
-    expect(out).toHaveLength(SCOPE_ERROR)
+    expect(out).toHaveLength(DEFAULT_MAX_GLOB_MATCHES)
   })
 
   it('handles a mix of resolved, pattern, and no-pattern PathSpecs', async () => {

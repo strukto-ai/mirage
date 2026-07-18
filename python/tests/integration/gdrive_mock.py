@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -36,9 +35,6 @@ _PATCH_TARGETS = {
     ],
     "download_file": [
         "mirage.core.gdrive.read.download_file",
-    ],
-    "download_file_stream": [
-        "mirage.core.gdrive.stream.download_file_stream",
     ],
 }
 
@@ -210,22 +206,12 @@ def _build_fakes(registry):
                 return other.get_bytes(file_id)
         raise FileNotFoundError(file_id)
 
-    async def fake_download_file_stream(
-        token_manager,
-        file_id: str,
-        chunk_size: int = 8192,
-    ) -> AsyncIterator[bytes]:
-        data = await fake_download_file(token_manager, file_id)
-        for i in range(0, len(data), chunk_size):
-            yield data[i:i + chunk_size]
-
     return {
         "refresh": fake_refresh,
         "list_files": fake_list_files,
         "list_shared_drives": fake_list_shared_drives,
         "list_all_files": fake_list_all_files,
         "download_file": fake_download_file,
-        "download_file_stream": fake_download_file_stream,
     }
 
 

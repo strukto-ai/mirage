@@ -25,16 +25,27 @@ import {
   linearRead,
   linearReaddir,
   linearStat,
+  makeResolveGlob,
   mountKey,
   mountPrefixOf,
-  resolveLinearGlob,
   type FileStat,
+  type IndexCacheStore,
   type LinearReaddirFilter,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactLinearConfig, type LinearConfig, type LinearConfigRedacted } from './config.ts'
+
+const resolveLinearGlob = (
+  accessor: LinearAccessor,
+  paths: readonly PathSpec[],
+  index: IndexCacheStore | undefined,
+  filter: LinearReaddirFilter,
+): Promise<PathSpec[]> =>
+  makeResolveGlob((a: LinearAccessor, p: PathSpec, i?: IndexCacheStore) =>
+    linearReaddir(a, p, i, filter),
+  )(accessor, paths, index)
 
 export interface LinearResourceState {
   type: string

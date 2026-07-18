@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
-import { resolveGlob } from '../../../core/s3/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { S3_CMD_OPS } from './ops.ts'
 import { readdir as s3Readdir } from '../../../core/s3/readdir.ts'
 import { rmR as s3RmR } from '../../../core/s3/rm.ts'
 import { rmdir as s3Rmdir } from '../../../core/s3/rmdir.ts'
@@ -25,6 +26,8 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
 import { writeMetadataProvision } from '../generic_bind/provision.ts'
+
+const resolveGlob = resolveGlobOf(S3_CMD_OPS)
 
 const ENC = new TextEncoder()
 

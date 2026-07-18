@@ -16,6 +16,7 @@ import logging
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.discord.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
@@ -27,7 +28,6 @@ from mirage.commands.spec.types import FlagView
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.formatters import format_grep_results
-from mirage.core.discord.glob import resolve_glob
 from mirage.core.discord.read import read as discord_read
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.scope import coalesce_scopes, detect_scope

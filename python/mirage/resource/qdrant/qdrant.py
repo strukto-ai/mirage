@@ -15,11 +15,14 @@
 from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.core.qdrant.glob import resolve_glob as _resolve_glob
+from mirage.core.qdrant.readdir import readdir
 from mirage.resource.base import BaseResource
 from mirage.resource.qdrant.config import QdrantConfig
 from mirage.resource.qdrant.prompt import PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 
 class QdrantResource(BaseResource):

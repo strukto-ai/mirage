@@ -1,10 +1,72 @@
 ---
 title: Adding a New Resource
 icon: plus
-description: Implement and register a Python resource using Mirage's current VFS, command, and snapshot conventions.
+description: Ship your own backend with the SDK, or contribute a builtin resource using Mirage's VFS, command, and snapshot conventions.
 ---
 
-A resource maps an external system to Mirage's filesystem operations and shell commands. Keep the core I/O layer independent from command parsing, and check whether the same resource or behavior should also be added to TypeScript.
+A resource maps an external system to Mirage's filesystem operations and shell commands. There are two paths:
+
+- **Ship your own backend** — a single Python file in your own project or package, built on `mirage.sdk`. No Mirage fork, no edits to Mirage source.
+- **Contribute a builtin** — the four-layer layout inside the Mirage repo, mirrored in TypeScript.
+
+## Ship Your Own Backend (SDK)
+
+Everything an out-of-tree backend needs is exported from `mirage.sdk` — that module is the stable public contract. Write the core functions over your data source, put them on a `CommandIO`, and `GenericResource` wires the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
+
+```python
+from functools import partial
+
+from mirage.sdk import (Accessor, CommandIO, FileStat, GenericResource,
+                        stream_from_bytes)
+
+
+class JiraAccessor(Accessor):
+    def __init__(self, config):
+        self.client = make_client(config)
+
+
+async def readdir(accessor, path, index=None) -> list[str]: ...
+async def read_bytes(accessor, path, index=None) -> bytes: ...
+async def stat(accessor, path, index=None) -> FileStat: ...
+
+
+def make_jira_resource(config) -> GenericResource:
+    io = CommandIO(
+        readdir=readdir,
+        read_bytes=read_bytes,
+        read_stream=partial(stream_from_bytes, read_bytes),
+        stat=stat,
+        is_mounted=lambda a: True,
+        local=False,
+    )
+    return GenericResource(name="jira", accessor=JiraAccessor(config), io=io,
+                           prompt="Issues rendered as .json files.")
+```
+
+Mount it like any builtin: `Workspace({"/jira/": make_jira_resource(cfg)})`.
+
+The escape hatches mirror what builtins use: optional `CommandIO` fields unlock more surface (`write` enables the byte-mutation family; `find`/`du_total`/`du_all` become native fast paths; `is_dir_name` hints virtual directories), `overrides=` suppresses a generic command you replace, `commands=[...]` adds bespoke `@command` verbs, and `ops=[...]` registers `@op` handlers for FUSE mounts.
+
+To make the backend constructible by name (workspace YAML, snapshots, the daemon), register it:
+
+```python
+from mirage.sdk import register_resource
+
+register_resource("jira", JiraResource, JiraConfig)
+```
+
+or ship it as a normal package with an entry point — discovered automatically at registry-build time:
+
+```toml
+[project.entry-points."mirage.resources"]
+jira = "mypackage.backends:JiraResource"
+```
+
+The entry point resolves to the resource class; declare a `CONFIG_CLS` class attribute when the constructor takes a typed config. See `examples/python/other/custom_resource.py` for a complete runnable backend in one file.
+
+## Contribute a Builtin Resource
+
+Builtins live inside the Mirage repo with the four-layer layout below. Keep the core I/O layer independent from command parsing, and check whether the same resource or behavior should also be added to TypeScript.
 
 Use a recent resource such as Dify or Databricks Volume as the structural reference. Paths are always `PathSpec` values inside the VFS; do not pass filesystem paths as raw strings.
 
@@ -21,7 +83,6 @@ python/mirage/
     read.py
     readdir.py
     stat.py
-    glob.py
   ops/<name>/
     __init__.py
     read.py
@@ -57,7 +118,8 @@ Implement only the operations the backend supports. Read-only API resources usua
 - `readdir(accessor, path, index)` returning child names.
 - `read_bytes(accessor, path, index)` returning bytes.
 - `stat(accessor, path, index)` returning `FileStat`.
-- `resolve_glob(accessor, paths, index)` returning resolved `PathSpec` values.
+
+Glob resolution is not a per-backend file: bind it from readdir with `make_resolve_glob(readdir, cap)` (`mirage.utils.glob_walk`), or use the `CommandIO.resolve_glob` property.
 
 Use explicit types:
 

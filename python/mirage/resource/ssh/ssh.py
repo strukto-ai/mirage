@@ -18,12 +18,12 @@ from mirage.accessor.ssh import SSHAccessor
 from mirage.commands.builtin.ssh import COMMANDS as SSH_COMMANDS
 from mirage.core.ssh.append import append_bytes
 from mirage.core.ssh.config import SSHConfig
+from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy
 from mirage.core.ssh.create import create
 from mirage.core.ssh.du import du, du_all
 from mirage.core.ssh.exists import exists
 from mirage.core.ssh.find import find
-from mirage.core.ssh.glob import resolve_glob as _resolve_glob
 from mirage.core.ssh.mkdir import mkdir
 from mirage.core.ssh.read import read_bytes
 from mirage.core.ssh.readdir import readdir
@@ -39,6 +39,9 @@ from mirage.ops.ssh import OPS as SSH_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.ssh.prompt import PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _SSH_OPS = {
     "read_bytes": read_bytes,

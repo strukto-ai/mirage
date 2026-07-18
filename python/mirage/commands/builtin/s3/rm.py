@@ -16,10 +16,10 @@ from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic_bind.provision import \
     write_metadata_provision
+from mirage.commands.builtin.s3.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.readdir import readdir
 from mirage.core.s3.rm import rm_r
 from mirage.core.s3.rmdir import rmdir

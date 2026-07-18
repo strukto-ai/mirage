@@ -17,11 +17,11 @@ from typing import Any
 
 from mirage.accessor.hf_datasets import HfDatasetsAccessor, HfDatasetsConfig
 from mirage.commands.builtin.hf_buckets import COMMANDS as HF_COMMANDS
+from mirage.core.hf_buckets.constants import SCOPE_ERROR
 from mirage.core.hf_buckets.create import create
 from mirage.core.hf_buckets.du import du, du_all
 from mirage.core.hf_buckets.exists import exists
 from mirage.core.hf_buckets.find import find
-from mirage.core.hf_buckets.glob import resolve_glob as _resolve_glob
 from mirage.core.hf_buckets.mkdir import mkdir
 from mirage.core.hf_buckets.read import read_bytes
 from mirage.core.hf_buckets.readdir import readdir
@@ -33,7 +33,10 @@ from mirage.ops.hf_buckets import OPS as HF_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.hf_datasets.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _OPS = {
     "read_bytes": read_bytes,
