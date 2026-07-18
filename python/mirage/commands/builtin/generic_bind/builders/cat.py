@@ -32,7 +32,7 @@ async def cat(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: bool = False,
     E: bool = False,
     T: bool = False,

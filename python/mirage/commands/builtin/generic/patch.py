@@ -112,7 +112,7 @@ async def _load_patch_data(
     i: PathSpec | None,
     paths: list[PathSpec],
     has_resource: bool,
-    stdin: AsyncIterator[bytes] | bytes | None,
+    stdin: ByteSource | None,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None,
 ) -> bytes:
@@ -133,7 +133,7 @@ async def patch(
     write_bytes: Callable[..., Awaitable[None]],
     has_resource: bool,
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     p: str | None = None,
     R: bool = False,
     i: PathSpec | None = None,

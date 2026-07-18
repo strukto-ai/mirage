@@ -47,7 +47,7 @@ async def gzip(
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     decompress: bool = False,
     keep: bool = False,
     force: bool = False,

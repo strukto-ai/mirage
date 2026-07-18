@@ -13,7 +13,7 @@ async def sort(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     reverse: bool = False,
     numeric: bool = False,
     unique: bool = False,

@@ -111,7 +111,7 @@ async def xxd(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     reverse: bool = False,
     plain: bool = False,
     uppercase: bool = False,

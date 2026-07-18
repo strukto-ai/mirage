@@ -28,7 +28,7 @@ async def comm(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     check_order: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,

@@ -13,7 +13,7 @@ async def md5(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         data = await _read_stdin_async(stdin)

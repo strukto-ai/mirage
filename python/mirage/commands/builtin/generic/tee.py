@@ -13,7 +13,7 @@ async def tee(
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     append: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:

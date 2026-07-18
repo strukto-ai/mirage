@@ -28,7 +28,7 @@ async def fmt(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     width: int = 75,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:

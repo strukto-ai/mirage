@@ -26,7 +26,7 @@ async def shuf(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     count: int | None = None,
     echo: bool = False,
     zero_terminated: bool = False,

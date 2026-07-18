@@ -30,7 +30,7 @@ async def cut(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     f: str | None = None,
     d: str | None = None,
     c: str | None = None,

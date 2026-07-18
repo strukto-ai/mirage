@@ -9,7 +9,7 @@ from mirage.types import PathSpec
 
 
 async def _read_stdin_bytes(
-        stdin: AsyncIterator[bytes] | bytes | None) -> bytes:
+        stdin: ByteSource | None) -> bytes:
     if isinstance(stdin, bytes):
         return stdin
     if stdin is None:
@@ -26,7 +26,7 @@ async def jq(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     r: bool = False,
     c: bool = False,
     s: bool = False,

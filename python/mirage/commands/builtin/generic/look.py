@@ -15,7 +15,7 @@ async def look(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     fold_case: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:

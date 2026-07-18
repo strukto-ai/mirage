@@ -31,7 +31,7 @@ async def tee(
     accessor: S3Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     a: bool = False,
     index: IndexCacheStore,
     **_extra: object,

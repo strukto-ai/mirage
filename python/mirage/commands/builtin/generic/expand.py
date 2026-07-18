@@ -20,7 +20,7 @@ async def expand(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     tabsize: int = 8,
     initial_only: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

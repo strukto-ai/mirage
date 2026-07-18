@@ -90,7 +90,7 @@ async def uniq(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     count: bool = False,
     duplicates_only: bool = False,
     unique_only: bool = False,

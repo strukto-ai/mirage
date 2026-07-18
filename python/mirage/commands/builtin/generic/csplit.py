@@ -40,7 +40,7 @@ async def csplit(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str | PathSpec = "xx",
     digits: int = 2,
     suffix_format: str | None = None,

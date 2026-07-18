@@ -30,7 +30,7 @@ async def awk(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     index: IndexCacheStore | None = None,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:

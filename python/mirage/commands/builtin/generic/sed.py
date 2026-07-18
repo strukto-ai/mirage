@@ -23,7 +23,7 @@ async def sed(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]] | None,
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     in_place: bool = False,
     suppress: bool = False,
     extended: bool = False,

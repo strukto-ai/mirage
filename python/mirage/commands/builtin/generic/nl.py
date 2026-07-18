@@ -67,7 +67,7 @@ async def nl(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     body_numbering_raw: str | None = None,
     start_raw: str | None = None,
     increment_raw: str | None = None,

@@ -39,7 +39,7 @@ async def trello_card_create(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(_extra, spec=SPEC)

@@ -94,7 +94,7 @@ async def grep(
     accessor: GitHubAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     index: IndexCacheStore,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:

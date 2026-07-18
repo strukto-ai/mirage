@@ -55,7 +55,7 @@ async def bc(
     accessor: Accessor = NOOPAccessor(),
     paths: list[PathSpec] | None = None,
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     args_l: bool = False,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:

@@ -82,7 +82,7 @@ async def sed(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     i: bool = False,
     e: object = None,
     f: object = None,

@@ -42,7 +42,7 @@ async def column(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     table: bool = False,
     separator: str | None = None,
     output_separator: str | None = None,

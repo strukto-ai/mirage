@@ -13,7 +13,7 @@ async def paste(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     delimiter: str = "\t",
     serial: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

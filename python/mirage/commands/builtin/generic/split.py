@@ -27,7 +27,7 @@ async def split(
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     lines_per_file: int = 0,
     byte_limit: int = 0,
     n_chunks: int = 0,

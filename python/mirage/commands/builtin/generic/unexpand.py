@@ -42,7 +42,7 @@ async def unexpand(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     tabsize: int = 8,
     all_spaces: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

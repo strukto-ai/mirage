@@ -12,7 +12,7 @@ async def tac(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     # Each operand is reversed independently and the outputs concatenate in
     # operand order, like GNU tac.

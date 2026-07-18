@@ -30,7 +30,7 @@ async def xxd(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     r: bool = False,
     p: bool = False,
     args_l: str | bool = False,

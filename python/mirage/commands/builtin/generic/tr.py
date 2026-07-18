@@ -61,7 +61,7 @@ async def tr(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     delete: bool = False,
     squeeze: bool = False,
     complement: bool = False,

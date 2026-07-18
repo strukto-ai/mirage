@@ -33,7 +33,7 @@ async def grep(
     accessor: GitHubCIAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     index: IndexCacheStore,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:

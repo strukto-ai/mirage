@@ -13,7 +13,7 @@ async def cut(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     f: str | None = None,
     d: str | None = None,
     c: str | None = None,

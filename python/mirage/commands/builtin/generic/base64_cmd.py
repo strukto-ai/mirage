@@ -41,7 +41,7 @@ async def base64_cmd(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     decode: bool = False,
     wrap: int | None = None,
 ) -> tuple[ByteSource | None, IOResult]:

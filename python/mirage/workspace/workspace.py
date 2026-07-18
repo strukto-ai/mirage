@@ -22,6 +22,7 @@ from functools import partial
 from types import TracebackType
 from typing import Any, Literal, TypeAlias, cast, overload
 
+from mirage.io.types import ByteSource
 from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
@@ -874,7 +875,7 @@ class Workspace:
     async def execute(self,
                       command: str,
                       session_id: str | None = ...,
-                      stdin: AsyncIterator[bytes] | bytes | None = ...,
+                      stdin: ByteSource | None = ...,
                       provision: Literal[False] = ...,
                       agent_id: str | None = ...,
                       cwd: str | None = ...,
@@ -887,7 +888,7 @@ class Workspace:
     async def execute(self,
                       command: str,
                       session_id: str | None = ...,
-                      stdin: AsyncIterator[bytes] | bytes | None = ...,
+                      stdin: ByteSource | None = ...,
                       *,
                       provision: Literal[True],
                       agent_id: str | None = ...,
@@ -901,7 +902,7 @@ class Workspace:
         self,
         command: str,
         session_id: str | None = None,
-        stdin: AsyncIterator[bytes] | bytes | None = None,
+        stdin: ByteSource | None = None,
         provision: bool = False,
         agent_id: str | None = None,
         cwd: str | None = None,

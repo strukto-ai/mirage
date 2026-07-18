@@ -30,7 +30,7 @@ async def gzip(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     d: bool = False,
     k: bool = False,
     f: bool = False,

@@ -40,7 +40,7 @@ async def cat(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: bool = False,
     index: IndexCacheStore,
     **_extra: object,

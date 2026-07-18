@@ -241,7 +241,7 @@ async def awk(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the mini-awk program over backend paths or stdin.
@@ -262,7 +262,7 @@ async def awk(
             for data files.
         accessor (Accessor | None): Backend accessor passed through wrapper
             helpers.
-        stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
+        stdin (ByteSource | None): Input used when paths is
             empty.
         index (IndexCacheStore | None): Optional cache index for wrapped
             backend calls.

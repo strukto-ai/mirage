@@ -30,7 +30,7 @@ async def paste(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     d: str | None = None,
     s: bool = False,
     index: IndexCacheStore | None = None,

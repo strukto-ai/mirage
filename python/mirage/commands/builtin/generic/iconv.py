@@ -12,7 +12,7 @@ async def iconv(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     from_enc: str = "utf-8",
     to_enc: str = "utf-8",
     ignore_errors: bool = False,

@@ -29,7 +29,7 @@ async def tar(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     c: bool = False,
     x: bool = False,
     t: bool = False,

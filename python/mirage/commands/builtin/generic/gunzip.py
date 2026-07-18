@@ -26,7 +26,7 @@ async def gunzip(
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     keep: bool = False,
     force: bool = False,
     to_stdout: bool = False,

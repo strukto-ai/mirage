@@ -33,7 +33,7 @@ async def fold(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     width: int = 80,
     break_spaces: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

@@ -30,7 +30,7 @@ async def nl(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     b: str | None = None,
     v: str | None = None,
     i: str | None = None,

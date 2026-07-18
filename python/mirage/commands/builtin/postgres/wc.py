@@ -40,7 +40,7 @@ async def wc(
     accessor: PostgresAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     args_l: bool = False,
     w: bool = False,
     c: bool = False,

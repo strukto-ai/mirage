@@ -53,7 +53,7 @@ async def head(
     accessor: DiscordAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: str | None = None,
     c: str | None = None,
     q: bool = False,

@@ -29,7 +29,7 @@ async def zip_cmd(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     r: bool = False,
     j: bool = False,
     q: bool = False,

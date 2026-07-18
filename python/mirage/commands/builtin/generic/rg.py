@@ -96,7 +96,7 @@ async def rg(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run ripgrep-style fallback search over backend paths or stdin.
@@ -119,7 +119,7 @@ async def rg(
             stream reader.
         accessor (Accessor | None): Backend accessor passed
             through wrapper helpers.
-        stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
+        stdin (ByteSource | None): Input used when paths is
             empty.
         index (IndexCacheStore | None): Optional cache index for wrapped
             backend calls.

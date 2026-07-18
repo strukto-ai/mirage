@@ -45,7 +45,7 @@ async def rg(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
     **flags: object,

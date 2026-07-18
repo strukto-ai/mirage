@@ -29,7 +29,7 @@ async def patch(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     p: str | None = None,
     R: bool = False,
     i: PathSpec | None = None,

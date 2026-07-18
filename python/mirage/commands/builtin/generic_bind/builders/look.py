@@ -30,7 +30,7 @@ async def look(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     f: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,

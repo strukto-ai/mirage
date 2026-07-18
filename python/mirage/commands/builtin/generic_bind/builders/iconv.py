@@ -31,7 +31,7 @@ async def iconv(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     f: str | None = None,
     t: str | None = None,
     c: bool = False,

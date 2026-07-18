@@ -73,7 +73,7 @@ async def sha256sum(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     check: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if check and paths:

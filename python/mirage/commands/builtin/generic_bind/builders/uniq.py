@@ -30,7 +30,7 @@ async def uniq(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     c: bool = False,
     d: bool = False,
     u: bool = False,

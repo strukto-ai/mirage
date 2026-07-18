@@ -12,7 +12,7 @@ async def strings(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     min_len: int = 4,
 ) -> tuple[ByteSource | None, IOResult]:
     pattern = rb"[\x20-\x7e]{" + str(min_len).encode() + rb",}"

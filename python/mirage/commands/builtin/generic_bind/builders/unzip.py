@@ -29,7 +29,7 @@ async def unzip(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     o: bool = False,
     args_l: bool = False,
     d: str | None = None,

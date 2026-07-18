@@ -30,7 +30,7 @@ async def column(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     t: bool = False,
     s: str | None = None,
     o: str | None = None,

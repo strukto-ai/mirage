@@ -29,7 +29,7 @@ async def grep(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore | None = None,
     **flags,

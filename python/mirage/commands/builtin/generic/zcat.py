@@ -12,7 +12,7 @@ async def zcat(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     # Each operand decompresses independently and the outputs concatenate
     # in operand order, like GNU zcat.

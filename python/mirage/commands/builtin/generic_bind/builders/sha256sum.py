@@ -31,7 +31,7 @@ async def sha256sum(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     c: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,

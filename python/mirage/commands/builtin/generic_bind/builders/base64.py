@@ -31,7 +31,7 @@ async def base64(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     d: bool = False,
     D: bool = False,
     w: str | None = None,
