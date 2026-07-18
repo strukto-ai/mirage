@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.server.version.errors import NoSuchBranchError
-from mirage.server.version.state_tree import (META_PATH, blob_to_meta,
-                                              meta_to_blob, to_state,
-                                              tree_inputs_from_state)
+from mirage.server.version.state_tree import (CONTROL_PREFIX, META_PATH,
+                                              blob_to_meta, meta_to_blob,
+                                              to_state, tree_inputs_from_state)
 from mirage.server.version.store import VersionStore
 from mirage.types import DriftPolicy, StateKey
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
@@ -100,8 +100,11 @@ async def checkout(store: VersionStore,
 
 
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:
+    # File-level diff/status stay content-only: the control-plane
+    # subtree changes on every command (history) and is surfaced by the
+    # structured cross-plane diff instead.
     return {
-        kind: [p for p in paths if p != META_PATH]
+        kind: [p for p in paths if not p.startswith(CONTROL_PREFIX)]
         for kind, paths in changes.items()
     }
 

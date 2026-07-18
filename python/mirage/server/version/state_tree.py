@@ -19,11 +19,30 @@ from mirage.workspace.snapshot.state import to_state_dict
 from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
-META_PATH = ".mirage-meta.json"
+# The control-plane subtree: everything about the workspace that is
+# not file content lives under one reserved directory, so a commit is
+# the WHOLE world (files + sessions + namespace + history) while file
+# paths stay clean. Cache stays out: it is derived and rebuildable.
+CONTROL_PREFIX = ".mirage/"
+META_PATH = ".mirage/meta.json"
+SESSIONS_PATH = ".mirage/sessions.json"
+NAMESPACE_PATH = ".mirage/namespace.json"
+HISTORY_PATH = ".mirage/history.jsonl"
 
 
 def _is_reserved(tree_path: str) -> bool:
-    return tree_path == META_PATH
+    return tree_path.startswith(CONTROL_PREFIX)
+
+
+def _history_to_blob(events: list[dict]) -> bytes:
+    lines = [json.dumps(e, default=_json_default) for e in events]
+    return ("\n".join(lines) + "\n" if lines else "").encode("utf-8")
+
+
+def _blob_to_history(data: bytes) -> list[dict]:
+    return [
+        json.loads(line) for line in data.decode("utf-8").splitlines() if line
+    ]
 
 
 def _tree_path(prefix: str, rel: str) -> str:
@@ -88,6 +107,14 @@ def tree_inputs_from_state(state: dict) -> tuple[dict[str, bytes], dict]:
         CacheKey.LIMIT: cache[CacheKey.LIMIT],
         CacheKey.MAX_DRAIN_BYTES: cache[CacheKey.MAX_DRAIN_BYTES],
     }
+    entries[SESSIONS_PATH] = meta_to_blob({
+        "sessions":
+        state.get(StateKey.SESSIONS) or [],
+    })
+    entries[NAMESPACE_PATH] = meta_to_blob({
+        "nodes": state.get(StateKey.NODES) or {},
+    })
+    entries[HISTORY_PATH] = _history_to_blob(state.get(StateKey.HISTORY) or [])
     meta = {
         "mounts": mounts_meta,
         "config": config,
@@ -118,12 +145,21 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
             MountKey.RESOURCE_STATE: resource_state,
         })
     config = meta.get("config", {})
+    sessions_blob = entries.get(SESSIONS_PATH)
+    sessions = (blob_to_meta(sessions_blob).get("sessions", [])
+                if sessions_blob is not None else [])
+    namespace_blob = entries.get(NAMESPACE_PATH)
+    nodes = (blob_to_meta(namespace_blob).get("nodes", {})
+             if namespace_blob is not None else {})
+    history_blob = entries.get(HISTORY_PATH)
+    history = (_blob_to_history(history_blob)
+               if history_blob is not None else [])
     return {
         StateKey.VERSION: FORMAT_VERSION,
         StateKey.MIRAGE_VERSION: config.get(StateKey.MIRAGE_VERSION,
                                             "unknown"),
         StateKey.MOUNTS: mounts,
-        StateKey.SESSIONS: [],
+        StateKey.SESSIONS: sessions,
         StateKey.DEFAULT_SESSION_ID: config.get(StateKey.DEFAULT_SESSION_ID),
         StateKey.DEFAULT_AGENT_ID: config.get(StateKey.DEFAULT_AGENT_ID),
         StateKey.CURRENT_AGENT_ID: config.get(StateKey.CURRENT_AGENT_ID),
@@ -132,8 +168,9 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
             CacheKey.MAX_DRAIN_BYTES: config.get(CacheKey.MAX_DRAIN_BYTES),
             CacheKey.ENTRIES: [],
         },
-        StateKey.HISTORY: None,
+        StateKey.HISTORY: history,
         StateKey.JOBS: [],
         StateKey.FINGERPRINTS: meta.get("fingerprints", []),
+        StateKey.NODES: nodes,
         StateKey.LIVE_ONLY_MOUNTS: [],
     }

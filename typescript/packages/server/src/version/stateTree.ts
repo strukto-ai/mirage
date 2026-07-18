@@ -18,7 +18,15 @@ export type { WorkspaceStateDict }
 
 type AnyDict = Record<string, unknown>
 
-export const META_PATH = '.mirage-meta.json'
+// The control-plane subtree: everything about the workspace that is
+// not file content lives under one reserved directory, so a commit is
+// the WHOLE world (files + sessions + namespace + history) while file
+// paths stay clean. Cache stays out: it is derived and rebuildable.
+export const CONTROL_PREFIX = '.mirage/'
+export const META_PATH = '.mirage/meta.json'
+const SESSIONS_PATH = '.mirage/sessions.json'
+const NAMESPACE_PATH = '.mirage/namespace.json'
+const HISTORY_PATH = '.mirage/history.jsonl'
 
 export interface VersionMeta {
   version: number
@@ -26,6 +34,7 @@ export interface VersionMeta {
   cache: { limit: number; entries: AnyDict[] }
   fingerprints: unknown[]
   liveOnlyMounts: string[]
+  defaultSessionId?: string | undefined
 }
 
 export interface TreeInputs {
@@ -55,7 +64,7 @@ function belongs(treePrefix: string, tp: string): boolean {
 }
 
 function isReserved(tp: string): boolean {
-  return tp === META_PATH
+  return tp.startsWith(CONTROL_PREFIX)
 }
 
 export function metaToBlob(meta: VersionMeta): Uint8Array {
@@ -64,6 +73,27 @@ export function metaToBlob(meta: VersionMeta): Uint8Array {
 
 export function blobToMeta(data: Uint8Array): VersionMeta {
   return JSON.parse(new TextDecoder().decode(data)) as VersionMeta
+}
+
+function jsonBlob(value: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(value))
+}
+
+function parseJsonBlob(data: Uint8Array): AnyDict {
+  return JSON.parse(new TextDecoder().decode(data)) as AnyDict
+}
+
+function historyToBlob(events: unknown[]): Uint8Array {
+  const lines = events.map((e) => JSON.stringify(e))
+  return new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+}
+
+function blobToHistory(data: Uint8Array): unknown[] {
+  return new TextDecoder()
+    .decode(data)
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => JSON.parse(line) as unknown)
 }
 
 export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
@@ -84,6 +114,9 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
     })
   }
 
+  entries[SESSIONS_PATH] = jsonBlob({ sessions: state.sessions })
+  entries[NAMESPACE_PATH] = jsonBlob({ nodes: state.nodes ?? {} })
+  entries[HISTORY_PATH] = historyToBlob((state.history as unknown[] | undefined) ?? [])
   const cache = state.cache as unknown as { limit: number }
   const meta: VersionMeta = {
     version: state.version,
@@ -91,6 +124,7 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
     cache: { limit: cache.limit, entries: [] },
     fingerprints: (state.fingerprints as unknown[] | undefined) ?? [],
     liveOnlyMounts: state.live_only_mounts ?? [],
+    defaultSessionId: state.default_session_id,
   }
   return { entries, meta }
 }
@@ -119,14 +153,22 @@ export function toState(
     })
   }
 
+  const sessionsBlob = entries[SESSIONS_PATH]
+  const sessions = sessionsBlob !== undefined ? (parseJsonBlob(sessionsBlob).sessions ?? []) : []
+  const namespaceBlob = entries[NAMESPACE_PATH]
+  const nodes = namespaceBlob !== undefined ? (parseJsonBlob(namespaceBlob).nodes ?? {}) : {}
+  const historyBlob = entries[HISTORY_PATH]
+  const history = historyBlob !== undefined ? blobToHistory(historyBlob) : []
   return {
     version: meta.version,
     mounts,
     cache: { limit: meta.cache.limit, entries: [] },
-    sessions: [],
-    history: [],
+    sessions,
+    nodes,
+    history,
     jobs: [],
     fingerprints: meta.fingerprints,
     live_only_mounts: meta.liveOnlyMounts,
+    default_session_id: meta.defaultSessionId,
   } as unknown as WorkspaceStateDict
 }

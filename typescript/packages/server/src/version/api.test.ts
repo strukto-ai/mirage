@@ -126,4 +126,34 @@ describe('version api', () => {
       deleted: [],
     })
   })
+
+  it('checkout restores the whole world: sessions, symlinks, history', async () => {
+    const ws = new Workspace({ '/m': new RAMResource() }, { mode: MountMode.EXEC })
+    const store = await openStore()
+    await ws.execute('echo original > /m/a.txt')
+    await ws.execute('ln -s /m/a.txt /m/l.txt')
+    const narrow = ws.createSession('narrow', { mounts: { '/m': 'read' } })
+    narrow.env.API_KEY = '@aws:prod-key'
+    await ws.flushSessions()
+    await commitState(store, await toStateDict(ws), 'main', 'v1')
+
+    await ws.execute('echo mutated > /m/a.txt')
+    await ws.execute('rm /m/l.txt')
+    narrow.env.API_KEY = '@aws:other-key'
+    narrow.mountModes = new Map([['/m', MountMode.WRITE]])
+
+    await checkout(store, ws, 'main')
+
+    const file = await ws.execute('cat /m/a.txt')
+    expect(new TextDecoder().decode(file.stdout)).toBe('original\n')
+    const link = await ws.execute('readlink /m/l.txt')
+    expect(new TextDecoder().decode(link.stdout).trim()).toBe('/m/a.txt')
+    const restored = ws.getSession('narrow')
+    expect(restored.env.API_KEY).toBe('@aws:prod-key')
+    expect(restored.mountModes?.get('/m')).toBe(MountMode.READ)
+    const history = await ws.execute('history')
+    const historyText = new TextDecoder().decode(history.stdout)
+    expect(historyText).toContain('echo original > /m/a.txt')
+    expect(historyText).not.toContain('echo mutated > /m/a.txt')
+  })
 })

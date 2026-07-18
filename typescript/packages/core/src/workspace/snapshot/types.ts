@@ -112,7 +112,9 @@ export interface FingerprintEntrySnapshot {
 export interface WorkspaceStateDict {
   version: number
   mirage_version: string
-  default_session_id: string
+  // Undefined when the state came from an older commit meta that
+  // predates the pointer; the live default is kept in that case.
+  default_session_id: string | undefined
   default_agent_id: string | null
   current_agent_id: string | null
   sessions: SessionSnapshot[]

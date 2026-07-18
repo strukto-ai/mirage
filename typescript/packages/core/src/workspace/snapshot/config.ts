@@ -18,6 +18,6 @@ import type { Resource } from '../../resource/base.ts'
 export interface MountArgs {
   mountArgs: Record<string, [Resource, MountMode]>
   consistency: ConsistencyPolicy
-  defaultSessionId: string
+  defaultSessionId: string | undefined
   defaultAgentId: string | null
 }

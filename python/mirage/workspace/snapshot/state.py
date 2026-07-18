@@ -200,7 +200,10 @@ async def _restore_sessions(ws, state: dict) -> None:
             try:
                 session = ws._session_mgr.create(sid)
             except ValueError:
-                continue
+                # The session already exists live (checkout on a
+                # running workspace): the restored state wins, matching
+                # the replace_from_snapshot contract below.
+                session = ws._session_mgr.get(sid)
         fields = Session.from_dict(s_data)
         session.cwd = fields.cwd
         session.env = fields.env
