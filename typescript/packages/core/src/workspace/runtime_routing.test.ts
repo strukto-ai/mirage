@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { VfsEntry, type RunArgs, type Runtime, type RunResult } from './executor/runtime.ts'
+import { VfsRuntime, type RunArgs, type Runtime, type RunResult } from './executor/runtime.ts'
 import type { RouteScript } from './executor/route/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
@@ -165,7 +165,7 @@ describe('routing ladder', () => {
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new VfsEntry((ctx) => !ctx.line.includes('/secret'))],
+        runtimes: [new VfsRuntime((ctx) => !ctx.line.includes('/secret'))],
       },
     )
     try {

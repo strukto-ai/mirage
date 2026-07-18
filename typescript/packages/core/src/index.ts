@@ -439,7 +439,7 @@ export {
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
   VFS_ENTRY,
-  VfsEntry,
+  VfsRuntime,
   type RunArgs,
   type RunResult,
   type Runtime,

@@ -47,8 +47,9 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
-from mirage.runtime.table import (DEFAULT_ENTRIES, VFS_ENTRY, bind_commands,
-                                  build_runtime, runtime_bindings_for)
+from mirage.runtime.table import (DEFAULT_ENTRIES, VFS_ENTRY, VfsRuntime,
+                                  bind_commands, build_runtime,
+                                  runtime_bindings_for)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -396,42 +397,40 @@ class Workspace:
         return self._ops.mount_prefixes()
 
     def _resolve_runtime_entries(
-            self, runtimes: list[Runtime | str] | None) -> list[Runtime | str]:
+            self, runtimes: list[Runtime | str] | None) -> list[Runtime]:
         """Build and wire the workspace's ordered runtime world.
 
-        Name strings become no-option instances; the vfs marker passes
-        through; every instance gets the workspace dispatch attached.
-        An explicit list fails loud per entry. The default world
-        (monty, quickjs, vfs) builds gracefully: a missing extra skips
-        the entry so its commands report the install hint per
-        invocation, never a silent escalation to another runtime.
+        Name strings become no-option instances and every instance gets
+        the workspace dispatch attached. The vfs runtime is required:
+        when the list omits it, an unconditional one is appended, so
+        the world always names an executor for unclaimed commands. An
+        explicit list fails loud per entry. The default world (monty,
+        quickjs, vfs) builds gracefully: a missing extra skips the
+        entry so its commands report the install hint per invocation,
+        never a silent escalation to another runtime.
 
         Args:
             runtimes (list[Runtime | str] | None): user entries, or
                 None for the default world.
         """
-        entries: list[Runtime | str] = []
+        entries: list[Runtime] = []
         if runtimes is None:
             for name in DEFAULT_ENTRIES:
-                if name == VFS_ENTRY:
-                    entries.append(VFS_ENTRY)
-                    continue
                 try:
                     entries.append(build_runtime(name))
                 except (ImportError, FileNotFoundError):
                     continue
         else:
             for entry in runtimes:
-                if isinstance(entry, str) and entry != VFS_ENTRY:
-                    entries.append(build_runtime(entry))
-                else:
-                    entries.append(entry)
+                entries.append(
+                    build_runtime(entry) if isinstance(entry, str) else entry)
+        if not any(entry.name == VFS_ENTRY for entry in entries):
+            entries.append(VfsRuntime())
         for entry in entries:
-            if isinstance(entry, Runtime):
-                entry.attach(self.dispatch, self._runtime_mount_prefixes)
+            entry.attach(self.dispatch, self._runtime_mount_prefixes)
         return entries
 
-    def add_runtime(self, runtime: Runtime | str) -> Runtime | str:
+    def add_runtime(self, runtime: Runtime | str) -> Runtime:
         """Append a runtime entry to the workspace's ordered world.
 
         The entry lands last, so it never steals a command an earlier
@@ -440,20 +439,17 @@ class Workspace:
         rejected before any state changes.
 
         Args:
-            runtime (Runtime | str): a Runtime instance, a registry
-                runtime name (built like a config entry), or the plain
-                "vfs" marker for the vfs executor's slot.
+            runtime (Runtime | str): a Runtime instance or a registry
+                runtime name (built like a config entry).
 
         Raises:
             ValueError: unknown name or duplicate entry.
         """
-        entry: Runtime | str = (build_runtime(runtime)
-                                if isinstance(runtime, str)
-                                and runtime != VFS_ENTRY else runtime)
+        entry = (build_runtime(runtime)
+                 if isinstance(runtime, str) else runtime)
         candidate = [*self._runtime_entries, entry]
         bindings = bind_commands(candidate)
-        if isinstance(entry, Runtime):
-            entry.attach(self.dispatch, self._runtime_mount_prefixes)
+        entry.attach(self.dispatch, self._runtime_mount_prefixes)
         self._runtime_entries = candidate
         self._registry.runtime_bindings = bindings
         return entry
@@ -492,9 +488,8 @@ class Workspace:
             })
         if provision:
             return None
-        has_scripts = any(
-            isinstance(entry, Runtime) and entry.script is not None
-            for entry in self._runtime_entries)
+        has_scripts = any(entry.script is not None
+                          for entry in self._runtime_entries)
         if self._route is None and not has_scripts:
             return None
         facts = command_facts(ast)
@@ -574,8 +569,7 @@ class Workspace:
                 return
             drain_tasks = list(self._cache._drain_tasks.values())
             for line_runtime in self._runtime_entries:
-                if isinstance(line_runtime, Runtime):
-                    await line_runtime.close()
+                await line_runtime.close()
             resources = {
                 id(mount.resource): mount.resource
                 for mount in self._registry.mounts()

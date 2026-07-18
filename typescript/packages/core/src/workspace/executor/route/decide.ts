@@ -14,13 +14,7 @@
 
 import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
 import { evalMontyValue } from '../python/runtimes/monty.ts'
-import {
-  bindCommands,
-  runtimeBindingsFor,
-  VfsEntry,
-  type Runtime,
-  type RuntimeEntry,
-} from '../runtime.ts'
+import { bindCommands, runtimeBindingsFor, VfsRuntime, type Runtime } from '../runtime.ts'
 import { RoutingDecisionError } from './errors.ts'
 import type { RoutingDecision, RouteContext, RouteFn, RouteScript } from './types.ts'
 
@@ -95,13 +89,12 @@ async function evaluateRoute(
  * A route verdict overlays the named runtime's captures on the static
  * bindings (an affirmative choice, never a refusal). With no verdict,
  * per-runtime scripts filter the entry list: an entry with no script
- * is always willing, and the willing entries re-bind in list order. A
- * captured command whose capturers all refused, or an uncaptured
- * command when the vfs entry is absent or unwilling, is an admission
- * failure at dispatch.
+ * is always willing, and the willing entries re-bind in list order.
+ * The vfs runtime is filtered exactly like the others; a command left
+ * without a willing runtime is an admission failure at dispatch.
  */
 export async function decideLine(
-  entries: readonly RuntimeEntry[],
+  entries: readonly Runtime[],
   route: RouteFn | null,
   ctx: RouteContext,
   staticBindings: Record<string, Runtime>,
@@ -125,21 +118,17 @@ export async function decideLine(
       }
     }
   }
-  const willing: RuntimeEntry[] = []
+  const willing: Runtime[] = []
   const captured = new Set<string>()
-  let vfsAllowed = false
   for (const entry of entries) {
-    if (typeof entry === 'string') {
-      vfsAllowed = true
-      willing.push(entry)
-      continue
-    }
     for (const command of entry.captures) captured.add(command)
     const wants =
       entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, bridge)
-    if (!wants) continue
-    if (entry instanceof VfsEntry) vfsAllowed = true
-    willing.push(entry)
+    if (wants) willing.push(entry)
   }
-  return { bindings: bindCommands(willing), vfsAllowed, captured }
+  return {
+    bindings: bindCommands(willing),
+    vfsAllowed: willing.some((entry) => entry instanceof VfsRuntime),
+    captured,
+  }
 }

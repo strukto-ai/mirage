@@ -26,18 +26,19 @@ from mirage.runtime.python.wasi import WasiRuntime
 RUNTIMES: tuple[type[Runtime], ...] = (MontyRuntime, WasiRuntime, LocalRuntime,
                                        QuickJsRuntime)
 
-NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}
-
 VFS_ENTRY = "vfs"
 
 
-class VfsEntry(Runtime):
-    """The vfs executor as an ordinary, scriptable entry.
+class VfsRuntime(Runtime):
+    """The workspace's built-in command engine as a runtime.
 
-    The plain "vfs" string is the unconditional form; this class exists
-    so the vfs rung can carry a route script like any other entry
-    (e.g. refuse oversized lines). It captures nothing and never runs:
-    the workspace executor itself serves the commands it admits.
+    Serves every command no other runtime captures (cat, ls, echo, and
+    anything unknown), so its own captures list is empty: it is the
+    fallback, not a capturer. Required: every workspace world contains
+    exactly one, appended automatically when the runtimes list omits
+    it; pass your own instance to give it a route script. run() stays
+    unimplemented until the line-door contract exists; the workspace
+    executor serves its commands internally.
 
     Args:
         script (Callable | str | None): per-line admission script, the
@@ -52,9 +53,13 @@ class VfsEntry(Runtime):
         self.script = script
 
     async def run(self, args: Any) -> Any:
-        raise RuntimeError("the vfs entry is an ordering marker; the "
+        raise RuntimeError("the vfs runtime has no interpreter door; the "
                            "workspace executor runs its commands")
 
+
+NAMEABLE: tuple[type[Runtime], ...] = (*RUNTIMES, VfsRuntime)
+
+NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in NAMEABLE}
 
 # The default world when no runtimes list is given: today's behavior
 # exactly. Defaults build gracefully (a missing extra leaves the
@@ -99,12 +104,12 @@ def build_runtime(name: str, **options: Any) -> Runtime:
         if name in TS_ONLY_HINTS:
             raise ValueError(TS_ONLY_HINTS[name])
         known = ", ".join(repr(n) for n in NAMED)
-        raise ValueError(f"unknown runtime: {name!r} (expected one of "
-                         f"{known}, or {VFS_ENTRY!r})")
+        raise ValueError(f"unknown runtime: {name!r} "
+                         f"(expected one of {known})")
     return cls(**options)
 
 
-def runtime_bindings_for(entries: list[Runtime | str],
+def runtime_bindings_for(entries: list[Runtime],
                          name: str) -> dict[str, Runtime]:
     """Resolve an explicit runtime name into a binding override map.
 
@@ -113,37 +118,34 @@ def runtime_bindings_for(entries: list[Runtime | str],
     everything else keeps its normal binding.
 
     Args:
-        entries (list[Runtime | str]): the workspace's ordered runtime
-            world.
+        entries (list[Runtime]): the workspace's ordered runtime world.
         name (str): the workspace runtime entry to bind to.
 
     Raises:
-        ValueError: the name is the vfs marker or not a workspace
-            entry.
+        ValueError: the name is vfs (captures nothing, so there is
+            nothing to rebind) or not a workspace entry.
     """
     if name == VFS_ENTRY:
         raise ValueError(
             "'vfs' is the default executor, not a runtime you can select")
     for entry in entries:
-        if not isinstance(entry, str) and entry.name == name:
+        if entry.name == name:
             return {command: entry for command in entry.captures}
-    known = ", ".join(
-        repr(e if isinstance(e, str) else e.name) for e in entries)
+    known = ", ".join(repr(e.name) for e in entries)
     raise ValueError(f"unknown runtime: {name!r} "
                      f"(workspace runtimes: {known})")
 
 
-def bind_commands(entries: list[Runtime | str]) -> dict[str, Runtime]:
+def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
     """Resolve the ordered world into a command -> runtime binding map.
 
-    A command binds to the FIRST entry that captures it; the vfs entry
-    is an ordering marker with no interpreter captures. Duplicate
+    A command binds to the FIRST entry that captures it; the vfs
+    runtime captures nothing, so it never appears in the map. Duplicate
     names are rejected: a second entry under the same name could never
     bind anything and always signals a config mistake.
 
     Args:
-        entries (list[Runtime | str]): runtime instances and the vfs
-            marker, in precedence order.
+        entries (list[Runtime]): runtime instances in precedence order.
 
     Raises:
         ValueError: duplicate entry names.
@@ -151,12 +153,9 @@ def bind_commands(entries: list[Runtime | str]) -> dict[str, Runtime]:
     bindings: dict[str, Runtime] = {}
     seen: set[str] = set()
     for entry in entries:
-        entry_name = entry if isinstance(entry, str) else entry.name
-        if entry_name in seen:
-            raise ValueError(f"duplicate runtime entry: {entry_name!r}")
-        seen.add(entry_name)
-        if isinstance(entry, str):
-            continue
+        if entry.name in seen:
+            raise ValueError(f"duplicate runtime entry: {entry.name!r}")
+        seen.add(entry.name)
         for command in entry.captures:
             if command not in bindings:
                 bindings[command] = entry

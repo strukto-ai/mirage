@@ -25,8 +25,6 @@ import {
   RedisFileCacheStore,
   RedisWorkspaceStateStore,
   buildRuntime,
-  VFS_ENTRY,
-  VfsEntry,
   type RuntimeEntry,
   type FileCache,
   type IndexConfig,
@@ -62,7 +60,7 @@ function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
   const out: RuntimeEntry[] = []
   for (const entry of entries) {
     if (typeof entry === 'string') {
-      out.push(entry === VFS_ENTRY ? VFS_ENTRY : buildRuntime(entry))
+      out.push(buildRuntime(entry))
       continue
     }
     if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
@@ -72,13 +70,6 @@ function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
     }
     if (script !== undefined && typeof script !== 'string') {
       throw new Error('a runtime entry script must be a string (inline monty source or a .py path)')
-    }
-    if (name === VFS_ENTRY) {
-      if (Object.keys(options).length > 0) {
-        throw new Error('the vfs runtime entry takes only a script')
-      }
-      out.push(script === undefined ? VFS_ENTRY : new VfsEntry(loadScriptSource(script)))
-      continue
     }
     const built = buildRuntime(name, options)
     if (script !== undefined) built.script = loadScriptSource(script)

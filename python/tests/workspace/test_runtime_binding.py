@@ -20,7 +20,7 @@ from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
 from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.python import LocalRuntime, MontyRuntime
-from mirage.runtime.table import VFS_ENTRY, VfsEntry
+from mirage.runtime.table import VFS_ENTRY, VfsRuntime
 
 
 @pytest_asyncio.fixture
@@ -102,7 +102,7 @@ def test_config_entry_needs_a_name():
 
 
 def test_config_vfs_entry_takes_no_options():
-    with pytest.raises(ValueError, match="vfs runtime entry takes only"):
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
         _build_runtime_entries([{"name": "vfs", "home": "/x"}])
 
 
@@ -217,7 +217,7 @@ async def test_vfs_entry_script_locks_down_lines():
     ws = Workspace(
         {"/": RAMResource()},
         mode=MountMode.EXEC,
-        runtimes=[VfsEntry(script=lambda ctx: "/secret" not in ctx.line)])
+        runtimes=[VfsRuntime(script=lambda ctx: "/secret" not in ctx.line)])
     try:
         io = await ws.execute("echo ok > /notes.txt && cat /notes.txt")
         assert await materialize(io.stdout) == b"ok\n"
@@ -285,13 +285,8 @@ def test_config_entry_script_and_route_load():
         "script": "True"
     }])
     assert entries[0].script == "ctx['command'] == 'python3'"
-    assert isinstance(entries[1], VfsEntry)
+    assert isinstance(entries[1], VfsRuntime)
     assert entries[1].script == "True"
-
-
-def test_config_vfs_entry_rejects_non_script_options():
-    with pytest.raises(ValueError, match="only a script"):
-        _build_runtime_entries([{"name": "vfs", "home": "/x"}])
 
 
 def test_config_script_path_form_embeds_content(tmp_path):

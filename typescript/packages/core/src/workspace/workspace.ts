@@ -74,6 +74,7 @@ import {
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
   VFS_ENTRY,
+  VfsRuntime,
   type Runtime,
   type RuntimeEntry,
 } from './executor/runtime.ts'
@@ -257,7 +258,7 @@ export class Workspace {
   readonly fs: WorkspaceFS
   private closed = false
   private readonly closers: (() => Promise<void>)[] = []
-  private readonly runtimeEntries: RuntimeEntry[]
+  private readonly runtimeEntries: Runtime[]
   private runtimeBindings: Record<string, Runtime>
   private readonly route: RouteFn | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
@@ -328,23 +329,20 @@ export class Workspace {
     this.runtimeEntries = []
     if (options.runtimes === undefined) {
       for (const name of DEFAULT_ENTRIES) {
-        if (name === VFS_ENTRY) {
-          this.runtimeEntries.push(VFS_ENTRY)
-          continue
-        }
         this.runtimeEntries.push(buildRuntime(name, name === 'pyodide' ? { ...userPython } : {}))
       }
     } else {
       for (const entry of options.runtimes) {
-        if (typeof entry === 'string' && entry !== VFS_ENTRY) {
-          this.runtimeEntries.push(buildRuntime(entry))
-        } else {
-          this.runtimeEntries.push(entry)
-        }
+        this.runtimeEntries.push(typeof entry === 'string' ? buildRuntime(entry) : entry)
       }
     }
+    // The vfs runtime is required: every world names an executor for
+    // unclaimed commands, so an omitted entry appends the default
+    // unconditional one.
+    if (!this.runtimeEntries.some((entry) => entry.name === VFS_ENTRY)) {
+      this.runtimeEntries.push(new VfsRuntime())
+    }
     for (const entry of this.runtimeEntries) {
-      if (typeof entry === 'string') continue
       entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
       this.closers.push(() => entry.close())
     }
@@ -441,15 +439,12 @@ export class Workspace {
    * like a config entry and fails loud; a duplicate name is rejected
    * before any state changes.
    */
-  addRuntime(runtime: RuntimeEntry): RuntimeEntry {
-    const entry: RuntimeEntry =
-      typeof runtime === 'string' && runtime !== VFS_ENTRY ? buildRuntime(runtime) : runtime
+  addRuntime(runtime: RuntimeEntry): Runtime {
+    const entry: Runtime = typeof runtime === 'string' ? buildRuntime(runtime) : runtime
     const candidate = [...this.runtimeEntries, entry]
     const bindings = bindCommands(candidate)
-    if (typeof entry !== 'string') {
-      entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
-      this.closers.push(() => entry.close())
-    }
+    entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
+    this.closers.push(() => entry.close())
     this.runtimeEntries.push(entry)
     this.runtimeBindings = bindings
     return entry
@@ -483,9 +478,7 @@ export class Workspace {
         captured: new Set(),
       }
     }
-    const hasScripts = this.runtimeEntries.some(
-      (entry) => typeof entry !== 'string' && entry.script !== undefined,
-    )
+    const hasScripts = this.runtimeEntries.some((entry) => entry.script !== undefined)
     if (this.route === null && !hasScripts) return null
     const facts = commandFacts(root)
     const sessionId = options.sessionId ?? this.sessionManager.defaultId

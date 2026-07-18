@@ -72,20 +72,25 @@ export type RuntimeEntry = Runtime | string
 export const VFS_ENTRY = 'vfs'
 
 /**
- * The vfs executor as an ordinary, scriptable entry.
+ * The workspace's built-in command engine as a runtime.
  *
- * The plain "vfs" string is the unconditional form; this class exists
- * so the vfs rung can carry a route script like any other entry (e.g.
- * refuse oversized lines). It captures nothing and never runs: the
- * workspace executor itself serves the commands it admits.
+ * Serves every command no other runtime captures (cat, ls, echo, and
+ * anything unknown), so its own captures list is empty: it is the
+ * fallback, not a capturer. Required: every workspace world contains
+ * exactly one, appended automatically when the runtimes list omits it;
+ * pass your own instance to give it a route script. run() stays
+ * unimplemented until the line-door contract exists; the workspace
+ * executor serves its commands internally.
  */
-export class VfsEntry implements Runtime {
+export class VfsRuntime implements Runtime {
   readonly name = VFS_ENTRY
   readonly captures: readonly string[] = []
   script?: RouteScript
 
-  constructor(script?: RouteScript) {
-    if (script !== undefined) this.script = script
+  // The record form exists for the shared buildRuntime path, which
+  // hands every runtime its (empty, for vfs) options object.
+  constructor(script?: RouteScript | Record<string, unknown>) {
+    if (typeof script === 'string' || typeof script === 'function') this.script = script
   }
 
   attach(): void {
@@ -94,7 +99,9 @@ export class VfsEntry implements Runtime {
 
   run(): Promise<never> {
     return Promise.reject(
-      new Error('the vfs entry is an ordering marker; the workspace executor runs its commands'),
+      new Error(
+        'the vfs runtime has no interpreter door; the workspace executor runs its commands',
+      ),
     )
   }
 
@@ -131,41 +138,39 @@ export const PYTHON_ONLY_HINTS: Record<string, string> = {
  * everything else keeps its normal binding.
  */
 export function runtimeBindingsFor(
-  entries: readonly RuntimeEntry[],
+  entries: readonly Runtime[],
   name: string,
 ): Record<string, Runtime> {
   if (name === VFS_ENTRY) {
     throw new Error(`'${VFS_ENTRY}' is the default executor, not a runtime you can select`)
   }
   for (const entry of entries) {
-    if (typeof entry !== 'string' && entry.name === name) {
+    if (entry.name === name) {
       const bindings: Record<string, Runtime> = {}
       for (const command of entry.captures) bindings[command] = entry
       return bindings
     }
   }
-  const known = entries.map((e) => `'${typeof e === 'string' ? e : e.name}'`).join(', ')
+  const known = entries.map((e) => `'${e.name}'`).join(', ')
   throw new Error(`unknown runtime: '${name}' (workspace runtimes: ${known})`)
 }
 
 /**
  * Resolve the ordered world into a command -> runtime binding map.
  *
- * A command binds to the FIRST entry that captures it; the vfs entry is
- * an ordering marker with no interpreter captures. Duplicate names are
+ * A command binds to the FIRST entry that captures it; the vfs runtime
+ * captures nothing, so it never appears in the map. Duplicate names are
  * rejected: a second entry under the same name could never bind
  * anything and always signals a config mistake.
  */
-export function bindCommands(entries: readonly RuntimeEntry[]): Record<string, Runtime> {
+export function bindCommands(entries: readonly Runtime[]): Record<string, Runtime> {
   const bindings: Record<string, Runtime> = {}
   const seen = new Set<string>()
   for (const entry of entries) {
-    const entryName = typeof entry === 'string' ? entry : entry.name
-    if (seen.has(entryName)) {
-      throw new Error(`duplicate runtime entry: '${entryName}'`)
+    if (seen.has(entry.name)) {
+      throw new Error(`duplicate runtime entry: '${entry.name}'`)
     }
-    seen.add(entryName)
-    if (typeof entry === 'string') continue
+    seen.add(entry.name)
     for (const command of entry.captures) {
       if (!(command in bindings)) bindings[command] = entry
     }

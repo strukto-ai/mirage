@@ -90,7 +90,7 @@ describe('configToWorkspaceArgs', () => {
     expect(entries).toHaveLength(3)
     expect((entries?.[0] as { name: string }).name).toBe('pyodide')
     expect((entries?.[1] as { name: string }).name).toBe('quickjs')
-    expect(entries?.[2]).toBe('vfs')
+    expect((entries?.[2] as { name: string }).name).toBe('vfs')
   })
 
   it('rejects an unknown runtime entry name', async () => {
@@ -114,7 +114,7 @@ describe('configToWorkspaceArgs', () => {
       mounts: { '/': { resource: 'ram' } },
       runtimes: [{ name: 'vfs', home: '/x' }],
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/vfs runtime entry takes only/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown vfs runtime option 'home'/)
   })
 
   it('carries entry scripts and the global route through', async () => {

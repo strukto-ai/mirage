@@ -25,7 +25,7 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import VFS_ENTRY, VfsEntry, build_runtime
+from mirage.runtime.table import build_runtime
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import (DEFAULT_STATE_ROOT,
@@ -283,14 +283,6 @@ def _build_runtime_entries(
         if script is not None and not isinstance(script, str):
             raise ValueError("a runtime entry script must be a string "
                              "(inline monty source or a .py path)")
-        if name == VFS_ENTRY:
-            if options:
-                raise ValueError("the vfs runtime entry takes only a script")
-            if script is None:
-                out.append(VFS_ENTRY)
-            else:
-                out.append(VfsEntry(script=_load_script_source(script)))
-            continue
         built = build_runtime(name, **options)
         if script is not None:
             built.script = _load_script_source(script)

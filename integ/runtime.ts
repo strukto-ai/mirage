@@ -23,7 +23,7 @@ import {
   RAMResource,
   RedisResource,
   S3Resource,
-  VfsEntry,
+  VfsRuntime,
   Workspace,
 } from "@struktoai/mirage-node";
 
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
     { "/ram": new RAMResource() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new VfsEntry("'secret' not in ctx['line']")],
+      runtimes: [new VfsRuntime("'secret' not in ctx['line']")],
     },
   );
   await run(wsLock, "lockdown_allow", "echo fine");

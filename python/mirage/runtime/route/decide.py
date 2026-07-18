@@ -21,7 +21,8 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.python.monty import _MirageOS, pydantic_monty
 from mirage.runtime.route.types import (RouteContext, RouteFn, RouteScript,
                                         RoutingDecision)
-from mirage.runtime.table import VfsEntry, bind_commands, runtime_bindings_for
+from mirage.runtime.table import (VfsRuntime, bind_commands,
+                                  runtime_bindings_for)
 
 
 async def _eval_monty(source: str, ctx_payload: dict[str, Any],
@@ -105,7 +106,7 @@ async def evaluate_route(route: RouteFn, ctx: RouteContext,
                      f"got {verdict!r}")
 
 
-async def decide_line(entries: list[Runtime | str], route: RouteFn | None,
+async def decide_line(entries: list[Runtime], route: RouteFn | None,
                       ctx: RouteContext, static_bindings: dict[str, Runtime],
                       dispatch: Callable[..., Any] | None) -> RoutingDecision:
     """Resolve the routing ladder for one line: route, then scripts.
@@ -114,12 +115,12 @@ async def decide_line(entries: list[Runtime | str], route: RouteFn | None,
     static bindings (an affirmative choice, never a refusal). With no
     verdict, per-runtime scripts filter the entry list: an entry with
     no script is always willing, and the willing entries re-bind in
-    list order. A captured command whose capturers all refused, or an
-    uncaptured command when the vfs entry is absent or unwilling, is
-    an admission failure at dispatch.
+    list order. The vfs runtime is filtered exactly like the others;
+    a command left without a willing runtime is an admission failure
+    at dispatch.
 
     Args:
-        entries (list[Runtime | str]): the workspace's ordered world.
+        entries (list[Runtime]): the workspace's ordered world.
         route (RouteFn | None): the global route, if configured.
         ctx (RouteContext): facts about the line.
         static_bindings (dict[str, Runtime]): the workspace's static
@@ -136,22 +137,15 @@ async def decide_line(entries: list[Runtime | str], route: RouteFn | None,
             },
                                    vfs_allowed=True,
                                    captured=frozenset())
-    willing: list[Runtime | str] = []
+    willing: list[Runtime] = []
     captured: set[str] = set()
-    vfs_allowed = False
     for entry in entries:
-        if isinstance(entry, str):
-            vfs_allowed = True
-            willing.append(entry)
-            continue
         captured.update(entry.captures)
         wants = (True if entry.script is None else await evaluate_script(
             entry.script, ctx, entry, dispatch))
-        if not wants:
-            continue
-        if isinstance(entry, VfsEntry):
-            vfs_allowed = True
-        willing.append(entry)
-    return RoutingDecision(bindings=bind_commands(willing),
-                           vfs_allowed=vfs_allowed,
-                           captured=frozenset(captured))
+        if wants:
+            willing.append(entry)
+    return RoutingDecision(
+        bindings=bind_commands(willing),
+        vfs_allowed=any(isinstance(entry, VfsRuntime) for entry in willing),
+        captured=frozenset(captured))

@@ -17,7 +17,7 @@ import pytest
 from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.route import (RouteContext, command_facts, decide_line,
                                   evaluate_route, evaluate_script)
-from mirage.runtime.table import VFS_ENTRY, VfsEntry
+from mirage.runtime.table import VfsRuntime
 from mirage.workspace.workspace import parse
 
 
@@ -90,7 +90,7 @@ async def test_route_returns_name_or_none_only():
 @pytest.mark.asyncio
 async def test_decide_route_overlays_static_bindings():
     alpha, beta = AlphaRuntime(), BetaRuntime()
-    routing = await decide_line([alpha, beta, VFS_ENTRY], lambda c: "beta",
+    routing = await decide_line([alpha, beta, VfsRuntime()], lambda c: "beta",
                                 ctx_for("python3 x"), {"python3": alpha}, None)
     assert routing.bindings["python3"] is beta
     assert routing.vfs_allowed
@@ -100,7 +100,7 @@ async def test_decide_route_overlays_static_bindings():
 async def test_decide_scripts_filter_in_list_order():
     alpha, beta = AlphaRuntime(), BetaRuntime()
     alpha.script = lambda c: False
-    routing = await decide_line([alpha, beta, VFS_ENTRY], None,
+    routing = await decide_line([alpha, beta, VfsRuntime()], None,
                                 ctx_for("python3 x"), {}, None)
     assert routing.bindings["python3"] is beta
     assert "python3" in routing.captured
@@ -110,8 +110,8 @@ async def test_decide_scripts_filter_in_list_order():
 async def test_decide_all_refuse_leaves_command_unbound_but_captured():
     alpha = AlphaRuntime()
     alpha.script = lambda c: False
-    routing = await decide_line([alpha, VFS_ENTRY], None, ctx_for("python3 x"),
-                                {}, None)
+    routing = await decide_line([alpha, VfsRuntime()], None,
+                                ctx_for("python3 x"), {}, None)
     assert "python3" not in routing.bindings
     assert "python3" in routing.captured
     assert routing.vfs_allowed
@@ -119,7 +119,7 @@ async def test_decide_all_refuse_leaves_command_unbound_but_captured():
 
 @pytest.mark.asyncio
 async def test_decide_vfs_entry_script_gates_vfs():
-    vfs = VfsEntry(script=lambda c: "/secret" not in c.line)
+    vfs = VfsRuntime(script=lambda c: "/secret" not in c.line)
     allowed = await decide_line([vfs], None, ctx_for("cat /notes"), {}, None)
     denied = await decide_line([vfs], None, ctx_for("cat /secret/x"), {}, None)
     assert allowed.vfs_allowed
