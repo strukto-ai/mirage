@@ -25,6 +25,15 @@ import { PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from '../wrapper.ts'
 import { PYODIDE_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
 import type { PythonReplRunArgs, PythonReplRunResult, ReplStatus } from '../types.ts'
 
+function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
+  return value instanceof Uint8Array ? value : new Uint8Array(value)
+}
+
+function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null {
+  const bytes = bridgeBytes(value)
+  return bytes.length > 0 ? bytes : null
+}
+
 function runtimeEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
@@ -215,8 +224,8 @@ export class PyodideRuntime implements PythonRuntime {
         }
       }
       return {
-        stdout: arr[0] instanceof Uint8Array ? arr[0] : new Uint8Array(arr[0] as ArrayLike<number>),
-        stderr: arr[1] instanceof Uint8Array ? arr[1] : new Uint8Array(arr[1] as ArrayLike<number>),
+        stdout: bridgeBytes(arr[0]),
+        stderr: bridgeStderr(arr[1]),
         exitCode: arr[2],
       }
     } finally {
@@ -270,8 +279,8 @@ export class PyodideRuntime implements PythonRuntime {
         }
       }
       return {
-        stdout: arr[0] instanceof Uint8Array ? arr[0] : new Uint8Array(arr[0] as ArrayLike<number>),
-        stderr: arr[1] instanceof Uint8Array ? arr[1] : new Uint8Array(arr[1] as ArrayLike<number>),
+        stdout: bridgeBytes(arr[0]),
+        stderr: bridgeStderr(arr[1]),
         exitCode: arr[2],
         status: arr[3],
       }

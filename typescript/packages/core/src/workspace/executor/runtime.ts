@@ -31,7 +31,8 @@ export interface RunArgs {
 /** Outcome of one interpreter execution. */
 export interface RunResult {
   stdout: Uint8Array
-  stderr: Uint8Array
+  /** Captured standard error, null when empty (mirrors Python). */
+  stderr: Uint8Array | null
   exitCode: number
 }
 

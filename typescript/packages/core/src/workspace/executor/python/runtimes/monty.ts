@@ -121,11 +121,12 @@ export class MontyRuntime implements PythonRuntime {
     })
     const incomplete =
       result.exitCode !== 0 &&
+      result.stderr !== null &&
       new TextDecoder().decode(result.stderr).includes('unexpected EOF while parsing')
     if (incomplete) {
       return {
         stdout: new Uint8Array(),
-        stderr: new Uint8Array(),
+        stderr: null,
         exitCode: 0,
         status: 'incomplete',
       }
@@ -193,7 +194,7 @@ export class MontyRuntime implements PythonRuntime {
         err.push(displayError(caught) + '\n')
         return {
           stdout: new TextEncoder().encode(out.join('')),
-          stderr: new TextEncoder().encode(err.join('')),
+          stderr: err.length > 0 ? new TextEncoder().encode(err.join('')) : null,
           exitCode: 1,
         }
       }
@@ -201,7 +202,7 @@ export class MontyRuntime implements PythonRuntime {
     }
     return {
       stdout: new TextEncoder().encode(out.join('')),
-      stderr: new TextEncoder().encode(err.join('')),
+      stderr: err.length > 0 ? new TextEncoder().encode(err.join('')) : null,
       exitCode: 0,
     }
   }

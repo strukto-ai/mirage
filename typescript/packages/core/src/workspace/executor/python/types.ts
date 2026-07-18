@@ -21,7 +21,8 @@ export type ReplStatus = 'complete' | 'incomplete' | 'exit'
 
 export interface PythonReplRunResult {
   stdout: Uint8Array
-  stderr: Uint8Array
+  /** Captured standard error, null when empty (mirrors RunResult). */
+  stderr: Uint8Array | null
   exitCode: number
   status: ReplStatus
 }

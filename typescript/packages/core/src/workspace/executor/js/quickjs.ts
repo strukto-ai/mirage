@@ -136,7 +136,7 @@ export class QuickJsRuntime implements JsRuntime {
       }
       return {
         stdout: ENC.encode(out.map((l) => l + '\n').join('')),
-        stderr: ENC.encode(err.map((l) => l + '\n').join('')),
+        stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
         exitCode,
       }
     } finally {

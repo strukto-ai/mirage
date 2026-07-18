@@ -64,7 +64,7 @@ function run(
   return rt.run({ code, args, env, stdin: null })
 }
 
-const text = (b: Uint8Array): string => new TextDecoder().decode(b)
+const text = (b: Uint8Array | null): string => (b === null ? '' : new TextDecoder().decode(b))
 
 describe('MontyRuntime', () => {
   const runtimes: MontyRuntime[] = []
