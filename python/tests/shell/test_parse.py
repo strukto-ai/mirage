@@ -17,10 +17,9 @@ import tree_sitter
 from mirage.shell import parse
 from mirage.shell.helpers import (get_command_name, get_for_parts,
                                   get_if_branches, get_list_parts, get_parts,
-                                  get_pipeline_commands, get_redirect_parts,
-                                  get_redirects, get_text, get_while_parts)
+                                  get_pipeline_commands, get_redirects,
+                                  get_text, get_while_parts)
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import RedirectKind
 
 
 def test_parse_returns_node():
@@ -84,34 +83,6 @@ def test_list_or():
 def test_semicolon_multiple():
     root = parse("cmd1; cmd2; cmd3")
     assert len(root.named_children) == 3
-
-
-def test_redirect_stdout():
-    node = parse("echo hello > /out.txt").named_children[0]
-    assert node.type == NT.REDIRECTED_STATEMENT
-    cmd, target, append, stream = get_redirect_parts(node)
-    assert target == "/out.txt"
-    assert not append
-    assert stream == RedirectKind.STDOUT
-
-
-def test_redirect_append():
-    node = parse("echo hello >> /out.txt").named_children[0]
-    _, target, append, stream = get_redirect_parts(node)
-    assert append is True
-
-
-def test_redirect_stdin():
-    node = parse("sort < /input.txt").named_children[0]
-    _, target, append, stream = get_redirect_parts(node)
-    assert stream == RedirectKind.STDIN
-
-
-def test_redirect_stderr():
-    node = parse("cmd 2> /err.txt").named_children[0]
-    _, target, append, stream = get_redirect_parts(node)
-    assert stream == RedirectKind.STDERR
-    assert target == "/err.txt"
 
 
 def test_redirect_on_list_detected():

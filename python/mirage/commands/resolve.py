@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io.types import ByteSource
-
 COMPOUND_EXTENSIONS = frozenset({
     ".gdoc.json",
     ".gslide.json",
@@ -33,11 +31,3 @@ def get_extension(path: str | None) -> str | None:
     if dot == -1 or "/" in path[dot:]:
         return None
     return path[dot:]
-
-
-async def materialize_stdout(stdout: ByteSource | None) -> bytes:
-    if stdout is None:
-        return b""
-    if isinstance(stdout, bytes):
-        return stdout
-    return b"".join([chunk async for chunk in stdout])

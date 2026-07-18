@@ -14,7 +14,6 @@
 
 import dataclasses
 import functools
-from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.types import (OperandRun,
@@ -31,11 +30,6 @@ async def relay(dispatch: Callable[..., Any], name: str, path: PathSpec,
     # ops as (path); dispatch keys off the path.
     data, _ = await dispatch(name, path, **kwargs)
     return data
-
-
-async def stream(dispatch: Callable[..., Any],
-                 path: PathSpec) -> AsyncIterator[bytes]:
-    yield await relay(dispatch, "read", path)
 
 
 async def run_operands(run_single: RunSingle,

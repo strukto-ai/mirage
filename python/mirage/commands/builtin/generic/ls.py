@@ -11,13 +11,6 @@ from mirage.utils.key_prefix import rekey
 from mirage.utils.path import rebase_one
 
 
-def get_extension(name: str) -> str | None:
-    dot = name.rfind(".")
-    if dot == -1 or "/" in name[dot:]:
-        return None
-    return name[dot:]
-
-
 def format_simple(entries: list[FileStat],
                   *,
                   classify: bool = False) -> list[str]:
@@ -266,7 +259,6 @@ async def ls(
 
 __all__ = [
     "format_simple",
-    "get_extension",
     "ls",
     "walk",
     "walk_grouped",

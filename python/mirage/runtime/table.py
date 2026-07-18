@@ -47,15 +47,6 @@ TS_ONLY_HINTS: dict[str, str] = {
 }
 
 
-def candidates(command: str) -> list[type[Runtime]]:
-    """The runtime classes that capture a command, preference order.
-
-    Args:
-        command (str): a command name (python3, node, ...).
-    """
-    return [cls for cls in RUNTIMES if command in cls.captures]
-
-
 def build_runtime(name: str, **options: Any) -> Runtime:
     """Construct a runtime by name, failing loud on unknown names.
 

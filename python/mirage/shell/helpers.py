@@ -134,21 +134,6 @@ def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     return list(node.named_children)
 
 
-def get_redirect_parts(
-    node: tree_sitter.Node,
-) -> tuple[tree_sitter.Node, str, bool, RedirectKind]:  # noqa: E125,E501
-    """Get (command, target, append, stream) for the first redirect.
-
-    Legacy helper — use get_redirects for full redirect support.
-    """
-    command, redirects = get_redirects(node)
-    if not redirects:
-        return command, "", False, RedirectKind.STDOUT
-    r = redirects[0]
-    target = r.target if isinstance(r.target, str) else ""
-    return command, target, r.append, r.kind
-
-
 def get_redirects(
         node: tree_sitter.Node,  # noqa: E125
 ) -> tuple[tree_sitter.Node, list[Redirect]]:
@@ -263,15 +248,6 @@ def get_redirects(
     return command, redirects
 
 
-def get_redirect_target_node(
-        node: tree_sitter.Node) -> tree_sitter.Node | None:
-    """Get the expandable target node from the first redirect."""
-    _, redirects = get_redirects(node)
-    if not redirects:
-        return None
-    return redirects[0].target_node
-
-
 def get_list_parts(
     node: tree_sitter.Node,
 ) -> tuple[tree_sitter.Node, str, tree_sitter.Node]:
@@ -354,17 +330,6 @@ def get_case_items(
     return items
 
 
-def get_declaration_assignments(node: tree_sitter.Node) -> list[str]:
-    """Get assignment strings from declaration_command.
-
-    Works for export, local, declare.
-    """
-    return [
-        get_text(c) for c in node.named_children
-        if c.type == NT.VARIABLE_ASSIGNMENT
-    ]
-
-
 def get_declaration_keyword(node: tree_sitter.Node) -> str:
     """Get keyword (export/local/declare) from declaration."""
     return node.children[0].type
@@ -374,25 +339,6 @@ def get_unset_names(node: tree_sitter.Node) -> list[str]:
     """Get variable names from unset_command."""
     return [
         get_text(c) for c in node.named_children if c.type == NT.VARIABLE_NAME
-    ]
-
-
-def get_test_argv(node: tree_sitter.Node) -> list[str]:
-    """Get test arguments from test_command ([ ] or [[ ]]).
-
-    Returns the inner expression text.
-    """
-    return [get_text(c) for c in node.named_children]
-
-
-def get_command_assignments(node: tree_sitter.Node) -> list[str]:
-    """Get prefix assignments from a command (A=1 B=2 cmd).
-
-    Returns list of assignment strings.
-    """
-    return [
-        get_text(c) for c in node.named_children
-        if c.type == NT.VARIABLE_ASSIGNMENT
     ]
 
 
@@ -432,19 +378,6 @@ def get_heredoc_meta(
     if dash and body:
         body = "\n".join(line.lstrip("\t") for line in body.split("\n"))
     return body, dash, quoted
-
-
-def get_herestring_content(node: tree_sitter.Node) -> str:
-    """Get content from herestring_redirect (<<<)."""
-    for c in node.named_children:
-        if c.type == NT.HERESTRING_REDIRECT:
-            return get_text(c.named_children[0])
-    return ""
-
-
-def get_process_sub_command(node: tree_sitter.Node) -> tree_sitter.Node:
-    """Get inner command from process_substitution."""
-    return node.named_children[0]
 
 
 def get_process_sub_direction(

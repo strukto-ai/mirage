@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from mirage.commands.builtin.generic.ls import (format_simple, get_extension,
-                                                ls, walk)
+from mirage.commands.builtin.generic.ls import format_simple, ls, walk
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 
 
@@ -53,19 +52,6 @@ def _file(name: str, size: int = 0, modified: str | None = None) -> FileStat:
 
 def _dir(name: str) -> FileStat:
     return FileStat(name=name, size=None, type=FileType.DIRECTORY)
-
-
-def test_get_extension_simple():
-    assert get_extension("file.txt") == ".txt"
-
-
-def test_get_extension_no_dot_returns_none():
-    assert get_extension("Makefile") is None
-
-
-def test_get_extension_dot_in_path_only_not_in_basename():
-    """`a.b/c` has no extension on `c`."""
-    assert get_extension("a.b/c") is None
 
 
 def test_format_simple_default_lists_names():

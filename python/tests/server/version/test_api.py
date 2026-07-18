@@ -15,10 +15,10 @@
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.server.version.api import (branch, checkout, commit, commit_state,
+from mirage.server.version.api import (branch, checkout, commit_state,
                                        diff_live_vs_ref, read_version,
-                                       resolve_ref, status, status_state,
-                                       version_diff, version_log)
+                                       resolve_ref, status_state, version_diff,
+                                       version_log)
 from mirage.server.version.backend import LocalBackend
 from mirage.server.version.errors import NoSuchBranchError
 from mirage.server.version.state_tree import META_PATH
@@ -26,6 +26,14 @@ from mirage.server.version.store import VersionStore
 from mirage.types import CacheKey, MountMode, StateKey
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
+
+
+async def commit(store, ws, branch="main", message=""):
+    return await commit_state(store, await to_state_dict(ws), branch, message)
+
+
+async def status(store, ws, branch="main"):
+    return await status_state(store, await to_state_dict(ws), branch)
 
 
 @pytest.mark.asyncio
