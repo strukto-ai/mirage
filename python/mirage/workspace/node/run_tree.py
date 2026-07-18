@@ -28,11 +28,11 @@ from mirage.workspace.types import ExecutionNode
 
 
 async def run_command_tree(
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
     job_table: JobTable,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     agent_id: str,
     ast: Any,
     session: Session,

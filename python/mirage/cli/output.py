@@ -47,7 +47,7 @@ def exit_code_from_response(r: Any) -> int:
     if not isinstance(r, dict):
         return 0
     if r.get("kind") == "io":
-        inner: dict | None = r
+        inner: dict[str, Any] | None = r
     else:
         result = r.get("result")
         inner = result if isinstance(result, dict) else None
@@ -64,7 +64,7 @@ def exit_code_from_response(r: Any) -> int:
     return 0
 
 
-def handle_response(r: httpx.Response) -> dict | list:
+def handle_response(r: httpx.Response) -> dict[str, Any] | list[Any]:
     if r.status_code >= 400:
         try:
             detail = r.json().get("detail", r.text)

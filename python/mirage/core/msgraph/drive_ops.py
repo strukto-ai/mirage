@@ -16,6 +16,7 @@ import posixpath
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
+from typing import Any
 from urllib.parse import quote
 
 import aiohttp
@@ -79,8 +80,8 @@ class DriveLoc:
         return posixpath.dirname("/" + self.path).strip("/")
 
 
-def _parent_reference(src: DriveLoc, dst: DriveLoc) -> dict:
-    ref: dict = {"path": dst.ref(dst.parent())}
+def _parent_reference(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
+    ref: dict[str, Any] = {"path": dst.ref(dst.parent())}
     if src.drive != dst.drive and dst.drive:
         ref["driveId"] = dst.drive
     return ref
@@ -163,8 +164,8 @@ async def copy_tree(config: MsGraphConfig, src: DriveLoc,
     await invalidate_after_write(_virt_spec(dst))
 
 
-def _move_body(src: DriveLoc, dst: DriveLoc) -> dict:
-    body: dict = {"name": posixpath.basename(dst.path)}
+def _move_body(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
+    body: dict[str, Any] = {"name": posixpath.basename(dst.path)}
     if dst.parent() != src.parent() or src.drive != dst.drive:
         body["parentReference"] = {"path": dst.ref(dst.parent())}
     return body
@@ -238,7 +239,7 @@ def _range_header(offset: int, size: int | None) -> str | None:
     return f"bytes={offset}-{end}"
 
 
-def entry_stat(item: dict) -> FileStat:
+def entry_stat(item: dict[str, Any]) -> FileStat:
     name = item.get("name", "")
     if "folder" in item:
         return FileStat(name=name,
@@ -259,7 +260,7 @@ def entry_stat(item: dict) -> FileStat:
     )
 
 
-def current_version_id(versions: list[dict]) -> str | None:
+def current_version_id(versions: list[dict[str, Any]]) -> str | None:
     if not versions:
         return None
     current = max(versions, key=lambda v: v.get("lastModifiedDateTime") or "")
@@ -356,7 +357,7 @@ async def iter_tree(
     config: MsGraphConfig,
     loc: DriveLoc,
     session: aiohttp.ClientSession | None = None,
-) -> AsyncIterator[tuple[str, dict, bool]]:
+) -> AsyncIterator[tuple[str, dict[str, Any], bool]]:
     children = await graph_list(config, loc.item("/children"), session=session)
     for child in children:
         cname = child.get("name", "")

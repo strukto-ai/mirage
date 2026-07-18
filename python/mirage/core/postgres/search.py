@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
@@ -38,7 +40,8 @@ async def _text_columns(conn, schema: str, name: str) -> list[str]:
 
 
 async def search_entity(accessor: PostgresAccessor, schema: str, kind: str,
-                        entity: str, pattern: str, limit: int) -> list[dict]:
+                        entity: str, pattern: str,
+                        limit: int) -> list[dict[str, Any]]:
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         cols = await _text_columns(conn, schema, entity)
@@ -50,9 +53,9 @@ async def search_entity(accessor: PostgresAccessor, schema: str, kind: str,
         return [dict(r) for r in rows]
 
 
-async def search_kind(accessor: PostgresAccessor, schema: str, kind: str,
-                      pattern: str,
-                      limit: int) -> list[tuple[str, str, str, list[dict]]]:
+async def search_kind(
+        accessor: PostgresAccessor, schema: str, kind: str, pattern: str,
+        limit: int) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         if kind == "tables":
@@ -61,7 +64,7 @@ async def search_kind(accessor: PostgresAccessor, schema: str, kind: str,
             views = await _client.list_views(conn, schema)
             mviews = await _client.list_matviews(conn, schema)
             names = sorted(set(views) | set(mviews))
-    out: list[tuple[str, str, str, list[dict]]] = []
+    out: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for n in names:
         rows = await search_entity(accessor, schema, kind, n, pattern, limit)
         if rows:
@@ -69,9 +72,10 @@ async def search_kind(accessor: PostgresAccessor, schema: str, kind: str,
     return out
 
 
-async def search_schema(accessor: PostgresAccessor, schema: str, pattern: str,
-                        limit: int) -> list[tuple[str, str, str, list[dict]]]:
-    out: list[tuple[str, str, str, list[dict]]] = []
+async def search_schema(
+        accessor: PostgresAccessor, schema: str, pattern: str,
+        limit: int) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
+    out: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for kind in ("tables", "views"):
         out.extend(await search_kind(accessor, schema, kind, pattern, limit))
     return out
@@ -79,18 +83,19 @@ async def search_schema(accessor: PostgresAccessor, schema: str, pattern: str,
 
 async def search_database(
         accessor: PostgresAccessor, pattern: str,
-        limit: int) -> list[tuple[str, str, str, list[dict]]]:
+        limit: int) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         schemas = await _client.list_schemas(conn, accessor.config.schemas)
-    out: list[tuple[str, str, str, list[dict]]] = []
+    out: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for s in schemas:
         out.extend(await search_schema(accessor, s, pattern, limit))
     return out
 
 
 def format_grep_results(
-        results: list[tuple[str, str, str, list[dict]]]) -> list[str]:
+        results: list[tuple[str, str, str, list[dict[str,
+                                                     Any]]]]) -> list[str]:
     lines: list[str] = []
     for schema, kind, entity, rows in results:
         for r in rows:

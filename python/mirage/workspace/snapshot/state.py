@@ -14,6 +14,7 @@
 
 import importlib
 import tempfile
+from typing import Any
 
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
@@ -33,7 +34,7 @@ from mirage.workspace.snapshot.drift import (capture_fingerprints,
 from mirage.workspace.snapshot.utils import FORMAT_VERSION, norm_mount_prefix
 
 
-async def to_state_dict(ws) -> dict:
+async def to_state_dict(ws) -> dict[str, Any]:
     auto_prefixes = {"/dev/", norm_mount_prefix(HISTORY_PREFIX)}
 
     mounts_state = []
@@ -96,7 +97,8 @@ async def to_state_dict(ws) -> dict:
     }
 
 
-def build_mount_args(state: dict, resources: dict | None = None) -> MountArgs:
+def build_mount_args(state: dict[str, Any],
+                     resources: dict[str, Any] | None = None) -> MountArgs:
     """Translate a state dict into Workspace constructor inputs.
 
     Validates that every mount with redacted secrets has a resource
@@ -126,7 +128,7 @@ def build_mount_args(state: dict, resources: dict | None = None) -> MountArgs:
             f"{missing}. These mounts were saved with redacted creds "
             "or transient connection state and need fresh resources.")
 
-    mount_args: dict[str, tuple] = {}
+    mount_args: dict[str, tuple[Any, ...]] = {}
     for m in state[StateKey.MOUNTS]:
         prefix = norm_mount_prefix(m[MountKey.PREFIX])
         prov = (overrides[prefix]
@@ -141,7 +143,7 @@ def build_mount_args(state: dict, resources: dict | None = None) -> MountArgs:
     )
 
 
-async def apply_state_dict(ws, state: dict) -> None:
+async def apply_state_dict(ws, state: dict[str, Any]) -> None:
     """Restore post-construction state into an already-built Workspace.
 
     Restores: resource load_state (content, fresh disk root, etc.),
@@ -171,7 +173,7 @@ async def apply_state_dict(ws, state: dict) -> None:
     await _restore_nodes(ws, state)
 
 
-async def _restore_nodes(ws, state: dict) -> None:
+async def _restore_nodes(ws, state: dict[str, Any]) -> None:
     entries = {
         path: NodeMeta.from_fields(d)
         for path, d in (state.get(StateKey.NODES) or {}).items()
@@ -179,7 +181,7 @@ async def _restore_nodes(ws, state: dict) -> None:
     await ws._namespace.replace_nodes(entries)
 
 
-async def _restore_sessions(ws, state: dict) -> None:
+async def _restore_sessions(ws, state: dict[str, Any]) -> None:
     default_sid = state.get(StateKey.DEFAULT_SESSION_ID)
     if default_sid is not None:
         # The snapshot's default session identity wins over the live
@@ -191,7 +193,7 @@ async def _restore_sessions(ws, state: dict) -> None:
             "default_session_id": default_sid,
         })
         ws._meta_written = True
-    restored: list = []
+    restored: list[Any] = []
     for s_data in state.get(StateKey.SESSIONS, []):
         sid = s_data[SessionKey.SESSION_ID]
         if sid == default_sid:
@@ -211,7 +213,7 @@ async def _restore_sessions(ws, state: dict) -> None:
     await ws._session_mgr.replace_from_snapshot(restored)
 
 
-def _restore_cache(ws, state: dict) -> None:
+def _restore_cache(ws, state: dict[str, Any]) -> None:
     cache_state = state.get(StateKey.CACHE) or {}
     if hasattr(ws._cache, "max_drain_bytes"):
         ws._cache.max_drain_bytes = cache_state.get(CacheKey.MAX_DRAIN_BYTES)
@@ -234,13 +236,13 @@ def _restore_cache(ws, state: dict) -> None:
         cache._cache_size += entry.get(CacheKey.SIZE, len(data))
 
 
-async def _restore_history(ws, state: dict) -> None:
+async def _restore_history(ws, state: dict[str, Any]) -> None:
     # Always load (load_events clears first): a snapshot with empty
     # history still rewinds the recorder, same as the cache clear.
     await ws.observer.load_events(state.get(StateKey.HISTORY) or [])
 
 
-def _restore_jobs(ws, state: dict) -> None:
+def _restore_jobs(ws, state: dict[str, Any]) -> None:
     max_id = 0
     for job_d in state.get(StateKey.JOBS, []):
         max_id = max(max_id, job_d.get(JobKey.ID, 0))
@@ -248,7 +250,7 @@ def _restore_jobs(ws, state: dict) -> None:
     ws.job_table._next_id = max_id + 1
 
 
-def _job_to_dict(job) -> dict:
+def _job_to_dict(job) -> dict[str, Any]:
     return {
         JobKey.ID: job.id,
         JobKey.COMMAND: job.command,
@@ -263,7 +265,7 @@ def _job_to_dict(job) -> dict:
     }
 
 
-def _job_from_dict(d: dict):
+def _job_from_dict(d: dict[str, Any]):
     return Job(
         id=d[JobKey.ID],
         command=d[JobKey.COMMAND],
@@ -279,7 +281,7 @@ def _job_from_dict(d: dict):
     )
 
 
-def _construct_resource(mount_state: dict):
+def _construct_resource(mount_state: dict[str, Any]):
     cls = _resource_class_for(mount_state)
     resource_state = mount_state[MountKey.RESOURCE_STATE]
     ptype = resource_state.get(ResourceStateKey.TYPE, "")
@@ -302,14 +304,14 @@ def _construct_resource(mount_state: dict):
     return cls()
 
 
-def requires_resource_override(mount_state: dict) -> bool:
+def requires_resource_override(mount_state: dict[str, Any]) -> bool:
     resource_state = mount_state[MountKey.RESOURCE_STATE]
     config = resource_state.get(ResourceStateKey.CONFIG)
     config_cls = _config_class_for(_resource_class_for(mount_state))
     return has_redacted_secret(config, config_cls)
 
 
-def _resource_class_for(mount_state: dict):
+def _resource_class_for(mount_state: dict[str, Any]):
     ptype = mount_state[MountKey.RESOURCE_STATE].get(ResourceStateKey.TYPE, "")
     if ptype in REGISTRY:
         return load_backend_class(REGISTRY[ptype].resource_path)

@@ -14,9 +14,10 @@
 
 from email import policy
 from email.parser import BytesParser
+from typing import Any
 
 
-def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict:
+def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict[str, Any]:
     parser = BytesParser(policy=policy.default)
     if headers_only:
         msg = parser.parsebytes(raw, headersonly=True)
@@ -24,7 +25,7 @@ def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict:
         msg = parser.parsebytes(raw)
 
     body_text, body_html = "", ""
-    attachments: list[dict] = []
+    attachments: list[dict[str, Any]] = []
 
     if not headers_only:
         body_text, body_html, attachments = _extract_parts(msg)
@@ -46,9 +47,9 @@ def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict:
     }
 
 
-def _extract_parts(msg) -> tuple[str, str, list[dict]]:
+def _extract_parts(msg) -> tuple[str, str, list[dict[str, Any]]]:
     text, html = "", ""
-    attachments: list[dict] = []
+    attachments: list[dict[str, Any]] = []
 
     if msg.is_multipart():
         for part in msg.walk():

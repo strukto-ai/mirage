@@ -14,6 +14,7 @@
 
 import tomllib
 from pathlib import Path
+from typing import Any
 
 ALLOWED_KEYS = frozenset({
     "url",
@@ -40,7 +41,7 @@ class DaemonConfigError(Exception):
     """Raised when config.toml's ``[daemon]`` table is unusable."""
 
 
-def validate_daemon_table(table: dict) -> None:
+def validate_daemon_table(table: dict[str, Any]) -> None:
     """Reject unknown keys or wrong-typed values in a ``[daemon]`` table.
 
     Args:
@@ -64,7 +65,7 @@ def validate_daemon_table(table: dict) -> None:
             f"type: {', '.join(bad_types)}")
 
 
-def read_daemon_table(home: Path) -> dict:
+def read_daemon_table(home: Path) -> dict[str, Any]:
     """Read the ``[daemon]`` table from ``home/config.toml``.
 
     Args:

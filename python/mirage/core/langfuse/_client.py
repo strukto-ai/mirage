@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from langfuse.api.client import AsyncLangfuseAPI
 
 
-def _to_dict(obj) -> dict:
+def _to_dict(obj) -> dict[str, Any]:
     if hasattr(obj, "model_dump"):
         return obj.model_dump(mode="json")
     if hasattr(obj, "dict"):
@@ -30,8 +32,8 @@ async def fetch_traces(
     user_id: str | None = None,
     session_id: str | None = None,
     order_by: str | None = None,
-) -> list[dict]:
-    kwargs: dict = {"limit": limit}
+) -> list[dict[str, Any]]:
+    kwargs: dict[str, Any] = {"limit": limit}
     if name:
         kwargs["name"] = name
     if user_id:
@@ -44,7 +46,7 @@ async def fetch_traces(
     return [_to_dict(t) for t in result.data]
 
 
-async def fetch_trace(api: AsyncLangfuseAPI, trace_id: str) -> dict:
+async def fetch_trace(api: AsyncLangfuseAPI, trace_id: str) -> dict[str, Any]:
     result = await api.trace.get(trace_id)
     return _to_dict(result)
 
@@ -52,17 +54,18 @@ async def fetch_trace(api: AsyncLangfuseAPI, trace_id: str) -> dict:
 async def fetch_sessions(
     api: AsyncLangfuseAPI,
     limit: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     result = await api.sessions.list(limit=limit)
     return [_to_dict(s) for s in result.data]
 
 
-async def fetch_session(api: AsyncLangfuseAPI, session_id: str) -> dict:
+async def fetch_session(api: AsyncLangfuseAPI,
+                        session_id: str) -> dict[str, Any]:
     result = await api.sessions.get(session_id)
     return _to_dict(result)
 
 
-async def fetch_prompts(api: AsyncLangfuseAPI) -> list[dict]:
+async def fetch_prompts(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
     result = await api.prompts.list()
     return [_to_dict(p) for p in result.data]
 
@@ -71,20 +74,20 @@ async def fetch_prompt(
     api: AsyncLangfuseAPI,
     name: str,
     version: int | None = None,
-) -> dict:
-    kwargs: dict = {"prompt_name": name}
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"prompt_name": name}
     if version is not None:
         kwargs["version"] = version
     result = await api.prompts.get(**kwargs)
     return _to_dict(result)
 
 
-async def fetch_datasets(api: AsyncLangfuseAPI) -> list[dict]:
+async def fetch_datasets(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
     result = await api.datasets.list()
     return [_to_dict(d) for d in result.data]
 
 
-async def fetch_dataset(api: AsyncLangfuseAPI, name: str) -> dict:
+async def fetch_dataset(api: AsyncLangfuseAPI, name: str) -> dict[str, Any]:
     result = await api.datasets.get(dataset_name=name)
     return _to_dict(result)
 
@@ -93,7 +96,7 @@ async def fetch_dataset_items(
     api: AsyncLangfuseAPI,
     dataset_name: str,
     limit: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     result = await api.dataset_items.list(
         dataset_name=dataset_name,
         limit=limit,
@@ -105,7 +108,7 @@ async def fetch_dataset_runs(
     api: AsyncLangfuseAPI,
     dataset_name: str,
     limit: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     result = await api.datasets.get_runs(
         dataset_name=dataset_name,
         limit=limit,

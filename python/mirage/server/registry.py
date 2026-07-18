@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import time
-from typing import Iterable
+from typing import Any, Iterable
 
 from mirage import Workspace, WorkspaceRunner
 from mirage.utils.ids import new_workspace_id
@@ -59,7 +59,7 @@ class WorkspaceRegistry:
         self.idle_grace_seconds = idle_grace_seconds
         self.exit_event = (exit_event
                            if exit_event is not None else asyncio.Event())
-        self._idle_task: asyncio.Task | None = None
+        self._idle_task: asyncio.Task[Any] | None = None
 
     def __contains__(self, workspace_id: str) -> bool:
         return workspace_id in self._entries

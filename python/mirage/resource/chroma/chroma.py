@@ -1,3 +1,5 @@
+from typing import Any
+
 from mirage.accessor.chroma import ChromaAccessor
 from mirage.commands.builtin.chroma import COMMANDS
 from mirage.core.chroma.glob import resolve_glob as _resolve_glob
@@ -40,7 +42,7 @@ class ChromaResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,
             "needs_override": True,
@@ -48,5 +50,5 @@ class ChromaResource(BaseResource):
             "config": self.config.model_dump(),
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

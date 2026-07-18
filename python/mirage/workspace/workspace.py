@@ -271,7 +271,7 @@ class Workspace:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
             self.add_fuse_mount(prefix, mountpoint)
 
-    async def history(self) -> list[dict]:
+    async def history(self) -> list[dict[str, Any]]:
         """Command events recorded by the hidden recorder.
 
         Returns:
@@ -299,7 +299,7 @@ class Workspace:
     def max_drain_bytes(self, value: int | None) -> None:
         self._cache.max_drain_bytes = value
 
-    def mounts(self) -> list:
+    def mounts(self) -> list[Any]:
         return self._registry.mounts()
 
     @property
@@ -532,7 +532,7 @@ class Workspace:
             cls,
             source,
             *,
-            resources: dict | None = None,
+            resources: dict[str, Any] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -568,9 +568,9 @@ class Workspace:
     @classmethod
     async def from_state(
             cls,
-            state: dict,
+            state: dict[str, Any],
             *,
-            resources: dict | None = None,
+            resources: dict[str, Any] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -622,10 +622,11 @@ class Workspace:
         return await type(self)._from_state(state, resources=resources)
 
     @classmethod
-    async def _from_state(cls,
-                          state: dict,
-                          *,
-                          resources: dict | None = None) -> "Workspace":
+    async def _from_state(
+            cls,
+            state: dict[str, Any],
+            *,
+            resources: dict[str, Any] | None = None) -> "Workspace":
         args = build_mount_args(state, resources)
         ws = cls(args.mount_args,
                  consistency=args.consistency,

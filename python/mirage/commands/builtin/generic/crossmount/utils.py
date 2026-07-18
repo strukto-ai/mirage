@@ -25,7 +25,7 @@ from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
-async def relay(dispatch: Callable, name: str, path: PathSpec,
+async def relay(dispatch: Callable[..., Any], name: str, path: PathSpec,
                 **kwargs: Any) -> Any:
     # Relay one op for one path to the mount that owns it. The generics call
     # ops as (path); dispatch keys off the path.
@@ -33,7 +33,8 @@ async def relay(dispatch: Callable, name: str, path: PathSpec,
     return data
 
 
-async def stream(dispatch: Callable, path: PathSpec) -> AsyncIterator[bytes]:
+async def stream(dispatch: Callable[..., Any],
+                 path: PathSpec) -> AsyncIterator[bytes]:
     yield await relay(dispatch, "read", path)
 
 
@@ -41,7 +42,7 @@ async def run_operands(run_single: RunSingle,
                        cmd_name: str,
                        scopes: list[PathSpec],
                        texts: list[str],
-                       flag_kwargs: dict,
+                       flag_kwargs: dict[str, object],
                        stdin_bytes: bytes | None = None) -> list[OperandRun]:
     """Run one native single-mount command per operand, in operand order.
 
@@ -102,7 +103,7 @@ def flat_scopes(scopes: list[PathSpec]) -> list[PathSpec]:
     ]
 
 
-def transfer_primitives(dispatch: Callable) -> dict[str, Any]:
+def transfer_primitives(dispatch: Callable[..., Any]) -> dict[str, Any]:
     """Dispatch-relayed primitives shared by the transfer generics (cp/mv).
 
     Args:

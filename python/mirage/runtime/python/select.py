@@ -52,7 +52,7 @@ def validate_python_runtime_name(name: str) -> str:
 
 def select_python_runtime(
         name: str | None,
-        dispatch: Callable | None = None,
+        dispatch: Callable[..., Any] | None = None,
         options: dict[str, dict[str, Any]] | None = None,
         mount_prefixes: Callable[[], list[str]] | None = None
 ) -> PythonRuntime:

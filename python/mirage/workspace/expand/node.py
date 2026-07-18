@@ -14,6 +14,7 @@
 
 import shlex
 from collections.abc import Callable
+from typing import Any
 
 import tree_sitter
 
@@ -42,7 +43,7 @@ def _unescape_unquoted(text: str) -> str:
 async def expand_arith(
     ts_node: tree_sitter.Node,
     session: Session,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
 ) -> str:
     """Reconstruct arithmetic expression text for the shared evaluator.
@@ -80,7 +81,7 @@ async def expand_arith(
 async def expand_node(
     ts_node: tree_sitter.Node,
     session: Session,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
 ) -> str:
     """Expand a tree-sitter node to a string."""

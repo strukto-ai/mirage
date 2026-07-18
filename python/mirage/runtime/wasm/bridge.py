@@ -29,7 +29,7 @@ class SyncDispatch:
     are enforced inside the op exactly as for shell commands.
     """
 
-    def __init__(self, dispatch: Callable,
+    def __init__(self, dispatch: Callable[..., Any],
                  loop: asyncio.AbstractEventLoop) -> None:
         self._dispatch = dispatch
         self._loop = loop

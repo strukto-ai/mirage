@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import aiohttp
 
 from mirage.resource.linear.config import LinearConfig
@@ -31,7 +33,7 @@ class LinearAPIError(RuntimeError):
         self,
         message: str,
         *,
-        errors: list[dict] | None = None,
+        errors: list[dict[str, Any]] | None = None,
         status: int | None = None,
     ) -> None:
         super().__init__(message)
@@ -49,8 +51,8 @@ def linear_headers(config: LinearConfig) -> dict[str, str]:
 async def graphql_request(
     config: LinearConfig,
     query: str,
-    variables: dict | None = None,
-) -> dict:
+    variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     payload = {
         "query": query,
         "variables": variables or {},
@@ -75,7 +77,7 @@ async def graphql_request(
             return data["data"]
 
 
-def _error_message(errors: list[dict] | None) -> str | None:
+def _error_message(errors: list[dict[str, Any]] | None) -> str | None:
     if not errors:
         return None
     first = errors[0]
@@ -89,13 +91,13 @@ def _error_message(errors: list[dict] | None) -> str | None:
 async def paginate_connection(
     config: LinearConfig,
     query: str,
-    variables: dict | None,
+    variables: dict[str, Any] | None,
     path: tuple[str, ...],
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     merged_vars = dict(variables or {})
     merged_vars.setdefault("first", 50)
     merged_vars["after"] = None
-    nodes: list[dict] = []
+    nodes: list[dict[str, Any]] = []
     while True:
         data = await graphql_request(config, query, merged_vars)
         cursor = data
@@ -109,12 +111,13 @@ async def paginate_connection(
     return nodes
 
 
-async def list_teams(config: LinearConfig) -> list[dict]:
+async def list_teams(config: LinearConfig) -> list[dict[str, Any]]:
     return await paginate_connection(config, TEAM_LIST_QUERY, None,
                                      ("teams", ))
 
 
-async def list_team_members(config: LinearConfig, team_id: str) -> list[dict]:
+async def list_team_members(config: LinearConfig,
+                            team_id: str) -> list[dict[str, Any]]:
     return await paginate_connection(
         config,
         TEAM_MEMBERS_QUERY,
@@ -123,7 +126,8 @@ async def list_team_members(config: LinearConfig, team_id: str) -> list[dict]:
     )
 
 
-async def list_team_issues(config: LinearConfig, team_id: str) -> list[dict]:
+async def list_team_issues(config: LinearConfig,
+                           team_id: str) -> list[dict[str, Any]]:
     return await paginate_connection(
         config,
         TEAM_ISSUES_QUERY,
@@ -132,7 +136,8 @@ async def list_team_issues(config: LinearConfig, team_id: str) -> list[dict]:
     )
 
 
-async def list_team_projects(config: LinearConfig, team_id: str) -> list[dict]:
+async def list_team_projects(config: LinearConfig,
+                             team_id: str) -> list[dict[str, Any]]:
     return await paginate_connection(
         config,
         TEAM_PROJECTS_QUERY,
@@ -141,7 +146,8 @@ async def list_team_projects(config: LinearConfig, team_id: str) -> list[dict]:
     )
 
 
-async def list_team_cycles(config: LinearConfig, team_id: str) -> list[dict]:
+async def list_team_cycles(config: LinearConfig,
+                           team_id: str) -> list[dict[str, Any]]:
     return await paginate_connection(
         config,
         TEAM_CYCLES_QUERY,
@@ -150,13 +156,13 @@ async def list_team_cycles(config: LinearConfig, team_id: str) -> list[dict]:
     )
 
 
-async def get_issue(config: LinearConfig, issue_id: str) -> dict:
+async def get_issue(config: LinearConfig, issue_id: str) -> dict[str, Any]:
     data = await graphql_request(config, ISSUE_QUERY, {"issueId": issue_id})
     return data["issue"]
 
 
 async def list_issue_comments(config: LinearConfig,
-                              issue_id: str) -> list[dict]:
+                              issue_id: str) -> list[dict[str, Any]]:
     return await paginate_connection(
         config,
         ISSUE_COMMENTS_QUERY,
@@ -214,7 +220,7 @@ async def issue_create(
     team_id: str,
     title: str,
     description: str | None,
-) -> dict:
+) -> dict[str, Any]:
     input_payload: dict[str, object] = {"title": title, "teamId": team_id}
     if description:
         input_payload["description"] = description
@@ -238,7 +244,7 @@ async def issue_update(
     priority: int | None = None,
     project_id: str | None = None,
     label_ids: list[str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     payload: dict[str, object] = {}
     if title is not None:
         payload["title"] = title
@@ -272,7 +278,7 @@ async def comment_create(
     *,
     issue_id: str,
     body: str,
-) -> dict:
+) -> dict[str, Any]:
     await graphql_request(
         config,
         COMMENT_CREATE_MUTATION,
@@ -292,7 +298,7 @@ async def comment_update(
     *,
     comment_id: str,
     body: str,
-) -> dict:
+) -> dict[str, Any]:
     data = await graphql_request(
         config,
         COMMENT_UPDATE_MUTATION,
@@ -318,7 +324,7 @@ async def search_issues(
     config: LinearConfig,
     query: str,
     limit: int = 50,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     data = await graphql_request(
         config,
         ISSUE_SEARCH_QUERY,

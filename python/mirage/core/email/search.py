@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email._client import fetch_message, list_message_uids
@@ -74,7 +75,7 @@ async def search_messages(
                                    max_results=max_results)
 
 
-def _build_vfs_path(prefix: str, folder: str, msg: dict) -> str:
+def _build_vfs_path(prefix: str, folder: str, msg: dict[str, Any]) -> str:
     date_str = _date_from_header(msg.get("date", ""))
     subject = _sanitize(msg.get("subject", "No Subject"))
     uid = msg.get("uid", "")

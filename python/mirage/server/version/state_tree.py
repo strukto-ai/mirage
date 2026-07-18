@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.types import CacheKey, MountKey, ResourceStateKey, StateKey
 from mirage.workspace.snapshot.state import to_state_dict
@@ -44,21 +45,22 @@ def _belongs(tree_prefix: str, tree_path: str) -> bool:
     return tree_path == tree_prefix or tree_path.startswith(tree_prefix + "/")
 
 
-def meta_to_blob(meta: dict) -> bytes:
+def meta_to_blob(meta: dict[str, Any]) -> bytes:
     return json.dumps(meta, default=_json_default).encode("utf-8")
 
 
-def blob_to_meta(data: bytes) -> dict:
+def blob_to_meta(data: bytes) -> dict[str, Any]:
     return json.loads(data.decode("utf-8"))
 
 
-async def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict]:
+async def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict[str, Any]]:
     return tree_inputs_from_state(await to_state_dict(ws))
 
 
-def tree_inputs_from_state(state: dict) -> tuple[dict[str, bytes], dict]:
+def tree_inputs_from_state(
+        state: dict[str, Any]) -> tuple[dict[str, bytes], dict[str, Any]]:
     entries: dict[str, bytes] = {}
-    mounts_meta: list[dict] = []
+    mounts_meta: list[dict[str, Any]] = []
     for mount in state[StateKey.MOUNTS]:
         prefix = mount[MountKey.PREFIX]
         resource_state = dict(mount[MountKey.RESOURCE_STATE])
@@ -96,8 +98,9 @@ def tree_inputs_from_state(state: dict) -> tuple[dict[str, bytes], dict]:
     return entries, meta
 
 
-def to_state(entries: dict[str, bytes], meta: dict) -> dict:
-    mounts: list[dict] = []
+def to_state(entries: dict[str, bytes], meta: dict[str,
+                                                   Any]) -> dict[str, Any]:
+    mounts: list[dict[str, Any]] = []
     for mount in meta["mounts"]:
         prefix = mount[MountKey.PREFIX]
         tree_prefix = prefix.strip("/")

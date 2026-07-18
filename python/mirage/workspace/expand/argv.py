@@ -15,6 +15,7 @@
 import dataclasses
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import Any
 
 import tree_sitter
 
@@ -76,7 +77,7 @@ class Argv:
 async def expand_argv(
     parts: list[tree_sitter.Node],
     session: Session,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     registry: MountRegistry,
 ) -> Argv:

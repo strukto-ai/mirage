@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
-from typing import cast
+from typing import Any, cast
 
 from agents import Runner, TResponseInputItem
 from openai import AsyncOpenAI
@@ -53,7 +53,7 @@ class MirageRunner:
         self._ws = workspace
         self._client = client
 
-    async def _block_for_path(self, path: str) -> dict:
+    async def _block_for_path(self, path: str) -> dict[str, Any]:
         st = await self._ws.ops.stat(path)
         data = await self._ws.ops.read(path)
         if st.type in _VISION_TYPES:
@@ -81,7 +81,7 @@ class MirageRunner:
         self,
         prompt: str,
         paths: list[str],
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Build the user-message content blocks for a prompt + paths.
 
         Args:
@@ -91,7 +91,7 @@ class MirageRunner:
         Returns:
             list[dict]: Content blocks ready to embed in a user message.
         """
-        blocks: list[dict] = [{"type": "input_text", "text": prompt}]
+        blocks: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
         for path in paths:
             blocks.append(await self._block_for_path(path))
         return blocks

@@ -15,6 +15,7 @@
 import dataclasses
 import os
 from pathlib import Path
+from typing import Any
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.commands.builtin.disk import COMMANDS as DISK_COMMANDS
@@ -62,7 +63,7 @@ class DiskResource(BaseResource):
     name: str = ResourceName.DISK
     accessor: DiskAccessor
     index_ttl: float = 60
-    _ops: dict = _DISK_OPS
+    _ops: dict[str, Any] = _DISK_OPS
     PROMPT: str = PROMPT
 
     def __init__(self, root: str) -> None:
@@ -83,7 +84,7 @@ class DiskResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         files: dict[str, bytes] = {}
         modes: dict[str, int] = {}
         for p in self.root.rglob("*"):
@@ -100,7 +101,7 @@ class DiskResource(BaseResource):
             "modes": modes,
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         files = state.get("files", {})
         modes = state.get("modes", {})
         for rel, data in files.items():

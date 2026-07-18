@@ -16,6 +16,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from mirage.io.types import IOResult
 from mirage.workspace.types import ExecutionNode
@@ -31,7 +32,7 @@ class JobStatus(str, Enum):
 class Job:
     id: int
     command: str
-    task: asyncio.Task | None
+    task: asyncio.Task[Any] | None
     cwd: str
     status: JobStatus = JobStatus.RUNNING
     stdout: bytes = b""
@@ -53,7 +54,7 @@ class JobTable:
     def submit(
         self,
         command: str,
-        task: asyncio.Task,
+        task: asyncio.Task[Any],
         cwd: str,
         agent: str = "unknown",
         session_id: str = "",

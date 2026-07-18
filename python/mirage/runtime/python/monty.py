@@ -65,7 +65,8 @@ class _MirageOS(OSAccess):
     """
 
     def __init__(self, loop: asyncio.AbstractEventLoop,
-                 dispatch: Callable | None, environ: dict[str, str]) -> None:
+                 dispatch: Callable[..., Any] | None,
+                 environ: dict[str, str]) -> None:
         super().__init__([], environ=dict(environ))
         self._loop = loop
         self._workspace_dispatch = dispatch
@@ -117,7 +118,7 @@ class _MirageOS(OSAccess):
                                      data=data))
         self._missing.discard(str(path))
 
-    def _insert_tree_dir(self, path: PurePosixPath) -> dict | None:
+    def _insert_tree_dir(self, path: PurePosixPath) -> dict[str, Any] | None:
         subtree = self._tree
         for part in path.parts:
             entry = subtree.setdefault(part, {})
@@ -245,7 +246,7 @@ class MontyRuntime(PythonRuntime):
 
     name = "monty"
 
-    def __init__(self, dispatch: Callable | None = None) -> None:
+    def __init__(self, dispatch: Callable[..., Any] | None = None) -> None:
         if pydantic_monty is None:
             raise ImportError(
                 "the monty runtime requires the 'monty' extra. Install with: "

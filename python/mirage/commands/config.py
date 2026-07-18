@@ -14,7 +14,7 @@
 
 import functools
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.commands.safeguard import CommandSafeguard
 from mirage.commands.spec import CommandSpec
@@ -30,8 +30,9 @@ _HELP_OPTION = Option(
 )
 
 
-def _with_help_support(name: str, spec: CommandSpec,
-                       fn: Callable) -> tuple[CommandSpec, Callable]:
+def _with_help_support(
+        name: str, spec: CommandSpec,
+        fn: Callable[..., Any]) -> tuple[CommandSpec, Callable[..., Any]]:
     has_help = any(o.long == "--help" for o in spec.options)
     new_spec = spec if has_help else replace(
         spec, options=spec.options + (_HELP_OPTION, ))
@@ -52,9 +53,9 @@ class RegisteredCommand:
     spec: CommandSpec
     resource: str | None
     filetype: str | None
-    fn: Callable
-    provision_fn: Callable | None = None
-    aggregate: Callable | None = None
+    fn: Callable[..., Any]
+    provision_fn: Callable[..., Any] | None = None
+    aggregate: Callable[..., Any] | None = None
     src: str | None = None
     dst: str | None = None
     write: bool = False
@@ -67,14 +68,14 @@ def command(
     resource: str | list[str] | None,
     spec: CommandSpec,
     filetype: str | None = None,
-    provision: Callable | None = None,
-    dry_run: Callable | None = None,
-    aggregate: Callable | None = None,
+    provision: Callable[..., Any] | None = None,
+    dry_run: Callable[..., Any] | None = None,
+    aggregate: Callable[..., Any] | None = None,
     write: bool = False,
     safeguard: CommandSafeguard | None = None,
-) -> Callable:
+) -> Callable[..., Any]:
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         resources = (resource if isinstance(resource, list) else [resource])
         new_spec, wrapped_fn = _with_help_support(name, spec, fn)
         cmds = getattr(wrapped_fn, "_registered_commands", [])
@@ -103,9 +104,9 @@ def cross_command(
     src: str,
     dst: str,
     spec: CommandSpec,
-) -> Callable:
+) -> Callable[..., Any]:
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         rc = RegisteredCommand(
             name=name,
             spec=spec,

@@ -56,7 +56,7 @@ async def call_read_bytes(
 
 
 async def stream_from_bytes(
-    read_fn: Callable,
+    read_fn: Callable[..., Any],
     accessor: Any,
     path: Any,
     index: Any = None,

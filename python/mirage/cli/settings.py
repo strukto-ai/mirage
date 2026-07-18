@@ -16,6 +16,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN
 from mirage.server.auth import storage as auth_storage
@@ -177,7 +178,7 @@ def _config_lines(path: Path) -> list[str]:
     return path.read_text().splitlines()
 
 
-def list_config(path: Path | None = None) -> dict:
+def list_config(path: Path | None = None) -> dict[str, Any]:
     """Return the ``[daemon]`` table as written in the config file.
 
     Args:

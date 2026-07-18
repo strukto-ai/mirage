@@ -90,12 +90,12 @@ class PlanScope:
 
 
 async def _provision_redirected(
-    recurse: Callable,
+    recurse: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace | None,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     command: Any,
-    redirects: list,
+    redirects: list[Any],
     session: Session,
 ) -> ProvisionResult:
     """Plan one redirected command: expand targets, cost, degrade.
@@ -133,11 +133,11 @@ async def _provision_redirected(
 
 
 async def _provision_reassociated(
-    recurse: Callable,
+    recurse: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace | None,
-    execute_fn: Callable,
-    redirects: list,
+    execute_fn: Callable[..., Any],
+    redirects: list[Any],
     right: Any,
     node: Any,
     session: Session,
@@ -165,8 +165,8 @@ async def _provision_reassociated(
 
 async def provision_node(
     registry: MountRegistry,
-    dispatch: Callable,
-    execute_fn: Callable,
+    dispatch: Callable[..., Any],
+    execute_fn: Callable[..., Any],
     namespace: Namespace | None,
     node: Any,
     session: Session,

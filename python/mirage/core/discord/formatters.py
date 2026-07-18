@@ -1,3 +1,5 @@
+from typing import Any
+
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +16,7 @@
 
 
 def format_grep_results(
-    messages: list[dict],
+    messages: list[dict[str, Any]],
     prefix: str,
     guild_dirname: str,
     channel_names: dict[str, str] | None = None,

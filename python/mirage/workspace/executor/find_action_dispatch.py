@@ -20,7 +20,7 @@ from mirage.workspace.mount import MountRegistry
 
 async def _apply_find_actions(
     stdout: ByteSource | None,
-    flag_kwargs: dict,
+    flag_kwargs: dict[str, object],
     registry: MountRegistry,
     cwd: str,
 ) -> tuple[ByteSource | None, bytes]:

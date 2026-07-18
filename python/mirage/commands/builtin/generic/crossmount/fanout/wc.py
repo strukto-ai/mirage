@@ -40,7 +40,8 @@ def _wc_counts(values: list[int], *, args_l: bool, w: bool, c: bool, m: bool,
     return WCCounts(lines=values[0], words=values[1], bytes_=values[2])
 
 
-def combine_wc(results: list[OperandRun], flag_kwargs: dict) -> bytes:
+def combine_wc(results: list[OperandRun], flag_kwargs: dict[str,
+                                                            object]) -> bytes:
     """Re-total per-operand wc rows with one shared column width.
 
     Each native run right-aligns its own rows, so the runs cannot simply

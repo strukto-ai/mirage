@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.utils.paths import resolve_script
@@ -32,7 +32,7 @@ async def _js(
     m: bool = False,
     module: bool = False,
     stdin: ByteSource | None = None,
-    dispatch: Callable | None = None,
+    dispatch: Callable[..., Any] | None = None,
     cwd: PathSpec | None = None,
     env: dict[str, str] | None = None,
     exec_allowed: bool = True,

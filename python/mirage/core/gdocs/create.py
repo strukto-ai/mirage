@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.gdocs._client import DOCS_API_BASE, TokenManager, google_post
 
 
-async def create_doc(token_manager: TokenManager, title: str) -> dict:
+async def create_doc(token_manager: TokenManager,
+                     title: str) -> dict[str, Any]:
     """Create a new empty Google Doc with a title.
 
     Args:

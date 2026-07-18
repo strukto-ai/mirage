@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -24,7 +25,7 @@ from mirage.utils.errors import enoent
 
 
 async def _resolve_row(accessor: QdrantAccessor, scope, config,
-                       virtual: str) -> dict:
+                       virtual: str) -> dict[str, Any]:
     row = await row_record(accessor, scope.table, config.id_field,
                            scope.row_id)
     if row is None:

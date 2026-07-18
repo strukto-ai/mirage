@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Literal
+from typing import Any, Literal
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.drive_ops import DriveLoc
@@ -22,7 +22,7 @@ _site_cache: dict[str, str] = {}
 _drive_cache: dict[tuple[str, str], str] = {}
 
 
-async def _list_sites(accessor: SharePointAccessor) -> list[dict]:
+async def _list_sites(accessor: SharePointAccessor) -> list[dict[str, Any]]:
     config = accessor.config
     search = config.site_filter or "*"
     url = f"{GRAPH_API}/sites"
@@ -31,7 +31,7 @@ async def _list_sites(accessor: SharePointAccessor) -> list[dict]:
 
 
 async def _list_drives(accessor: SharePointAccessor,
-                       site_id: str) -> list[dict]:
+                       site_id: str) -> list[dict[str, Any]]:
     url = f"{GRAPH_API}/sites/{site_id}/drives"
     params = {"$select": "id,name"}
     return await graph_list(accessor.config, url, params=params)

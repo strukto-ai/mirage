@@ -19,7 +19,7 @@ from mirage.workspace.provision.rollup import rollup_list
 from mirage.workspace.session import Session
 
 
-async def _plan_body(provision_node_fn, body: list,
+async def _plan_body(provision_node_fn, body: list[Any],
                      session) -> ProvisionResult:
     """Plan a multi-statement body."""
     children = []
@@ -35,7 +35,7 @@ async def _plan_body(provision_node_fn, body: list,
 async def handle_function_provision(
     provision_node_fn,
     name: str,
-    body: list,
+    body: list[Any],
     planning: set[str],
     session: Session,
 ) -> ProvisionResult:
@@ -90,7 +90,7 @@ async def handle_if_provision(
 
 async def handle_for_provision(
     provision_node_fn,
-    body: list,
+    body: list[Any],
     n: int,
     session: Session,
 ) -> ProvisionResult:
@@ -101,7 +101,7 @@ async def handle_for_provision(
 
 async def handle_while_provision(
     provision_node_fn,
-    body: list,
+    body: list[Any],
     session: Session,
 ) -> ProvisionResult:
     """Plan while: unknown iterations."""

@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator, Callable
 from functools import partial
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -141,7 +142,7 @@ async def _read_refusing_dirs(ops: CommandIO, index: IndexCacheStore,
 
 
 def dir_refusing_read(ops: CommandIO, accessor: Accessor,
-                      index: IndexCacheStore) -> Callable:
+                      index: IndexCacheStore) -> Callable[..., Any]:
     """Bound read-stream callable that reports directory operands as EISDIR.
 
     For generics that read per operand and format FS errors inline (wc):

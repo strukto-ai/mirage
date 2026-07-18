@@ -21,12 +21,13 @@ from mirage.workspace.snapshot import requires_resource_override, to_state_dict
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
 
-def _build_override_resources(override: dict[str, Any] | None) -> dict:
+def _build_override_resources(
+        override: dict[str, Any] | None) -> dict[str, Any]:
     if not override:
         return {}
     if "mounts" not in override:
         return {}
-    out: dict = {}
+    out: dict[str, Any] = {}
     for prefix, block in override["mounts"].items():
         if not isinstance(block, dict):
             continue
@@ -38,14 +39,14 @@ def _build_override_resources(override: dict[str, Any] | None) -> dict:
     return out
 
 
-def _existing_redacted_resources(ws: Workspace, state: dict,
-                                 skip: set[str]) -> dict:
+def _existing_redacted_resources(ws: Workspace, state: dict[str, Any],
+                                 skip: set[str]) -> dict[str, Any]:
     auto_prefixes = {"/dev/", norm_mount_prefix(HISTORY_PREFIX)}
     prefix_to_resource = {
         m.prefix: m.resource
         for m in ws._registry.mounts() if m.prefix not in auto_prefixes
     }
-    out: dict = {}
+    out: dict[str, Any] = {}
     for m in state["mounts"]:
         prefix = m["prefix"]
         if norm_mount_prefix(prefix) in skip:

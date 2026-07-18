@@ -14,6 +14,7 @@
 
 import json
 import re
+from typing import Any
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexCacheStore
@@ -38,8 +39,8 @@ from mirage.types import PathSpec
 
 
 def _filter_traces(
-    traces: list[dict],
-    pattern: re.Pattern,
+    traces: list[dict[str, Any]],
+    pattern: re.Pattern[str],
 ) -> tuple[bytes, IOResult]:
     lines: list[str] = []
     for t in traces:
@@ -55,8 +56,8 @@ def _filter_traces(
 
 
 def _format_session_results(
-    sessions: list[dict],
-    pattern: re.Pattern,
+    sessions: list[dict[str, Any]],
+    pattern: re.Pattern[str],
 ) -> tuple[bytes, IOResult]:
     lines: list[str] = []
     for s in sessions:
@@ -72,8 +73,8 @@ def _format_session_results(
 
 
 def _format_prompt_results(
-    prompts: list[dict],
-    pattern: re.Pattern,
+    prompts: list[dict[str, Any]],
+    pattern: re.Pattern[str],
 ) -> tuple[bytes, IOResult]:
     lines: list[str] = []
     seen: set[str] = set()
@@ -93,8 +94,8 @@ def _format_prompt_results(
 
 
 def _format_dataset_results(
-    datasets: list[dict],
-    pattern: re.Pattern,
+    datasets: list[dict[str, Any]],
+    pattern: re.Pattern[str],
 ) -> tuple[bytes, IOResult]:
     lines: list[str] = []
     for d in datasets:

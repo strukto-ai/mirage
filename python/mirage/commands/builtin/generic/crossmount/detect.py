@@ -20,7 +20,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec
 
 
-def strategy_for(cmd_name: str, flag_kwargs: dict) -> Strategy:
+def strategy_for(cmd_name: str, flag_kwargs: dict[str, object]) -> Strategy:
     """Pick the combine strategy for one cross-mount command invocation.
 
     Flags can flip the strategy: ``sed -i`` edits each operand in place

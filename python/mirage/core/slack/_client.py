@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import aiohttp
 
 from mirage.resource.secrets import reveal_secret
@@ -43,7 +45,7 @@ def slack_headers(config: SlackConfig, method: str) -> dict[str, str]:
     }
 
 
-def _format_slack_error(method: str, data: dict) -> str:
+def _format_slack_error(method: str, data: dict[str, Any]) -> str:
     err = data.get("error", "unknown_error")
     base = f"Slack API error ({method}): {err}"
     if err != "missing_scope":
@@ -58,8 +60,8 @@ def _format_slack_error(method: str, data: dict) -> str:
 async def slack_get(
     config: SlackConfig,
     method: str,
-    params: dict | None = None,
-) -> dict:
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     url = f"{SLACK_API}/{method}"
     headers = slack_headers(config, method)
     async with aiohttp.ClientSession() as session:
@@ -73,8 +75,8 @@ async def slack_get(
 async def slack_post(
     config: SlackConfig,
     method: str,
-    body: dict | None = None,
-) -> dict:
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     url = f"{SLACK_API}/{method}"
     headers = slack_headers(config, method)
     async with aiohttp.ClientSession() as session:

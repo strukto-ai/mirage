@@ -22,11 +22,11 @@ from mirage.resource.discord.config import DiscordConfig
 async def after_id_pages(
     config: DiscordConfig,
     endpoint: str,
-    base_params: dict,
-    last_id_fn: Callable[[dict], str],
+    base_params: dict[str, Any],
+    last_id_fn: Callable[[dict[str, Any]], str],
     page_size: int = 100,
     start_after: str = "0",
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Walk an after-id paginated Discord endpoint.
 
     Used for endpoints that return a flat list and accept `after=<id>` +
@@ -61,7 +61,7 @@ async def after_id_pages(
         last = last_id_fn(data[-1])
 
 
-def _get_nested(d: dict, path: tuple[str, ...]) -> Any:
+def _get_nested(d: dict[str, Any], path: tuple[str, ...]) -> Any:
     cur: Any = d
     for k in path:
         if not isinstance(cur, dict):
@@ -73,7 +73,7 @@ def _get_nested(d: dict, path: tuple[str, ...]) -> Any:
 async def offset_pages(
     config: DiscordConfig,
     endpoint: str,
-    base_params: dict,
+    base_params: dict[str, Any],
     items_path: tuple[str, ...],
     total_key: str = "total_results",
     page_size: int = 25,

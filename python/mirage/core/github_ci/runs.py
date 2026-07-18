@@ -13,13 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from mirage.core.github_ci._client import (ci_get, ci_get_bytes,
                                            ci_get_paginated)
 from mirage.resource.github_ci.config import GitHubCIConfig
 
 
-async def list_runs(config: GitHubCIConfig, days: int = 30) -> list[dict]:
+async def list_runs(config: GitHubCIConfig,
+                    days: int = 30) -> list[dict[str, Any]]:
     since = (datetime.now(timezone.utc) -
              timedelta(days=days)).strftime("%Y-%m-%d")
     return await ci_get_paginated(
@@ -33,7 +35,7 @@ async def list_runs(config: GitHubCIConfig, days: int = 30) -> list[dict]:
     )
 
 
-async def get_run(config: GitHubCIConfig, run_id: str) -> dict:
+async def get_run(config: GitHubCIConfig, run_id: str) -> dict[str, Any]:
     return await ci_get(
         config.token,
         "/repos/{owner}/{repo}/actions/runs/{run_id}",
@@ -43,7 +45,8 @@ async def get_run(config: GitHubCIConfig, run_id: str) -> dict:
     )
 
 
-async def list_jobs_for_run(config: GitHubCIConfig, run_id: str) -> list[dict]:
+async def list_jobs_for_run(config: GitHubCIConfig,
+                            run_id: str) -> list[dict[str, Any]]:
     return await ci_get_paginated(
         config.token,
         "/repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
@@ -54,7 +57,7 @@ async def list_jobs_for_run(config: GitHubCIConfig, run_id: str) -> list[dict]:
     )
 
 
-async def get_job(config: GitHubCIConfig, job_id: str) -> dict:
+async def get_job(config: GitHubCIConfig, job_id: str) -> dict[str, Any]:
     return await ci_get(
         config.token,
         "/repos/{owner}/{repo}/actions/jobs/{job_id}",

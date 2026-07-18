@@ -14,6 +14,7 @@
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -32,7 +33,7 @@ MAX_PLAN_WALK = 1000
 
 
 async def _expand_globs(
-    resolve_glob: Callable | None,
+    resolve_glob: Callable[..., Any] | None,
     accessor: Accessor,
     paths: list[PathSpec],
     index: IndexCacheStore,
@@ -55,8 +56,8 @@ async def _expand_globs(
 
 
 async def _walk_files(
-    readdir: Callable,
-    stat: Callable,
+    readdir: Callable[..., Any],
+    stat: Callable[..., Any],
     accessor: Accessor,
     roots: list[PathSpec],
     index: IndexCacheStore,
@@ -107,7 +108,7 @@ async def _walk_files(
 
 
 async def _resolve_sizes(
-    stat: Callable,
+    stat: Callable[..., Any],
     accessor: Accessor,
     paths: list[PathSpec],
     index: IndexCacheStore,
@@ -136,8 +137,9 @@ async def _resolve_sizes(
     return resolved, missing
 
 
-def make_file_read_provision(stat: Callable,
-                             resolve_glob: Callable | None = None) -> Callable:
+def make_file_read_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Cost estimate for full file reads (cat, wc), generic over stat."""
 
     async def file_read_provision(
@@ -179,8 +181,9 @@ def make_file_read_provision(stat: Callable,
     return file_read_provision
 
 
-def make_head_tail_provision(stat: Callable,
-                             resolve_glob: Callable | None = None) -> Callable:
+def make_head_tail_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Cost estimate for partial reads (head, tail), generic over stat."""
 
     async def head_tail_provision(
@@ -308,7 +311,7 @@ async def index_hit_read_provision(
     )
 
 
-def make_jq_provision(stat: Callable) -> Callable:
+def make_jq_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
     """Provision for jq: streamable jsonl reads a range, else whole file."""
 
     async def jq_provision(
@@ -358,7 +361,7 @@ def make_jq_provision(stat: Callable) -> Callable:
     return jq_provision
 
 
-def make_sed_provision(stat: Callable) -> Callable:
+def make_sed_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
     """Provision for sed: operands are read fully; -i writes back, so
     the output keeps the read total as a floor with UNKNOWN."""
     base = make_file_read_provision(stat)
@@ -380,9 +383,10 @@ def make_sed_provision(stat: Callable) -> Callable:
     return sed_provision
 
 
-def make_search_provision(stat: Callable,
-                          resolve_glob: Callable | None = None,
-                          readdir: Callable | None = None) -> Callable:
+def make_search_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None,
+        readdir: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Provision for grep/rg/jq: render pattern then delegate to file_read.
 
     With -r/-R and a readdir, directory operands are walked the way the
@@ -428,8 +432,9 @@ def make_search_provision(stat: Callable,
     return search_provision
 
 
-def make_transform_provision(stat: Callable,
-                             resolve_glob: Callable | None = None) -> Callable:
+def make_transform_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Provision for read-transform-write commands (gzip, tar, split).
 
     The operands are read fully, so the read side is a known floor, but
@@ -456,8 +461,9 @@ def make_transform_provision(stat: Callable,
     return transform_provision
 
 
-def make_copy_provision(stat: Callable,
-                        resolve_glob: Callable | None = None) -> Callable:
+def make_copy_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Provision for cp: bytes bracket 0 (server-side copy) to the total.
 
     Reads the source sizes and reports both network_read and
@@ -554,10 +560,12 @@ TRANSFORM_COMMANDS = frozenset(
 WRITE_METADATA_COMMANDS = frozenset({"ln", "mkdir", "mktemp", "rm", "touch"})
 
 
-def default_provision(name: str,
-                      stat: Callable,
-                      resolve_glob: Callable | None = None,
-                      readdir: Callable | None = None) -> Callable | None:
+def default_provision(
+        name: str,
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None,
+        readdir: Callable[..., Any] | None = None
+) -> Callable[..., Any] | None:
     """Default cost estimator for a factory-built command, by family.
 
     Whole-file readers stat their operands and charge the byte total;

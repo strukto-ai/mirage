@@ -14,6 +14,7 @@
 
 import re
 from email.utils import parsedate_to_datetime
+from typing import Any
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
@@ -90,7 +91,7 @@ async def readdir(
                                        folder_name,
                                        max_results=max_msgs)
         headers_list = await fetch_headers(accessor, folder_name, uids)
-        date_groups: dict[str, list[dict]] = {}
+        date_groups: dict[str, list[dict[str, Any]]] = {}
         for hdr in headers_list:
             date_str = _date_from_header(hdr.get("date", ""))
             date_groups.setdefault(date_str, []).append(hdr)

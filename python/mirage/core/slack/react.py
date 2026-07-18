@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.slack._client import slack_post
 from mirage.resource.slack.config import SlackConfig
 
@@ -21,7 +23,7 @@ async def add_reaction(
     channel_id: str,
     timestamp: str,
     reaction: str,
-) -> dict:
+) -> dict[str, Any]:
     """Add a reaction to a message.
 
     Args:

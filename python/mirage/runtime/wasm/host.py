@@ -50,7 +50,8 @@ else:
     ValType = _ValType
 
 
-def _call_guarded(fn: Callable, caller: "wasmtime.Caller", *args: int) -> int:
+def _call_guarded(fn: Callable[..., Any], caller: "wasmtime.Caller", *args:
+                  int) -> int:
     """Run a preview1 host function, mapping fs errors to guest errnos.
 
     Only filesystem-shaped exceptions are mapped; anything else
@@ -83,7 +84,7 @@ class WasiFs:
         self.stderr = bytearray()
         self._memory: "wasmtime.Memory | None" = None
         self._next_fd = 4
-        self._fds: dict[int, dict] = {
+        self._fds: dict[int, dict[str, Any]] = {
             0: {
                 "kind": "stdin",
                 "buf": stdin,
@@ -134,7 +135,7 @@ class WasiFs:
         normed = posixpath.normpath(joined)
         return normed if normed.startswith("/") else "/" + normed
 
-    def _alloc(self, entry: dict) -> int:
+    def _alloc(self, entry: dict[str, Any]) -> int:
         fd = self._next_fd
         self._next_fd += 1
         self._fds[fd] = entry
@@ -488,7 +489,7 @@ class WasiFs:
         return ENOTSUP
 
 
-def _spec() -> dict[str, tuple[list, list]]:
+def _spec() -> dict[str, tuple[list[Any], list[Any]]]:
     i32, i64 = ValType.i32(), ValType.i64()
     return {
         "fd_advise": ([i32, i64, i64, i32], [i32]),

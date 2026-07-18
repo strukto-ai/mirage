@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.fanout import run_fanout
@@ -31,8 +31,8 @@ async def handle_cross_mount(
     cmd_name: str,
     scopes: list[PathSpec],
     text_args: list[str],
-    flag_kwargs: dict,
-    dispatch: Callable,
+    flag_kwargs: dict[str, object],
+    dispatch: Callable[..., Any],
     run_single: RunSingle,
     stdin: ByteSource | None = None,
 ) -> CrossResult:

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from email.message import EmailMessage
+from typing import Any
 
 import aiosmtplib
 
@@ -36,7 +37,7 @@ async def send_message(
     to: str,
     subject: str,
     body: str,
-) -> dict:
+) -> dict[str, Any]:
     msg = EmailMessage()
     msg["From"] = config.username
     msg["To"] = to
@@ -48,9 +49,9 @@ async def send_message(
 
 async def reply_message(
     config: EmailConfig,
-    original: dict,
+    original: dict[str, Any],
     body: str,
-) -> dict:
+) -> dict[str, Any]:
     msg = EmailMessage()
     msg["From"] = config.username
     msg["To"] = original["from"]["email"]
@@ -70,9 +71,9 @@ async def reply_message(
 
 async def reply_all_message(
     config: EmailConfig,
-    original: dict,
+    original: dict[str, Any],
     body: str,
-) -> dict:
+) -> dict[str, Any]:
     all_recipients: set[str] = set()
     all_recipients.add(original["from"]["email"])
     for r in original.get("to", []):
@@ -100,9 +101,9 @@ async def reply_all_message(
 
 async def forward_message(
     config: EmailConfig,
-    original: dict,
+    original: dict[str, Any],
     to: str,
-) -> dict:
+) -> dict[str, Any]:
     msg = EmailMessage()
     msg["From"] = config.username
     msg["To"] = to

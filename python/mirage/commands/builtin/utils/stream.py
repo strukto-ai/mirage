@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Callable
+from typing import Any
+
 from mirage.io.types import ByteSource
 
 
-async def _read_stdin_async(
-        stdin: ByteSource | None) -> bytes | None:
+async def _read_stdin_async(stdin: ByteSource | None) -> bytes | None:
     if stdin is None:
         return None
     if isinstance(stdin, bytes):
@@ -50,7 +51,7 @@ def _resolve_source(
 
 
 async def resolve_text_input(
-    read_bytes: Callable,
+    read_bytes: Callable[..., Any],
     config: object,
     *,
     inline_text: str | None,

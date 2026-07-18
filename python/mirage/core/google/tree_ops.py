@@ -14,7 +14,7 @@
 
 import logging
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import invalidate_after_unlink
@@ -37,7 +37,7 @@ class DriveItemAccessor(Protocol):
     token_manager: TokenManager
 
 
-def make_stat(readdir: Callable) -> Callable:
+def make_stat(readdir: Callable[..., Any]) -> Callable[..., Any]:
     """Build a Drive-item stat over a backend's readdir.
 
     Args:
@@ -89,7 +89,7 @@ def make_stat(readdir: Callable) -> Callable:
     return stat
 
 
-def make_unlink(readdir: Callable) -> Callable:
+def make_unlink(readdir: Callable[..., Any]) -> Callable[..., Any]:
     """Build a Drive-item unlink over a backend's readdir.
 
     Args:

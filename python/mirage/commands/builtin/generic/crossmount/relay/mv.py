@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
@@ -24,8 +24,8 @@ from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec, PrimitiveMove
 
 
-async def run_mv(scopes: list[PathSpec], flag_kwargs: dict,
-                 dispatch: Callable) -> CrossResult:
+async def run_mv(scopes: list[PathSpec], flag_kwargs: dict[str, object],
+                 dispatch: Callable[..., Any]) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.
 
     Pure wiring: copy through the transfer primitives, then unlink the

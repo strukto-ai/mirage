@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from mirage.resource.loader import load_backend_class
 
@@ -164,7 +164,8 @@ REGISTRY: dict[str, ResourceEntry] = {
 }
 
 
-def build_resource(name: str, config: dict | None = None) -> "BaseResource":
+def build_resource(name: str,
+                   config: dict[str, Any] | None = None) -> "BaseResource":
     """Construct a resource instance by its registry name.
 
     Resolves resource and config classes lazily via importlib, so

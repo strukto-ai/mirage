@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
@@ -23,8 +23,8 @@ from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec, PrimitiveCopy
 
 
-async def run_cp(scopes: list[PathSpec], flag_kwargs: dict,
-                 dispatch: Callable) -> CrossResult:
+async def run_cp(scopes: list[PathSpec], flag_kwargs: dict[str, object],
+                 dispatch: Callable[..., Any]) -> CrossResult:
     """Copy operands that span mounts via the shared generic cp.
 
     Pure wiring: the generic runs in its primitive mode (no native copy),

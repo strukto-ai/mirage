@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.core.gslides._client import (SLIDES_API_BASE, TokenManager,
                                          google_post)
@@ -22,7 +23,7 @@ async def batch_update(
     token_manager: TokenManager,
     presentation_id: str,
     requests_json: str,
-) -> dict:
+) -> dict[str, Any]:
     """Send batchUpdate to Google Slides API.
 
     Args:

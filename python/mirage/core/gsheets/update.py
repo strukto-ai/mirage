@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.core.gsheets._client import (SHEETS_API_BASE, TokenManager,
                                          google_post)
@@ -22,7 +23,7 @@ async def batch_update(
     token_manager: TokenManager,
     spreadsheet_id: str,
     requests_json: str,
-) -> dict:
+) -> dict[str, Any]:
     """Send batchUpdate to Google Sheets API.
 
     Args:

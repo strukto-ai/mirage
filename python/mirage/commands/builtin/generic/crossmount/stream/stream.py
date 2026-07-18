@@ -20,7 +20,7 @@ from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 
 
-def _has_active_flags(flag_kwargs: dict) -> bool:
+def _has_active_flags(flag_kwargs: dict[str, object]) -> bool:
     return any(v not in (None, False) for v in flag_kwargs.values())
 
 
@@ -37,7 +37,7 @@ def _respell_fetch_stderr(stderr: bytes, cmd_name: str) -> bytes:
 
 
 async def run_stream(cmd_name: str, scopes: list[PathSpec],
-                     text_args: list[str], flag_kwargs: dict,
+                     text_args: list[str], flag_kwargs: dict[str, object],
                      run_single: RunSingle) -> CrossResult:
     """Run a stream command (``cmd files...`` == ``cat files... | cmd``).
 

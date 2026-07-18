@@ -1,12 +1,13 @@
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def extract_level(extra: dict) -> int:
+def extract_level(extra: dict[str, Any]) -> int:
     for n in range(9, 0, -1):
         if extra.get(str(n)):
             return n

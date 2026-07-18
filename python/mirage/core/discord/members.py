@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.core.discord._client import discord_get
 from mirage.core.discord.paginate import after_id_pages
 from mirage.resource.discord.config import DiscordConfig
 
 
-def _member_user_id(m: dict) -> str:
+def _member_user_id(m: dict[str, Any]) -> str:
     return m.get("user", {}).get("id", "")
 
 
@@ -27,7 +28,7 @@ def list_members_stream(
     config: DiscordConfig,
     guild_id: str,
     page_size: int = 1000,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Stream guild members across pages.
 
     Walks ``/guilds/<id>/members?after=<user_id>&limit=N`` until the
@@ -54,7 +55,7 @@ async def list_members(
     config: DiscordConfig,
     guild_id: str,
     page_size: int = 1000,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all guild members (paginated).
 
     Args:
@@ -65,7 +66,7 @@ async def list_members(
     Returns:
         list[dict]: member dicts.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     async for page in list_members_stream(config, guild_id, page_size):
         out.extend(page)
     return out
@@ -76,7 +77,7 @@ async def search_members(
     guild_id: str,
     query: str,
     limit: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Search guild members by name.
 
     Args:

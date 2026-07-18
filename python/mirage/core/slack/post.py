@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.slack._client import slack_post
 from mirage.resource.slack.config import SlackConfig
 
@@ -20,7 +22,7 @@ async def post_message(
     config: SlackConfig,
     channel_id: str,
     text: str,
-) -> dict:
+) -> dict[str, Any]:
     """Post a message to a channel.
 
     Args:
@@ -42,7 +44,7 @@ async def reply_to_thread(
     channel_id: str,
     thread_ts: str,
     text: str,
-) -> dict:
+) -> dict[str, Any]:
     """Reply to a thread.
 
     Args:

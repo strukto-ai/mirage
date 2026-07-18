@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
+from typing import Any
 
 from mirage.types import ConsistencyPolicy
 
@@ -24,7 +25,7 @@ class MountArgs:
     Workspace.load uses this to instantiate a fresh Workspace; snapshot
     code never constructs Workspace itself.
     """
-    mount_args: dict
+    mount_args: dict[str, Any]
     consistency: ConsistencyPolicy
     default_session_id: str
     default_agent_id: str | None

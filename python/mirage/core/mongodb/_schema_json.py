@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._client import (count_documents, get_index_stats,
                                          get_indexes, get_validator, is_view,
@@ -20,7 +22,7 @@ from mirage.core.mongodb._sampler import sample_field_types
 from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind, IndexType
 
 
-def _index_type(idx: dict) -> str:
+def _index_type(idx: dict[str, Any]) -> str:
     if "textIndexVersion" in idx:
         return IndexType.TEXT
     return IndexType.BTREE
@@ -29,10 +31,10 @@ def _index_type(idx: dict) -> str:
 async def build_database_json(
     accessor: MongoDBAccessor,
     database: str,
-) -> dict:
+) -> dict[str, Any]:
     all_names = await list_collections(accessor.client, database)
-    collections: list[dict] = []
-    views: list[dict] = []
+    collections: list[dict[str, Any]] = []
+    views: list[dict[str, Any]] = []
     for name in all_names:
         if await is_view(accessor.client, database, name):
             views.append({"name": name})
@@ -54,14 +56,14 @@ async def build_collection_schema_json(
     database: str,
     collection: str,
     sample_size: int = 100,
-) -> dict:
+) -> dict[str, Any]:
     col = accessor.client[database][collection]
     view = await is_view(accessor.client, database, collection)
     validator = await get_validator(accessor.client, database, collection)
     fields = await sample_field_types(col, sample_size=sample_size)
     doc_count = await count_documents(accessor.client, database, collection)
     if view:
-        enriched_indexes: list[dict] = []
+        enriched_indexes: list[dict[str, Any]] = []
     else:
         indexes = await get_indexes(accessor.client, database, collection)
         stats = await get_index_stats(accessor.client, database, collection)

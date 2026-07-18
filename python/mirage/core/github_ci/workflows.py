@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.github_ci._client import ci_get, ci_get_paginated
 from mirage.resource.github_ci.config import GitHubCIConfig
 
 
-async def list_workflows(config: GitHubCIConfig) -> list[dict]:
+async def list_workflows(config: GitHubCIConfig) -> list[dict[str, Any]]:
     return await ci_get_paginated(
         config.token,
         "/repos/{owner}/{repo}/actions/workflows",
@@ -26,7 +28,8 @@ async def list_workflows(config: GitHubCIConfig) -> list[dict]:
     )
 
 
-async def get_workflow(config: GitHubCIConfig, workflow_id: str) -> dict:
+async def get_workflow(config: GitHubCIConfig,
+                       workflow_id: str) -> dict[str, Any]:
     return await ci_get(
         config.token,
         "/repos/{owner}/{repo}/actions/workflows/{workflow_id}",

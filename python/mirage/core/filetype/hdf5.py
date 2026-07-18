@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import tempfile
+from typing import Any
 
 import h5py
 import pandas as pd
@@ -63,9 +64,9 @@ def _fields(df: pd.DataFrame) -> list[tuple[str, str]]:
     return [(str(c), tbl.canonical_type(str(df[c].dtype))) for c in df.columns]
 
 
-def _rows(df: pd.DataFrame) -> list[dict]:
+def _rows(df: pd.DataFrame) -> list[dict[str, Any]]:
     columns = _columns(df)
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for record in df.to_dict("records"):
         out.append({
             col: _scalar(value)

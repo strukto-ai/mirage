@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from mirage import Workspace
@@ -34,7 +36,7 @@ from mirage.server.schemas import (  # isort: skip
 router = APIRouter(prefix="/v1")
 
 
-async def _state_of(ws: Workspace) -> dict:
+async def _state_of(ws: Workspace) -> dict[str, Any]:
     return await to_state_dict(ws)
 
 

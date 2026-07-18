@@ -78,7 +78,7 @@ class WasiRuntime(PythonRuntime):
     def __init__(
         self,
         home: str | None = None,
-        dispatch: Callable | None = None,
+        dispatch: Callable[..., Any] | None = None,
         mount_prefixes: Callable[[], list[str]] | None = None,
     ) -> None:
         if wasmtime is None:

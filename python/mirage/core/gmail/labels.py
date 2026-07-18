@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.google._client import GMAIL_API_BASE, TokenManager, google_get
 
 
-async def list_labels(token_manager: TokenManager) -> list[dict]:
+async def list_labels(token_manager: TokenManager) -> list[dict[str, Any]]:
     """List all Gmail labels.
 
     Args:

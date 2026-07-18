@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from mirage.observe import OpRecord
 from mirage.types import PathSpec
@@ -42,8 +43,8 @@ class ExecutionNode:
     records: list[OpRecord] = field(default_factory=list)
     paths: list[PathSpec] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
-        d: dict = {}
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
         if self.command is not None:
             d["command"] = self.command
         if self.op is not None:

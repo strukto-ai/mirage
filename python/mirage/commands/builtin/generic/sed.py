@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from mirage.commands.builtin.sed_helper import (_execute_program,
                                                 _parse_one_command,
@@ -9,7 +10,7 @@ from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
-def _is_simple_sub(commands: list[dict], suppress: bool) -> bool:
+def _is_simple_sub(commands: list[dict[str, Any]], suppress: bool) -> bool:
     return (len(commands) == 1 and commands[0]["cmd"] == "s"
             and commands[0].get("addr_start") is None and not suppress)
 

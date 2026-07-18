@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.types import (CacheKey, JobKey, MountKey, ResourceName,
                           ResourceStateKey, StateKey)
 from mirage.workspace.snapshot.utils import BLOB_REF_KEY, is_safe_blob_path
@@ -35,10 +37,11 @@ class _BlobAllocator:
         return f"{category}/{i}.bin"
 
 
-def split_manifest_and_blobs(state: dict) -> tuple[dict, dict[str, bytes]]:
+def split_manifest_and_blobs(
+        state: dict[str, Any]) -> tuple[dict[str, Any], dict[str, bytes]]:
     a = _BlobAllocator()
 
-    manifest: dict = {
+    manifest: dict[str, Any] = {
         StateKey.VERSION: state[StateKey.VERSION],
         StateKey.MIRAGE_VERSION: state[StateKey.MIRAGE_VERSION],
         StateKey.DEFAULT_SESSION_ID: state[StateKey.DEFAULT_SESSION_ID],
@@ -86,7 +89,8 @@ def split_manifest_and_blobs(state: dict) -> tuple[dict, dict[str, bytes]]:
     return manifest, a.blobs
 
 
-def _mount_to_manifest(mount: dict, a: _BlobAllocator) -> dict:
+def _mount_to_manifest(mount: dict[str, Any],
+                       a: _BlobAllocator) -> dict[str, Any]:
     idx = mount[MountKey.INDEX]
     ps = dict(mount[MountKey.RESOURCE_STATE])
     ptype = ps.get(ResourceStateKey.TYPE, "")
@@ -96,7 +100,7 @@ def _mount_to_manifest(mount: dict, a: _BlobAllocator) -> dict:
             files, a, f"_ram{idx}", tar_dir=f"mounts/{idx}/files")
     elif ptype == ResourceName.DISK:
         # tree-preserving: real files at their relative paths
-        new_files: dict[str, dict] = {}
+        new_files: dict[str, dict[str, Any]] = {}
         for rel, data in files.items():
             tar_path = f"mounts/{idx}/files/{rel}"
             a.blobs[tar_path] = data
@@ -115,10 +119,10 @@ def _mount_to_manifest(mount: dict, a: _BlobAllocator) -> dict:
     }
 
 
-def _stash_blobs(files: dict, a: _BlobAllocator, category: str,
-                 tar_dir: str) -> dict:
+def _stash_blobs(files: dict[str, Any], a: _BlobAllocator, category: str,
+                 tar_dir: str) -> dict[str, Any]:
     """Replace each {key: bytes} with {key: {__file: tar-path}}."""
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     for k, data in files.items():
         slot = a.alloc(category).split("/")[-1]
         tar_path = f"{tar_dir}/{slot}"
@@ -163,7 +167,7 @@ def _node_to_manifest(node, a: _BlobAllocator):
     return out
 
 
-def resolve_manifest(manifest: dict, blob_reader) -> dict:
+def resolve_manifest(manifest: dict[str, Any], blob_reader) -> dict[str, Any]:
     return _resolve(manifest, blob_reader)
 
 

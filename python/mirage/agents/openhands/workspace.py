@@ -29,7 +29,7 @@ from mirage.workspace.workspace import Workspace as MirageBackingWorkspace
 logger = logging.getLogger(__name__)
 
 
-def _run_loop_in_thread(state: dict, ready: threading.Event) -> None:
+def _run_loop_in_thread(state: dict[str, Any], ready: threading.Event) -> None:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     state["loop"] = loop

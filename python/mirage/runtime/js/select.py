@@ -39,7 +39,7 @@ def validate_js_runtime_name(name: str) -> str:
 
 def select_js_runtime(
         name: str | None,
-        dispatch: Callable | None = None,
+        dispatch: Callable[..., Any] | None = None,
         options: dict[str, dict[str, Any]] | None = None,
         mount_prefixes: Callable[[], list[str]] | None = None) -> JsRuntime:
     """Build the JavaScript runtime for a workspace.

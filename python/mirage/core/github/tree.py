@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from typing import Any
 
 from mirage.core.github._client import github_get, github_get_sync
 from mirage.core.github.config import GitHubConfig
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 
 
 def _parse_tree_response(
-    data: dict,
+    data: dict[str, Any],
     owner: str,
     repo: str,
     ref: str,

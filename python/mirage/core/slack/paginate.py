@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.core.slack._client import slack_get
 from mirage.resource.slack.config import SlackConfig
@@ -21,9 +22,9 @@ from mirage.resource.slack.config import SlackConfig
 async def cursor_pages(
     config: SlackConfig,
     endpoint: str,
-    base_params: dict,
+    base_params: dict[str, Any],
     items_key: str,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Walk a cursor-paginated Slack endpoint, one page per round-trip.
 
     Args:

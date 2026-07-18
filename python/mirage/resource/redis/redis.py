@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
-from typing import cast
+from typing import Any, cast
 
 try:
     import redis as sync_redis
@@ -76,7 +76,7 @@ class RedisResource(BaseResource):
     accessor: RedisAccessor
     name: str = ResourceName.REDIS
     index_ttl: float = 0
-    _ops: dict = _REDIS_OPS
+    _ops: dict[str, Any] = _REDIS_OPS
     PROMPT: str = PROMPT
 
     def __init__(
@@ -101,7 +101,7 @@ class RedisResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         prefix = self._store._prefix
         url = self._store._url
         client = sync_redis.Redis.from_url(url)
@@ -158,7 +158,7 @@ class RedisResource(BaseResource):
             "modified": modified,
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         files = state.get("files", {})
         dirs = state.get("dirs", ["/"])
         prefix = self._store._prefix

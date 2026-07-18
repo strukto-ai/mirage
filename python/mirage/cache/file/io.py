@@ -15,7 +15,7 @@
 import asyncio
 import logging
 from functools import partial
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.io import CachableAsyncIterator, IOResult
@@ -63,7 +63,7 @@ async def _set_cached(
 
 
 def _drop_drain_task(cache: FileCacheMixin, path: str,
-                     task: asyncio.Task) -> None:
+                     task: asyncio.Task[Any]) -> None:
     cache._drain_tasks.pop(path, None)
 
 

@@ -15,6 +15,7 @@
 import asyncio
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 import aiohttp
 
@@ -82,8 +83,8 @@ async def google_headers(token_manager: TokenManager, ) -> dict[str, str]:
 async def google_get(
     token_manager: TokenManager,
     url: str,
-    params: dict | None = None,
-) -> dict:
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     headers = await google_headers(token_manager)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as resp:
@@ -94,8 +95,8 @@ async def google_get(
 async def google_post(
     token_manager: TokenManager,
     url: str,
-    json: dict,
-) -> dict:
+    json: dict[str, Any],
+) -> dict[str, Any]:
     headers = await google_headers(token_manager)
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=json) as resp:
@@ -106,8 +107,8 @@ async def google_post(
 async def google_put(
     token_manager: TokenManager,
     url: str,
-    json: dict,
-) -> dict:
+    json: dict[str, Any],
+) -> dict[str, Any]:
     headers = await google_headers(token_manager)
     async with aiohttp.ClientSession() as session:
         async with session.put(url, headers=headers, json=json) as resp:

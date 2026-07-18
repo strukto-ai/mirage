@@ -67,7 +67,7 @@ class _EnvInterpolator:
         self.env = env
         self.missing = missing
 
-    def _sub(self, m: re.Match) -> str:
+    def _sub(self, m: re.Match[str]) -> str:
         name = m.group(1)
         if name not in self.env:
             self.missing.append(name)
@@ -419,7 +419,7 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
                                   workspace=workspace)
 
 
-def load_config(source: str | Path | dict,
+def load_config(source: str | Path | dict[str, Any],
                 env: dict[str, str] | None = None) -> WorkspaceConfig:
     """Load a workspace config from a YAML / JSON file or a raw dict.
 

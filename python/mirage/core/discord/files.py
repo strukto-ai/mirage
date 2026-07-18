@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import aiohttp
 
 from mirage.utils.sanitize import path_safe_name
 
 
-def file_blob_name(att: dict) -> str:
+def file_blob_name(att: dict[str, Any]) -> str:
     """Construct a stable VFS filename for a Discord attachment.
 
     Args:

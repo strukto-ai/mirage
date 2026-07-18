@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.gdocs._client import DOCS_API_BASE, TokenManager, google_post
 
 
@@ -19,7 +21,7 @@ async def append_text(
     token_manager: TokenManager,
     doc_id: str,
     text: str,
-) -> dict:
+) -> dict[str, Any]:
     """Append text to the end of a Google Doc.
 
     Args:

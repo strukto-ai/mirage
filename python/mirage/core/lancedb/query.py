@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.lancedb import LanceDBAccessor
 
 
@@ -54,7 +56,7 @@ async def distinct_values(accessor: LanceDBAccessor, table: str, column: str,
 
 async def rows_matching(accessor: LanceDBAccessor, table: str,
                         filters: dict[str, str], columns: list[str],
-                        limit: int) -> list[dict]:
+                        limit: int) -> list[dict[str, Any]]:
     tbl = await accessor.table(table)
     query = tbl.query().select(columns).limit(limit)
     if filters:
@@ -63,14 +65,14 @@ async def rows_matching(accessor: LanceDBAccessor, table: str,
 
 
 async def row_record(accessor: LanceDBAccessor, table: str, id_column: str,
-                     row_id: str) -> dict | None:
+                     row_id: str) -> dict[str, Any] | None:
     tbl = await accessor.table(table)
     rows = await tbl.query().where(_eq(id_column, row_id)).limit(1).to_list()
     return rows[0] if rows else None
 
 
 async def search_rows(accessor: LanceDBAccessor, table: str, query_text: str,
-                      limit: int) -> list[dict]:
+                      limit: int) -> list[dict[str, Any]]:
     key = (table, query_text, limit)
     cached = accessor.cached_search(key)
     if cached is not None:

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import datetime, timezone
+from typing import Any
 
 from mirage.core.gmail.messages import (_decode_body, _extract_header,
                                         get_message_processed, get_message_raw,
@@ -68,7 +69,7 @@ async def search_messages(
     label_name: str | None = None,
     date_str: str | None = None,
     max_results: int = 50,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Search Gmail and return formatted result rows.
 
     Returns:
@@ -80,7 +81,7 @@ async def search_messages(
         query=query,
         max_results=max_results,
     )
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for stub in stubs:
         mid = stub.get("id")
         if not mid:
@@ -105,7 +106,7 @@ async def search_messages(
 
 
 def format_grep_results(
-    rows: list[dict],
+    rows: list[dict[str, Any]],
     scope: GmailScope,
     prefix: str,
     pattern: str = "",

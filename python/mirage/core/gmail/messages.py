@@ -24,7 +24,7 @@ async def list_messages(
     label_id: str | None = None,
     query: str | None = None,
     max_results: int = 50,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List message IDs for a label or query.
 
     Args:
@@ -63,7 +63,7 @@ async def trash_message(
 async def get_message_raw(
     token_manager: TokenManager,
     message_id: str,
-) -> dict:
+) -> dict[str, Any]:
     """Get raw message JSON from API.
 
     Args:
@@ -77,7 +77,7 @@ async def get_message_raw(
     return await google_get(token_manager, url)
 
 
-def _decode_body(payload: dict) -> str:
+def _decode_body(payload: dict[str, Any]) -> str:
     if payload.get("mimeType") == "text/plain":
         data = payload.get("body", {}).get("data", "")
         if data:
@@ -90,7 +90,7 @@ def _decode_body(payload: dict) -> str:
     return ""
 
 
-def _extract_header(headers: list[dict], name: str) -> str:
+def _extract_header(headers: list[dict[str, Any]], name: str) -> str:
     for h in headers:
         if h.get("name", "").lower() == name.lower():
             return h.get("value", "")
@@ -133,7 +133,7 @@ async def get_attachment(
     return base64.urlsafe_b64decode(raw + "==")
 
 
-def _extract_attachments(payload: dict) -> list[dict]:
+def _extract_attachments(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract attachment metadata from message payload.
 
     Args:
@@ -173,7 +173,7 @@ def _extract_attachments(payload: dict) -> list[dict]:
 async def get_message_processed(
     token_manager: TokenManager,
     message_id: str,
-) -> dict:
+) -> dict[str, Any]:
     """Get message as processed dict with decoded body.
 
     Args:

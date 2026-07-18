@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.general.curl import _resolve_target
@@ -32,7 +32,7 @@ async def wget(
     args_O: str | None = None,
     q: bool = False,
     spider: bool = False,
-    dispatch: Callable | None = None,
+    dispatch: Callable[..., Any] | None = None,
     cwd: PathSpec | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:

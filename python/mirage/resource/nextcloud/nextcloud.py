@@ -52,7 +52,7 @@ class NextcloudResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         redacted = ["password"]
         cfg = self.config.model_dump()
         for f in redacted:
@@ -65,5 +65,5 @@ class NextcloudResource(BaseResource):
             "config": cfg,
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

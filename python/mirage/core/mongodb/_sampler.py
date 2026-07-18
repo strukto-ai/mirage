@@ -14,6 +14,7 @@
 
 import datetime as dt
 from collections.abc import Iterable
+from typing import Any
 
 from bson import Binary, Decimal128, Int64, ObjectId, Regex, Timestamp
 
@@ -53,7 +54,7 @@ def _scalar_tag(v) -> str:
     return type(v).__name__
 
 
-def _array_tag(items: Iterable) -> str:
+def _array_tag(items: Iterable[Any]) -> str:
     items = list(items)
     if not items:
         return BsonTypeTag.ARRAY
@@ -80,7 +81,8 @@ def _walk(value, prefix: str, counts: dict[str, dict[str, int]]) -> None:
         _bump(counts, prefix, _scalar_tag(value))
 
 
-async def sample_field_types(col, sample_size: int = 100) -> list[dict]:
+async def sample_field_types(col,
+                             sample_size: int = 100) -> list[dict[str, Any]]:
     counts: dict[str, dict[str, int]] = {}
     total = 0
     async for doc in await col.aggregate([{"$sample": {"size": sample_size}}]):
@@ -88,7 +90,7 @@ async def sample_field_types(col, sample_size: int = 100) -> list[dict]:
         _walk(doc, "", counts)
     if total == 0:
         return []
-    fields: list[dict] = []
+    fields: list[dict[str, Any]] = []
     for path, type_counts in sorted(counts.items()):
         if path == PRIMARY_KEY:
             continue

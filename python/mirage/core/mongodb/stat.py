@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mongodb._client import (count_documents, database_exists,
@@ -123,7 +125,7 @@ async def _documents_stat(
             or await is_view(accessor.client, database, name))
     doc_count = await count_documents(accessor.client, database, name)
     if view:
-        index_info: list[dict] = []
+        index_info: list[dict[str, Any]] = []
     else:
         indexes = await get_indexes(accessor.client, database, name)
         index_info = [{

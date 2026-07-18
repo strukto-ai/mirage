@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.core.gdocs._client import DOCS_API_BASE, TokenManager, google_post
 
@@ -21,7 +22,7 @@ async def batch_update(
     token_manager: TokenManager,
     doc_id: str,
     requests_json: str,
-) -> dict:
+) -> dict[str, Any]:
     """Send batchUpdate to Google Docs API.
 
     Args:

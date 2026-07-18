@@ -15,6 +15,7 @@
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
@@ -69,12 +70,12 @@ def _date_from_internal(internal_date: str) -> str:
 
 async def _build_date_groups(
     accessor: GmailAccessor,
-    msg_ids: list[dict],
+    msg_ids: list[dict[str, Any]],
     index: IndexCacheStore,
     virtual_key: str,
     write_dates: bool,
 ) -> list[tuple[str, IndexEntry]]:
-    date_groups: dict[str, list[dict]] = {}
+    date_groups: dict[str, list[dict[str, Any]]] = {}
     for m in msg_ids:
         mid = m["id"]
         raw = await get_message_raw(accessor.token_manager, mid)

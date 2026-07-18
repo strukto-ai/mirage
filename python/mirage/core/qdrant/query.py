@@ -44,7 +44,7 @@ def _filter(filters: dict[str, str]) -> models.Filter | None:
     ])
 
 
-def _point_to_row(point: Any, id_field: str) -> dict:
+def _point_to_row(point: Any, id_field: str) -> dict[str, Any]:
     payload = point.payload if isinstance(point.payload, dict) else {}
     row = dict(payload)
     row[id_field] = point.id
@@ -137,13 +137,14 @@ async def distinct_values(accessor: QdrantAccessor, table: str, column: str,
 
 
 async def rows_matching(accessor: QdrantAccessor, table: str,
-                        filters: dict[str, str], limit: int) -> list[dict]:
+                        filters: dict[str, str],
+                        limit: int) -> list[dict[str, Any]]:
     points = await _scroll_all(accessor, table, filters, limit)
     return [_point_to_row(point, accessor.config.id_field) for point in points]
 
 
 async def row_record(accessor: QdrantAccessor, table: str, id_field: str,
-                     row_id: str) -> dict | None:
+                     row_id: str) -> dict[str, Any] | None:
     ids = _candidate_ids(row_id)
     if not ids:
         return None
@@ -158,7 +159,7 @@ async def row_record(accessor: QdrantAccessor, table: str, id_field: str,
 
 
 async def search_rows(accessor: QdrantAccessor, table: str, query_text: str,
-                      limit: int) -> list[dict]:
+                      limit: int) -> list[dict[str, Any]]:
     key = (table, query_text, limit)
     cached = accessor.cached_search(key)
     if cached is not None:
@@ -171,7 +172,7 @@ async def search_rows(accessor: QdrantAccessor, table: str, query_text: str,
         limit=limit,
         with_payload=True,
     )
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for point in response.points:
         row = _point_to_row(point, accessor.config.id_field)
         row["_score"] = point.score

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+from typing import Any
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
@@ -68,7 +69,7 @@ class RAMResource(BaseResource):
     accessor: RAMAccessor
     name: str = ResourceName.RAM
     index_ttl: float = 0
-    _ops: dict = _RAM_OPS
+    _ops: dict[str, Any] = _RAM_OPS
     PROMPT: str = PROMPT
 
     def __init__(self) -> None:
@@ -89,7 +90,7 @@ class RAMResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,
             "files": dict(self._store.files),
@@ -101,7 +102,7 @@ class RAMResource(BaseResource):
             },
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         self._store.files = dict(state.get("files", {}))
         self._store.dirs = set(state.get("dirs", ["/"]))
         self._store.modified = dict(state.get("modified", {}))

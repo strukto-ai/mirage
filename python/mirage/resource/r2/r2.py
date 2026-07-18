@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.resource.r2.config import R2Config
 from mirage.resource.r2.prompt import PROMPT
 from mirage.resource.s3 import S3Resource
@@ -25,8 +27,8 @@ class R2Resource(S3Resource):
         self.r2_config = config
         super().__init__(config.to_s3_config())
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return self.config_state(self.r2_config)
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

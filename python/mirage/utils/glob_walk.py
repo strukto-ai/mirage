@@ -16,6 +16,7 @@ import dataclasses
 import fnmatch
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -70,7 +71,7 @@ def spell_match(raw: str, virtual: str, walked: int) -> str:
 
 
 async def expand_pattern(
-    readdir: Callable,
+    readdir: Callable[..., Any],
     accessor: Accessor,
     path: PathSpec,
     index: IndexCacheStore,
@@ -138,7 +139,7 @@ async def expand_pattern(
 
 
 async def resolve_glob_with(
-    readdir: Callable,
+    readdir: Callable[..., Any],
     accessor: Accessor,
     paths: list[PathSpec],
     index: IndexCacheStore,

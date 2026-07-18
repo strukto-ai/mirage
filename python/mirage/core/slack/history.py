@@ -15,6 +15,7 @@
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from typing import Any
 
 from mirage.core.slack.paginate import cursor_pages
 from mirage.resource.slack.config import SlackConfig
@@ -32,7 +33,7 @@ def stream_messages_for_day(
     channel_id: str,
     date_str: str,
     limit: int = 200,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming history for a channel-day.
 
     Args:
@@ -64,7 +65,7 @@ async def fetch_messages_for_day(
     config: SlackConfig,
     channel_id: str,
     date_str: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Fetch all messages for a date as parsed dicts (eager).
 
     Args:
@@ -75,7 +76,7 @@ async def fetch_messages_for_day(
     Returns:
         list[dict]: messages sorted by ts ascending.
     """
-    messages: list[dict] = []
+    messages: list[dict[str, Any]] = []
     async for page in stream_messages_for_day(config, channel_id, date_str):
         messages.extend(page)
     messages.sort(key=lambda m: float(m.get("ts", "0")))

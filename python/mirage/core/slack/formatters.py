@@ -14,6 +14,7 @@
 
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from mirage.core.slack.files import file_blob_name
 from mirage.core.slack.scope import SlackScope
@@ -21,7 +22,7 @@ from mirage.utils.naming import make_id_name
 from mirage.utils.sanitize import path_safe_name
 
 
-def channel_dirname(ch: dict) -> str:
+def channel_dirname(ch: dict[str, Any]) -> str:
     """Compute the VFS dirname for a channel, of the form `name__C123`."""
     return make_id_name(
         ch.get("name", ch.get("id", "unknown")),
@@ -30,7 +31,7 @@ def channel_dirname(ch: dict) -> str:
     )
 
 
-def dm_dirname(dm: dict, user_map: dict[str, str]) -> str:
+def dm_dirname(dm: dict[str, Any], user_map: dict[str, str]) -> str:
     """Compute the VFS dirname for a DM, of the form `username__D123`.
 
     Args:
@@ -45,7 +46,7 @@ def dm_dirname(dm: dict, user_map: dict[str, str]) -> str:
     return make_id_name(display, dm["id"], path_safe=True)
 
 
-def user_filename(u: dict) -> str:
+def user_filename(u: dict[str, Any]) -> str:
     """Compute the VFS filename for a user, of the form `name__U123.json`."""
     name = u.get("name", u.get("id", "unknown"))
     return f"{make_id_name(name, u['id'], path_safe=True)}.json"

@@ -50,7 +50,7 @@ class JobEntry:
         self.submitted_at: float = time.time()
         self.started_at: float | None = None
         self.finished_at: float | None = None
-        self._future: concurrent.futures.Future | None = None
+        self._future: concurrent.futures.Future[Any] | None = None
         self._done_event: asyncio.Event = asyncio.Event()
 
 
@@ -81,8 +81,9 @@ class JobTable:
         ]
 
     def submit(self, workspace_id: str, command: str,
-               schedule: Callable[[Awaitable], concurrent.futures.Future],
-               coro_factory: Callable[[], Awaitable]) -> JobEntry:
+               schedule: Callable[[Awaitable[Any]],
+                                  concurrent.futures.Future[Any]],
+               coro_factory: Callable[[], Awaitable[Any]]) -> JobEntry:
         """Register a job and start running it on the workspace loop.
 
         Args:
@@ -115,11 +116,11 @@ class JobTable:
         return entry
 
     def _dispatch_done(self, entry: JobEntry, loop: asyncio.AbstractEventLoop,
-                       fut: concurrent.futures.Future) -> None:
+                       fut: concurrent.futures.Future[Any]) -> None:
         loop.call_soon_threadsafe(self._on_done, entry, fut)
 
     def _on_done(self, entry: JobEntry,
-                 fut: concurrent.futures.Future) -> None:
+                 fut: concurrent.futures.Future[Any]) -> None:
         entry.finished_at = time.time()
         if fut.cancelled():
             entry.status = JobStatus.CANCELED

@@ -12,25 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.utils.naming import parse_id_name
 from mirage.utils.sanitize import sanitize_name
 
 split_suffix_id = parse_id_name
 
 
-def page_dirname(page: dict) -> str:
+def page_dirname(page: dict[str, Any]) -> str:
     title = extract_title(page)
     label = sanitize_name(title) if title else "untitled"
     return f"{label}__{page['id']}"
 
 
-def database_dirname(database: dict) -> str:
+def database_dirname(database: dict[str, Any]) -> str:
     title = extract_database_title(database)
     label = sanitize_name(title) if title else "untitled"
     return f"{label}__{database['id']}"
 
 
-def extract_title(page: dict) -> str:
+def extract_title(page: dict[str, Any]) -> str:
     props = page.get("properties", {})
     for prop in props.values():
         if prop.get("type") == "title":
@@ -39,6 +41,6 @@ def extract_title(page: dict) -> str:
     return ""
 
 
-def extract_database_title(database: dict) -> str:
+def extract_database_title(database: dict[str, Any]) -> str:
     title_items = database.get("title", [])
     return "".join(item.get("plain_text", "") for item in title_items)

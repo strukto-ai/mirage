@@ -25,7 +25,7 @@ from mirage.workspace.session import Session
 async def expand_redirects(
     redirects: list[Redirect],
     session: Session,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None = None,
 ) -> tuple[list[Redirect], Any]:

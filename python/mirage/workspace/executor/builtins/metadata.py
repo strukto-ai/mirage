@@ -15,6 +15,7 @@
 import re
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec
@@ -164,7 +165,7 @@ def _read_only_error(cmd: str, namespace: Namespace, path: PathSpec) -> str:
 
 async def _setattr_via(
     namespace: Namespace,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     path: PathSpec,
     *,
     mode: int | None = None,
@@ -259,7 +260,7 @@ def _follow_operand(
 
 async def _resolve_operand(
     namespace: Namespace,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     cmd: str,
     target: PathSpec,
     errors: list[str],
@@ -287,7 +288,7 @@ async def _resolve_operand(
 
 async def _apply_attrs(
     namespace: Namespace,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     cmd: str,
     resolved: PathSpec,
     errors: list[str],
@@ -321,7 +322,7 @@ async def _apply_attrs(
 
 async def handle_chmod(
     namespace: Namespace,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     args: list[str | PathSpec],
 ) -> Result:
     """chmod MODE FILE...: set permission bits via setattr.
@@ -372,7 +373,7 @@ async def handle_chmod(
 
 async def handle_chown(
     namespace: Namespace,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     args: list[str | PathSpec],
 ) -> Result:
     """chown OWNER[:GROUP] FILE...: set ownership via setattr.
@@ -420,7 +421,7 @@ async def handle_chown(
 
 async def handle_touch(
     namespace: Namespace,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:

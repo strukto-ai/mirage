@@ -162,10 +162,11 @@ async def load_workspace(req: LoadWorkspaceRequest,
     return await make_detail(entry)
 
 
-def _build_load_resources(override: dict[str, Any] | None) -> dict | None:
+def _build_load_resources(
+        override: dict[str, Any] | None) -> dict[str, Any] | None:
     if not override or "mounts" not in override:
         return None
-    out: dict = {}
+    out: dict[str, Any] = {}
     for prefix, block in override["mounts"].items():
         if not isinstance(block, dict):
             continue

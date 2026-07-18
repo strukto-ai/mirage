@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import aiohttp
 
 from mirage.resource.notion.config import NotionConfig
@@ -45,8 +47,8 @@ def notion_headers(config: NotionConfig) -> dict[str, str]:
 async def notion_get(
     config: NotionConfig,
     path: str,
-    params: dict | None = None,
-) -> dict:
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
     headers = notion_headers(config)
     async with aiohttp.ClientSession() as session:
@@ -66,8 +68,8 @@ async def notion_get(
 async def notion_post(
     config: NotionConfig,
     path: str,
-    body: dict | None = None,
-) -> dict:
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
     headers = notion_headers(config)
     async with aiohttp.ClientSession() as session:
@@ -87,8 +89,8 @@ async def notion_post(
 async def notion_patch(
     config: NotionConfig,
     path: str,
-    body: dict | None = None,
-) -> dict:
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
     headers = notion_headers(config)
     async with aiohttp.ClientSession() as session:
@@ -109,12 +111,12 @@ async def notion_patch(
 async def paginate_list(
     config: NotionConfig,
     path: str,
-    params: dict | None = None,
+    params: dict[str, Any] | None = None,
     page_size: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     merged = dict(params or {})
     merged["page_size"] = page_size
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     while True:
         data = await notion_get(config, path, params=merged)
         results.extend(data.get("results", []))
@@ -127,12 +129,12 @@ async def paginate_list(
 async def paginate_post(
     config: NotionConfig,
     path: str,
-    body: dict | None = None,
+    body: dict[str, Any] | None = None,
     page_size: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     merged = dict(body or {})
     merged["page_size"] = page_size
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     while True:
         data = await notion_post(config, path, merged)
         results.extend(data.get("results", []))

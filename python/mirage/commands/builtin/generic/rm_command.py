@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -28,7 +29,7 @@ def make_rm(
     resource: str,
     glob_fn: Callable[..., Awaitable[list[PathSpec]]],
     unlink: Callable[..., Awaitable[None]],
-) -> Callable:
+) -> Callable[..., Any]:
     """Build a file-only ``rm`` over an index-threaded unlink.
 
     For backends whose unlink resolves ids through the cache index; the

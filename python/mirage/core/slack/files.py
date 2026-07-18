@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import aiohttp
 
 from mirage.resource.secrets import reveal_secret
@@ -19,7 +21,7 @@ from mirage.resource.slack.config import SlackConfig
 from mirage.utils.sanitize import path_safe_name
 
 
-def file_blob_name(file_meta: dict) -> str:
+def file_blob_name(file_meta: dict[str, Any]) -> str:
     """Construct a stable VFS filename for a Slack file metadata dict.
 
     Args:

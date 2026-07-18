@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 from enum import Enum
+from typing import Any
 
 from mirage.core.google._client import (DRIVE_API_BASE, TokenManager,
                                         google_delete, google_get,
@@ -53,7 +54,7 @@ async def list_files(
     page_size: int = 1000,
     modified_after: str | None = None,
     modified_before: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List files via Drive API.
 
     Args:
@@ -82,7 +83,7 @@ async def list_files(
     if modified_before:
         parts.append(f"modifiedTime < '{modified_before}'")
     q = " and ".join(parts)
-    files: list[dict] = []
+    files: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
@@ -110,7 +111,7 @@ async def list_files(
 async def list_shared_drives(
     token_manager: TokenManager,
     page_size: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List shared drives visible to the authenticated user.
 
     Args:
@@ -120,7 +121,7 @@ async def list_shared_drives(
     Returns:
         list[dict]: shared drive metadata dicts.
     """
-    drives: list[dict] = []
+    drives: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
@@ -145,7 +146,7 @@ async def list_all_files(
     page_size: int = 1000,
     modified_after: str | None = None,
     modified_before: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all files (no folder filter) via Drive API.
 
     Args:
@@ -171,7 +172,7 @@ async def list_all_files(
     if modified_before:
         parts.append(f"modifiedTime < '{modified_before}'")
     q = " and ".join(parts) if parts else None
-    files: list[dict] = []
+    files: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {

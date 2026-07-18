@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from typing import Any
 
 import tree_sitter
 
@@ -63,7 +64,7 @@ def _string_has_array_at(node: tree_sitter.Node) -> bool:
 async def _expand_string_with_array(
     node: tree_sitter.Node,
     session: Session,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
 ) -> list[str]:
     """Expand a string containing one or more "${a[@]}" into multiple words.
@@ -108,9 +109,9 @@ _SPLIT_TYPES = frozenset({
 
 
 async def expand_parts(
-    parts: list,
+    parts: list[Any],
     session: Session,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
 ) -> list[str]:
     """Expand a list of tree-sitter child nodes to strings."""
@@ -150,9 +151,9 @@ async def expand_parts(
 
 
 async def expand_and_classify(
-    words: list,
+    words: list[Any],
     session: Session,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     registry: MountRegistry,
     cwd: str,
     call_stack: CallStack | None = None,
