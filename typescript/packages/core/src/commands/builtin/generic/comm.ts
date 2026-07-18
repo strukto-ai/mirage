@@ -105,7 +105,7 @@ export async function commGeneric(
   const lines1 = splitLinesNoTrailing(data1)
   const lines2 = splitLinesNoTrailing(data2)
   let stderr = ''
-  if (opts.flags['check-order'] === true) {
+  if (opts.flags.check_order === true) {
     if (!isSorted(lines1)) stderr = 'comm: file 1 is not in sorted order\n'
     else if (!isSorted(lines2)) stderr = 'comm: file 2 is not in sorted order\n'
   }

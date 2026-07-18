@@ -38,9 +38,11 @@ describe('commGeneric', () => {
   it('--check-order exits nonzero for unsorted input', async () => {
     const result = await commGeneric(
       [PathSpec.fromStrPath('/left.txt'), PathSpec.fromStrPath('/right.txt')],
-      opts({ 'check-order': true }),
+      opts({ check_order: true }),
       stream,
     )
+    expect(result).not.toBeNull()
+    if (result === null) throw new Error('expected comm result')
     const [, io] = result
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(await materialize(io.stderr))).toBe('comm: file 1 is not in sorted order\n')

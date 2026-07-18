@@ -123,7 +123,13 @@ export async function uniqGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   if (paths.length > 2) throw extraOperandError(CommandName.UNIQ, paths[2]?.rawPath ?? '')
-  const uniqOpts = parseOptions(opts.flags)
+  let uniqOpts: UniqOptions
+  try {
+    uniqOpts = parseOptions(opts.flags)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+  }
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]

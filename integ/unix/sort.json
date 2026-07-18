@@ -373,6 +373,28 @@
         "stdout": "a\na\nb\nb\nc\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sort_no_input",
+      "seq": 600004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

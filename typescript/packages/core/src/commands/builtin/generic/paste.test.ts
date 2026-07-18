@@ -29,18 +29,24 @@ async function* emptyStream(_path: PathSpec): AsyncIterable<Uint8Array> {
 
 describe('pasteGeneric', () => {
   it('uses empty standard input when no operands are given', async () => {
-    const [stdout, io] = await pasteGeneric([], opts(), emptyStream)
+    const result = await pasteGeneric([], opts(), emptyStream)
+    expect(result).not.toBeNull()
+    if (result === null) throw new Error('expected paste result')
+    const [stdout, io] = result
     expect(await materialize(stdout)).toEqual(new Uint8Array(0))
     expect(io.exitCode).toBe(0)
   })
 
   it.each([false, true])('produces no output for an empty file with serial=%s', async (serial) => {
     const flags = serial ? { s: true } : {}
-    const [stdout, io] = await pasteGeneric(
+    const result = await pasteGeneric(
       [PathSpec.fromStrPath('/empty.txt')],
       opts(flags),
       emptyStream,
     )
+    expect(result).not.toBeNull()
+    if (result === null) throw new Error('expected paste result')
+    const [stdout, io] = result
     expect(await materialize(stdout)).toEqual(new Uint8Array(0))
     expect(io.exitCode).toBe(0)
   })

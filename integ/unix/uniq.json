@@ -241,6 +241,50 @@
         "stdout": "      2 1 apple\n      1 3 banana\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "uniq_no_input",
+      "seq": 600005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "uniq",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "uniq_invalid_count",
+      "seq": 600006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "uniq -f 2junk /data/dup.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "uniq: invalid count: '2junk'"
+      }
     }
   ]
 }

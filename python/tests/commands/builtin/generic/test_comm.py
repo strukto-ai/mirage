@@ -4,7 +4,6 @@ from mirage.commands.builtin.generic.comm import comm
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 
-
 _COMM_FILES = {
     "/left.txt": b"b\na\n",
     "/right.txt": b"b\nc\n",
@@ -27,6 +26,6 @@ async def test_check_order_unsorted_input_exits_nonzero():
     )
 
     await materialize(stdout)
+    stderr = await materialize(io.stderr)
     assert io.exit_code == 1
-    assert await materialize(io.stderr) == (
-        b"comm: file 1 is not in sorted order\n")
+    assert stderr == b"comm: file 1 is not in sorted order\n"

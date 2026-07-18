@@ -87,6 +87,28 @@
         "stdout": "date\nelder\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "comm_check_order_unsorted",
+      "seq": 600000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "comm --check-order /data/a.txt /data/sorted_b.txt > /dev/null",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "comm: file 1 is not in sorted order\n"
+      }
     }
   ]
 }
