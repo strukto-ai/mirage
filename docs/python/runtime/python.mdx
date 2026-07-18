@@ -100,22 +100,22 @@ unzip a release from
 pip install mirage-ai[wasi]
 ```
 
-Point mirage at the build directory with the `home` option in the
-wasi runtime's block (the `runtime_options` argument, the yaml
-`runtime: wasi:` block, or the MIRAGE_WASI_HOME environment variable):
+Point mirage at the build directory with the `home` option on the
+runtime entry (or the MIRAGE_WASI_HOME environment variable):
 
 ```python
+from mirage.runtime.python import WasiRuntime
+
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
-               python_runtime="wasi",
-               runtime_options={"wasi": {"home": "/path/to/unzipped/build"}})
+               runtimes=[WasiRuntime(home="/path/to/unzipped/build"), "vfs"])
 ```
 
 ```yaml
-runtime:
-  python: wasi
-  wasi:
+runtimes:
+  - name: wasi
     home: /path/to/unzipped/build
+  - vfs
 ```
 
 The first run compiles `python.wasm` (a few hundred milliseconds) and
@@ -133,19 +133,18 @@ stdin, third-party packages, or host files:
 ```python
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
-               python_runtime="local")
+               runtimes=["local", "vfs"])
 ```
 
 It defaults to the interpreter running mirage; point the `home` option
-in the local runtime's block (or the MIRAGE_LOCAL_HOME environment
-variable) at another binary, e.g. a project venv whose packages the
-code needs:
+on the runtime entry (or the MIRAGE_LOCAL_HOME environment variable)
+at another binary, e.g. a project venv whose packages the code needs:
 
 ```yaml
-runtime:
-  python: local
-  local:
+runtimes:
+  - name: local
     home: /path/to/venv/bin/python
+  - vfs
 ```
 
 Note that `local` code does **not** see workspace mounts; it sees the real
@@ -153,15 +152,17 @@ host filesystem.
 
 ## Selecting in YAML
 
-Workspace config files take a top-level `runtime` block:
+Workspace config files take a top-level `runtimes` list: the ordered
+world of runtimes, each entry a name or a mapping with the name plus
+constructor options flat on the entry. The first entry that captures a
+command binds it; `vfs` is the in-process catch-all:
 
 ```yaml
-runtime:
-  python: monty   # or: wasi, local
-  wasi:           # optional per-runtime blocks
+runtimes:
+  - monty         # or: wasi, local
+  - name: wasi    # options live flat on the entry
     home: /opt/cpython-wasi
-  local:
-    home: /usr/bin/python3.12
+  - vfs
 
 mounts:
   /data:

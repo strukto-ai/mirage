@@ -225,12 +225,12 @@ jobs:
               assert b"monty' extra" in io.stderr, io.stderr
               ws2 = Workspace({"/data": RAMResource()},
                               mode=MountMode.EXEC,
-                              python_runtime="local")
+                              runtimes=["local"])
               io2 = await ws2.execute("python3 -c 'print(41 + 1)'")
               assert io2.exit_code == 0, io2.stderr
               assert io2.stdout.strip() == b"42", io2.stdout
               try:
-                  Workspace({"/d": RAMResource()}, python_runtime="monty")
+                  Workspace({"/d": RAMResource()}, runtimes=["monty"])
               except ImportError:
                   pass
               else:

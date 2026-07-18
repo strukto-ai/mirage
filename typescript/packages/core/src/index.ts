@@ -433,11 +433,17 @@ export {
   isCrossMount,
 } from './workspace/executor/cross_mount.ts'
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
-export { PYTHON_RUNTIMES } from './workspace/executor/python/runtimes/interface.ts'
-export { validateRuntimeOptions } from './workspace/executor/runtime_options.ts'
-export { JS_RUNTIMES, DEFAULT_JS_RUNTIME } from './workspace/executor/js/interface.ts'
+export {
+  bindCommands,
+  DEFAULT_ENTRIES,
+  VFS_ENTRY,
+  type RunArgs,
+  type RunResult,
+  type Runtime,
+  type RuntimeEntry,
+} from './workspace/executor/runtime.ts'
+export { buildRuntime, candidates, RUNTIMES } from './workspace/executor/runtime_table.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
-export { selectJsRuntime } from './workspace/executor/js/select.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'
 export { handleRedirect } from './workspace/executor/redirect.ts'

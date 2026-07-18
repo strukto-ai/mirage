@@ -31,8 +31,7 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
-import type { PythonRuntime } from './python/runtimes/interface.ts'
-import type { JsRuntime } from './js/interface.ts'
+import type { Runtime } from './runtime.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -63,8 +62,7 @@ interface RunOnMountCtx {
   dispatch: DispatchFn
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
-  pythonRuntime?: PythonRuntime
-  jsRuntime?: JsRuntime
+  runtimeBindings?: Record<string, Runtime>
 }
 
 interface RunOnMountOpts {
@@ -103,7 +101,7 @@ async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, session, dispatch, namespace, ensureOpen, pythonRuntime, jsRuntime } = ctx
+  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings } = ctx
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
@@ -168,8 +166,7 @@ async function runOnMount(
       sessionId: session.sessionId,
       env: session.env,
       execAllowed: registry.isExecAllowed(),
-      ...(pythonRuntime !== undefined ? { pythonRuntime } : {}),
-      ...(jsRuntime !== undefined ? { jsRuntime } : {}),
+      ...(runtimeBindings?.[cmdName] !== undefined ? { runtime: runtimeBindings[cmdName] } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
       safeguardOverride,
     })
@@ -241,8 +238,7 @@ export async function handleCommand(
   jobTable: JobTable | null = null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PythonRuntime,
-  jsRuntime?: JsRuntime,
+  runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
 ): Promise<Result> {
   if (parts.length === 0) {
@@ -357,8 +353,7 @@ export async function handleCommand(
       dispatch,
       ...(namespace !== undefined ? { namespace } : {}),
       ...(ensureOpen !== undefined ? { ensureOpen } : {}),
-      ...(pythonRuntime !== undefined ? { pythonRuntime } : {}),
-      ...(jsRuntime !== undefined ? { jsRuntime } : {}),
+      ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
@@ -506,8 +501,7 @@ export async function handleCommand(
     dispatch,
     ...(namespace !== undefined ? { namespace } : {}),
     ...(ensureOpen !== undefined ? { ensureOpen } : {}),
-    ...(pythonRuntime !== undefined ? { pythonRuntime } : {}),
-    ...(jsRuntime !== undefined ? { jsRuntime } : {}),
+    ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
   }
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,

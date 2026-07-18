@@ -20,13 +20,13 @@ import {
   ConsistencyPolicy,
   MountMode,
   OnExceed,
-  JS_RUNTIMES,
-  PYTHON_RUNTIMES,
   RAMFileCacheStore,
   RAMWorkspaceStateStore,
   RedisFileCacheStore,
   RedisWorkspaceStateStore,
-  validateRuntimeOptions,
+  buildRuntime,
+  VFS_ENTRY,
+  type RuntimeEntry,
   type FileCache,
   type IndexConfig,
   type RedisIndexConfig,
@@ -45,32 +45,28 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
 
-const VALID_PYTHON_RUNTIMES = new Set<string>(PYTHON_RUNTIMES)
-
-const VALID_JS_RUNTIMES = new Set<string>(JS_RUNTIMES)
-
-function coerceJsRuntime(value: string): string {
-  const lower = value.toLowerCase()
-  if (!VALID_JS_RUNTIMES.has(lower)) {
-    throw new Error(`invalid js runtime: ${value} (expected 'quickjs')`)
-  }
-  return lower
-}
-
-const RUNTIME_BLOCK_NAMES = ['monty', 'wasi', 'local', 'pyodide', 'quickjs'] as const
-
-function coercePythonRuntime(value: string): string {
-  const lower = value.toLowerCase()
-  if (!VALID_PYTHON_RUNTIMES.has(lower)) {
-    if (lower === 'local' || lower === 'wasi') {
-      throw new Error(
-        `python runtime '${lower}' is Python-only; ` +
-          "TypeScript supports 'pyodide' (default) and 'monty'",
-      )
+function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
+  const out: RuntimeEntry[] = []
+  for (const entry of entries) {
+    if (typeof entry === 'string') {
+      out.push(entry === VFS_ENTRY ? VFS_ENTRY : buildRuntime(entry))
+      continue
     }
-    throw new Error(`invalid python runtime: ${value} (expected 'pyodide' or 'monty')`)
+    if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
+    const { name, ...options } = entry
+    if (typeof name !== 'string' || name === '') {
+      throw new Error("runtime entry needs a non-empty 'name'")
+    }
+    if (name === VFS_ENTRY) {
+      if (Object.keys(options).length > 0) {
+        throw new Error('the vfs runtime entry takes no options')
+      }
+      out.push(VFS_ENTRY)
+      continue
+    }
+    out.push(buildRuntime(name, options))
   }
-  return lower
+  return out
 }
 
 function coerceConsistency(value: string | undefined): ConsistencyPolicy {
@@ -132,12 +128,10 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
     }
     out.store = store
   }
-  if (isPlainObject(out.runtime)) {
-    const runtime = camelizeKeys(out.runtime)
-    for (const name of RUNTIME_BLOCK_NAMES) {
-      if (isPlainObject(runtime[name])) runtime[name] = camelizeKeys(runtime[name])
-    }
-    out.runtime = runtime
+  if (Array.isArray(out.runtimes)) {
+    out.runtimes = out.runtimes.map((entry): unknown =>
+      isPlainObject(entry) ? camelizeKeys(entry) : entry,
+    )
   }
   return out
 }
@@ -267,19 +261,9 @@ interface StoreBlock {
   workspace?: StoreGroupBlock | null
 }
 
-interface RuntimeBlock {
-  python?: string
-  js?: string
-  monty?: Record<string, unknown>
-  wasi?: Record<string, unknown>
-  local?: Record<string, unknown>
-  pyodide?: Record<string, unknown>
-  quickjs?: Record<string, unknown>
-}
-
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
-  runtime?: RuntimeBlock | null
+  runtimes?: (string | Record<string, unknown>)[] | null
   mode?: string
   consistency?: string
   defaultSessionId?: string
@@ -341,9 +325,7 @@ export interface WorkspaceArgs {
     index?: IndexConfig
     workspaceId?: string
     store?: WorkspaceStateStore
-    pythonRuntime?: string
-    jsRuntime?: string
-    runtimeOptions?: Record<string, Record<string, unknown>>
+    runtimes?: RuntimeEntry[]
   }
   fuseMounts: Record<string, boolean | string>
 }
@@ -410,15 +392,6 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
 }
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
-  const runtimeOptions: Record<string, Record<string, unknown>> = {}
-  if (cfg.runtime !== undefined && cfg.runtime !== null) {
-    for (const [name, block] of Object.entries(cfg.runtime)) {
-      if (name === 'python' || name === 'js' || block === undefined || block === null) continue
-      if (!isPlainObject(block)) throw new Error(`runtime block '${name}' must be a mapping`)
-      runtimeOptions[name] = block
-    }
-    validateRuntimeOptions(runtimeOptions)
-  }
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
   const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
@@ -443,11 +416,9 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
       ...(stateStore !== undefined ? { store: stateStore } : {}),
-      ...(cfg.runtime?.python !== undefined
-        ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
+      ...(cfg.runtimes !== undefined && cfg.runtimes !== null
+        ? { runtimes: buildRuntimeEntries(cfg.runtimes) }
         : {}),
-      ...(cfg.runtime?.js !== undefined ? { jsRuntime: coerceJsRuntime(cfg.runtime.js) } : {}),
-      ...(Object.keys(runtimeOptions).length > 0 ? { runtimeOptions } : {}),
     },
     fuseMounts,
   }

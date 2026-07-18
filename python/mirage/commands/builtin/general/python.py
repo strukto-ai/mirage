@@ -15,12 +15,13 @@
 from typing import Any, Callable
 
 from mirage.accessor.base import Accessor, NOOPAccessor
-from mirage.commands.builtin.utils.paths import resolve_script
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.general.interpreter import (resolve_source,
+                                                         run_code)
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.python import MontyRuntime, PythonRunArgs, PythonRuntime
+from mirage.io.types import ByteSource, CommandOutput
+from mirage.runtime.base import Runtime
+from mirage.runtime.python import MontyRuntime
 from mirage.types import PathSpec
 
 
@@ -34,66 +35,21 @@ async def _python3(
     cwd: PathSpec | None = None,
     env: dict[str, str] | None = None,
     exec_allowed: bool = True,
-    python_runtime: PythonRuntime | None = None,
+    runtime: Runtime | None = None,
     **_extra: object,
-) -> tuple[ByteSource | None, IOResult]:
-    if not exec_allowed:
-        err = b"python3: root mount '/' is not in EXEC mode\n"
-        return None, IOResult(exit_code=126, stderr=err)
-
-    paths = paths or []
-    text_list = list(texts)
-    code: str | None = c
-    has_code = code is not None
-    script_path: PathSpec | None = None
-    arg_strs: list[str]
-    if has_code:
-        arg_strs = [p.virtual for p in paths] + text_list
-    elif paths:
-        script_path = paths[0]
-        arg_strs = [p.virtual for p in paths[1:]] + text_list
-    elif text_list:
-        script_path = resolve_script(text_list[0], cwd)
-        arg_strs = text_list[1:]
-    else:
-        arg_strs = []
-
-    if code is None and script_path is not None:
-        if dispatch is None:
-            err = b"python3: no dispatch available to read script\n"
-            return None, IOResult(exit_code=1, stderr=err)
-        try:
-            data, _ = await dispatch("read", script_path)
-        except FileNotFoundError:
-            err = f"python3: {script_path.virtual}: No such file\n".encode()
-            return None, IOResult(exit_code=1, stderr=err)
-        code = data.decode(errors="replace") if isinstance(data, bytes) else ""
-
-    stdin_data = await _read_stdin_async(stdin)
-    if code is None:
-        if stdin_data:
-            code = stdin_data.decode(errors="replace")
-            stdin_data = None
-        else:
-            return None, IOResult(exit_code=1, stderr=b"python3: no input\n")
-
-    if python_runtime is not None:
-        runtime = python_runtime
-    else:
-        try:
-            runtime = MontyRuntime(dispatch)
-        except ImportError as exc:
-            return None, IOResult(exit_code=127,
-                                  stderr=f"python3: {exc}\n".encode())
-    result = await runtime.run(
-        PythonRunArgs(code=code,
-                      args=arg_strs,
-                      env=env or {},
-                      stdin=stdin_data))
-    return result.stdout if result.stdout else None, IOResult(
-        exit_code=result.exit_code,
-        stderr=result.stderr,
-    )
+) -> CommandOutput:
+    error, prepared = await resolve_source("python3", paths, texts, c, stdin,
+                                           dispatch, cwd, exec_allowed)
+    if error is not None or prepared is None:
+        assert error is not None
+        return error
+    return await run_code("python3",
+                          prepared,
+                          env, {},
+                          runtime,
+                          fallback=MontyRuntime,
+                          fallback_errors=(ImportError, ),
+                          dispatch=dispatch)
 
 
 python3 = command("python3", resource=None, spec=SPECS["python3"])(_python3)

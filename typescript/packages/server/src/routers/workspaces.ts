@@ -111,13 +111,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
           ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
           ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-          ...(args.options.pythonRuntime !== undefined
-            ? { pythonRuntime: args.options.pythonRuntime }
-            : {}),
-          ...(args.options.jsRuntime !== undefined ? { jsRuntime: args.options.jsRuntime } : {}),
-          ...(args.options.runtimeOptions !== undefined
-            ? { runtimeOptions: args.options.runtimeOptions }
-            : {}),
+          ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
         })
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })

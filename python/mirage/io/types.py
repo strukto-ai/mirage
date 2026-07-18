@@ -20,6 +20,10 @@ from mirage.types import CommandSafeguard
 
 ByteSource = bytes | AsyncIterator[bytes]
 
+# The shape every command returns: a live stdout stream (None when
+# buffered into the result) and the command's outcome.
+CommandOutput = tuple["ByteSource | None", "IOResult"]
+
 
 async def materialize(stream: ByteSource | None) -> bytes:
     """Consume a ByteSource and return bytes."""

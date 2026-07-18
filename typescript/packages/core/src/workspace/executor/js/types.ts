@@ -12,20 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export interface JsRunArgs {
-  code: string
-  args: string[]
-  env: Record<string, string>
-  stdin: Uint8Array | null
-  module: boolean
-}
-
-export interface JsRunResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  exitCode: number
-}
-
 export class QuickJsUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options)

@@ -76,6 +76,9 @@ CASES: list[tuple[str, str]] = [
      ".read_text().splitlines(); "
      "print('books:', len(lines))\""),
     ("py3_script_argv", "python3 /ram/analyze.py 40 2"),
+    ("py3_stdin_pipe", "cat /ram/pipe.py | python3"),
+    ("py3_pipe_to_grep",
+     "python3 -c \"print('alpha'); print('beta')\" | grep beta"),
     ("py3_write_back", "python3 -c \"from pathlib import Path; "
      "Path('/ram/out.txt').write_text('written-by-python3')\" "
      "&& cat /ram/out.txt"),
@@ -152,6 +155,7 @@ def _build_workspace(endpoint: str, run_id: str) -> Workspace:
     ram = RAMResource()
     ram._store.files["/data.txt"] = b"hello from ram\n"
     ram._store.files["/analyze.py"] = ANALYZE_SCRIPT.encode()
+    ram._store.files["/pipe.py"] = b"print('came-through-pipe')\n"
     redis = RedisResource(url=REDIS_URL,
                           key_prefix=f"mirage-integ-runtime-{run_id}/")
     s3 = S3Resource(
@@ -266,12 +270,24 @@ async def main() -> None:
 
         ws_local = Workspace({"/ram": RAMResource()},
                              mode=MountMode.EXEC,
-                             python_runtime="local")
+                             runtimes=["local"])
         result = await ws_local.execute(
             'python3 -c "import sys; print(sys.argv[1:])" alpha beta')
         print("=== py3_local_runtime_argv ===")
         print(await result.stdout_str(), end="")
         await ws_local.close()
+
+        # Explicit monty entry (the default world also starts with
+        # monty; this pins it). Bare `argv` is monty's injected global,
+        # so this line would NameError on the local runtime.
+        ws_monty = Workspace({"/ram": RAMResource()},
+                             mode=MountMode.EXEC,
+                             runtimes=["monty", "vfs"])
+        result = await ws_monty.execute(
+            'python3 -c "print(argv[1:])" alpha beta')
+        print("=== py3_monty_runtime_argv ===")
+        print(await result.stdout_str(), end="")
+        await ws_monty.close()
 
         slow_ram = RAMResource()
         slow_ram._store.files["/slow.py"] = SLOW_SCRIPT.encode()

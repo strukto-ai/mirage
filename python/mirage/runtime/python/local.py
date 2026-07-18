@@ -17,13 +17,12 @@ import os
 import shutil
 import sys
 
-from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
-                                        PythonRuntime)
+from mirage.runtime.base import RunArgs, RunResult, Runtime
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
-class LocalRuntime(PythonRuntime):
+class LocalRuntime(Runtime):
     """Run Python code on a host interpreter as a subprocess.
 
     Each run spawns `<interpreter> -c <code>`; the code sees the host
@@ -31,7 +30,7 @@ class LocalRuntime(PythonRuntime):
     run kills the subprocess, so a safeguard timeout reclaims it.
 
     The interpreter defaults to the one running mirage; point the
-    `home` argument (the yaml `runtime: local: home:` entry ends up
+    `home` argument (the yaml `runtimes:` entry `home` option ends up
     here) or the MIRAGE_LOCAL_HOME environment variable at another
     binary, e.g. a project venv whose packages the code needs.
 
@@ -42,6 +41,7 @@ class LocalRuntime(PythonRuntime):
     """
 
     name = "local"
+    captures = ("python3", "python")
 
     def __init__(self, home: str | None = None) -> None:
         chosen = home or os.environ.get(LOCAL_HOME_ENV)
@@ -50,14 +50,14 @@ class LocalRuntime(PythonRuntime):
             if resolved is None:
                 raise FileNotFoundError(
                     f"local python interpreter not found: {chosen!r} "
-                    "(from the yaml `runtime: local: home:` entry, the "
-                    "Workspace `runtime_options` argument, or "
+                    "(from the yaml `runtimes:` entry `home` option, the "
+                    "runtime entry's `home` option, or "
                     f"{LOCAL_HOME_ENV})")
             self._python = resolved
         else:
             self._python = sys.executable
 
-    async def run(self, args: PythonRunArgs) -> PythonRunResult:
+    async def run(self, args: RunArgs) -> RunResult:
         proc = await asyncio.create_subprocess_exec(
             self._python,
             "-c",
@@ -77,7 +77,7 @@ class LocalRuntime(PythonRuntime):
             proc.kill()
             await proc.wait()
             raise
-        return PythonRunResult(
+        return RunResult(
             stdout=stdout,
             stderr=stderr or None,
             exit_code=proc.returncode if proc.returncode is not None else 1,

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../executor/runtime.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -34,8 +35,6 @@ import {
   getUnsetNames,
   getWhileParts,
 } from '../../shell/helpers.ts'
-import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
-import type { JsRuntime } from '../executor/js/interface.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
@@ -85,8 +84,7 @@ export interface ExecuteNodeDeps {
   registerCloser: (fn: () => Promise<void>) => void
   ensureOpen?: (resource: Resource) => Promise<void>
   unmount?: (prefix: string) => Promise<void>
-  pythonRuntime?: PythonRuntime
-  jsRuntime?: JsRuntime
+  runtimeBindings?: Record<string, Runtime>
   signal?: AbortSignal
 }
 
@@ -133,8 +131,7 @@ export async function executeNode(
       jobTable,
       deps.ensureOpen,
       deps.unmount,
-      deps.pythonRuntime,
-      deps.jsRuntime,
+      deps.runtimeBindings,
       deps.signal,
     )
   }

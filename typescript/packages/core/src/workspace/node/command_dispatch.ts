@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../executor/runtime.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -23,8 +24,6 @@ import {
   getText,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
-import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
-import type { JsRuntime } from '../executor/js/interface.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
@@ -139,8 +138,7 @@ export async function executeCommand(
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PythonRuntime,
-  jsRuntime?: JsRuntime,
+  runtimeBindings?: Record<string, Runtime>,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -200,8 +198,7 @@ export async function executeCommand(
       jobTable,
       ensureOpen,
       unmount,
-      pythonRuntime,
-      jsRuntime,
+      runtimeBindings,
       signal,
     )
   } finally {
@@ -236,8 +233,7 @@ async function runCommandBody(
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PythonRuntime,
-  jsRuntime?: JsRuntime,
+  runtimeBindings?: Record<string, Runtime>,
   signal?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
@@ -310,8 +306,7 @@ async function runCommandBody(
       jobTable,
       ensureOpen,
       unmount,
-      pythonRuntime,
-      jsRuntime,
+      runtimeBindings,
       signal,
     ),
     timeout,
@@ -337,8 +332,7 @@ async function runArgv(
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PythonRuntime,
-  jsRuntime?: JsRuntime,
+  runtimeBindings?: Record<string, Runtime>,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
@@ -586,8 +580,7 @@ async function runArgv(
     jobTable,
     ensureOpen,
     unmount,
-    pythonRuntime,
-    jsRuntime,
+    runtimeBindings,
     namespace,
   )
 

@@ -43,8 +43,9 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
-from mirage.runtime.js import JsRuntime, select_js_runtime
-from mirage.runtime.python import PythonRuntime, select_python_runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.table import (DEFAULT_ENTRIES, VFS_ENTRY, bind_commands,
+                                  build_runtime)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -112,9 +113,7 @@ class Workspace:
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
-        python_runtime: str | None = None,
-        js_runtime: str | None = None,
-        runtime_options: dict[str, dict[str, Any]] | None = None,
+        runtimes: list[Runtime | str] | None = None,
     ) -> None:
         self._registry = MountRegistry()
         # One provider scopes every control-plane store by workspace id;
@@ -234,38 +233,13 @@ class Workspace:
                         links=self._namespace,
                         stat_overlay=self._merge_overlay)
 
-        # Graceful default: without the 'monty' extra the default runtime
-        # cannot build; leave it unset so python3 reports the install hint
-        # per invocation. An explicitly requested runtime still fails loud.
-        self._python_runtime: PythonRuntime | None
-        try:
-            self._python_runtime = select_python_runtime(
-                python_runtime,
-                self.dispatch,
-                options=runtime_options,
-                mount_prefixes=self._runtime_mount_prefixes)
-        except ImportError:
-            if python_runtime is not None:
-                raise
-            self._python_runtime = None
-        self._registry.python_runtime = self._python_runtime
-
-        # `node`/`js` runtime: quickjs needs the 'quickjs' extra plus a
-        # wasm build, so a default that cannot construct is left unset and
-        # the command reports the hint per invocation; an explicit runtime
-        # or option still fails loud.
-        self._js_runtime: JsRuntime | None
-        try:
-            self._js_runtime = select_js_runtime(
-                js_runtime,
-                self.dispatch,
-                options=runtime_options,
-                mount_prefixes=self._runtime_mount_prefixes)
-        except (ImportError, FileNotFoundError):
-            if js_runtime is not None:
-                raise
-            self._js_runtime = None
-        self._registry.js_runtime = self._js_runtime
+        # The workspace's ordered runtime world: instances and the vfs
+        # marker, first capturer binds each command. An explicit list
+        # fails loud per entry; the default world builds gracefully (a
+        # missing extra leaves the command reporting its install hint
+        # per invocation, never a silent escalation to another runtime).
+        self._runtime_entries = self._resolve_runtime_entries(runtimes)
+        self._registry.runtime_bindings = bind_commands(self._runtime_entries)
 
         for prefix, fuse_target in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
@@ -416,6 +390,42 @@ class Workspace:
         # mounts added or removed after construction are picked up.
         return self._ops.mount_prefixes()
 
+    def _resolve_runtime_entries(
+            self, runtimes: list[Runtime | str] | None) -> list[Runtime | str]:
+        """Build and wire the workspace's ordered runtime world.
+
+        Name strings become no-option instances; the vfs marker passes
+        through; every instance gets the workspace dispatch attached.
+        An explicit list fails loud per entry. The default world
+        (monty, quickjs, vfs) builds gracefully: a missing extra skips
+        the entry so its commands report the install hint per
+        invocation, never a silent escalation to another runtime.
+
+        Args:
+            runtimes (list[Runtime | str] | None): user entries, or
+                None for the default world.
+        """
+        entries: list[Runtime | str] = []
+        if runtimes is None:
+            for name in DEFAULT_ENTRIES:
+                if name == VFS_ENTRY:
+                    entries.append(VFS_ENTRY)
+                    continue
+                try:
+                    entries.append(build_runtime(name))
+                except (ImportError, FileNotFoundError):
+                    continue
+        else:
+            for entry in runtimes:
+                if isinstance(entry, str) and entry != VFS_ENTRY:
+                    entries.append(build_runtime(entry))
+                else:
+                    entries.append(entry)
+        for entry in entries:
+            if isinstance(entry, Runtime):
+                entry.attach(self.dispatch, self._runtime_mount_prefixes)
+        return entries
+
     @property
     def _cwd(self) -> str:
         return self._session_mgr.cwd
@@ -471,10 +481,9 @@ class Workspace:
             if self._async_closed:
                 return
             drain_tasks = list(self._cache._drain_tasks.values())
-            if self._python_runtime is not None:
-                await self._python_runtime.close()
-            if self._js_runtime is not None:
-                await self._js_runtime.close()
+            for line_runtime in self._runtime_entries:
+                if isinstance(line_runtime, Runtime):
+                    await line_runtime.close()
             resources = {
                 id(mount.resource): mount.resource
                 for mount in self._registry.mounts()
