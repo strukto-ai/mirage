@@ -12,5 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SCOPE_WARN = 5000
-export const SCOPE_ERROR = 50000
+export type CompressionKind = 'gzip' | 'bzip2' | 'xz'
+export type Compression = CompressionKind | null

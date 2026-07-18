@@ -12,5 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SCOPE_WARN = 5000
-export const SCOPE_ERROR = 50000
+import type { CompressionKind } from './types.ts'
+
+export const COMPRESSION_SIGNATURES: Readonly<Record<CompressionKind, readonly number[]>> =
+  Object.freeze({
+    gzip: [0x1f, 0x8b],
+    bzip2: [0x42, 0x5a, 0x68],
+    xz: [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00],
+  })

@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../../config.ts'
-import type { FiletypeEntry, ReadBytesFn, StatEntryFn } from '../extensions.ts'
+import type { FiletypeEntry, FiletypeReadBytesFn, StatEntryFn } from '../extensions.ts'
 import { ftCat } from './cat.ts'
 import { ftCut } from './cut.ts'
 import { ftFile } from './file.ts'
@@ -26,7 +26,7 @@ import { ftTail } from './tail.ts'
 import { ftWc } from './wc.ts'
 
 export type FiletypeHandler = <A extends Accessor>(
-  readBytes: ReadBytesFn<A>,
+  readBytes: FiletypeReadBytesFn<A>,
   statEntry: StatEntryFn<A>,
   entry: FiletypeEntry,
   accessor: A,

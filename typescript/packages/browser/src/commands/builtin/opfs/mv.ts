@@ -40,8 +40,8 @@ function mvCommand(
   }
   return mvGeneric(
     paths,
-    (src: PathSpec, target: PathSpec) => coreRename(accessor, src, target),
     (p: PathSpec) => coreStat(accessor, p),
+    { rename: (src: PathSpec, target: PathSpec) => coreRename(accessor, src, target) },
     opts.flags.n === true,
     opts.flags.v === true,
     opts.index ?? undefined,

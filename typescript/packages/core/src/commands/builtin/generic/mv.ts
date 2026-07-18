@@ -15,39 +15,31 @@
 import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { PathSpec, type MoveStrategy, type PrimitiveMove, type StatFn } from '../../../types.ts'
 import {
   backendKeyDefault,
   copyTargets,
   isDirectory,
   pathExists,
   type BackendKeyFn,
-  type StatFn,
 } from '../utils/copy.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { cpWalk, type CpPrimitives } from './cp.ts'
+import { cpWalk } from './cp.ts'
 
 const ENC = new TextEncoder()
 
-type RenameFn = (src: PathSpec, target: PathSpec) => Promise<void>
-
-// Low-level primitives for the no-native-rename path (cross-mount): the source
-// tree is copied (parents first) then removed (children first), mirroring the
-// Python mv generic. Backends that inject a native rename never use these.
-export interface MvPrimitives extends CpPrimitives {
-  unlink: (p: PathSpec) => Promise<void>
-  rmdir: (p: PathSpec) => Promise<void>
+function isPrimitiveMove(strategy: MoveStrategy): strategy is PrimitiveMove {
+  return 'readBytes' in strategy
 }
 
 export async function mvGeneric(
   paths: PathSpec[],
-  rename: RenameFn | undefined,
   stat: StatFn,
+  strategy: MoveStrategy,
   noClobber: boolean,
   verbose: boolean,
   index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
-  prim?: MvPrimitives,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const sources = paths.slice(0, -1)
@@ -73,17 +65,17 @@ export async function mvGeneric(
       continue
     }
     if (noClobber && (await pathExists(stat, target))) continue
-    if (rename === undefined && prim !== undefined) {
+    if (isPrimitiveMove(strategy)) {
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
-      const entries = await cpWalk(prim.readdir, stat, src, index)
+      const entries = await cpWalk(strategy.readdir, stat, src, index)
       for (const { path: entry, isDir } of entries) {
         const entryDst = dstBase + entry.slice(srcBase.length)
         const entryDstSpec = PathSpec.fromStrPath(entryDst)
         if (isDir) {
-          if (!(await isDirectory(stat, entryDstSpec, index))) await prim.mkdir(entryDstSpec)
+          if (!(await isDirectory(stat, entryDstSpec, index))) await strategy.mkdir(entryDstSpec)
         } else {
-          await prim.write(entryDstSpec, await prim.readBytes(PathSpec.fromStrPath(entry)))
+          await strategy.write(entryDstSpec, await strategy.readBytes(PathSpec.fromStrPath(entry)))
         }
       }
       for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -93,11 +85,11 @@ export async function mvGeneric(
           node.path,
           rekey(src.virtual, src.resourcePath, node.path),
         )
-        if (node.isDir) await prim.rmdir(spec)
-        else await prim.unlink(spec)
+        if (node.isDir) await strategy.rmdir(spec)
+        else await strategy.unlink(spec)
       }
-    } else if (rename !== undefined) {
-      await rename(src, target)
+    } else {
+      await strategy.rename(src, target)
     }
     writes[src.mountPath] = new Uint8Array()
     writes[target.mountPath] = new Uint8Array()

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IndexCacheStore } from './cache/index/store.ts'
+import type { FindOptions } from './resource/base.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 
 export const MountMode = Object.freeze({
@@ -252,6 +254,73 @@ export class FileStat {
     Object.freeze(this)
   }
 }
+
+export type ReadBytesFn<Args extends unknown[] = [path: PathSpec]> = (
+  ...args: Args
+) => Promise<Uint8Array>
+
+export type ReadStreamFn<Args extends unknown[] = [path: PathSpec]> = (
+  ...args: Args
+) => AsyncIterable<Uint8Array>
+
+export type PolymorphicReadResult =
+  | Uint8Array
+  | AsyncIterable<Uint8Array>
+  | Promise<Uint8Array | AsyncIterable<Uint8Array>>
+
+export type PolymorphicReadFn<Args extends unknown[] = [path: PathSpec]> = (
+  ...args: Args
+) => PolymorphicReadResult
+
+export type CopyFn<Args extends unknown[] = [src: PathSpec, target: PathSpec]> = (
+  ...args: Args
+) => Promise<void>
+
+export type MoveFn<Args extends unknown[] = [src: PathSpec, target: PathSpec]> = (
+  ...args: Args
+) => Promise<void>
+
+export type FindFn<Args extends unknown[] = [src: PathSpec, options: FindOptions]> = (
+  ...args: Args
+) => Promise<string[]>
+
+export type ReaddirFn<Args extends unknown[] = [path: PathSpec]> = (
+  ...args: Args
+) => Promise<string[]>
+
+export type StatFn<Args extends unknown[] = [path: PathSpec, index?: IndexCacheStore]> = (
+  ...args: Args
+) => Promise<FileStat>
+
+export interface NativeCopy {
+  copy: CopyFn
+  find: FindFn
+  dirCopy?: CopyFn
+}
+
+export interface PrimitiveCopy {
+  readBytes: ReadBytesFn
+  write: CopyFn<[target: PathSpec, data: Uint8Array]>
+  mkdir: CopyFn<[path: PathSpec]>
+  readdir: ReaddirFn
+}
+
+export type CopyStrategy = NativeCopy | PrimitiveCopy
+
+export interface NativeMove {
+  rename: MoveFn
+}
+
+export interface PrimitiveMove {
+  readBytes: ReadBytesFn
+  write: MoveFn<[target: PathSpec, data: Uint8Array]>
+  mkdir: MoveFn<[path: PathSpec]>
+  readdir: ReaddirFn
+  unlink: MoveFn<[path: PathSpec]>
+  rmdir: MoveFn<[path: PathSpec]>
+}
+
+export type MoveStrategy = NativeMove | PrimitiveMove
 
 export interface PathSpecInit {
   virtual: string

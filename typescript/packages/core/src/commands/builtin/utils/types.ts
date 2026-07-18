@@ -12,5 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SCOPE_WARN = 5000
-export const SCOPE_ERROR = 50000
+import type { FileStat } from '../../../types.ts'
+
+export type AsyncReadBytesFn = (path: string) => Promise<Uint8Array>
+export type AsyncReaddirFn = (path: string) => Promise<string[]>
+export type AsyncStatFn = (path: string) => Promise<FileStat>

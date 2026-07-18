@@ -17,15 +17,30 @@ export {
   CommandSafeguard,
   type CommandSafeguardInit,
   ConsistencyPolicy,
+  type CopyFn,
+  type CopyStrategy,
   DriftPolicy,
   FileStat,
   type FileStatInit,
   FileType,
+  type FindFn,
   MountMode,
+  type MoveFn,
+  type MoveStrategy,
+  type NativeCopy,
+  type NativeMove,
   OnExceed,
   PathSpec,
   type PathSpecInit,
+  type PolymorphicReadFn,
+  type PolymorphicReadResult,
+  type PrimitiveCopy,
+  type PrimitiveMove,
+  type ReadBytesFn,
+  type ReaddirFn,
+  type ReadStreamFn,
   ResourceName,
+  type StatFn,
 } from './types.ts'
 export {
   captureFingerprints,
@@ -180,7 +195,7 @@ export {
   FILETYPE_ENTRIES,
   type FiletypeEntry,
   type FiletypeModule,
-  type ReadBytesFn,
+  type FiletypeReadBytesFn,
   type StatEntryFn,
 } from './commands/builtin/filetype_factory/extensions.ts'
 export { numberLines } from './commands/builtin/generic/cat.ts'
@@ -275,9 +290,6 @@ export {
 } from './commands/builtin/grep_helper.ts'
 export { grepContextLines } from './commands/builtin/grep_context.ts'
 export {
-  type AsyncReaddirFn,
-  type AsyncReadBytesFn,
-  type AsyncStatFn,
   rgFolderFiletype,
   type RgFolderFiletypeOptions,
   rgFull,
@@ -285,6 +297,11 @@ export {
   rgMatchesFilter,
   TYPE_EXTENSIONS,
 } from './commands/builtin/rg_helper.ts'
+export type {
+  AsyncReadBytesFn,
+  AsyncReaddirFn,
+  AsyncStatFn,
+} from './commands/builtin/utils/types.ts'
 export {
   compareKeys,
   parseKeyOptions,

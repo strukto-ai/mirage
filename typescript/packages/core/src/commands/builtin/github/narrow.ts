@@ -22,8 +22,9 @@ import { narrowPaths } from '../../../core/github/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { rebaseRaw } from '../../../utils/path.ts'
+import { PatternType } from '../constants.ts'
 import { formatRecords } from '../utils/output.ts'
-import { classifyPattern, PatternType, searchQuery } from '../grep_helper.ts'
+import { classifyPattern, searchQuery } from '../grep_helper.ts'
 
 const resolveGlob = resolveGlobOf(GITHUB_CMD_OPS)
 

@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { FindOptions } from '../../../../resource/base.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { NativeCopy, PathSpec } from '../../../../types.ts'
 import { cpGeneric } from '../../generic/cp.ts'
 import type { Builder } from '../adapter.ts'
 
@@ -28,16 +27,22 @@ export const CP_BUILDER: Builder = {
         new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
       ])
     }
-    const { copy, find } = ops
+    const { copy, dirCopy, find } = ops
     if (copy === undefined || find === undefined) {
       throw new Error('cp: backend provides no copy/find op')
     }
     const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
+    const strategy: NativeCopy = {
+      copy: (src: PathSpec, target: PathSpec) => copy(accessor, src, target),
+      find: (src, options) => find(accessor, src, options),
+      ...(dirCopy === undefined
+        ? {}
+        : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),
+    }
     return cpGeneric(
       paths,
-      (src: PathSpec, target: PathSpec) => copy(accessor, src, target),
-      (src: PathSpec, options: FindOptions) => find(accessor, src, options),
       (p: PathSpec) => ops.stat(accessor, p, opts.index ?? undefined),
+      strategy,
       recursive,
       opts.flags.n === true,
       opts.flags.v === true,

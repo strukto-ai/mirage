@@ -12,5 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SCOPE_WARN = 5000
-export const SCOPE_ERROR = 50000
+import { describe, expect, it } from 'vitest'
+import { SCOPE_ERROR, SCOPE_WARN } from './constants.ts'
+
+describe('RAM scope constants', () => {
+  it('keeps the warning threshold below the error threshold', () => {
+    expect(SCOPE_WARN).toBe(5000)
+    expect(SCOPE_ERROR).toBe(50000)
+  })
+})
