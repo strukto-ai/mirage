@@ -91,6 +91,12 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
   const width = opts.sizeWidth ?? sizes.reduce((m, s) => Math.max(m, s.length), 1)
   return stats.map((s, i) => {
     const mode = lsModeString(s)
+    // Metadata-less entries (synthetic API-backend directories) render the
+    // compact placeholder form instead of inventing size 0 + epoch mtime,
+    // mirroring the python formatter.
+    if (s.size == null && s.modified == null) {
+      return `${mode}\t-\t-\t${s.name}`
+    }
     const size = padLeft(sizes[i] ?? '0', width)
     const time = lsTimeString(s.modified)
     const who = s.uid !== null ? String(s.uid) : owner
