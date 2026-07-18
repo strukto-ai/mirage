@@ -40,6 +40,10 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
+    # mtime_min/mtime_max are accepted for signature parity but not applied:
+    # buckets carry no per-object mtime, so filtering would drop everything
+    # (matches the s3/onedrive remote finds).
+    del mtime_min, mtime_max
     start_name = start_basename(path)
     target = path.mount_path
     pfx = target.strip("/")
@@ -73,7 +77,6 @@ async def find(
             saw_descendant = True
             kind = "d" if is_dir else "f"
             content_length = getattr(entry.metadata, "content_length", 0) or 0
-            last_modified = getattr(entry.metadata, "last_modified", None)
 
             file_entries: list[tuple[str, str]] = [(entry_path, kind)]
             if not is_dir:
@@ -105,15 +108,6 @@ async def find(
                     if min_size is not None and size < min_size:
                         continue
                     if max_size is not None and size > max_size:
-                        continue
-
-                if mtime_min is not None or mtime_max is not None:
-                    if last_modified is None:
-                        continue
-                    mt = last_modified.timestamp()
-                    if mtime_min is not None and mt < mtime_min:
-                        continue
-                    if mtime_max is not None and mt > mtime_max:
                         continue
 
                 results.append(ep)

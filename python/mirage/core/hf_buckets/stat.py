@@ -63,9 +63,11 @@ async def stat(accessor: _HfAccessor,
             fingerprint=md.etag,
             extra={"etag": md.etag} if md.etag else {},
         )
+    # Buckets have no dir objects and opendal's trailing-slash stat
+    # short-circuits to DIR client-side, so a directory exists iff
+    # something lists under its prefix (object-store semantics).
     try:
-        md_dir = await op.stat(key + "/")
-        if md_dir and md_dir.mode == EntryMode.Dir:
+        async for _ in await op.list(key + "/"):
             return FileStat(
                 name=stripped.rsplit("/", 1)[-1] or "/",
                 type=FileType.DIRECTORY,

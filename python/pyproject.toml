@@ -222,6 +222,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest-httpx>=0.36.0",
     "mypy>=2.3.0",
+    "lz4>=4.4.5",
 ]
 
 [tool.flake8]

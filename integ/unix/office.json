@@ -88,6 +88,8 @@
       "id": "office_plain_files_untouched",
       "seq": 204006,
       "targets": [
+        "hf",
+        "hf-prefix",
         "onedrive",
         "sharepoint"
       ],
@@ -102,6 +104,8 @@
       "id": "office_cleanup",
       "seq": 204007,
       "targets": [
+        "hf",
+        "hf-prefix",
         "onedrive",
         "sharepoint"
       ],

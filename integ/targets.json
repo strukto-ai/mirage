@@ -283,6 +283,69 @@
           "fixture": "columnar/v1"
         }
       ]
+    },
+    {
+      "id": "hf",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "hf",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "hf",
+          "backend": "hf",
+          "bucket": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "hf",
+          "backend": "hf",
+          "bucket": "data2"
+        },
+        {
+          "path": "/res",
+          "resource": "hf",
+          "backend": "hf",
+          "bucket": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "hf-prefix",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "hf",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "hf",
+          "backend": "hf",
+          "bucket": "shared",
+          "prefix": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "hf",
+          "backend": "hf",
+          "bucket": "shared",
+          "prefix": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "hf",
+          "backend": "hf",
+          "bucket": "shared",
+          "prefix": "team/reports/res",
+          "fixture": "columnar/v1"
+        }
+      ]
     }
   ]
 }

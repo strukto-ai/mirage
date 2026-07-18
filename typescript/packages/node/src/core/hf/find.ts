@@ -26,15 +26,13 @@ import {
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { isNotFound, rawPathOf } from './util.ts'
 
-interface CandidateMeta {
-  size: number
-  mtime: number | null
-}
-
+// -mtime is accepted for signature parity but not applied: buckets carry no
+// per-object mtime, so filtering would drop everything (matches s3/onedrive).
 function matchesFilters(
   entryPath: string,
   kind: 'f' | 'd',
-  meta: CandidateMeta,
+  size: number,
+  isEmpty: boolean | null,
   baseDepth: number,
   options: FindOptions,
   tree: PredNode,
@@ -44,36 +42,16 @@ function matchesFilters(
   if (options.maxDepth !== null && options.maxDepth !== undefined && depth > options.maxDepth) {
     return false
   }
-  if (!keep({ key: entryPath, name: entryName, kind, depth }, tree, options.minDepth)) {
+  if (!keep({ key: entryPath, name: entryName, kind, depth, isEmpty }, tree, options.minDepth)) {
     return false
   }
   if (options.minSize != null || options.maxSize != null) {
     // Directories count as size 0 for -size (deliberate GNU divergence).
-    const size = kind === 'f' ? meta.size : 0
-    if (options.minSize != null && size < options.minSize) {
+    const effective = kind === 'f' ? size : 0
+    if (options.minSize != null && effective < options.minSize) {
       return false
     }
-    if (options.maxSize != null && size > options.maxSize) {
-      return false
-    }
-  }
-  if (
-    (options.mtimeMin !== null && options.mtimeMin !== undefined) ||
-    (options.mtimeMax !== null && options.mtimeMax !== undefined)
-  ) {
-    if (meta.mtime === null) return false
-    if (
-      options.mtimeMin !== null &&
-      options.mtimeMin !== undefined &&
-      meta.mtime < options.mtimeMin
-    ) {
-      return false
-    }
-    if (
-      options.mtimeMax !== null &&
-      options.mtimeMax !== undefined &&
-      meta.mtime > options.mtimeMax
-    ) {
+    if (options.maxSize != null && effective > options.maxSize) {
       return false
     }
   }
@@ -91,6 +69,7 @@ export async function find(
   const base = pfx !== '' ? `/${pfx}` : '/'
   const baseDepth = base === '/' ? 0 : (base.match(/\//g) ?? []).length
   const startName = startBasename(path.virtual)
+  const empty = options.empty === true
   const op = await accessor.operator()
   const results: string[] = []
   const seenDirs = new Set<string>()
@@ -126,11 +105,7 @@ export async function find(
     sawDescendant = true
     const kind: 'f' | 'd' = isDir ? 'd' : 'f'
     const length = meta.contentLength
-    const lm = meta.lastModified
-    const candidateMeta: CandidateMeta = {
-      size: length !== null ? Number(length) : 0,
-      mtime: lm !== null ? Date.parse(lm) / 1000 : null,
-    }
+    const size = length !== null ? Number(length) : 0
     const fileEntries: [string, 'f' | 'd'][] = [[entryPath, kind]]
     if (!isDir) {
       let parent = rstripSlash(entryPath.slice(0, entryPath.lastIndexOf('/'))) || '/'
@@ -143,7 +118,8 @@ export async function find(
       }
     }
     for (const [ep, k] of fileEntries) {
-      if (matchesFilters(ep, k, candidateMeta, baseDepth, options, tree)) {
+      const isEmpty = !empty ? null : k === 'd' ? false : size === 0
+      if (matchesFilters(ep, k, size, isEmpty, baseDepth, options, tree)) {
         results.push(ep)
       }
     }
@@ -151,7 +127,7 @@ export async function find(
   if (sawDescendant || dirExists) {
     emitStartPath(results, base, startName, {
       kind: 'd',
-      isEmpty: null,
+      isEmpty: !sawDescendant,
       exists: true,
       tree,
       maxDepth: options.maxDepth,

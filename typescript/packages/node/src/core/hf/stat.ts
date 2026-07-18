@@ -75,9 +75,12 @@ export async function stat(
       extra: etag !== null && etag !== '' ? { etag } : {},
     })
   }
+  // Buckets have no dir objects and opendal's trailing-slash stat
+  // short-circuits to DIR client-side, so a directory exists iff
+  // something lists under its prefix (object-store semantics).
   try {
-    const mdDir = await op.stat(`${stripped}/`)
-    if (mdDir.isDirectory()) {
+    const children = await op.list(`${stripped}/`)
+    if (children.length > 0) {
       return new FileStat({
         name: stripped.split('/').pop() ?? '/',
         type: FileType.DIRECTORY,

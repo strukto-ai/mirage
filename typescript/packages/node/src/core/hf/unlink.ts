@@ -15,6 +15,7 @@
 import { invalidateAfterUnlink } from '@struktoai/mirage-core'
 import { FileType, type IndexCacheStore, type PathSpec, record } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
+import { invalidateAncestors } from './invalidate.ts'
 import { stat } from './stat.ts'
 import { hfKey, isNotFound, rawPathOf } from './util.ts'
 import { enoent } from '@struktoai/mirage-core'
@@ -42,4 +43,5 @@ export async function unlink(
   }
   record('unlink', path.virtual, accessor.resourceName, 0, startMs)
   await invalidateAfterUnlink(path)
+  await invalidateAncestors(path)
 }

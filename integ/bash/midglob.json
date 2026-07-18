@@ -98,6 +98,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "onedrive",
         "sharepoint",
         "ssh",
