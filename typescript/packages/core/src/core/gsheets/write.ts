@@ -49,3 +49,30 @@ export async function appendValues(
   }
   return r.json()
 }
+
+export async function updateValues(
+  tm: TokenManager,
+  spreadsheetId: string,
+  range: string,
+  valuesJson: string,
+): Promise<unknown> {
+  let values: unknown
+  try {
+    values = JSON.parse(valuesJson)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`Invalid JSON: ${msg}`)
+  }
+  const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`
+  const headers = await googleHeaders(tm)
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new SheetsApiError(`Sheets PUT ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}

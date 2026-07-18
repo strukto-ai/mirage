@@ -31,7 +31,6 @@ def test_write_prompt_examples_match_actual_signatures():
     assert "--params" in WRITE_PROMPT
     assert "--json" in WRITE_PROMPT
     assert "spreadsheetId" in WRITE_PROMPT
-    assert "valueInputOption" in WRITE_PROMPT
     assert "gws sheets +append" in WRITE_PROMPT
     assert "--spreadsheet" in WRITE_PROMPT
     assert "--range" in WRITE_PROMPT

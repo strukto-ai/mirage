@@ -66,9 +66,8 @@ export const GSHEETS_PROMPT = `{prefix}
     gws sheets +read --spreadsheet <id> --range Sheet1!A1:C10`
 
 export const GSHEETS_WRITE_PROMPT = `  Write commands:
-    gws sheets +write \\
-      --params '{"spreadsheetId": "<id>", "range": "Sheet1!A1:B2", "valueInputOption": "USER_ENTERED"}' \\
-      --json   '{"values": [["Name", "Score"], ["Alice", 42]]}'
+    gws sheets +write --spreadsheet <id> --range Sheet1!A1:B2 \\
+      --json-values '[["Name", "Score"], ["Alice", 42]]'
 
     gws sheets +append --spreadsheet <id> --range Sheet1!A1 \\
       --values "Bob,37"                          # comma-separated single row

@@ -34,7 +34,6 @@ describe('GSHEETS_WRITE_PROMPT', () => {
     expect(GSHEETS_WRITE_PROMPT).toContain('--params')
     expect(GSHEETS_WRITE_PROMPT).toContain('--json')
     expect(GSHEETS_WRITE_PROMPT).toContain('spreadsheetId')
-    expect(GSHEETS_WRITE_PROMPT).toContain('valueInputOption')
     expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets +append')
     expect(GSHEETS_WRITE_PROMPT).toContain('--spreadsheet')
     expect(GSHEETS_WRITE_PROMPT).toContain('--range')

@@ -50,3 +50,34 @@ async def append_values(
         async with session.post(url, headers=headers, json=body) as resp:
             resp.raise_for_status()
             return await resp.json()
+
+
+async def update_values(
+    token_manager: TokenManager,
+    spreadsheet_id: str,
+    range_: str,
+    values_json: str,
+) -> dict[str, Any]:
+    """Overwrite cell values via Values API (PUT).
+
+    Args:
+        token_manager (TokenManager): manages OAuth2 tokens.
+        spreadsheet_id (str): Google Sheets spreadsheet ID.
+        range_ (str): A1 notation range.
+        values_json (str): JSON string of 2D values array.
+
+    Returns:
+        dict: API response.
+    """
+    try:
+        values = json.loads(values_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON: {exc}") from exc
+    base = f"{sheets_base(token_manager)}/spreadsheets/{spreadsheet_id}"
+    url = f"{base}/values/{range_}?valueInputOption=USER_ENTERED"
+    headers = await google_headers(token_manager)
+    body = {"values": values}
+    async with aiohttp.ClientSession() as session:
+        async with session.put(url, headers=headers, json=body) as resp:
+            resp.raise_for_status()
+            return await resp.json()

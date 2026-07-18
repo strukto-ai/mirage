@@ -371,7 +371,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +write --params '{\"spreadsheetId\": \"sheet0001\", \"range\": \"Sheet1!A2:C2\"}' --json '{\"values\": [[\"x\", \"y\", \"z\"]]}' > /dev/null && gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
+      "command": "gws sheets +write --spreadsheet sheet0001 --range 'Sheet1!A2:C2' --values 'x,y,z' > /dev/null && gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
       "expect": {
         "exit": 0,
         "stderr": "",
