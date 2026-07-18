@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "mkdir -p /data/g12/sub && cd /data/g12 && printf 'y\n' | tee plain.txt > /dev/null && printf 'x\n' | tee sub/a.txt > /dev/null && printf 'x\n' | tee sub/b.txt > /dev/null",
       "expect": {

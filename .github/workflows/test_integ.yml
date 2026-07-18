@@ -383,6 +383,95 @@ jobs:
           pnpm exec tsx find_arg_errors.ts > /tmp/ts-fae.out
           diff truth_find_arg_errors.txt /tmp/ts-fae.out
 
+  integ-shared:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build mirage-core
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core build
+
+      - name: Build mirage-node
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-node build
+
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
+
+      - name: Start moto S3 for the TypeScript host
+        run: |
+          nohup ./python/.venv/bin/moto_server -H 127.0.0.1 -p 5001 > /tmp/moto.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5001/moto-api/ > /dev/null && break
+            sleep 1
+          done
+          echo "S3_ENDPOINT=http://127.0.0.1:5001" >> "$GITHUB_ENV"
+          echo "S3_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_ACCESS_KEY_ID=testing" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=testing" >> "$GITHUB_ENV"
+
+      - name: Start sftp server shared by both hosts
+        run: |
+          nohup ./python/.venv/bin/python integ/runners/tools/ssh_server.py --port 2222 > /tmp/sshsrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "SSH_PORT=" /tmp/sshsrv.log && break
+            sleep 1
+          done
+          cat /tmp/sshsrv.log
+          echo "SSH_HOST=127.0.0.1" >> "$GITHUB_ENV"
+          echo "SSH_PORT=2222" >> "$GITHUB_ENV"
+
+      - name: Run declarative battery (python hosts)
+        run: ./python/.venv/bin/python integ/runners/python/main.py
+
+      - name: Run declarative battery (typescript hosts)
+        working-directory: integ
+        run: pnpm exec tsx runners/typescript/main.ts
+
   integ-database:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
@@ -671,6 +760,9 @@ jobs:
         run: |
           ./python/.venv/bin/python integ/nextcloud_cases.py > /tmp/nextcloud_cases.out
           diff integ/truth.txt /tmp/nextcloud_cases.out
+
+      - name: Run declarative battery on nextcloud
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud
 
   integ-ssh:
     needs: changes
@@ -961,7 +1053,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-database, integ-database-ts, integ-data, integ-ssh, integ-ssh-ts, integ-fuse, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared, integ-database, integ-database-ts, integ-data, integ-ssh, integ-ssh-ts, integ-fuse, runtime-py, runtime-ts]
     if: always()
     steps:
       - name: Check required jobs

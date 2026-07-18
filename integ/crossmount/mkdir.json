@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "mkdir /data/xd /data2/xd && ls /data2 && rm -r /data/xd /data2/xd",
       "expect": {

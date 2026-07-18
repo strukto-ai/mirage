@@ -197,6 +197,65 @@
       ]
     },
     {
+      "id": "ssh",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "ssh",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ssh",
+          "backend": "ssh",
+          "root": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "ssh",
+          "backend": "ssh",
+          "root": "xm2"
+        },
+        {
+          "path": "/res",
+          "resource": "ssh",
+          "backend": "ssh",
+          "root": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "nextcloud",
+      "hosts": [
+        "python"
+      ],
+      "service": "nextcloud",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "nextcloud",
+          "backend": "webdav",
+          "root": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "nextcloud",
+          "backend": "webdav",
+          "root": "xm2"
+        },
+        {
+          "path": "/res",
+          "resource": "nextcloud",
+          "backend": "webdav",
+          "root": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
       "id": "sharepoint",
       "hosts": [
         "python"

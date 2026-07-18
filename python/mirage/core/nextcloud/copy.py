@@ -6,10 +6,12 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-async def copy(accessor: NextcloudAccessor, src: PathSpec,
-               dst: PathSpec) -> None:
-    src_key = src.mount_path.lstrip("/")
-    dst_key = dst.mount_path.lstrip("/")
+async def copy(accessor: NextcloudAccessor, src_spec: str | PathSpec,
+               dst_spec: str | PathSpec) -> None:
+    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
+    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
+    src_key = src.lstrip("/")
+    dst_key = dst.lstrip("/")
     op = accessor.operator()
     try:
         await op.copy(src_key, dst_key)
