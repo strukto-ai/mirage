@@ -6,6 +6,7 @@
     "has_write": true,
     "resources": [
       "databricks_volume",
+      "gdrive",
       "opfs",
       "ram",
       "s3"
