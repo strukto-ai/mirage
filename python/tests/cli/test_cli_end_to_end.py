@@ -143,7 +143,8 @@ def test_save_then_load_round_trip(daemon, tmp_path):
     _run_cli(daemon["env"], "execute", "--workspace_id", "save-test",
              "--command", "echo persisted > /report.txt")
 
-    tar_path = tmp_path / "snap.tar"
+    tar_path = tmp_path / "snapshots" / "snap.tar"
+    tar_path.parent.mkdir(exist_ok=True)
     saved = _run_cli(daemon["env"], "workspace", "snapshot", "save-test",
                      str(tar_path))
     assert saved["size"] > 0

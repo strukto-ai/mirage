@@ -56,7 +56,7 @@ function plainRegistry(): MountRegistry {
 }
 
 describe('executeNode dispatcher', () => {
-  it('throws on unknown node type', async () => {
+  it('reports unknown node type as an unsupported-construct error', async () => {
     const reg = plainRegistry()
     const node: TSNodeLike = {
       type: 'not_a_real_type',
@@ -65,9 +65,12 @@ describe('executeNode dispatcher', () => {
       namedChildren: [],
       isNamed: true,
     }
-    await expect(
-      executeNode(buildDeps(reg), node, new Session({ sessionId: 't' })),
-    ).rejects.toThrow(/unsupported tree-sitter node type/)
+    const [stdout, io] = await executeNode(buildDeps(reg), node, new Session({ sessionId: 't' }))
+    expect(stdout).toBeNull()
+    expect(io.exitCode).toBe(2)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toBe(
+      'mirage: unsupported shell construct: not_a_real_type\n',
+    )
   })
 
   it('FUNCTION_DEFINITION registers function body in session', async () => {

@@ -43,35 +43,6 @@ def _parse_tree_response(
     return result, truncated
 
 
-async def fetch_tree(
-    config: GitHubConfig,
-    owner: str,
-    repo: str,
-    ref: str,
-) -> tuple[dict[str, TreeEntry], bool]:
-    """Fetch full recursive tree.
-
-    Args:
-        config (GitHubConfig): Auth + base config.
-        owner (str): Repo owner.
-        repo (str): Repo name.
-        ref (str): Branch or sha.
-
-    Returns:
-        tuple: (tree_dict, truncated) where truncated is True when
-            the repo has >100K entries and the API response is incomplete.
-    """
-    data = await github_get(
-        config.token,
-        "/repos/{owner}/{repo}/git/trees/{ref}",
-        owner=owner,
-        repo=repo,
-        ref=ref,
-        params={"recursive": "1"},
-    )
-    return _parse_tree_response(data, owner, repo, ref)
-
-
 def fetch_tree_sync(
     config: GitHubConfig,
     owner: str,

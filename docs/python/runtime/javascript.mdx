@@ -79,22 +79,22 @@ pip install mirage-ai[quickjs]
 ```
 
 Point mirage at the directory holding `qjs-wasi.wasm` with the `home`
-option in the quickjs runtime's block (the `runtime_options` argument,
-the yaml `runtime: quickjs:` block, or the MIRAGE_QUICKJS_HOME
-environment variable):
+option on the runtime entry (or the MIRAGE_QUICKJS_HOME environment
+variable):
 
 ```python
+from mirage.runtime.js import QuickJsRuntime
+
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
-               js_runtime="quickjs",
-               runtime_options={"quickjs": {"home": "/path/to/qjs-dir"}})
+               runtimes=[QuickJsRuntime(home="/path/to/qjs-dir"), "vfs"])
 ```
 
 ```yaml
-runtime:
-  js: quickjs
-  quickjs:
+runtimes:
+  - name: quickjs
     home: /path/to/qjs-dir
+  - vfs
 ```
 
 The first run compiles `qjs-wasi.wasm` and caches the compilation as

@@ -17,8 +17,7 @@ import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
 import type { CommandSafeguard, PathSpec } from '../types.ts'
-import type { PythonRuntime } from '../workspace/executor/python/runtimes/interface.ts'
-import type { JsRuntime } from '../workspace/executor/js/interface.ts'
+import type { Runtime } from '../workspace/executor/runtime.ts'
 import type { StatOverlay } from '../ops/config.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
@@ -54,8 +53,7 @@ export interface CommandOpts {
   sessionId?: string
   env?: Record<string, string>
   execAllowed?: boolean
-  pythonRuntime?: PythonRuntime
-  jsRuntime?: JsRuntime
+  runtime?: Runtime
   statOverlay?: StatOverlay
 }
 

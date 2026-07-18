@@ -16,12 +16,12 @@ import type { Accessor } from '../../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../../config.ts'
-import type { FiletypeEntry, ReadBytesFn, StatEntryFn } from '../extensions.ts'
+import type { FiletypeEntry, FiletypeReadBytesFn, StatEntryFn } from '../extensions.ts'
 
 const ENC = new TextEncoder()
 
 export async function ftStat<A extends Accessor>(
-  readBytes: ReadBytesFn<A>,
+  readBytes: FiletypeReadBytesFn<A>,
   _statEntry: StatEntryFn<A>,
   entry: FiletypeEntry,
   accessor: A,

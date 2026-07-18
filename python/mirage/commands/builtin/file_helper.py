@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.utils.types import _ReadBytes, _Stat
 from mirage.types import FileStat, FileType
 
 
@@ -35,18 +34,3 @@ def _detect(path: str, header: bytes, s: FileStat) -> FileType | str:
     if all(b < 128 for b in header[:256] if b != 0):
         return FileType.TEXT
     return FileType.BINARY
-
-
-def file(
-    read_bytes: _ReadBytes,
-    stat_fn: _Stat,
-    path: str,
-) -> FileType | str:
-    s = stat_fn(path)
-    if s.type == FileType.DIRECTORY:
-        return FileType.DIRECTORY
-    try:
-        header = read_bytes(path)[:512]
-    except Exception:
-        header = b""
-    return _detect(path, header, s)

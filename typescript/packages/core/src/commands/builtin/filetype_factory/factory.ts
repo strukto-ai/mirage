@@ -15,12 +15,12 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { command, type RegisteredCommand } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { FILETYPE_ENTRIES, type ReadBytesFn, type StatEntryFn } from './extensions.ts'
+import { FILETYPE_ENTRIES, type FiletypeReadBytesFn, type StatEntryFn } from './extensions.ts'
 import { BUILDERS } from './handlers/index.ts'
 
 export interface FiletypeCommandsOptions<A extends Accessor = Accessor> {
   resource: string
-  readBytes: ReadBytesFn<A>
+  readBytes: FiletypeReadBytesFn<A>
   statEntry: StatEntryFn<A>
 }
 

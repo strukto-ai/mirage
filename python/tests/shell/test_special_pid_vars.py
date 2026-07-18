@@ -12,11 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind.provision import (
-    exact_zero_provision, make_file_read_provision)
-from mirage.core.gslides.stat import stat as _stat
+import os
 
-file_read_provision = make_file_read_provision(_stat)
-metadata_provision = exact_zero_provision
 
-__all__ = ["file_read_provision", "metadata_provision"]
+def test_dollar_dollar_is_process_id(shell):
+    assert shell.mirage("echo $$") == f"{os.getpid()}\n"
+
+
+def test_dollar_bang_empty_without_background_job(shell):
+    assert shell.mirage("echo [$!]") == "[]\n"
+
+
+def test_dollar_bang_is_last_background_job_id(shell):
+    out = shell.mirage("sleep 0.05 & echo bg=$!")
+    assert out == "bg=1\n"
+
+
+def test_wait_on_dollar_bang(shell):
+    code, out, _ = shell.mirage_result("sleep 0.05 & wait $!; echo waited=$?")
+    assert code == 0
+    assert out == "waited=0\n"
+
+
+def test_dollar_bang_does_not_leak_from_subshell(shell):
+    out = shell.mirage("(sleep 0.05 &) ; echo [$!]")
+    assert out == "[]\n"

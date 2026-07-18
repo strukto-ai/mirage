@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -22,6 +21,7 @@ import {
   pidFilePath,
   resolveWithinRoot,
   snapshotRootPath,
+  stateRootPath,
   validatePathSegment,
   versionRootPath,
 } from './paths.ts'
@@ -94,103 +94,30 @@ describe('pidFilePath', () => {
     )
   })
 
-  it('MIRAGE_PID_FILE wins over MIRAGE_HOME', () => {
-    expect(
-      pidFilePath(undefined, { MIRAGE_HOME: '/data/mirage', MIRAGE_PID_FILE: '/run/m.pid' }),
-    ).toBe('/run/m.pid')
-  })
-
-  it('explicit argument wins over env', () => {
-    expect(pidFilePath('/x/y.pid', { MIRAGE_PID_FILE: '/run/m.pid' })).toBe('/x/y.pid')
+  it('explicit argument wins over home', () => {
+    expect(pidFilePath('/x/y.pid', { MIRAGE_HOME: '/data/mirage' })).toBe('/x/y.pid')
   })
 })
 
 describe('root defaults follow mirageHome', () => {
-  it('version and snapshot roots', () => {
+  it('version, snapshot, and state roots', () => {
     const env = { MIRAGE_HOME: '/data/mirage' }
     expect(versionRootPath(undefined, env)).toBe(join('/data/mirage', 'repos'))
     expect(snapshotRootPath(undefined, env)).toBe(join('/data/mirage', 'snapshots'))
-  })
-})
-
-describe('config.toml [daemon] layer', () => {
-  it('env beats config for pid_file', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\npid_file = "/from/config.pid"\n')
-    const env = { MIRAGE_HOME: home, MIRAGE_PID_FILE: '/from/env.pid' }
-    expect(pidFilePath(undefined, env)).toBe(resolve('/from/env.pid'))
+    expect(stateRootPath(undefined, env)).toBe(join('/data/mirage', 'state'))
   })
 
-  it('config beats default for pid_file', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\npid_file = "/from/config.pid"\n')
-    const env = { MIRAGE_HOME: home }
-    expect(pidFilePath(undefined, env)).toBe(resolve('/from/config.pid'))
-  })
-
-  it('default when unset for pid_file', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    const env = { MIRAGE_HOME: home }
-    expect(pidFilePath(undefined, env)).toBe(join(home, 'daemon.pid'))
-  })
-
-  it('env beats config for version_root', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\nversion_root = "/from/config/repos"\n')
-    const env = { MIRAGE_HOME: home, MIRAGE_VERSION_ROOT: '/from/env/repos' }
-    expect(versionRootPath(undefined, env)).toBe(resolve('/from/env/repos'))
-  })
-
-  it('config beats default for version_root', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\nversion_root = "/from/config/repos"\n')
-    const env = { MIRAGE_HOME: home }
-    expect(versionRootPath(undefined, env)).toBe(resolve('/from/config/repos'))
-  })
-
-  it('default when unset for version_root', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    const env = { MIRAGE_HOME: home }
-    expect(versionRootPath(undefined, env)).toBe(join(home, 'repos'))
-  })
-
-  it('env beats config for snapshot_root', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\nsnapshot_root = "/from/config/snapshots"\n')
-    const env = { MIRAGE_HOME: home, MIRAGE_SNAPSHOT_ROOT: '/from/env/snapshots' }
-    expect(snapshotRootPath(undefined, env)).toBe(resolve('/from/env/snapshots'))
-  })
-
-  it('config beats default for snapshot_root', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\nsnapshot_root = "/from/config/snapshots"\n')
-    const env = { MIRAGE_HOME: home }
-    expect(snapshotRootPath(undefined, env)).toBe(resolve('/from/config/snapshots'))
-  })
-
-  it('default when unset for snapshot_root', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    const env = { MIRAGE_HOME: home }
-    expect(snapshotRootPath(undefined, env)).toBe(join(home, 'snapshots'))
-  })
-
-  it('explicit argument wins over config', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mir-paths-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\npid_file = "/from/config.pid"\n')
-    const env = { MIRAGE_HOME: home }
-    expect(pidFilePath('/explicit/x.pid', env)).toBe(resolve('/explicit/x.pid'))
+  it('explicit argument wins over home', () => {
+    const env = { MIRAGE_HOME: '/data/mirage' }
+    expect(versionRootPath('/explicit/repos', env)).toBe(resolve('/explicit/repos'))
+    expect(snapshotRootPath('/explicit/snaps', env)).toBe(resolve('/explicit/snaps'))
+    expect(stateRootPath('/explicit/state', env)).toBe(resolve('/explicit/state'))
   })
 })
 
 describe('relative overrides are absolutized', () => {
   it('relative MIRAGE_HOME resolves against cwd', () => {
     expect(mirageHome({ MIRAGE_HOME: 'mhome' })).toBe(resolve('mhome'))
-  })
-
-  it('relative MIRAGE_PID_FILE resolves against cwd', () => {
-    expect(pidFilePath(undefined, { MIRAGE_PID_FILE: 'rel/daemon.pid' })).toBe(
-      resolve('rel/daemon.pid'),
-    )
   })
 
   it('relative explicit pid path resolves against cwd', () => {

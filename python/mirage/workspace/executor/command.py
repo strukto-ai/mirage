@@ -240,8 +240,7 @@ async def run_on_mount(
             session_id=session.session_id,
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
-            python_runtime=registry.python_runtime,
-            js_runtime=registry.js_runtime,
+            runtime=registry.runtime_bindings.get(cmd_name),
             stat_overlay=stat_overlay,
         )
     except UsageError as exc:

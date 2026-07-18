@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../runtime.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
@@ -25,6 +26,10 @@ import { PyodideUnavailableError, type PythonReplRunResult } from './types.ts'
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 export interface HandlePythonDeps {
+  runtime: Runtime
+}
+
+export interface HandlePythonReplDeps {
   runtime: PythonRuntime
 }
 
@@ -124,7 +129,7 @@ export async function handlePython(
 export async function handlePythonRepl(
   code: string,
   sessionId: string,
-  deps: HandlePythonDeps,
+  deps: HandlePythonReplDeps,
 ): Promise<PythonReplRunResult> {
   try {
     return await deps.runtime.runRepl({ code, sessionId })

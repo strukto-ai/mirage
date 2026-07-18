@@ -12,19 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export interface PythonRunArgs {
-  code: string
-  args: string[]
-  env: Record<string, string>
-  stdin: Uint8Array | null
-}
-
-export interface PythonRunResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  exitCode: number
-}
-
 export interface PythonReplRunArgs {
   code: string
   sessionId: string
@@ -34,7 +21,8 @@ export type ReplStatus = 'complete' | 'incomplete' | 'exit'
 
 export interface PythonReplRunResult {
   stdout: Uint8Array
-  stderr: Uint8Array
+  /** Captured standard error, null when empty (mirrors RunResult). */
+  stderr: Uint8Array | null
   exitCode: number
   status: ReplStatus
 }

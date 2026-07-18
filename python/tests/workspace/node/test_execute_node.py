@@ -16,6 +16,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from mirage.io import IOResult
+from mirage.io.stream import materialize
 from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
@@ -397,7 +398,7 @@ def test_whoami_ignores_env_user():
     assert stdout != b"alice\n"
 
 
-# ── unsupported node raises ─────────────────────
+# ── unsupported node errors gracefully ──────────
 
 
 def test_unsupported_node_raises():
@@ -409,14 +410,15 @@ def test_unsupported_node_raises():
 
     fake_node = MagicMock()
     fake_node.type = "some_unknown_type_xyz"
+    fake_node.text = b"some_unknown_type_xyz"
 
-    try:
-        _run(
-            execute_node(dispatch, reg, job_table, execute_fn, "agent-1",
-                         fake_node, session))
-        assert False, "should have raised"
-    except TypeError as e:
-        assert "unsupported" in str(e)
+    stdout, io, _ = _run(
+        execute_node(dispatch, reg, job_table, execute_fn, "agent-1",
+                     fake_node, session))
+    assert stdout is None
+    assert io.exit_code == 2
+    assert (_run(materialize(io.stderr)) ==
+            b"mirage: unsupported shell construct: some_unknown_type_xyz\n")
 
 
 # ── read ────────────────────────────────────────

@@ -86,8 +86,8 @@ def test_load_daemon_settings_reads_config_under_mirage_home(
 
 def test_set_config_creates_file(tmp_path):
     p = tmp_path / "config.toml"
-    set_config("version_root", "/data/repos", path=p)
-    assert get_config("version_root", path=p) == "/data/repos"
+    set_config("socket", "/tmp/s.sock", path=p)
+    assert get_config("socket", path=p) == "/tmp/s.sock"
     assert '[daemon]' in p.read_text()
 
 
@@ -102,11 +102,11 @@ def test_set_config_updates_existing_key(tmp_path):
 def test_set_config_preserves_comments_and_other_keys(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text('[daemon]\n# keep me\nurl = "http://a:1"\n')
-    set_config("pid_file", "/tmp/x.pid", path=p)
+    set_config("socket", "/tmp/s.sock", path=p)
     text = p.read_text()
     assert "# keep me" in text
     assert 'url = "http://a:1"' in text
-    assert get_config("pid_file", path=p) == "/tmp/x.pid"
+    assert get_config("socket", path=p) == "/tmp/s.sock"
 
 
 def test_unset_config_removes_key(tmp_path):
@@ -119,10 +119,10 @@ def test_unset_config_removes_key(tmp_path):
 def test_list_config_returns_written_keys(tmp_path):
     p = tmp_path / "config.toml"
     set_config("url", "http://a:1", path=p)
-    set_config("snapshot_root", "/snaps", path=p)
+    set_config("socket", "/tmp/s.sock", path=p)
     assert list_config(path=p) == {
         "url": "http://a:1",
-        "snapshot_root": "/snaps"
+        "socket": "/tmp/s.sock"
     }
 
 
@@ -169,28 +169,22 @@ def test_load_daemon_settings_missing_explicit_path_returns_defaults(
 
 def test_resolved_config_reports_origins(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
-    monkeypatch.setenv("MIRAGE_VERSION_ROOT", "/env/repos")
-    monkeypatch.delenv("MIRAGE_SNAPSHOT_ROOT", raising=False)
+    monkeypatch.setenv("MIRAGE_DAEMON_PORT", "9314")
     monkeypatch.delenv("MIRAGE_DAEMON_URL", raising=False)
-    (tmp_path / "config.toml").write_text(
-        '[daemon]\nversion_root = "/file/repos"\nurl = "http://f:1"\n')
+    (tmp_path /
+     "config.toml").write_text('[daemon]\nport = 9001\nurl = "http://f:1"\n')
     resolved = resolved_config()
-    assert resolved["version_root"] == ("/env/repos",
-                                        "env MIRAGE_VERSION_ROOT")
+    assert resolved["port"] == ("9314", "env MIRAGE_DAEMON_PORT")
     assert resolved["url"] == ("http://f:1", "file")
-    assert resolved["snapshot_root"] == (str(tmp_path / "snapshots"),
-                                         "default")
 
 
 def test_resolved_config_defaults_when_nothing_set(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
-    for name in ("MIRAGE_DAEMON_URL", "MIRAGE_TOKEN", "MIRAGE_PID_FILE",
-                 "MIRAGE_VERSION_ROOT", "MIRAGE_SNAPSHOT_ROOT",
+    for name in ("MIRAGE_DAEMON_URL", "MIRAGE_TOKEN", "MIRAGE_DAEMON_PORT",
                  "MIRAGE_IDLE_GRACE_SECONDS"):
         monkeypatch.delenv(name, raising=False)
     resolved = resolved_config()
     assert resolved["url"] == (DEFAULT_DAEMON_URL, "default")
-    assert resolved["pid_file"] == (str(tmp_path / "daemon.pid"), "default")
     assert resolved["idle_grace_seconds"] == ("30", "default")
 
 

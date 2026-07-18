@@ -45,12 +45,7 @@ export async function runMv(
   }
   const [out, io] = await mvGeneric(
     flat,
-    undefined,
     stat,
-    noClobber,
-    verbose,
-    undefined,
-    undefined,
     {
       readBytes,
       write,
@@ -59,6 +54,8 @@ export async function runMv(
       unlink,
       rmdir,
     },
+    noClobber,
+    verbose,
   )
   return [out, io]
 }

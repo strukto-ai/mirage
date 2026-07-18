@@ -22,6 +22,8 @@ from mirage.io.stream import async_chain, close_quietly, merge_stdout_stderr
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ExitSignal
+from mirage.shell.helpers import get_text
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.session import Session
@@ -45,8 +47,18 @@ async def handle_pipe(
 
     try:
         for i, cmd in enumerate(commands):
-            stdout, io, child_exec = await execute_node(
-                cmd, session, current_stdin, call_stack)
+            try:
+                stdout, io, child_exec = await execute_node(
+                    cmd, session, current_stdin, call_stack)
+            except ExitSignal as sig:
+                # Each pipeline segment is its own shell in bash: exit
+                # (or ${var:?}) ends the segment, not the pipeline.
+                stdout = sig.stdout
+                io = IOResult(exit_code=sig.contained_code,
+                              stderr=sig.stderr or None)
+                child_exec = ExecutionNode(command=get_text(cmd),
+                                           exit_code=sig.contained_code,
+                                           stderr=sig.stderr)
             ios.append(io)
             child_nodes.append(child_exec)
 
@@ -109,6 +121,19 @@ async def handle_pipe(
     return last_stdout, last_io, exec_node
 
 
+async def _merge_left_into_exit(
+    sig: ExitSignal,
+    left_bytes: ByteSource | None,
+    left_io: IOResult,
+) -> ExitSignal:
+    """Fold the left side's completed output into a propagating exit."""
+    left_stderr = await materialize(left_io.stderr) or b""
+    left = await materialize(left_bytes) or b""
+    sig.stdout = left + (sig.stdout or b"")
+    sig.stderr = left_stderr + sig.stderr
+    return sig
+
+
 async def handle_connection(
     execute_node,
     left: tree_sitter.Node,
@@ -130,8 +155,11 @@ async def handle_connection(
         if left_io.exit_code != 0:
             return left_bytes, left_io, ExecutionNode(
                 op="&&", exit_code=left_io.exit_code, children=children)
-        right_stdout, right_io, right_exec = (await execute_node(
-            right, session, stdin, call_stack))
+        try:
+            right_stdout, right_io, right_exec = (await execute_node(
+                right, session, stdin, call_stack))
+        except ExitSignal as sig:
+            raise await _merge_left_into_exit(sig, left_bytes, left_io)
         children.append(right_exec)
         right_bytes = await materialize(right_stdout)
         merged = await left_io.merge(right_io)
@@ -147,8 +175,11 @@ async def handle_connection(
         if left_io.exit_code == 0:
             return left_bytes, left_io, ExecutionNode(
                 op="||", exit_code=left_io.exit_code, children=children)
-        right_stdout, right_io, right_exec = (await execute_node(
-            right, session, stdin, call_stack))
+        try:
+            right_stdout, right_io, right_exec = (await execute_node(
+                right, session, stdin, call_stack))
+        except ExitSignal as sig:
+            raise await _merge_left_into_exit(sig, left_bytes, left_io)
         children.append(right_exec)
         right_bytes = await materialize(right_stdout)
         merged = await left_io.merge(right_io)
@@ -160,8 +191,11 @@ async def handle_connection(
     # semicolon or other
     left_bytes = await apply_barrier(left_stdout, left_io, BarrierPolicy.VALUE)
     session.last_exit_code = left_io.exit_code
-    right_stdout, right_io, right_exec = await execute_node(
-        right, session, stdin, call_stack)
+    try:
+        right_stdout, right_io, right_exec = await execute_node(
+            right, session, stdin, call_stack)
+    except ExitSignal as sig:
+        raise await _merge_left_into_exit(sig, left_bytes, left_io)
     children.append(right_exec)
     # Materialize right side to match && and || behavior, ensuring
     # lazy exit codes (e.g. from exit_on_empty) are finalized before
@@ -189,13 +223,28 @@ async def handle_subshell(
     saved_arrays = {k: list(v) for k, v in session.arrays.items()}
     saved_functions = dict(session.functions)
     saved_positional = list(getattr(session, "positional_args", None) or [])
+    saved_last_bg_job = session.last_bg_job_id
     try:
         all_stdout: list[Any] = []
         merged_io = IOResult()
         last_exec = ExecutionNode(command="()", exit_code=0)
         for child in body:
-            stdout, io, last_exec = await execute_node(child, session, stdin,
-                                                       call_stack)
+            try:
+                stdout, io, last_exec = await execute_node(
+                    child, session, stdin, call_stack)
+            except ExitSignal as sig:
+                # A subshell is its own shell: exit (or ${var:?}) ends
+                # the subshell only, becoming its exit status.
+                if sig.stdout:
+                    all_stdout.append(sig.stdout)
+                sig_io = IOResult(exit_code=sig.contained_code,
+                                  stderr=sig.stderr or None)
+                merged_io = await merged_io.merge(sig_io)
+                merged_io.exit_code = sig.contained_code
+                last_exec = ExecutionNode(command="()",
+                                          exit_code=sig.contained_code,
+                                          stderr=sig.stderr)
+                break
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
@@ -215,3 +264,4 @@ async def handle_subshell(
         session.arrays = saved_arrays
         session.functions = saved_functions
         session.positional_args = saved_positional
+        session.last_bg_job_id = saved_last_bg_job

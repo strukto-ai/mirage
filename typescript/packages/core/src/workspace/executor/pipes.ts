@@ -18,6 +18,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
@@ -44,7 +45,23 @@ export async function handlePipe(
     for (let i = 0; i < commands.length; i++) {
       const cmd = commands[i]
       if (cmd === undefined) continue
-      const [stdout, io, childExec] = await executeNode(cmd, session, currentStdin, callStack)
+      let stdout: ByteSource | null
+      let io: IOResult
+      let childExec: ExecutionNode
+      try {
+        ;[stdout, io, childExec] = await executeNode(cmd, session, currentStdin, callStack)
+      } catch (err) {
+        if (!(err instanceof ExitSignal)) throw err
+        // Each pipeline segment is its own shell in bash: exit
+        // (or ${var:?}) ends the segment, not the pipeline.
+        stdout = err.stdout
+        io = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
+        childExec = new ExecutionNode({
+          command: cmd.text,
+          exitCode: err.containedCode,
+          stderr: err.stderr,
+        })
+      }
       ios.push(io)
       childNodes.push(childExec)
 
@@ -117,6 +134,19 @@ export async function handlePipe(
   return [lastStdout, lastIo, execNode]
 }
 
+async function mergeLeftIntoExit(
+  sig: ExitSignal,
+  leftBytes: ByteSource | null,
+  leftIo: IOResult,
+): Promise<ExitSignal> {
+  // Fold the left side's completed output into a propagating exit.
+  const leftStderr = await materialize(leftIo.stderr)
+  const left = await materialize(leftBytes)
+  sig.stdout = concat([left, sig.stdout ?? new Uint8Array()])
+  sig.stderr = concat([leftStderr, sig.stderr])
+  return sig
+}
+
 export async function handleConnection(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
@@ -139,7 +169,15 @@ export async function handleConnection(
         new ExecutionNode({ op: '&&', exitCode: leftIo.exitCode, children }),
       ]
     }
-    const [rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
+    let rightStdout: ByteSource | null
+    let rightIo: IOResult
+    let rightExec: ExecutionNode
+    try {
+      ;[rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
+    } catch (err) {
+      if (err instanceof ExitSignal) throw await mergeLeftIntoExit(err, leftBytes, leftIo)
+      throw err
+    }
     children.push(rightExec)
     const rightBytes = await materialize(rightStdout)
     const merged = await leftIo.merge(rightIo)
@@ -157,7 +195,15 @@ export async function handleConnection(
         new ExecutionNode({ op: '||', exitCode: leftIo.exitCode, children }),
       ]
     }
-    const [rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
+    let rightStdout: ByteSource | null
+    let rightIo: IOResult
+    let rightExec: ExecutionNode
+    try {
+      ;[rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
+    } catch (err) {
+      if (err instanceof ExitSignal) throw await mergeLeftIntoExit(err, leftBytes, leftIo)
+      throw err
+    }
     children.push(rightExec)
     const rightBytes = await materialize(rightStdout)
     const merged = await leftIo.merge(rightIo)
@@ -168,7 +214,15 @@ export async function handleConnection(
   // ; (semicolon) or other: run both regardless
   const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
   session.lastExitCode = leftIo.exitCode
-  const [rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
+  let rightStdout: ByteSource | null
+  let rightIo: IOResult
+  let rightExec: ExecutionNode
+  try {
+    ;[rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
+  } catch (err) {
+    if (err instanceof ExitSignal) throw await mergeLeftIntoExit(err, leftBytes, leftIo)
+    throw err
+  }
   children.push(rightExec)
   const rightBytes = await materialize(rightStdout)
   const merged = await leftIo.merge(rightIo)
@@ -195,12 +249,32 @@ export async function handleSubshell(
   for (const [k, v] of Object.entries(session.arrays)) savedArrays[k] = [...v]
   const savedFunctions = { ...session.functions }
   const savedPositional = [...session.positionalArgs]
+  const savedLastBgJob = session.lastBgJobId
   try {
     const allStdout: ByteSource[] = []
     let mergedIo = new IOResult()
     let lastExec = new ExecutionNode({ command: '()', exitCode: 0 })
     for (const child of body) {
-      const [stdout, io, childExec] = await executeNode(child, session, stdin, callStack)
+      let stdout: ByteSource | null
+      let io: IOResult
+      let childExec: ExecutionNode
+      try {
+        ;[stdout, io, childExec] = await executeNode(child, session, stdin, callStack)
+      } catch (err) {
+        if (!(err instanceof ExitSignal)) throw err
+        // A subshell is its own shell: exit (or ${var:?}) ends the
+        // subshell only, becoming its exit status.
+        if (err.stdout !== null && err.stdout.byteLength > 0) allStdout.push(err.stdout)
+        const sigIo = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
+        mergedIo = await mergedIo.merge(sigIo)
+        mergedIo.exitCode = err.containedCode
+        lastExec = new ExecutionNode({
+          command: '()',
+          exitCode: err.containedCode,
+          stderr: err.stderr,
+        })
+        break
+      }
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       lastExec = childExec
@@ -226,6 +300,7 @@ export async function handleSubshell(
     session.arrays = savedArrays
     session.functions = savedFunctions
     session.positionalArgs = savedPositional
+    session.lastBgJobId = savedLastBgJob
   }
 }
 

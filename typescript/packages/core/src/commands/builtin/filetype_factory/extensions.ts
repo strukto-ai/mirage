@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import * as featherModule from '../../../core/filetype/feather.ts'
 import * as hdf5Module from '../../../core/filetype/hdf5.ts'
 import * as parquetModule from '../../../core/filetype/parquet.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { PathSpec, ReadBytesFn } from '../../../types.ts'
 
 export interface FiletypeModule {
   describe(raw: Uint8Array): string | Promise<string>
@@ -42,11 +42,9 @@ export const FILETYPE_ENTRIES: readonly FiletypeEntry[] = [
   { fmt: 'hdf5', exts: ['.h5', '.hdf5'], module: hdf5Module },
 ]
 
-export type ReadBytesFn<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<Uint8Array>
+export type FiletypeReadBytesFn<A extends Accessor = Accessor> = ReadBytesFn<
+  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+>
 
 export type StatEntryFn<A extends Accessor = Accessor> = (
   accessor: A,

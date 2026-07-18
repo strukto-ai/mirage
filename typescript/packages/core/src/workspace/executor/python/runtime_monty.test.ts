@@ -16,7 +16,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import type { BridgeDispatchFn } from './mirage_bridge.ts'
 import { MontyRuntime } from './runtimes/monty.ts'
 import { PyodideRuntime } from './runtimes/pyodide.ts'
-import { selectPythonRuntime } from './runtimes/select.ts'
+import { buildRuntime } from '../runtime_table.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
@@ -64,7 +64,7 @@ function run(
   return rt.run({ code, args, env, stdin: null })
 }
 
-const text = (b: Uint8Array): string => new TextDecoder().decode(b)
+const text = (b: Uint8Array | null): string => (b === null ? '' : new TextDecoder().decode(b))
 
 describe('MontyRuntime', () => {
   const runtimes: MontyRuntime[] = []
@@ -198,13 +198,13 @@ describe('MontyRuntime', () => {
   })
 })
 
-describe('Workspace with pythonRuntime: monty', () => {
+describe('Workspace with the monty runtime', () => {
   it('python3 reads a virtualized file end to end', async () => {
     const parser = await getTestParser()
     const data = new RAMResource()
     const ws = new Workspace(
       { '/data': data },
-      { mode: MountMode.EXEC, shellParser: parser, pythonRuntime: 'monty' },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
     )
     await ws.execute('echo virtual-content > /data/a.txt')
     const io = await ws.execute(
@@ -229,6 +229,8 @@ describe('monty unavailable', () => {
     const { MontyUnavailableError } = await import('./runtimes/monty.ts')
     const runtime = {
       name: 'monty',
+      captures: ['python3', 'python'],
+      attach: () => undefined,
       run: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
       runRepl: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
       close: () => Promise.resolve(),
@@ -246,20 +248,20 @@ describe('monty unavailable', () => {
   })
 })
 
-describe('selectPythonRuntime', () => {
-  it('defaults to pyodide', () => {
-    expect(selectPythonRuntime(undefined)).toBeInstanceOf(PyodideRuntime)
+describe('buildRuntime', () => {
+  it('builds pyodide by name', () => {
+    expect(buildRuntime('pyodide')).toBeInstanceOf(PyodideRuntime)
   })
 
-  it('selects monty', () => {
-    expect(selectPythonRuntime('monty')).toBeInstanceOf(MontyRuntime)
+  it('builds monty by name', () => {
+    expect(buildRuntime('monty')).toBeInstanceOf(MontyRuntime)
   })
 
   it('rejects unknown names', () => {
-    expect(() => selectPythonRuntime('docker')).toThrow(/unknown python runtime/)
+    expect(() => buildRuntime('docker')).toThrow(/unknown runtime/)
   })
 
   it("hints that 'local' is Python-only", () => {
-    expect(() => selectPythonRuntime('local')).toThrow(/Python-only/)
+    expect(() => buildRuntime('local')).toThrow(/Python-only/)
   })
 })

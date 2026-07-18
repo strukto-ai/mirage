@@ -206,6 +206,7 @@ export const ShellBuiltin = Object.freeze({
   BREAK: 'break',
   CONTINUE: 'continue',
   RETURN: 'return',
+  EXIT: 'exit',
 } as const)
 
 export type ShellBuiltin = (typeof ShellBuiltin)[keyof typeof ShellBuiltin]

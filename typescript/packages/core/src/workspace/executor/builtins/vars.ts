@@ -18,6 +18,7 @@ import { asyncChain } from '../../../io/stream.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
+import { ExitSignal } from '../../../shell/errors.ts'
 import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
@@ -240,6 +241,26 @@ export function handleReturn(args: readonly string[]): Result {
     )
   }
   throw new ReturnSignal(first !== undefined ? Number(first) : 0)
+}
+
+/** Exit the shell, with bash's argument checks. */
+export function handleExit(args: readonly string[], session: Session): Result {
+  const first = args[0]
+  if (first !== undefined && !isShiftCount(first)) {
+    // bash exits with 2 after the diagnostic.
+    throw new ExitSignal(2, new TextEncoder().encode(`exit: ${first}: numeric argument required\n`))
+  }
+  if (args.length > 1) {
+    // bash refuses to exit and the command fails with 1.
+    const err = new TextEncoder().encode('exit: too many arguments\n')
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: 'exit', exitCode: 1, stderr: err }),
+    ]
+  }
+  const code = first !== undefined ? Number(first) : session.lastExitCode
+  throw new ExitSignal(((code % 256) + 256) % 256)
 }
 
 /**

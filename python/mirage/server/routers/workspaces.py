@@ -40,7 +40,13 @@ async def create_workspace(req: CreateWorkspaceRequest,
     if req.id is not None and req.id in registry:
         raise HTTPException(status_code=409,
                             detail=f"workspace id already exists: {req.id!r}")
-    kwargs = req.config.to_workspace_kwargs()
+    try:
+        # Map runtime entries construct their instances here, so a bad
+        # entry (a wasi build dir that does not exist, an unknown
+        # option) fails the create like any other config mistake.
+        kwargs = req.config.to_workspace_kwargs()
+    except (FileNotFoundError, ImportError, ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
     # The registry id and the state-store scope must be the same identity,
     # so resolve it before construction: explicit REST id, then the
     # config's workspace_id, then a fresh mint.

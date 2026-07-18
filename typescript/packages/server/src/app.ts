@@ -27,7 +27,13 @@ import { registerSessionsRoutes } from './routers/sessions.ts'
 import { registerVersionsRoutes } from './routers/versions.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
 import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
-import { mirageHome, pidFilePath, snapshotRootPath, versionRootPath } from './paths.ts'
+import {
+  mirageHome,
+  pidFilePath,
+  snapshotRootPath,
+  stateRootPath,
+  versionRootPath,
+} from './paths.ts'
 import { LocalBackend } from './version/backend.ts'
 
 export interface BuildAppOptions {
@@ -37,6 +43,7 @@ export interface BuildAppOptions {
   authConfig?: AuthConfig
   versionRoot?: string
   snapshotRoot?: string
+  stateRoot?: string
   pidFile?: string
 }
 
@@ -59,6 +66,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   const jobs = new JobTable()
   const versionBackend = new LocalBackend(versionRootPath(options.versionRoot))
   const snapshotRoot = snapshotRootPath(options.snapshotRoot)
+  const stateRoot = stateRootPath(options.stateRoot)
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })
   void app.register(rateLimit, {
@@ -85,7 +93,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     limits: { fileSize: 10 * 1024 * 1024 * 1024 },
   })
   registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
-  registerWorkspacesRoutes(app, { registry, snapshotRoot })
+  registerWorkspacesRoutes(app, { registry, snapshotRoot, stateRoot })
   registerVersionsRoutes(app, { registry, versionBackend })
   registerSessionsRoutes(app, { registry })
   registerExecuteRoutes(app, { registry, jobs })

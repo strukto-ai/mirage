@@ -17,16 +17,13 @@ import tree_sitter
 import tree_sitter_bash
 
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import RedirectKind
 
 from mirage.shell.helpers import (  # isort: skip
-    get_case_items, get_case_word, get_command_assignments, get_command_name,
-    get_declaration_assignments, get_declaration_keyword, get_for_parts,
-    get_function_body, get_function_name, get_heredoc_parts, get_if_branches,
-    get_list_parts, get_negated_command, get_parts, get_pipeline_commands,
-    get_process_sub_command, get_redirect_parts, get_redirect_target_node,
-    get_subshell_body, get_test_argv, get_text, get_unset_names,
-    get_while_parts)
+    get_case_items, get_case_word, get_command_name, get_declaration_keyword,
+    get_for_parts, get_function_body, get_function_name, get_heredoc_parts,
+    get_if_branches, get_list_parts, get_negated_command, get_parts,
+    get_pipeline_commands, get_redirects, get_subshell_body, get_text,
+    get_unset_names, get_while_parts)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -111,25 +108,6 @@ def test_get_for_select():
 def test_get_subshell_body():
     body = get_subshell_body(_first("(echo a; echo b)"))
     assert len(body) == 2
-
-
-def test_get_redirect_parts():
-    cmd, target, append, stream = get_redirect_parts(
-        _first("cat file > out.txt"))
-    assert target == "out.txt"
-    assert append is False
-    assert stream == RedirectKind.STDOUT
-
-
-def test_get_redirect_append():
-    cmd, target, append, stream = get_redirect_parts(
-        _first("echo x >> log.txt"))
-    assert append is True
-
-
-def test_get_redirect_stdin():
-    cmd, target, append, stream = get_redirect_parts(_first("cat < input.txt"))
-    assert stream == RedirectKind.STDIN
 
 
 def test_get_list_parts_and():
@@ -229,13 +207,6 @@ def test_get_case_multi_statement_body():
     assert len(items[0][1]) == 2
 
 
-def test_get_redirect_stderr():
-    cmd, target, append, stream = get_redirect_parts(
-        _first("echo err 2> error.log"))
-    assert stream == RedirectKind.STDERR
-    assert target == "error.log"
-
-
 def test_get_for_single_value():
     var, values, body = get_for_parts(_first("for x in hello; do echo; done"))
     assert var == "x"
@@ -288,11 +259,6 @@ def test_get_subshell_single():
     assert len(body) == 1
 
 
-def test_export_assignments():
-    assigns = get_declaration_assignments(_first("export A=1 B=2"))
-    assert assigns == ["A=1", "B=2"]
-
-
 def test_export_keyword():
     assert get_declaration_keyword(_first("export A=1")) == "export"
 
@@ -301,36 +267,9 @@ def test_local_keyword():
     assert get_declaration_keyword(_first("local X=hello")) == "local"
 
 
-def test_declare_assignments():
-    assigns = get_declaration_assignments(_first("declare -i NUM=42"))
-    assert assigns == ["NUM=42"]
-
-
 def test_unset_names():
     names = get_unset_names(_first("unset VAR1 VAR2"))
     assert names == ["VAR1", "VAR2"]
-
-
-def test_test_command_bracket():
-    argv = get_test_argv(_first("[ -f /data/file ]"))
-    assert len(argv) == 1
-    assert "-f" in argv[0]
-
-
-def test_test_command_double_bracket():
-    argv = get_test_argv(_first("[[ $x == hello ]]"))
-    assert len(argv) == 1
-    assert "==" in argv[0]
-
-
-def test_command_prefix_assignments():
-    assigns = get_command_assignments(_first("A=1 B=2 echo hello"))
-    assert assigns == ["A=1", "B=2"]
-
-
-def test_command_no_assignments():
-    assigns = get_command_assignments(_first("echo hello"))
-    assert assigns == []
 
 
 # ── negated command ──────────────────────────────
@@ -362,7 +301,7 @@ def test_process_sub_command():
     parts = get_parts(_first("diff <(echo a) <(echo b)"))
     ps_nodes = [p for p in parts if p.type == NT.PROCESS_SUBSTITUTION]
     assert len(ps_nodes) == 2
-    inner = get_process_sub_command(ps_nodes[0])
+    inner = ps_nodes[0].named_children[0]
     assert get_command_name(inner) == "echo"
 
 
@@ -429,9 +368,9 @@ def test_empty_command():
 def test_redirect_with_pipe():
     node = _first("echo a | grep b > out.txt")
     assert node.type == NT.REDIRECTED_STATEMENT
-    cmd, target, append, stream = get_redirect_parts(node)
+    cmd, redirects = get_redirects(node)
     assert cmd.type == NT.PIPELINE
-    assert target == "out.txt"
+    assert redirects[0].target == "out.txt"
 
 
 # ── quotes and escapes ──────────────────────────
@@ -555,34 +494,39 @@ def test_select_multi_statement_body():
 
 def test_redirect_target_concat():
     node = _first("echo x > $DIR/out.txt")
-    target_node = get_redirect_target_node(node)
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
     assert target_node is not None
     assert target_node.type == NT.CONCATENATION
 
 
 def test_redirect_target_expansion():
     node = _first("echo x > $OUT")
-    target_node = get_redirect_target_node(node)
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
     assert target_node is not None
     assert target_node.type == NT.SIMPLE_EXPANSION
 
 
 def test_redirect_target_cmd_sub():
     node = _first("echo x > $(echo out.txt)")
-    target_node = get_redirect_target_node(node)
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
     assert target_node is not None
     assert target_node.type == NT.COMMAND_SUBSTITUTION
 
 
 def test_redirect_target_heredoc_none():
     node = _first("cat <<EOF\nhello\nEOF")
-    target_node = get_redirect_target_node(node)
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
     assert target_node is None
 
 
 def test_redirect_target_stderr():
     node = _first("cmd 2> /err.txt")
-    target_node = get_redirect_target_node(node)
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
     assert target_node is not None
     assert get_text(target_node) == "/err.txt"
 
@@ -616,7 +560,7 @@ def test_python3_with_args():
 def test_python3_heredoc():
     node = _first("python3 <<PYEOF\nprint('hello')\nPYEOF")
     assert node.type == NT.REDIRECTED_STATEMENT
-    cmd, target, append, stream = get_redirect_parts(node)
+    cmd, _ = get_redirects(node)
     assert get_command_name(cmd) == "python3"
     redirect = node.named_children[1]
     assert redirect.type == NT.HEREDOC_REDIRECT

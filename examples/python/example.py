@@ -40,7 +40,7 @@ ws = Workspace(
         "/work/": (mem, MountMode.WRITE),
     },
     mode=MountMode.EXEC,
-    python_runtime="local",
+    runtimes=["local", "vfs"],
 )
 
 

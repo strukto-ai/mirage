@@ -18,8 +18,7 @@ import asyncio
 from pathlib import PurePosixPath
 from typing import Any, Callable
 
-from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
-                                        PythonRuntime)
+from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.types import PathSpec
 
 pydantic_monty: Any
@@ -231,7 +230,7 @@ class _MirageOS(OSAccess):
             self._missing.add(str(path))
 
 
-class MontyRuntime(PythonRuntime):
+class MontyRuntime(Runtime):
     """Run Python code on the Monty sandboxed interpreter.
 
     Code executes in Monty's Rust interpreter: no host filesystem,
@@ -245,6 +244,7 @@ class MontyRuntime(PythonRuntime):
     """
 
     name = "monty"
+    captures = ("python3", "python")
 
     def __init__(self, dispatch: Callable[..., Any] | None = None) -> None:
         if pydantic_monty is None:
@@ -253,7 +253,12 @@ class MontyRuntime(PythonRuntime):
                 "pip install mirage-ai[monty], or select the 'local' runtime")
         self._workspace_dispatch = dispatch
 
-    async def run(self, args: PythonRunArgs) -> PythonRunResult:
+    def attach(self, dispatch: Callable[..., Any],
+               mount_prefixes: Callable[[], list[str]]) -> None:
+        if self._workspace_dispatch is None:
+            self._workspace_dispatch = dispatch
+
+    async def run(self, args: RunArgs) -> RunResult:
         # run_async executes on Monty's own tokio pool and returns an
         # asyncio-compatible future: the loop stays free, and cancelling
         # the future halts the interpreter (verified: CPU drops to zero),
@@ -266,9 +271,7 @@ class MontyRuntime(PythonRuntime):
             monty = pydantic_monty.Monty(args.code, inputs=["argv"])
         except pydantic_monty.MontySyntaxError as exc:
             trace = exc.display(format="traceback") + "\n"
-            return PythonRunResult(stdout=b"",
-                                   stderr=trace.encode(),
-                                   exit_code=1)
+            return RunResult(stdout=b"", stderr=trace.encode(), exit_code=1)
         argv = ["main.py", *args.args]
         try:
             await monty.run_async(inputs={"argv": argv},
@@ -277,11 +280,11 @@ class MontyRuntime(PythonRuntime):
         except pydantic_monty.MontyRuntimeError as exc:
             stdout, stderr = _split_streams(collector)
             trace = exc.display(format="traceback") + "\n"
-            return PythonRunResult(stdout=stdout,
-                                   stderr=(stderr or b"") + trace.encode(),
-                                   exit_code=1)
+            return RunResult(stdout=stdout,
+                             stderr=(stderr or b"") + trace.encode(),
+                             exit_code=1)
         stdout, stderr = _split_streams(collector)
-        return PythonRunResult(stdout=stdout, stderr=stderr, exit_code=0)
+        return RunResult(stdout=stdout, stderr=stderr, exit_code=0)
 
 
 def _split_streams(

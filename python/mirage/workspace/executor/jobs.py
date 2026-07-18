@@ -19,6 +19,7 @@ import tree_sitter
 from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
+from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.job_table import JobTable
 from mirage.workspace.session import Session
@@ -53,6 +54,14 @@ async def handle_background(
                                       stderr=msg,
                                       exit_code=124)
             return b"", io, exec_node
+        except ExitSignal as sig:
+            # A background job is its own shell: exit ends the job only.
+            io = IOResult(exit_code=sig.contained_code,
+                          stderr=sig.stderr or None)
+            exec_node = ExecutionNode(command=cmd_str_inner,
+                                      stderr=sig.stderr,
+                                      exit_code=sig.contained_code)
+            return sig.stdout or b"", io, exec_node
         stdout = await materialize(stdout)
         # Eagerly materialize stderr too so JobTable._refresh can read
         # the task result synchronously without an async hop.
@@ -69,6 +78,7 @@ async def handle_background(
                                cwd=bg_session.cwd,
                                agent=agent_id or "",
                                session_id=session.session_id)
+        session.last_bg_job_id = job.id
         job_line = f"[{job.id}]\n".encode()
     else:
         job_line = b"[bg]\n"

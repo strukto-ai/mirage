@@ -12,10 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { walkFind } from '../../../../core/generic/find.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { FindOptions } from '../../../../resource/base.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { NativeCopy, PathSpec } from '../../../../types.ts'
 import { cpGeneric } from '../../generic/cp.ts'
 import type { Builder } from '../adapter.ts'
 
@@ -29,41 +27,26 @@ export const CP_BUILDER: Builder = {
         new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
       ])
     }
-    const { copy, find, isDirName } = ops
-    if (copy === undefined) {
-      throw new Error('cp: backend provides no copy op')
+    const { copy, dirCopy, find } = ops
+    if (copy === undefined || find === undefined) {
+      throw new Error('cp: backend provides no copy/find op')
     }
-    // No backend find op: walk readdir/stat, mirroring the python builder.
-    const findFn =
-      find !== undefined
-        ? (src: PathSpec, options: FindOptions) => find(accessor, src, options)
-        : (src: PathSpec, options: FindOptions) =>
-            walkFind(
-              src,
-              {
-                readdir: (spec, i) => ops.readdir(accessor, spec, i),
-                stat: (spec, i) => ops.stat(accessor, spec, i),
-                isDirName:
-                  isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
-              },
-              options,
-              opts.index ?? undefined,
-            )
     const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
-    const dirCopy = ops.dirCopy
+    const strategy: NativeCopy = {
+      copy: (src: PathSpec, target: PathSpec) => copy(accessor, src, target),
+      find: (src, options) => find(accessor, src, options),
+      ...(dirCopy === undefined
+        ? {}
+        : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),
+    }
     return cpGeneric(
       paths,
-      (src: PathSpec, target: PathSpec) => copy(accessor, src, target),
-      findFn,
       (p: PathSpec) => ops.stat(accessor, p, opts.index ?? undefined),
+      strategy,
       recursive,
       opts.flags.n === true,
       opts.flags.v === true,
       opts.index ?? undefined,
-      undefined,
-      dirCopy === undefined
-        ? undefined
-        : (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target),
     )
   },
 }

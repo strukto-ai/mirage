@@ -41,7 +41,7 @@ const EMPTY_META: VersionMeta = {
 
 // File-level diff/status stay content-only: the control-plane subtree
 // changes on every command (history) and is surfaced by the structured
-// cross-plane diff instead.
+// structured stateDiff instead.
 function stripMeta(d: DiffResult): DiffResult {
   const keep = (xs: string[]): string[] => xs.filter((p) => !p.startsWith(CONTROL_PREFIX))
   return { added: keep(d.added), modified: keep(d.modified), deleted: keep(d.deleted) }

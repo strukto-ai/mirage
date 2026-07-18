@@ -60,10 +60,15 @@ import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
 import { handlePythonRepl } from './executor/python/handle.ts'
 import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bridge.ts'
-import { selectPythonRuntime } from './executor/python/runtimes/select.ts'
 import type { PythonRuntime } from './executor/python/runtimes/interface.ts'
-import { selectJsRuntime } from './executor/js/select.ts'
-import type { JsRuntime } from './executor/js/interface.ts'
+import {
+  bindCommands,
+  DEFAULT_ENTRIES,
+  VFS_ENTRY,
+  type Runtime,
+  type RuntimeEntry,
+} from './executor/runtime.ts'
+import { buildRuntime } from './executor/runtime_table.ts'
 import type { PythonReplRunResult } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
 import { Dispatcher } from './dispatcher.ts'
@@ -128,18 +133,12 @@ export interface WorkspaceOptions {
     bootstrapCode?: string
     denyPackages?: readonly string[]
   }
-  /** Python runtime for `python3`: 'pyodide' (default) or 'monty'. */
-  pythonRuntime?: string
-  /** JavaScript runtime for `node`/`js`: 'quickjs' (default). */
-  jsRuntime?: string
   /**
-   * Per-runtime option blocks (the yaml `runtime:` sibling blocks end
-   * up here); the selected runtime consumes its own block, e.g.
-   * `{ pyodide: { home: 'https://cdn.example.com/pyodide/' } }` for
-   * self-hosted pyodide assets (`home` falls back to
-   * MIRAGE_PYODIDE_HOME). Blocks for other runtimes are ignored.
+   * The workspace's ordered runtime world: instances and name
+   * shorthands plus the vfs marker; the first capturer binds each
+   * command. Unset = the default world (pyodide, quickjs, vfs).
    */
-  runtimeOptions?: Record<string, Record<string, unknown>>
+  runtimes?: RuntimeEntry[]
 }
 
 export class ExecuteResult {
@@ -228,8 +227,8 @@ export class Workspace {
   readonly fs: WorkspaceFS
   private closed = false
   private readonly closers: (() => Promise<void>)[] = []
-  private readonly pythonRuntime: PythonRuntime
-  private readonly jsRuntime: JsRuntime
+  private readonly runtimeEntries: RuntimeEntry[]
+  private readonly runtimeBindings: Record<string, Runtime>
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -289,26 +288,36 @@ export class Workspace {
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? null
+    // The ordered runtime world; the first capturer binds each
+    // command. The TypeScript engines construct lazily (missing wasm
+    // surfaces at run time), so defaults and explicit entries build
+    // the same way. options.python keeps configuring the default
+    // pyodide build.
     const userPython = options.python ?? {}
-    this.pythonRuntime = selectPythonRuntime(
-      options.pythonRuntime,
-      {
-        ...userPython,
-        workspaceBridge: this.buildWorkspaceBridge(),
-        listMounts: () => this.sandboxVisibleMounts(),
-      },
-      options.runtimeOptions,
-    )
-    this.closers.push(() => this.pythonRuntime.close())
-    this.jsRuntime = selectJsRuntime(
-      options.jsRuntime,
-      {
-        workspaceBridge: this.buildWorkspaceBridge(),
-        listMounts: () => this.sandboxVisibleMounts(),
-      },
-      options.runtimeOptions,
-    )
-    this.closers.push(() => this.jsRuntime.close())
+    this.runtimeEntries = []
+    if (options.runtimes === undefined) {
+      for (const name of DEFAULT_ENTRIES) {
+        if (name === VFS_ENTRY) {
+          this.runtimeEntries.push(VFS_ENTRY)
+          continue
+        }
+        this.runtimeEntries.push(buildRuntime(name, name === 'pyodide' ? { ...userPython } : {}))
+      }
+    } else {
+      for (const entry of options.runtimes) {
+        if (typeof entry === 'string' && entry !== VFS_ENTRY) {
+          this.runtimeEntries.push(buildRuntime(entry))
+        } else {
+          this.runtimeEntries.push(entry)
+        }
+      }
+    }
+    for (const entry of this.runtimeEntries) {
+      if (typeof entry === 'string') continue
+      entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
+      this.closers.push(() => entry.close())
+    }
+    this.runtimeBindings = bindCommands(this.runtimeEntries)
     this.observer = new Observer(observeStore)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
@@ -974,8 +983,7 @@ export class Workspace {
       },
       ensureOpen,
       unmount: (prefix: string) => this.unmount(prefix),
-      pythonRuntime: this.pythonRuntime,
-      jsRuntime: this.jsRuntime,
+      runtimeBindings: this.runtimeBindings,
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     }
     const targetSessionId = options.sessionId ?? this.sessionManager.defaultId
@@ -1090,7 +1098,11 @@ export class Workspace {
   ): Promise<PythonReplRunResult> {
     if (this.closed) throw new Error('Workspace is closed')
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
-    return handlePythonRepl(code, sessionId, { runtime: this.pythonRuntime })
+    const bound = this.runtimeBindings.python3
+    if (bound === undefined || !('runRepl' in bound)) {
+      throw new Error('no python runtime bound for the repl')
+    }
+    return handlePythonRepl(code, sessionId, { runtime: bound as PythonRuntime })
   }
 
   async snapshot(target: string): Promise<number> {

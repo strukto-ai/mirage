@@ -33,8 +33,8 @@ export const MV_BUILDER: Builder = {
     }
     return mvGeneric(
       paths,
-      (src: PathSpec, target: PathSpec) => rename(accessor, src, target),
       (p: PathSpec) => ops.stat(accessor, p, opts.index ?? undefined),
+      { rename: (src: PathSpec, target: PathSpec) => rename(accessor, src, target) },
       opts.flags.n === true,
       opts.flags.v === true,
       opts.index ?? undefined,

@@ -38,6 +38,7 @@ export interface SessionInit {
   mountModes?: ReadonlyMap<string, MountMode> | null
   generation?: number
   pipelineTimeoutSeconds?: number | null
+  lastBgJobId?: number | null
 }
 
 export class Session {
@@ -56,6 +57,7 @@ export class Session {
   mountModes: ReadonlyMap<string, MountMode> | null
   generation: number
   pipelineTimeoutSeconds: number | null
+  lastBgJobId: number | null
 
   constructor(init: SessionInit) {
     this.sessionId = init.sessionId
@@ -71,6 +73,7 @@ export class Session {
     this.mountModes = init.mountModes ?? null
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
+    this.lastBgJobId = init.lastBgJobId ?? null
   }
 
   /**
@@ -98,6 +101,7 @@ export class Session {
       mountModes: overrides.mountModes ?? this.mountModes,
       generation: overrides.generation ?? this.generation,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
+      lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
   }
 

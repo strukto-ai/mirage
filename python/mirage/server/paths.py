@@ -16,9 +16,7 @@ import os
 import re
 from pathlib import Path
 
-from mirage.server.daemon_config import read_daemon_table
-from mirage.server.env import (ENV_HOME, ENV_PID_FILE, ENV_SNAPSHOT_ROOT,
-                               ENV_STATE_ROOT, ENV_VERSION_ROOT)
+from mirage.server.env import ENV_HOME
 
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -45,9 +43,10 @@ def mirage_home() -> Path:
 def pid_file_path(explicit: str | Path | None = None) -> Path:
     """Resolve the daemon pid file location.
 
-    Priority: ``explicit`` argument, then ``$MIRAGE_PID_FILE``, then the
-    ``pid_file`` key in ``config.toml`` ``[daemon]``, then ``daemon.pid``
-    under :func:`mirage_home`.
+    Priority: ``explicit`` argument, then ``daemon.pid`` under
+    :func:`mirage_home`. There is deliberately no per-path env or
+    config key: like docker's ``data-root`` and git's ``GIT_DIR``, the
+    home is the single configurable root and its layout is fixed.
 
     Args:
         explicit (str | Path | None): caller-supplied override.
@@ -57,22 +56,14 @@ def pid_file_path(explicit: str | Path | None = None) -> Path:
     """
     if explicit is not None:
         return _absolute(explicit)
-    override = os.environ.get(ENV_PID_FILE)
-    if override:
-        return _absolute(override)
-    home = mirage_home()
-    from_config = read_daemon_table(home).get("pid_file")
-    if from_config:
-        return _absolute(from_config)
-    return home / "daemon.pid"
+    return mirage_home() / "daemon.pid"
 
 
 def version_root_path(explicit: str | Path | None = None) -> Path:
     """Resolve the git repos root.
 
-    Priority: ``explicit`` argument, then ``$MIRAGE_VERSION_ROOT``, then the
-    ``version_root`` key in ``config.toml`` ``[daemon]``, then ``repos``
-    under :func:`mirage_home`.
+    Priority: ``explicit`` argument, then ``repos`` under
+    :func:`mirage_home`.
 
     Args:
         explicit (str | Path | None): caller-supplied override.
@@ -82,22 +73,14 @@ def version_root_path(explicit: str | Path | None = None) -> Path:
     """
     if explicit is not None:
         return _absolute(explicit)
-    override = os.environ.get(ENV_VERSION_ROOT)
-    if override:
-        return _absolute(override)
-    home = mirage_home()
-    from_config = read_daemon_table(home).get("version_root")
-    if from_config:
-        return _absolute(from_config)
-    return home / "repos"
+    return mirage_home() / "repos"
 
 
 def state_root_path(explicit: str | Path | None = None) -> Path:
     """Resolve the live-state (disk store) root.
 
-    Priority: ``explicit`` argument, then ``$MIRAGE_STATE_ROOT``, then the
-    ``state_root`` key in ``config.toml`` ``[daemon]``, then ``state``
-    under :func:`mirage_home`.
+    Priority: ``explicit`` argument, then ``state`` under
+    :func:`mirage_home`.
 
     Args:
         explicit (str | Path | None): caller-supplied override.
@@ -107,22 +90,14 @@ def state_root_path(explicit: str | Path | None = None) -> Path:
     """
     if explicit is not None:
         return _absolute(explicit)
-    override = os.environ.get(ENV_STATE_ROOT)
-    if override:
-        return _absolute(override)
-    home = mirage_home()
-    from_config = read_daemon_table(home).get("state_root")
-    if from_config:
-        return _absolute(from_config)
-    return home / "state"
+    return mirage_home() / "state"
 
 
 def snapshot_root_path(explicit: str | Path | None = None) -> Path:
     """Resolve the snapshot root.
 
-    Priority: ``explicit`` argument, then ``$MIRAGE_SNAPSHOT_ROOT``, then the
-    ``snapshot_root`` key in ``config.toml`` ``[daemon]``, then ``snapshots``
-    under :func:`mirage_home`.
+    Priority: ``explicit`` argument, then ``snapshots`` under
+    :func:`mirage_home`.
 
     Args:
         explicit (str | Path | None): caller-supplied override.
@@ -132,14 +107,7 @@ def snapshot_root_path(explicit: str | Path | None = None) -> Path:
     """
     if explicit is not None:
         return _absolute(explicit)
-    override = os.environ.get(ENV_SNAPSHOT_ROOT)
-    if override:
-        return _absolute(override)
-    home = mirage_home()
-    from_config = read_daemon_table(home).get("snapshot_root")
-    if from_config:
-        return _absolute(from_config)
-    return home / "snapshots"
+    return mirage_home() / "snapshots"
 
 
 class PathOutsideRootError(Exception):

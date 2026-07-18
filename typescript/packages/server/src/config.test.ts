@@ -75,59 +75,46 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/invalid mount mode/)
   })
 
-  it('threads per-runtime option blocks into workspace options', async () => {
+  it('builds runtime entries from the ordered list', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'pyodide', pyodide: { home: 'https://assets.example.com/pyodide/' } },
+      runtimes: [
+        { name: 'pyodide', home: 'https://assets.example.com/pyodide/' },
+        'quickjs',
+        'vfs',
+      ],
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.runtimeOptions).toEqual({
-      pyodide: { home: 'https://assets.example.com/pyodide/' },
-    })
+    const entries = args.options.runtimes
+    expect(entries).toBeDefined()
+    expect(entries).toHaveLength(3)
+    expect((entries?.[0] as { name: string }).name).toBe('pyodide')
+    expect((entries?.[1] as { name: string }).name).toBe('quickjs')
+    expect(entries?.[2]).toBe('vfs')
   })
 
-  it('accepts blocks for Python-only runtimes (portable config)', async () => {
+  it('rejects an unknown runtime entry name', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: {
-        python: 'pyodide',
-        wasi: { home: '/opt/wasi-build' },
-        local: { home: '/usr/bin/python3' },
-      },
+      runtimes: ['docker'],
     })
-    const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.runtimeOptions).toEqual({
-      wasi: { home: '/opt/wasi-build' },
-      local: { home: '/usr/bin/python3' },
-    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime/)
   })
 
-  it('rejects an unknown runtime name block', async () => {
+  it("hints that 'wasi' is Python-only", async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'pyodide', docker: { home: '/somewhere' } },
+      runtimes: ['wasi'],
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
-      /unknown runtime name in runtime options/,
-    )
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
   })
 
-  it('threads the js selector and quickjs block', async () => {
+  it('rejects options on the vfs entry', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { js: 'quickjs', quickjs: { home: '/opt/qjs' } },
+      runtimes: [{ name: 'vfs', home: '/x' }],
     })
-    const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.jsRuntime).toBe('quickjs')
-    expect(args.options.runtimeOptions).toEqual({ quickjs: { home: '/opt/qjs' } })
-  })
-
-  it('rejects an invalid js runtime name', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { resource: 'ram' } },
-      runtime: { js: 'v8' },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/invalid js runtime/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/vfs runtime entry takes no/)
   })
 
   it('builds a redis index config from an index block', async () => {

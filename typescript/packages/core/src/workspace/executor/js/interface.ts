@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
-import type { JsRunArgs, JsRunResult } from './types.ts'
-
 export const QUICKJS_RUNTIME = 'quickjs'
-
-/** JavaScript runtime names the TypeScript packages can build. */
-export const JS_RUNTIMES = [QUICKJS_RUNTIME] as const
-
-export const DEFAULT_JS_RUNTIME = JS_RUNTIMES[0]
 
 /**
  * Construction options a JavaScript runtime accepts.
@@ -43,8 +36,4 @@ export interface JsRuntimeOptions {
  * the workspace mounts through `std.open`/`os.readdir`; without one it
  * sees an empty filesystem.
  */
-export interface JsRuntime {
-  readonly name: string
-  run(args: JsRunArgs): Promise<JsRunResult>
-  close(): Promise<void>
-}
+export type { Runtime as JsRuntime } from '../runtime.ts'

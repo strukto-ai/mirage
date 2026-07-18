@@ -17,15 +17,30 @@ export {
   CommandSafeguard,
   type CommandSafeguardInit,
   ConsistencyPolicy,
+  type CopyFn,
+  type CopyStrategy,
   DriftPolicy,
   FileStat,
   type FileStatInit,
   FileType,
+  type FindFn,
   MountMode,
+  type MoveFn,
+  type MoveStrategy,
+  type NativeCopy,
+  type NativeMove,
   OnExceed,
   PathSpec,
   type PathSpecInit,
+  type PolymorphicReadFn,
+  type PolymorphicReadResult,
+  type PrimitiveCopy,
+  type PrimitiveMove,
+  type ReadBytesFn,
+  type ReaddirFn,
+  type ReadStreamFn,
   ResourceName,
+  type StatFn,
 } from './types.ts'
 export {
   captureFingerprints,
@@ -180,7 +195,7 @@ export {
   FILETYPE_ENTRIES,
   type FiletypeEntry,
   type FiletypeModule,
-  type ReadBytesFn,
+  type FiletypeReadBytesFn,
   type StatEntryFn,
 } from './commands/builtin/filetype_factory/extensions.ts'
 export { numberLines } from './commands/builtin/generic/cat.ts'
@@ -275,9 +290,6 @@ export {
 } from './commands/builtin/grep_helper.ts'
 export { grepContextLines } from './commands/builtin/grep_context.ts'
 export {
-  type AsyncReaddirFn,
-  type AsyncReadBytesFn,
-  type AsyncStatFn,
   rgFolderFiletype,
   type RgFolderFiletypeOptions,
   rgFull,
@@ -285,6 +297,11 @@ export {
   rgMatchesFilter,
   TYPE_EXTENSIONS,
 } from './commands/builtin/rg_helper.ts'
+export type {
+  AsyncReadBytesFn,
+  AsyncReaddirFn,
+  AsyncStatFn,
+} from './commands/builtin/utils/types.ts'
 export {
   compareKeys,
   parseKeyOptions,
@@ -434,11 +451,17 @@ export {
   isCrossMount,
 } from './workspace/executor/cross_mount.ts'
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
-export { PYTHON_RUNTIMES } from './workspace/executor/python/runtimes/interface.ts'
-export { validateRuntimeOptions } from './workspace/executor/runtime_options.ts'
-export { JS_RUNTIMES, DEFAULT_JS_RUNTIME } from './workspace/executor/js/interface.ts'
+export {
+  bindCommands,
+  DEFAULT_ENTRIES,
+  VFS_ENTRY,
+  type RunArgs,
+  type RunResult,
+  type Runtime,
+  type RuntimeEntry,
+} from './workspace/executor/runtime.ts'
+export { buildRuntime, candidates, RUNTIMES } from './workspace/executor/runtime_table.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
-export { selectJsRuntime } from './workspace/executor/js/select.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'
 export { handleRedirect } from './workspace/executor/redirect.ts'

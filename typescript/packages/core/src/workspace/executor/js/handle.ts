@@ -94,7 +94,7 @@ export async function handleJs(
       args,
       env: opts.env,
       stdin: stdinBytes,
-      module,
+      flags: { module },
     })
     return [
       result.stdout.length > 0 ? result.stdout : null,

@@ -17,12 +17,13 @@ import time
 
 import pytest
 
-from mirage.runtime.python import LocalRuntime, PythonRunArgs
+from mirage.runtime.base import RunArgs
+from mirage.runtime.python import LocalRuntime
 
 
 def test_local_runs_on_host_interpreter():
     runtime = LocalRuntime()
-    result = asyncio.run(runtime.run(PythonRunArgs(code="print(21 * 2)")))
+    result = asyncio.run(runtime.run(RunArgs(code="print(21 * 2)")))
     assert result.exit_code == 0
     assert result.stdout == b"42\n"
     assert result.stderr is None
@@ -32,8 +33,7 @@ def test_local_passes_argv():
     runtime = LocalRuntime()
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(code="import sys; print(sys.argv[1:])",
-                          args=["a", "b"])))
+            RunArgs(code="import sys; print(sys.argv[1:])", args=["a", "b"])))
     assert result.stdout == b"['a', 'b']\n"
 
 
@@ -41,8 +41,8 @@ def test_local_env_overlays_host():
     runtime = LocalRuntime()
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(code="import os; print(os.environ['MY_VAR'])",
-                          env={"MY_VAR": "v1"})))
+            RunArgs(code="import os; print(os.environ['MY_VAR'])",
+                    env={"MY_VAR": "v1"})))
     assert result.stdout == b"v1\n"
 
 
@@ -50,14 +50,14 @@ def test_local_stdin():
     runtime = LocalRuntime()
     result = asyncio.run(
         runtime.run(
-            PythonRunArgs(code="import sys; print(sys.stdin.read().upper())",
-                          stdin=b"hello")))
+            RunArgs(code="import sys; print(sys.stdin.read().upper())",
+                    stdin=b"hello")))
     assert result.stdout == b"HELLO\n"
 
 
 def test_local_exit_code_and_stderr():
     runtime = LocalRuntime()
-    result = asyncio.run(runtime.run(PythonRunArgs(code="1/0")))
+    result = asyncio.run(runtime.run(RunArgs(code="1/0")))
     assert result.exit_code == 1
     assert b"ZeroDivisionError" in result.stderr
 
@@ -70,7 +70,7 @@ def test_local_name():
 async def test_local_cancellation_kills_subprocess():
     runtime = LocalRuntime()
     task = asyncio.ensure_future(
-        runtime.run(PythonRunArgs(code="import time; time.sleep(30)")))
+        runtime.run(RunArgs(code="import time; time.sleep(30)")))
     await asyncio.sleep(0.3)
     start = time.monotonic()
     task.cancel()

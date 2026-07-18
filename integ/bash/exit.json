@@ -1,0 +1,334 @@
+{
+  "cases": [
+    {
+      "id": "exit_bang_empty_before_jobs",
+      "seq": 500100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo [$!]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_dollar_dollar_numeric",
+      "seq": 500101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "test $$ -gt 0 && echo pid-ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "pid-ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_bang_subshell_wait",
+      "seq": 500102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "(sleep 0.05 & wait $!) 2>/dev/null; echo waited=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "waited=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_bang_no_leak_from_subshell",
+      "seq": 500103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo [$!]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_bang_top_level_job_id",
+      "seq": 500104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "sleep 0.05 & echo bg=$! && wait $!",
+      "expect": {
+        "exit": 0,
+        "stdout": "bg=1\n",
+        "stderr": "[1]\n"
+      }
+    },
+    {
+      "id": "exit_and_keeps_left_output",
+      "seq": 500105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo a && exit 3",
+      "expect": {
+        "exit": 3,
+        "stdout": "a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_stops_line",
+      "seq": 500106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo a; exit 3; echo b",
+      "expect": {
+        "exit": 3,
+        "stdout": "a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_no_arg_last_code",
+      "seq": 500107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "false; exit",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_subshell_contained",
+      "seq": 500108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "(exit 3); echo after code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after code=3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_pipeline_contained",
+      "seq": 500109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "exit 3 | cat; echo after code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after code=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_function_exits_shell",
+      "seq": 500110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "f(){ exit 5; echo infn; }; f; echo no",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_non_numeric",
+      "seq": 500111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "exit abc; echo hi",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "exit: abc: numeric argument required\n"
+      }
+    },
+    {
+      "id": "exit_too_many_args",
+      "seq": 500112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "exit 1 2; echo after code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after code=1\n",
+        "stderr": "exit: too many arguments\n"
+      }
+    },
+    {
+      "id": "exit_status_wraps",
+      "seq": 500113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "(exit 300); echo code=$?; (exit -1); echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=44\ncode=255\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exit_cstyle_for_graceful",
+      "seq": 500114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "for ((i=0;i<3;i++)); do echo $i; done",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: unsupported shell construct: c_style_for_statement\n"
+      }
+    }
+  ]
+}

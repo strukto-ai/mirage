@@ -112,7 +112,7 @@ describe('python3 command timeout', () => {
         mode: MountMode.EXEC,
         ops: registry,
         shellParser: parser,
-        pythonRuntime: 'monty',
+        runtimes: ['monty', 'quickjs', 'vfs'],
         ...(safeguards !== undefined ? { commandSafeguards: safeguards } : {}),
       },
     )
