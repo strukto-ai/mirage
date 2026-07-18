@@ -13,15 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import inspect
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
+from typing import Any
 
-from mirage.cache.context import active_cache_manager
-from mirage.types import PathSpec
+from mirage.accessor.base import Accessor
+from mirage.cache.context import CacheInvalidator, active_cache_manager
+from mirage.types import PathSpec, PolymorphicReadFn, ReadBytesFn, ReadStreamFn
 
 
-async def _serve_stream(manager, raw: Callable, accessor, path: PathSpec,
-                        *args, **kwargs) -> AsyncIterator[bytes]:
-    if manager is not None and isinstance(path, PathSpec):
+async def _serve_stream(manager: CacheInvalidator | None, raw: ReadStreamFn,
+                        accessor: Accessor | None, path: PathSpec, *args: Any,
+                        **kwargs: Any) -> AsyncIterator[bytes]:
+    if manager is not None:
         cached = await manager.cached_bytes(path)
         if cached is not None:
             yield cached
@@ -36,7 +39,7 @@ async def _serve_stream(manager, raw: Callable, accessor, path: PathSpec,
             await close()
 
 
-def cache_aware_read_stream(raw: Callable) -> Callable:
+def cache_aware_read_stream(raw: ReadStreamFn) -> ReadStreamFn:
     """Wrap a backend ``read_stream`` so warm reads serve cached bytes.
 
     The returned reader keeps the backend's ``(accessor, path, ...)``
@@ -53,17 +56,18 @@ def cache_aware_read_stream(raw: Callable) -> Callable:
     which time that scope is gone.
 
     Args:
-        raw (Callable): the backend ``read_stream`` op.
+        raw (ReadStreamFn): the backend ``read_stream`` op.
     """
 
-    def reader(accessor, path: PathSpec, *args, **kwargs):
+    def reader(accessor: Accessor | None, path: PathSpec, *args: Any,
+               **kwargs: Any) -> AsyncIterator[bytes]:
         manager = active_cache_manager()
         return _serve_stream(manager, raw, accessor, path, *args, **kwargs)
 
     return reader
 
 
-def cache_aware_read_bytes(raw: Callable) -> Callable:
+def cache_aware_read_bytes(raw: ReadBytesFn) -> ReadBytesFn:
     """Wrap a backend ``read_bytes`` so warm reads serve cached bytes.
 
     Drop-in for the raw reader, same signature. Returns the cached bytes
@@ -71,12 +75,13 @@ def cache_aware_read_bytes(raw: Callable) -> Callable:
     non-caching mounts.
 
     Args:
-        raw (Callable): the backend ``read_bytes`` op.
+        raw (ReadBytesFn): the backend ``read_bytes`` op.
     """
 
-    async def reader(accessor, path: PathSpec, *args, **kwargs) -> bytes:
+    async def reader(accessor: Accessor | None, path: PathSpec, *args: Any,
+                     **kwargs: Any) -> bytes:
         manager = active_cache_manager()
-        if manager is not None and isinstance(path, PathSpec):
+        if manager is not None:
             cached = await manager.cached_bytes(path)
             if cached is not None:
                 return cached
@@ -85,7 +90,7 @@ def cache_aware_read_bytes(raw: Callable) -> Callable:
     return reader
 
 
-def cache_aware_read(raw: Callable) -> Callable:
+def cache_aware_read(raw: PolymorphicReadFn) -> PolymorphicReadFn:
     """Wrap a polymorphic reader so warm reads serve cached bytes.
 
     For the ``read`` contract used by ``head_multi`` / ``tail_multi`` /
@@ -105,12 +110,13 @@ def cache_aware_read(raw: Callable) -> Callable:
     stream, mirroring :func:`cache_aware_read_stream`.
 
     Args:
-        raw (Callable): the backend reader (bytes / awaitable / stream).
+        raw (PolymorphicReadFn): backend bytes / awaitable / stream reader.
     """
     manager = active_cache_manager()
 
-    async def reader(accessor, path: PathSpec, *args, **kwargs):
-        if manager is not None and isinstance(path, PathSpec):
+    async def reader(accessor: Accessor | None, path: PathSpec, *args: Any,
+                     **kwargs: Any) -> bytes | AsyncIterator[bytes]:
+        if manager is not None:
             cached = await manager.cached_bytes(path)
             if cached is not None:
                 return cached
@@ -134,7 +140,7 @@ async def cached_prefix_bytes(path: PathSpec, n: int | None) -> bytes | None:
         n (int | None): byte count, or None for the whole file.
     """
     manager = active_cache_manager()
-    if manager is None or not isinstance(path, PathSpec):
+    if manager is None:
         return None
     cached = await manager.cached_bytes(path)
     if cached is None:

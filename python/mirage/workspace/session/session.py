@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.shell.types import FunctionBody
 from mirage.types import MountMode
 
 
@@ -26,7 +27,7 @@ class Session:
     cwd: str = "/"
     env: dict[str, str] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
-    functions: dict[str, object] = field(default_factory=dict)
+    functions: dict[str, FunctionBody] = field(default_factory=dict)
     last_exit_code: int = 0
     shell_options: dict[str, bool] = field(default_factory=dict)
     readonly_vars: set[str] = field(default_factory=set)
@@ -38,7 +39,7 @@ class Session:
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
     _local_vars: dict[str, str | None] | None = field(default=None, repr=False)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         data = {
             "session_id": self.session_id,
             "cwd": self.cwd,
@@ -54,7 +55,7 @@ class Session:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Session":
+    def from_dict(cls, data: dict[str, Any]) -> "Session":
         modes = data.get("mount_modes")
         if modes is not None:
             data = dict(data)
@@ -64,7 +65,7 @@ class Session:
             }
         return cls(**data)
 
-    def fork(self, **overrides) -> "Session":
+    def fork(self, **overrides: Any) -> "Session":
         """Return a copy of this session with overrides applied.
 
         Mutable containers (env, functions, readonly_vars, arrays,

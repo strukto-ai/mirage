@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "stat -c \"%s\" /data/a.txt",
       "expect": {
@@ -31,12 +33,36 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "stat -c \"%n\" /data/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "/data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stat_root_dir",
+      "seq": 94,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "stat -c \"%F %n\" /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "directory /data\n",
         "stderr": ""
       }
     }

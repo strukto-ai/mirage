@@ -115,7 +115,7 @@ export class Reconciler {
   // fresh read also surfaces a remote delete via its own ENOENT).
   async mayServeCached(mount: MountEntry, path: string): Promise<boolean> {
     if (this.consistency !== ConsistencyPolicy.ALWAYS) return true
-    if (mount.resource.fingerprint === undefined) {
+    if (mount.resource.supportsSnapshot !== true) {
       await this.cache.remove(path)
       return false
     }

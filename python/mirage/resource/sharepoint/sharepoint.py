@@ -75,15 +75,6 @@ class SharePointResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    async def fingerprint(self, path: str) -> str | None:
-        try:
-            remote = await sharepoint_stat(self.accessor,
-                                           PathSpec.from_str_path(path),
-                                           index=self._index)
-            return remote.fingerprint
-        except FileNotFoundError:
-            return None
-
     def get_state(self) -> dict:
         return self.config_state(self.config)
 

@@ -26,10 +26,10 @@ class CacheInvalidator(Protocol):
     core mutators -> cache.context <- mount (pushes a manager).
     """
 
-    async def invalidate_after_write(self, path: str | PathSpec) -> None:
+    async def invalidate_after_write(self, path: PathSpec) -> None:
         ...
 
-    async def invalidate_after_unlink(self, path: str | PathSpec) -> None:
+    async def invalidate_after_unlink(self, path: PathSpec) -> None:
         ...
 
     async def cached_bytes(self, path: PathSpec) -> bytes | None:
@@ -68,24 +68,24 @@ def active_cache_manager() -> CacheInvalidator | None:
     return _active.get()
 
 
-async def invalidate_after_write(path: str | PathSpec) -> None:
+async def invalidate_after_write(path: PathSpec) -> None:
     """Report a backend write so caches are invalidated at the mutation
     site. No-op if no cache manager is active.
 
     Args:
-        path (str | PathSpec): Resource-relative path that was written.
+        path (PathSpec): Resource-relative path that was written.
     """
     manager = _active.get()
     if manager is not None:
         await manager.invalidate_after_write(path)
 
 
-async def invalidate_after_unlink(path: str | PathSpec) -> None:
+async def invalidate_after_unlink(path: PathSpec) -> None:
     """Report a backend deletion so caches are invalidated at the
     mutation site. No-op if no cache manager is active.
 
     Args:
-        path (str | PathSpec): Resource-relative path that was removed.
+        path (PathSpec): Resource-relative path that was removed.
     """
     manager = _active.get()
     if manager is not None:

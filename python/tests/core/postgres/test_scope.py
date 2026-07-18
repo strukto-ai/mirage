@@ -23,7 +23,6 @@ def _ps(p: str) -> PathSpec:
 def test_root():
     s = detect_scope(_ps("/"))
     assert s.level == "root"
-    assert s.schema == ""
     assert s.resource_path == "/"
 
 

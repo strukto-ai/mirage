@@ -129,7 +129,7 @@ async def execute_node(
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
-    cs = call_stack or CallStack()
+    cs = call_stack if call_stack is not None else CallStack()
 
     recurse = partial(execute_node,
                       dispatch,

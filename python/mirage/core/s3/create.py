@@ -18,13 +18,12 @@ from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.types import PathSpec
 
 
-async def create(accessor: S3Accessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def create(accessor: S3Accessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     config = accessor.config
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         await client.put_object(Bucket=config.bucket,
                                 Key=_key(path, config),
                                 Body=b"")
-    await invalidate_after_write(path)
+    await invalidate_after_write(path_spec)

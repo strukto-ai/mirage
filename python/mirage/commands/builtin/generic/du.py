@@ -29,7 +29,7 @@ async def _du_one(
     h: bool,
     max_depth: int | None,
 ) -> tuple[str, int]:
-    label = path.raw_path or path.virtual
+    label = path.raw_path
 
     if s:
         total = await compute_total(path)
@@ -100,13 +100,11 @@ async def _du_block(
 ) -> tuple[list[str], int]:
     if s or compute_all is None:
         total = await compute_total(p0)
-        return [_format_size(total, h) + "\t" + (p0.raw_path or p0.virtual)
-                ], total
+        return [_format_size(total, h) + "\t" + p0.raw_path], total
     all_entries = await compute_all(p0)
     if not all_entries:
         total = await compute_total(p0)
-        return [_format_size(total, h) + "\t" + (p0.raw_path or p0.virtual)
-                ], total
+        return [_format_size(total, h) + "\t" + p0.raw_path], total
     if not a:
         all_entries = [(p, sz) for p, sz in all_entries if p == p0.virtual]
     if max_depth is not None:
@@ -114,8 +112,7 @@ async def _du_block(
                        if _depth(p, p0.virtual) <= max_depth]
     if not all_entries:
         total = await compute_total(p0)
-        return [_format_size(total, h) + "\t" + (p0.raw_path or p0.virtual)
-                ], total
+        return [_format_size(total, h) + "\t" + p0.raw_path], total
     lines = [_format_size(sz, h) + "\t" + p for p, sz in all_entries]
     return lines, sum(sz for _, sz in all_entries)
 

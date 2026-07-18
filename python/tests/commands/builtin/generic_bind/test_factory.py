@@ -12,13 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 import pytest
 
 from mirage.cache.context import push_cache_manager
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
-from mirage.commands.builtin.generic_bind.factory import with_read_cache
+from mirage.commands.builtin.generic_bind.factory import (
+    make_generic_commands, with_read_cache)
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -66,6 +69,22 @@ def _spec() -> PathSpec:
 
 async def _drain(source) -> bytes:
     return b"".join([c async for c in source])
+
+
+def test_factory_registers_only_commands_with_available_capabilities():
+    backend = _CountingBackend(b"payload")
+    ops = replace(_ops(backend), write=backend.read_bytes)
+    commands = make_generic_commands("limited", ops)
+    names = {
+        registered.name
+        for command in commands
+        for registered in command._registered_commands
+    }
+
+    assert "tee" in names
+    assert {
+        "cp", "mv", "rm", "mkdir", "tar", "unzip", "gzip", "gunzip", "touch"
+    }.isdisjoint(names)
 
 
 @pytest.mark.asyncio

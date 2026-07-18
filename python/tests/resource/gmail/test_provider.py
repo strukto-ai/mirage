@@ -45,10 +45,3 @@ def test_resource_commands_registered(config):
     resource = GmailResource(config=config)
     cmds = resource.commands()
     assert len(cmds) > 15
-
-
-@pytest.mark.asyncio
-async def test_resource_fingerprint_not_found(config):
-    resource = GmailResource(config=config)
-    fp = await resource.fingerprint("/gmail/nonexistent")
-    assert fp is None

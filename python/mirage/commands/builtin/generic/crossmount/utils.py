@@ -17,6 +17,8 @@ import functools
 from collections.abc import AsyncIterator
 from typing import Any, Callable
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.crossmount.types import (OperandRun,
                                                               RunSingle)
 from mirage.io import IOResult
@@ -27,23 +29,21 @@ from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 async def relay(dispatch: Callable,
                 name: str,
-                accessor: object,
-                path: PathSpec | str,
-                index: object = None,
+                accessor: Accessor | None,
+                path: PathSpec,
+                index: IndexCacheStore | None = None,
                 **kwargs: Any) -> Any:
     # Relay one op for one path to the mount that owns it. The generics call
     # ops as (accessor, path, index); dispatch ignores both and keys off the
-    # path. It is also the single place a raw str (the generic's string path
-    # arithmetic) is coerced to the PathSpec dispatch needs.
-    spec = path if isinstance(path, PathSpec) else PathSpec.from_str_path(path)
-    data, _ = await dispatch(name, spec, **kwargs)
+    # path.
+    data, _ = await dispatch(name, path, **kwargs)
     return data
 
 
 async def stream(dispatch: Callable,
-                 accessor: object,
+                 accessor: Accessor | None,
                  path: PathSpec,
-                 index: object = None) -> AsyncIterator[bytes]:
+                 index: IndexCacheStore | None = None) -> AsyncIterator[bytes]:
     yield await relay(dispatch, "read", accessor, path)
 
 

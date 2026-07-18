@@ -30,10 +30,9 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def append_bytes(accessor: DiskAccessor, path_spec: str | PathSpec,
+async def append_bytes(accessor: DiskAccessor, path_spec: PathSpec,
                        data: bytes) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
     p = _resolve(root, path)
@@ -41,4 +40,4 @@ async def append_bytes(accessor: DiskAccessor, path_spec: str | PathSpec,
     async with aiofiles.open(p, "ab") as f:
         await f.write(data)
     record("append", path, "disk", len(data), start_ms)
-    await invalidate_after_write(path)
+    await invalidate_after_write(path_spec)

@@ -24,7 +24,16 @@ class IndexCacheStore:
     Subclasses implement storage and concurrency.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._closed = False
+
     async def get(self, resource_path: str) -> LookupResult:
+        raise NotImplementedError
+
+    def seed(self, entries: dict[str, IndexEntry],
+             children: dict[str, list[str]], expires_at: datetime) -> None:
+        """Queue a synchronous metadata snapshot for the next lookup."""
         raise NotImplementedError
 
     async def put(self, resource_path: str, entry: IndexEntry) -> None:
@@ -41,8 +50,14 @@ class IndexCacheStore:
     ) -> None:
         raise NotImplementedError
 
+    async def entries(self) -> dict[str, IndexEntry]:
+        raise NotImplementedError
+
     async def invalidate_dir(self, resource_path: str) -> None:
         raise NotImplementedError
 
     async def clear(self) -> None:
         raise NotImplementedError
+
+    async def close(self) -> None:
+        self._closed = True

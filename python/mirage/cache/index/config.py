@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -37,7 +38,7 @@ class IndexEntry(BaseModel):
     index_time: str = ""
     vfs_name: str = ""
     size: int | None = None
-    extra: dict = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class LookupResult(BaseModel):

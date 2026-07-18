@@ -47,14 +47,13 @@ class CacheManager:
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
 
-    def _virtual(self, path: str | PathSpec) -> str:
-        if isinstance(path, PathSpec):
-            path = path.mount_path
-        if not path.startswith("/"):
-            path = "/" + path
-        if self._prefix and not path.startswith(self._prefix):
-            return self._prefix + path
-        return path
+    def _virtual(self, path: PathSpec) -> str:
+        mount_path = path.mount_path
+        if not mount_path.startswith("/"):
+            mount_path = "/" + mount_path
+        if self._prefix and not mount_path.startswith(self._prefix):
+            return self._prefix + mount_path
+        return mount_path
 
     async def cached_bytes(self, path: PathSpec) -> bytes | None:
         """Return cached bytes for ``path`` if present, else None.
@@ -75,24 +74,22 @@ class CacheManager:
             return await self._file_cache.get(virtual)
         return None
 
-    async def invalidate_after_write(self, path: str | PathSpec) -> None:
+    async def invalidate_after_write(self, path: PathSpec) -> None:
         """Invalidate caches after a write to ``path``.
 
         Args:
-            path (str | PathSpec): Resource-relative path that was
-                written.
+            path (PathSpec): Resource-relative path that was written.
         """
         virtual = self._virtual(path)
         if self._caches_reads and self._file_cache is not None:
             await self._file_cache.remove(virtual)
         await self._invalidate_parent(virtual)
 
-    async def invalidate_after_unlink(self, path: str | PathSpec) -> None:
+    async def invalidate_after_unlink(self, path: PathSpec) -> None:
         """Invalidate caches after a deletion of ``path``.
 
         Args:
-            path (str | PathSpec): Resource-relative path that was
-                removed.
+            path (PathSpec): Resource-relative path that was removed.
         """
         virtual = self._virtual(path)
         if self._caches_reads and self._file_cache is not None:

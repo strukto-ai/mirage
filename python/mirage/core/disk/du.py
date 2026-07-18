@@ -64,16 +64,14 @@ def _du_all_sync(root: Path, path: str) -> tuple[list[tuple[str, int]], int]:
     return entries, total
 
 
-async def du(accessor: DiskAccessor, path_spec: str | PathSpec) -> int:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def du(accessor: DiskAccessor, path_spec: PathSpec) -> int:
+    path = path_spec.mount_path
     return await asyncio.to_thread(_du_sync, accessor.root, path)
 
 
 async def du_all(
     accessor: DiskAccessor,
-    path_spec: str | PathSpec,
+    path_spec: PathSpec,
 ) -> tuple[list[tuple[str, int]], int]:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     return await asyncio.to_thread(_du_all_sync, accessor.root, path)

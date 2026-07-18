@@ -31,22 +31,20 @@ from mirage.types import FileType, PathSpec
 
 async def _rm(
     accessor: S3Accessor,
-    path: PathSpec | str,
+    path: PathSpec,
     recursive: bool = False,
     force: bool = False,
     remove_dir: bool = False,
     *,
     index: IndexCacheStore,
 ) -> None:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     try:
         s = await stat(accessor, path, index=index)
     except (FileNotFoundError, ValueError):
         if force:
             return
         raise
-    label = path.virtual if isinstance(path, PathSpec) else path
+    label = path.virtual
     if s.type == FileType.DIRECTORY:
         if recursive:
             await rm_r(accessor, path)

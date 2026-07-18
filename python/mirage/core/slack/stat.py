@@ -57,8 +57,7 @@ async def _populate_via_parent(
                      resource_path=mount_key(parent_virtual, prefix)),
             index=index,
         )
-    except Exception as exc:
-        # best-effort cache populate; canonical ENOENT raised below
+    except FileNotFoundError as exc:
         logger.debug("stat populate failed for %s: %s", virtual_key, exc)
 
 

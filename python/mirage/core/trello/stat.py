@@ -45,8 +45,7 @@ async def _lookup_with_fallback(
                      resource_path=mount_key(parent_path, prefix)),
             index=index,
         )
-    except Exception as exc:
-        # best-effort cache populate; canonical ENOENT raised below
+    except FileNotFoundError as exc:
         logger.debug("stat populate failed for %s: %s", idx_key, exc)
     return await index.get(idx_key)
 

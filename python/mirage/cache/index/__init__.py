@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.cache.index.config import (IndexConfig, IndexEntry, ListResult,
                                        LookupResult, LookupStatus,
                                        RedisIndexConfig, ResourceType)
@@ -35,7 +37,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "RedisIndexCacheStore":
         from mirage.cache.index.redis import RedisIndexCacheStore
         return RedisIndexCacheStore

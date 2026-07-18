@@ -31,6 +31,10 @@ ENTRY_PREFIX = "mirage:idx:entry:"
 CHILDREN_PREFIX = "mirage:idx:children:"
 
 
+def _text(value: str | bytes) -> str:
+    return value.decode() if isinstance(value, bytes) else value
+
+
 class RedisIndexCacheStore(IndexCacheStore):
     """Redis-backed index cache for remote resource metadata.
 
@@ -62,8 +66,11 @@ class RedisIndexCacheStore(IndexCacheStore):
     ) -> None:
         super().__init__()
         self._ttl = ttl
-        self._client = client or Redis.from_url(url, decode_responses=True)
+        self._client = (client if client is not None else Redis.from_url(
+            url, decode_responses=True))
         self._owns_client = client is None
+        self._pending_seed: tuple[dict[str, IndexEntry], dict[str, list[str]],
+                                  datetime] | None = None
         p = key_prefix or ""
         self._entry_prefix = f"{p}{ENTRY_PREFIX}"
         self._children_prefix = f"{p}{CHILDREN_PREFIX}"
@@ -74,7 +81,38 @@ class RedisIndexCacheStore(IndexCacheStore):
     def _children_key(self, resource_path: str) -> str:
         return f"{self._children_prefix}{resource_path}"
 
+    def seed(self, entries: dict[str, IndexEntry],
+             children: dict[str, list[str]], expires_at: datetime) -> None:
+        self._pending_seed = (dict(entries), {
+            path: list(keys)
+            for path, keys in children.items()
+        }, expires_at)
+
+    async def _flush_seed(self) -> None:
+        pending = self._pending_seed
+        if pending is None:
+            return
+        entries, children, expires_at = pending
+        now = datetime.now(timezone.utc)
+        now_iso = to_iso_z(now)
+        ttl_seconds = max(1, int((expires_at - now).total_seconds()))
+        pipe = self._client.pipeline()
+        for resource_path, entry in entries.items():
+            if not entry.index_time:
+                entry = entry.model_copy(update={"index_time": now_iso})
+            pipe.set(self._entry_key(resource_path), entry.model_dump_json())
+        for resource_path, child_keys in children.items():
+            key = self._children_key(resource_path)
+            pipe.delete(key)
+            if child_keys:
+                pipe.rpush(key, *child_keys)
+                pipe.expire(key, ttl_seconds)
+        await pipe.execute()
+        if self._pending_seed is pending:
+            self._pending_seed = None
+
     async def get(self, resource_path: str) -> LookupResult:
+        await self._flush_seed()
         raw = await self._client.get(self._entry_key(resource_path))
         if raw is None:
             return LookupResult(status=LookupStatus.NOT_FOUND)
@@ -82,6 +120,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         return LookupResult(entry=entry)
 
     async def put(self, resource_path: str, entry: IndexEntry) -> None:
+        await self._flush_seed()
         if not entry.index_time:
             entry = entry.model_copy(
                 update={"index_time": to_iso_z(datetime.now(timezone.utc))})
@@ -89,6 +128,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                                entry.model_dump_json())
 
     async def list_dir(self, resource_path: str) -> ListResult:
+        await self._flush_seed()
         key = self._children_key(resource_path)
         exists = await self._client.exists(key)
         if not exists:
@@ -96,9 +136,9 @@ class RedisIndexCacheStore(IndexCacheStore):
         ttl_remaining = await self._client.ttl(key)
         if ttl_remaining == -2:
             return ListResult(status=LookupStatus.EXPIRED)
-        raw = await cast("Awaitable[list[str]]",
+        raw = await cast("Awaitable[list[str | bytes]]",
                          self._client.lrange(key, 0, -1))
-        return ListResult(entries=raw)
+        return ListResult(entries=[_text(entry) for entry in raw])
 
     async def set_dir(
         self,
@@ -106,6 +146,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         entries: list[tuple[str, IndexEntry]],
         expired_at: datetime | None = None,
     ) -> None:
+        await self._flush_seed()
         now = datetime.now(timezone.utc)
         now_iso = to_iso_z(now)
         prefix = "/" if resource_path == "/" else resource_path + "/"
@@ -132,17 +173,36 @@ class RedisIndexCacheStore(IndexCacheStore):
 
         await pipe.execute()
 
+    async def entries(self) -> dict[str, IndexEntry]:
+        await self._flush_seed()
+        entries: dict[str, IndexEntry] = {}
+        cursor = 0
+        while True:
+            cursor, keys = await self._client.scan(
+                cursor, match=f"{self._entry_prefix}*", count=500)
+            for key in keys:
+                key_text = _text(key)
+                raw = await self._client.get(key)
+                if raw is not None:
+                    resource_path = key_text.removeprefix(self._entry_prefix)
+                    entries[resource_path] = IndexEntry.model_validate_json(
+                        raw)
+            if cursor == 0:
+                return entries
+
     async def invalidate_dir(self, resource_path: str) -> None:
+        await self._flush_seed()
         children_key = f"{self._children_prefix}{resource_path}"
-        child_paths = await cast("Awaitable[list[str]]",
+        child_paths = await cast("Awaitable[list[str | bytes]]",
                                  self._client.lrange(children_key, 0, -1))
         pipe = self._client.pipeline()
         for child in child_paths:
-            pipe.delete(self._entry_key(child))
+            pipe.delete(self._entry_key(_text(child)))
         pipe.delete(children_key)
         await pipe.execute()
 
     async def clear(self) -> None:
+        self._pending_seed = None
         cursor = 0
         while True:
             cursor, keys = await self._client.scan(
@@ -161,5 +221,9 @@ class RedisIndexCacheStore(IndexCacheStore):
                 break
 
     async def close(self) -> None:
+        if self._closed:
+            return
         if self._owns_client:
             await self._client.aclose()
+        self._pending_seed = None
+        await super().close()

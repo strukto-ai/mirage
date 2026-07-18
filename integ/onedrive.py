@@ -14,13 +14,19 @@
 
 import asyncio
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import run_cache_verify_cases  # noqa: E402
 from cases import run_not_found, run_provision_cache_cases  # noqa: E402
-from onedrive_server import start_fake_graph  # noqa: E402
+from onedrive_server import freeze_clock, start_fake_graph  # noqa: E402
+
+# Freeze the timestamp the fake Graph stamps onto every item so the `ls -l`
+# mtime column is deterministic, mirroring integ/s3.py's moto freeze. The
+# shared suite (onedrive_cases.py) keeps the live clock for -mtime cases.
+freeze_clock(datetime(2026, 3, 31, tzinfo=timezone.utc))
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.accessor.onedrive import OneDriveConfig  # noqa: E402
@@ -43,7 +49,7 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("ls_data", "ls {m}/data/"),
     ("tree", "tree {m}/"),
     ("stat", "stat -c '%s %n' {m}/data/example.json"),
-    ("stat_dir", "stat {m}/data"),
+    ("stat_dir", "stat -c '%s %F' {m}/data"),
     ("cat_head", "cat {m}/data/example.json | head -n 5"),
     ("head_1_jsonl", "head -n 1 {m}/data/example.jsonl"),
     ("head_3_jsonl", "head -n 3 {m}/data/example.jsonl"),

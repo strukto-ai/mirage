@@ -19,20 +19,17 @@ import sys
 import time
 from collections.abc import AsyncIterator, Iterable, Mapping
 from functools import partial
-from typing import Any, Literal, overload
+from types import TracebackType
+from typing import Any, Literal, TypeAlias, cast, overload
 
+from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      run_with_timeout)
 from mirage.commands.errors import FindParseError, UsageError
-from mirage.commands.safeguard import resolve_safeguard
-
-try:
-    from mirage.cache.file.redis import RedisFileCacheStore
-except ImportError:
-    RedisFileCacheStore = None  # type: ignore[misc, assignment]
+from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
 from mirage.observe.context import RecordingScope
 from mirage.observe.observer import Observer
@@ -74,7 +71,21 @@ from mirage.workspace.snapshot import snapshot as _write_snapshot
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
 
+RedisFileCacheStore: Any
+try:
+    from mirage.cache.file.redis import \
+        RedisFileCacheStore as _RedisFileCacheStore
+except ImportError:
+    RedisFileCacheStore = None
+else:
+    RedisFileCacheStore = _RedisFileCacheStore
+
 logger = logging.getLogger(__name__)
+
+ResourceMount: TypeAlias = (BaseResource | Mount
+                            | tuple[BaseResource, MountMode]
+                            | tuple[BaseResource, MountMode,
+                                    dict[str, CommandSafeguard]])
 
 
 class Workspace:
@@ -86,7 +97,7 @@ class Workspace:
 
     def __init__(
         self,
-        resources: dict[str, BaseResource | tuple | Mount],
+        resources: dict[str, ResourceMount],
         cache_limit: str | int = "512MB",
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
@@ -96,6 +107,7 @@ class Workspace:
         agent_id: str | None = None,
         workspace_id: str | None = None,
         store: WorkspaceStateStore | None = None,
+        owns_store: bool = False,
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
@@ -117,7 +129,7 @@ class Workspace:
             session_id = new_session_id()
         # A caller-passed provider may be shared with sibling workspaces,
         # so only a workspace that built its own provider closes it.
-        self._owns_state_store = store is None
+        self._owns_state_store = store is None or owns_store
         self._meta_written = False
         self._state_store = store if store is not None \
             else RAMWorkspaceStateStore()
@@ -145,6 +157,11 @@ class Workspace:
                                             max_drain_bytes=max_drain)
         self._locked_paths: set[str] = set()
         self._closed = False
+        self._async_closed = False
+        self._close_lock = asyncio.Lock()
+        # Resources reused from another live workspace (copy() / load
+        # resource overrides) stay open here; their origin closes them.
+        self._shared_resources: set[int] = set()
         self._drift_policy: DriftPolicy = DriftPolicy.OFF
         self._drift_check_pending: bool = False
         # Queued at Workspace.load: (mount, path, expected_fingerprint).
@@ -169,7 +186,7 @@ class Workspace:
 
         fuse_targets: list[tuple[str, bool | str]] = []
         for prefix, value in resources.items():
-            mount_safeguards: dict = {}
+            mount_safeguards: dict[str, CommandSafeguard] = {}
             mount_fuse: bool | str = False
             if isinstance(value, Mount):
                 prov = value.resource
@@ -178,9 +195,13 @@ class Workspace:
                     mount_safeguards = dict(value.command_safeguards)
                 mount_fuse = value.fuse
             elif isinstance(value, tuple):
+                if len(value) not in (2, 3):
+                    raise TypeError(
+                        "resource tuples must be (resource, mode) or "
+                        "(resource, mode, command_safeguards)")
                 prov = value[0]
-                mount_mode = value[1] if len(value) >= 2 else mode
-                if len(value) >= 3 and value[2]:
+                mount_mode = value[1]
+                if len(value) == 3 and value[2]:
                     mount_safeguards = dict(value[2])
             else:
                 prov = value
@@ -420,14 +441,16 @@ class Workspace:
     def __enter__(self) -> "Workspace":
         self._original_open = builtins.open
         self._original_os = sys.modules["os"]
-        builtins.open = make_open(self._ops)
+        builtins.open = cast(Any, make_open(self._ops))
         sys.modules["os"] = make_os_module(self._ops)
         return self
 
-    def __exit__(self, *_: object) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None,
+                 exc_value: BaseException | None,
+                 traceback: TracebackType | None) -> None:
         builtins.open = self._original_open
         sys.modules["os"] = self._original_os
-        self._close_parts()
+        run_async_from_sync(self.close())
 
     def _close_parts(self) -> None:
         if self._closed:
@@ -444,23 +467,34 @@ class Workspace:
         self._cache._drain_tasks.clear()
 
     async def close(self) -> None:
-        drain_tasks = list(self._cache._drain_tasks.values())
-        if self._python_runtime is not None:
-            await self._python_runtime.close()
-        if self._js_runtime is not None:
-            await self._js_runtime.close()
-        await self._namespace.close()
-        await self._session_mgr.close_store()
-        if self._owns_state_store:
-            await self._state_store.close()
-        self._close_parts()
-        for task in drain_tasks:
+        async with self._close_lock:
+            if self._async_closed:
+                return
+            drain_tasks = list(self._cache._drain_tasks.values())
+            if self._python_runtime is not None:
+                await self._python_runtime.close()
+            if self._js_runtime is not None:
+                await self._js_runtime.close()
+            resources = {
+                id(mount.resource): mount.resource
+                for mount in self._registry.mounts()
+                if id(mount.resource) not in self._shared_resources
+            }
+            await asyncio.gather(*(resource.close()
+                                   for resource in resources.values()))
+            if self._owns_state_store:
+                await self._state_store.close()
+            self._close_parts()
+            for task in drain_tasks:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             try:
-                await task
-            except asyncio.CancelledError:
-                # drain tasks may already be cancelled at close
-                pass
-        await self._cache.clear()
+                await self._cache.clear()
+            finally:
+                await self._cache.close()
+            self._async_closed = True
 
     # ── snapshot / load / copy ─────────────────────────────────────────────
 
@@ -597,6 +631,8 @@ class Workspace:
                  consistency=args.consistency,
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id)
+        if resources:
+            ws._shared_resources = {id(r) for r in resources.values()}
         await apply_state_dict(ws, state)
         return ws
 

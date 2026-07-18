@@ -43,7 +43,8 @@ def _rig(
     files = FakeFiles()
     accessor = DatabricksVolumeAccessor(config, FakeClient(files))
     index = RAMIndexCacheStore(ttl=600)
-    return accessor, files, index, backend_path(config, "/")
+    return accessor, files, index, backend_path(config,
+                                                PathSpec.from_str_path("/"))
 
 
 def _seed_flat(files: FakeFiles, root: str, count: int = 5) -> None:

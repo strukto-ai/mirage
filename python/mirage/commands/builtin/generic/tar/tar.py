@@ -4,6 +4,10 @@ import tarfile
 from collections.abc import Awaitable, Callable
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.generic.tar.constants import (READ_MODES,
+                                                           WRITE_MODES)
+from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
+                                                       ReadMode, WriteMode)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -13,7 +17,7 @@ def _excluded(name: str, pattern: str) -> bool:
     return fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(base, pattern)
 
 
-def _compression_suffix(z: bool, j: bool, J: bool) -> str:
+def _compression_suffix(z: bool, j: bool, J: bool) -> CompressionSuffix:
     if z:
         return ":gz"
     if j:
@@ -23,10 +27,18 @@ def _compression_suffix(z: bool, j: bool, J: bool) -> str:
     return ""
 
 
+def _write_mode(suffix: CompressionSuffix) -> WriteMode:
+    return WRITE_MODES[suffix]
+
+
+def _read_mode(suffix: CompressionSuffix) -> ReadMode:
+    return READ_MODES[suffix]
+
+
 async def _create_archive(
     paths: list[PathSpec],
     archive_path: PathSpec,
-    mode_suffix: str,
+    mode_suffix: CompressionSuffix,
     exclude: str | None,
     verbose: bool,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -35,8 +47,7 @@ async def _create_archive(
 ) -> tuple[ByteSource | None, IOResult]:
     buf = io.BytesIO()
     names: list[str] = []
-    with tarfile.open(  # type: ignore[call-overload]
-            fileobj=buf, mode=f"w{mode_suffix}") as tf:
+    with tarfile.open(fileobj=buf, mode=_write_mode(mode_suffix)) as tf:
         for p in paths:
             name = p.virtual.lstrip("/")
             if exclude and _excluded(name, exclude):
@@ -54,14 +65,13 @@ async def _create_archive(
 
 async def _list_archive(
     archive_path: PathSpec,
-    mode_suffix: str,
+    mode_suffix: CompressionSuffix,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None,
 ) -> tuple[ByteSource | None, IOResult]:
     data = await read_bytes(accessor, archive_path)
-    with tarfile.open(  # type: ignore[call-overload]
-            fileobj=io.BytesIO(data),
-            mode=f"r{mode_suffix}") as tf:
+    with tarfile.open(fileobj=io.BytesIO(data),
+                      mode=_read_mode(mode_suffix)) as tf:
         names = tf.getnames()
     return ("\n".join(names) + "\n").encode(), IOResult()
 
@@ -69,7 +79,7 @@ async def _list_archive(
 async def _extract_archive(
     archive_path: PathSpec,
     dest_path: str,
-    mode_suffix: str,
+    mode_suffix: CompressionSuffix,
     strip_n: int,
     verbose: bool,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -80,9 +90,8 @@ async def _extract_archive(
     data = await read_bytes(accessor, archive_path)
     writes: dict[str, ByteSource] = {}
     names: list[str] = []
-    with tarfile.open(  # type: ignore[call-overload]
-            fileobj=io.BytesIO(data),
-            mode=f"r{mode_suffix}") as tf:
+    with tarfile.open(fileobj=io.BytesIO(data),
+                      mode=_read_mode(mode_suffix)) as tf:
         for member in tf.getmembers():
             if not member.isfile():
                 continue

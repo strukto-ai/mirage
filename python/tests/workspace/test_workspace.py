@@ -14,6 +14,8 @@
 
 import asyncio
 
+import pytest
+
 from mirage.resource.ram import RAMResource
 from mirage.runtime.python import select_python_runtime
 from mirage.types import MountMode
@@ -2464,6 +2466,11 @@ def test_unmount_removes_mount():
     assert any(m.prefix == "/s3/" for m in ws.mounts())
     asyncio.run(ws.unmount("/s3"))
     assert not any(m.prefix == "/s3/" for m in ws.mounts())
+
+
+def test_workspace_rejects_invalid_resource_tuple_shape():
+    with pytest.raises(TypeError, match="resource tuples must be"):
+        Workspace({"/x": ()})
 
 
 def test_unmount_closes_resource_when_owned():

@@ -26,8 +26,9 @@ class QdrantAccessor(Accessor):
 
     def __init__(self, config: QdrantConfig) -> None:
         self.config = config
-        self._clients: dict[int, Any] = {}
-        self._search_cache: dict[tuple[str, str, int], list[dict]] = {}
+        self._clients: dict[int, AsyncQdrantClient] = {}
+        self._search_cache: dict[tuple[str, str, int], list[dict[str,
+                                                                 Any]]] = {}
         self._indexes_ensured: set[str] = set()
 
     def _loop_key(self) -> int:
@@ -37,13 +38,13 @@ class QdrantAccessor(Accessor):
             return 0
         return id(loop)
 
-    async def client(self) -> Any:
+    async def client(self) -> AsyncQdrantClient:
         key = self._loop_key()
         client = self._clients.get(key)
         if client is None:
             api_key = (reveal_secret(self.config.api_key)
                        if self.config.api_key is not None else None)
-            kwargs: dict = {
+            kwargs: dict[str, Any] = {
                 "api_key": api_key,
                 "cloud_inference": self.config.cloud_inference
             }
@@ -57,9 +58,18 @@ class QdrantAccessor(Accessor):
             self._clients[key] = client
         return client
 
-    def cached_search(self, key: tuple[str, str, int]) -> list[dict] | None:
+    def cached_search(
+            self, key: tuple[str, str, int]) -> list[dict[str, Any]] | None:
         return self._search_cache.get(key)
 
     def store_search(self, key: tuple[str, str, int],
-                     rows: list[dict]) -> None:
+                     rows: list[dict[str, Any]]) -> None:
         self._search_cache[key] = rows
+
+    async def close(self) -> None:
+        clients = list(self._clients.values())
+        self._clients.clear()
+        self._search_cache.clear()
+        self._indexes_ensured.clear()
+        for client in clients:
+            await client.close()

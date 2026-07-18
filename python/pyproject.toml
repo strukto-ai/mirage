@@ -245,3 +245,66 @@ packages = ["mirage"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "mirage.accessor.base",
+    "mirage.accessor.lancedb",
+    "mirage.accessor.mongodb",
+    "mirage.accessor.qdrant",
+    "mirage.accessor.ssh",
+    "mirage.bridge.sync",
+    "mirage.cache.context",
+    "mirage.cache.manager",
+    "mirage.cache.read_through",
+    "mirage.cache.index.*",
+    "mirage.commands.builtin.generic_bind.adapter",
+    "mirage.commands.builtin.generic.cp",
+    "mirage.commands.builtin.generic.diff",
+    "mirage.commands.builtin.generic.mktemp",
+    "mirage.commands.builtin.generic.mv",
+    "mirage.commands.builtin.generic_bind.builders.cp",
+    "mirage.commands.builtin.generic_bind.builders.mktemp",
+    "mirage.commands.builtin.generic_bind.builders.mv",
+    "mirage.core.chroma.path",
+    "mirage.core.chroma.find",
+    "mirage.core.chroma.search",
+    "mirage.core.databricks_volume._helpers",
+    "mirage.core.databricks_volume.path",
+    "mirage.core.dify.path",
+    "mirage.core.dify.find",
+    "mirage.core.dify.search",
+    "mirage.core.github.scope",
+    "mirage.core.github.find",
+    "mirage.core.hf_buckets.find",
+    "mirage.core.lancedb.scope",
+    "mirage.core.mongodb.scope",
+    "mirage.core.msgraph.types",
+    "mirage.core.onedrive.find",
+    "mirage.core.onedrive.copy",
+    "mirage.core.notion.find",
+    "mirage.core.nextcloud.find",
+    "mirage.core.postgres.scope",
+    "mirage.core.qdrant.scope",
+    "mirage.core.s3.find",
+    "mirage.core.sharepoint.find",
+    "mirage.core.sharepoint.copy",
+    "mirage.core.ssh._client",
+    "mirage.core.ssh.config",
+    "mirage.core.ssh.find",
+    "mirage.ops.file",
+    "mirage.ops.open",
+    "mirage.resource.base",
+    "mirage.resource.redis.store",
+    "mirage.shell.types",
+    "mirage.types",
+    "mirage.utils.dates",
+    "mirage.workspace.session.session",
+    "mirage.workspace.store.*",
+    "mirage.workspace.executor.fanout",
+]
+disallow_untyped_defs = true
+disallow_any_generics = true
+warn_return_any = true

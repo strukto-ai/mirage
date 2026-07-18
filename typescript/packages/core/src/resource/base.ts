@@ -89,7 +89,6 @@ export interface Resource {
   du?(path: PathSpec): Promise<number>
   find?(path: PathSpec, options?: FindOptions): Promise<string[]>
   glob?(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
-  fingerprint?(path: PathSpec): Promise<string | null>
 }
 
 export function throwUnsupported(op: string): never {

@@ -18,9 +18,8 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def rm_r(accessor: RAMAccessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def rm_r(accessor: RAMAccessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     prefix = p.rstrip("/") + "/"
@@ -34,4 +33,4 @@ async def rm_r(accessor: RAMAccessor, path_spec: str | PathSpec) -> None:
             store.dirs.discard(key)
             store.modified.pop(key, None)
             store.attrs.pop(key, None)
-    await invalidate_after_unlink(path)
+    await invalidate_after_unlink(path_spec)

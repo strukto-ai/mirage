@@ -60,7 +60,7 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(
         options=(
             Option(short="-d"),
-            Option(short="-p", value_kind=OperandKind.TEXT),
+            Option(short="-p", value_kind=OperandKind.PATH),
             Option(short="-t"),
         ),
         positional=(Operand(kind=OperandKind.TEXT), ),

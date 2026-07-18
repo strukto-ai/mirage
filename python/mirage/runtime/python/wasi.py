@@ -15,16 +15,19 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Callable
-
-try:
-    import wasmtime
-except ImportError:
-    wasmtime = None  # type: ignore[assignment]
+from typing import Any, Callable
 
 from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
                                         PythonRuntime)
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
+
+wasmtime: Any
+try:
+    import wasmtime as _wasmtime
+except ImportError:
+    wasmtime = None
+else:
+    wasmtime = _wasmtime
 
 WASI_HOME_ENV = "MIRAGE_WASI_HOME"
 

@@ -13,6 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import io
+
+import pytest
 
 from mirage.ops.file import MirageFile
 
@@ -106,3 +109,83 @@ class TestMirageFile:
         assert f.closed is False
         f.close()
         assert f.closed is True
+
+    def test_write_rejects_read_only_mode(self):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.txt", b"original")
+        f = MirageFile(ops, "/data/dir/f.txt", "r")
+        with pytest.raises(io.UnsupportedOperation, match="not writable"):
+            f.write("replacement")
+        f.close()
+        assert _read(ops, "/data/dir/f.txt") == b"original"
+
+    def test_read_rejects_write_only_mode(self):
+        ops, _ = make_ops_with_dir()
+        f = MirageFile(ops, "/data/dir/f.txt", "w")
+        with pytest.raises(io.UnsupportedOperation, match="not readable"):
+            f.read()
+        f.close()
+
+    def test_operations_reject_closed_file(self):
+        ops, _ = make_ops_with_dir()
+        f = MirageFile(ops, "/data/dir/f.txt", "w")
+        f.close()
+        with pytest.raises(ValueError, match="closed file"):
+            f.write("late")
+
+    @pytest.mark.parametrize("mode", ["", "rw", "rr", "r++", "rbt"])
+    def test_invalid_mode_is_rejected(self, mode):
+        ops, _ = make_ops_with_dir()
+        with pytest.raises(ValueError, match="invalid mode"):
+            MirageFile(ops, "/data/dir/f.txt", mode)
+
+    def test_write_mode_truncates_when_opened(self):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.txt", b"original")
+        f = MirageFile(ops, "/data/dir/f.txt", "w")
+        assert _read(ops, "/data/dir/f.txt") == b""
+        f.close()
+
+    def test_update_mode_persists_writes(self):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.txt", b"original")
+        with MirageFile(ops, "/data/dir/f.txt", "r+") as f:
+            f.write("changed")
+        assert _read(ops, "/data/dir/f.txt") == b"changedl"
+
+    def test_flush_persists_before_close(self):
+        ops, _ = make_ops_with_dir()
+        f = MirageFile(ops, "/data/dir/f.txt", "w")
+        f.write("visible")
+        f.flush()
+        assert _read(ops, "/data/dir/f.txt") == b"visible"
+        f.close()
+
+    def test_exclusive_mode_creates_once(self):
+        ops, _ = make_ops_with_dir()
+        with MirageFile(ops, "/data/dir/f.txt", "x") as f:
+            f.write("new")
+        assert _read(ops, "/data/dir/f.txt") == b"new"
+        with pytest.raises(FileExistsError):
+            MirageFile(ops, "/data/dir/f.txt", "x")
+
+    def test_append_mode_creates_missing_file_on_open(self):
+        ops, _ = make_ops_with_dir()
+        f = MirageFile(ops, "/data/dir/f.txt", "a")
+        assert _read(ops, "/data/dir/f.txt") == b""
+        f.close()
+
+    def test_text_encoding_and_error_policy_are_honored(self):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.txt", b"caf\xe9")
+        with MirageFile(ops,
+                        "/data/dir/f.txt",
+                        encoding="ascii",
+                        errors="replace") as f:
+            assert f.read() == "caf�"
+
+    @pytest.mark.parametrize("argument", ["encoding", "errors", "newline"])
+    def test_binary_mode_rejects_text_arguments(self, argument):
+        ops, _ = make_ops_with_dir()
+        with pytest.raises(ValueError, match="binary mode"):
+            MirageFile(ops, "/data/dir/f.txt", "rb", **{argument: "utf-8"})

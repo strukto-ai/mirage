@@ -209,6 +209,7 @@ export class Workspace {
   private readonly wsId: string
   private readonly stateStoreInternal: WorkspaceStateStore
   private readonly ownsStateStore: boolean
+  private readonly sharedResources = new Set<Resource>()
   private metaWritten = false
   private readonly sessionIdExplicit: boolean
   private readonly opsRegistry: OpsRegistry
@@ -1135,6 +1136,9 @@ export class Workspace {
       ...options,
     }
     const ws = new this(resources, mergedOptions) as InstanceType<T>
+    for (const resource of Object.values(overrides)) {
+      ws.sharedResources.add(resource)
+    }
     await applyStateDict(ws, state)
     return ws
   }
@@ -1172,8 +1176,9 @@ export class Workspace {
     for (const task of drainTasks) {
       await task
     }
-    await this.namespace.close()
-    await this.sessionManager.closeStore()
+    // Per-plane stores from the provider close through it below; a
+    // caller-passed provider (or direct store override) may be shared
+    // with sibling workspaces, so only its owner closes it.
     if (this.ownsStateStore) {
       await this.stateStoreInternal.close()
     }
@@ -1193,6 +1198,9 @@ export class Workspace {
       toClose.add(mount.resource)
     }
     for (const r of toClose) {
+      // Resources reused from another live workspace (copy() / load
+      // resource overrides) stay open here; their origin closes them.
+      if (this.sharedResources.has(r)) continue
       await r.close()
     }
     this.opened.clear()

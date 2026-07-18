@@ -96,7 +96,7 @@ async def test_mkdir_with_parents(mk_store):
 @pytest.mark.asyncio
 async def test_mkdir_p(mk_store):
     a = await mk_store("test:mkdir:5:")
-    await mkdir_p(a, "/x/y/z")
+    await mkdir_p(a, PathSpec.from_str_path("/x/y/z"))
     assert await a.store.has_dir("/x")
     assert await a.store.has_dir("/x/y")
     assert await a.store.has_dir("/x/y/z")
@@ -106,7 +106,7 @@ async def test_mkdir_p(mk_store):
 async def test_mkdir_p_existing_parent(mk_store):
     a = await mk_store("test:mkdir:6:")
     await a.store.add_dir("/existing")
-    await mkdir_p(a, "/existing/child/grandchild")
+    await mkdir_p(a, PathSpec.from_str_path("/existing/child/grandchild"))
     assert await a.store.has_dir("/existing/child")
     assert await a.store.has_dir("/existing/child/grandchild")
 
@@ -114,7 +114,7 @@ async def test_mkdir_p_existing_parent(mk_store):
 @pytest.mark.asyncio
 async def test_mkdir_p_does_not_overwrite_modified(mk_store):
     a = await mk_store("test:mkdir:7:")
-    await mkdir_p(a, "/a")
+    await mkdir_p(a, PathSpec.from_str_path("/a"))
     original = await a.store.get_modified("/a")
-    await mkdir_p(a, "/a/b")
+    await mkdir_p(a, PathSpec.from_str_path("/a/b"))
     assert await a.store.get_modified("/a") == original

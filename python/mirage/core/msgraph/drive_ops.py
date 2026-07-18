@@ -33,7 +33,7 @@ from mirage.core.msgraph._client import (GraphError, graph_delete, graph_get,
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.observe.context import (active_recorder, record, record_stream,
                                     revision_for)
-from mirage.types import FileStat, FileType
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
 
@@ -86,6 +86,14 @@ def _parent_reference(src: DriveLoc, dst: DriveLoc) -> dict:
     return ref
 
 
+def _virt_spec(loc: DriveLoc) -> PathSpec:
+    # Cache invalidation takes a PathSpec; DriveLoc carries the
+    # mount-relative spelling, which is exactly the resource_path.
+    stripped = loc.virt.strip("/")
+    return PathSpec.from_str_path("/" + stripped if stripped else "/",
+                                  stripped)
+
+
 async def copy_once(config: MsGraphConfig, src: DriveLoc,
                     dst: DriveLoc) -> tuple[str, str] | None:
     """One Graph copy attempt, surfacing a conflict instead of raising.
@@ -115,15 +123,13 @@ async def copy_once(config: MsGraphConfig, src: DriveLoc,
         if exc.status == 409 or exc.code == "nameAlreadyExists":
             return exc.code, str(exc)
         raise
-    if not monitor:
-        return None
     result = await poll_monitor(monitor, timeout=config.timeout)
     status = result.get("status")
     if status == "failed":
         err = result.get("error", {}) if isinstance(result, dict) else {}
         return (err.get("code", "copyFailed"),
                 err.get("message", f"copy {src.path} -> {dst.path} failed"))
-    if status not in ("completed", None):
+    if status != "completed":
         raise GraphError(504, "copyTimeout",
                          f"copy {src.path} -> {dst.path} not confirmed")
     return None
@@ -133,7 +139,7 @@ async def copy_tree(config: MsGraphConfig, src: DriveLoc,
                     dst: DriveLoc) -> None:
     err = await copy_once(config, src, dst)
     if err is None:
-        await invalidate_after_write(dst.virt)
+        await invalidate_after_write(_virt_spec(dst))
         return
     code, message = err
     if code != "nameAlreadyExists":
@@ -154,7 +160,7 @@ async def copy_tree(config: MsGraphConfig, src: DriveLoc,
     err = await copy_once(config, src, dst)
     if err is not None:
         raise GraphError(500, err[0], err[1])
-    await invalidate_after_write(dst.virt)
+    await invalidate_after_write(_virt_spec(dst))
 
 
 def _move_body(src: DriveLoc, dst: DriveLoc) -> dict:

@@ -31,19 +31,20 @@ class MongoDBAccessor(Accessor):
                  listing_cache_ttl: float = 5.0) -> None:
         self.config = config
         self.listing_cache_ttl = listing_cache_ttl
-        self._clients: dict[int, AsyncMongoClient] = {}
+        self._clients: dict[int, AsyncMongoClient[dict[str, Any]]] = {}
         self._cache: dict[str, tuple[float, Any]] = {}
 
     @property
-    def client(self) -> AsyncMongoClient:
+    def client(self) -> AsyncMongoClient[dict[str, Any]]:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return self._for_loop(None)
         return self._for_loop(loop)
 
-    def _for_loop(self,
-                  loop: asyncio.AbstractEventLoop | None) -> AsyncMongoClient:
+    def _for_loop(
+        self, loop: asyncio.AbstractEventLoop | None
+    ) -> AsyncMongoClient[dict[str, Any]]:
         key = id(loop) if loop is not None else 0
         client = self._clients.get(key)
         if client is None:
@@ -62,3 +63,10 @@ class MongoDBAccessor(Accessor):
         value = await fetch()
         self._cache[key] = (now + self.listing_cache_ttl, value)
         return value
+
+    async def close(self) -> None:
+        clients = list(self._clients.values())
+        self._clients.clear()
+        self._cache.clear()
+        for client in clients:
+            await client.close()

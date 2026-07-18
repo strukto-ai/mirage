@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
@@ -26,6 +27,8 @@ from mirage.core.gslides.read import read_presentation
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 
 async def read_bytes(
@@ -55,9 +58,9 @@ async def read(
             try:
                 await readdir(accessor, parent_path, index)
                 result = await index.get(virtual_key)
-            except Exception:
-                # parent refresh failed; fall through to FileNotFoundError
-                pass
+            except FileNotFoundError as exc:
+                logger.debug("read populate failed for %s: %s", virtual_key,
+                             exc)
         if result.entry is None:
             raise enoent(virtual)
     if result.entry.resource_type in DIRECTORY_RESOURCE_TYPES:

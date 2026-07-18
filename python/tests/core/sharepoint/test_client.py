@@ -4,7 +4,8 @@ from aioresponses import aioresponses
 from mirage.accessor.sharepoint import SharePointConfig
 from mirage.core.sharepoint._client import (GraphError, drive_ref_path,
                                             graph_get, graph_get_bytes,
-                                            graph_list, headers, item_url)
+                                            graph_list, graph_post_monitor,
+                                            headers, item_url)
 
 
 def _cfg(**kw) -> SharePointConfig:
@@ -87,6 +88,16 @@ async def test_graph_get_raises_grapherror():
             await graph_get(_cfg(), url)
     assert exc.value.status == 404
     assert exc.value.code == "itemNotFound"
+
+
+@pytest.mark.asyncio
+async def test_graph_post_monitor_requires_location_header():
+    url = f"{_BASE}/drives/{_DRIVE}/root:/a.txt:/copy"
+    with aioresponses() as m:
+        m.post(url, status=202, payload={})
+        with pytest.raises(GraphError) as exc:
+            await graph_post_monitor(_cfg(), url)
+    assert exc.value.code == "missingMonitor"
 
 
 @pytest.mark.asyncio

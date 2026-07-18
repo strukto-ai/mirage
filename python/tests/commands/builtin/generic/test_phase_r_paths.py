@@ -139,8 +139,10 @@ async def test_mktemp_creates_file():
     text = out.decode()
     assert text.startswith("/tmp/tmp.")
     assert text.endswith("\n")
-    assert mkdir_calls == [("/tmp", True)]
+    assert [(path.virtual, parents)
+            for path, parents in mkdir_calls] == [("/tmp", True)]
     assert len(write_calls) == 1
+    assert write_calls[0][0].virtual == text.rstrip("\n")
     assert write_calls[0][1] == b""
 
 
@@ -160,7 +162,9 @@ async def test_mktemp_creates_directory():
                           d=True,
                           t=True)
     text = out.decode().rstrip("\n")
-    assert mkdir_calls == [("/tmp", True), (text, False)]
+    assert [(path.virtual, parents)
+            for path, parents in mkdir_calls] == [("/tmp", True),
+                                                  (text, False)]
     assert write_calls == []
 
 
@@ -178,7 +182,8 @@ async def test_mktemp_custom_parent():
                           write_bytes_fn=write_bytes_fn,
                           p="/var/cache")
     assert out.decode().startswith("/var/cache/tmp.")
-    assert mkdir_calls[0] == ("/var/cache", True)
+    assert (mkdir_calls[0][0].virtual, mkdir_calls[0][1]) == ("/var/cache",
+                                                              True)
 
 
 @pytest.mark.asyncio

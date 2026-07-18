@@ -16,7 +16,7 @@ example.parquet
 === stat ===
 15533 /onedrive/data/example.json
 === stat_dir ===
-name=data size=10435509 modified=2026-03-31T00:00:00Z type=directory
+10435509 directory
 === cat_head ===
 {
   "company": "Strukto",

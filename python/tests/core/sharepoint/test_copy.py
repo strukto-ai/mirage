@@ -46,13 +46,17 @@ def _seeded_caches():
 @pytest.mark.asyncio
 async def test_copy_posts_copy_action_with_name():
     body = {}
+    monitor = "https://monitor.example/sp/body"
 
     def _cb(url, **kwargs):
         body.update(kwargs.get("json") or {})
-        return CallbackResult(status=202, payload={})
+        return CallbackResult(status=202,
+                              payload={},
+                              headers={"Location": monitor})
 
     with aioresponses() as m:
         m.post(_DRIVE + "/root:/a.txt:/copy", callback=_cb)
+        m.get(monitor, payload={"status": "completed"})
         await copy(_accessor(), _spec("a.txt"), _spec("sub/b.txt"))
     assert body["name"] == "b.txt"
     assert body["parentReference"]["path"].endswith("/root:/sub")
@@ -101,7 +105,11 @@ async def test_copy_file_conflict_deletes_destination_and_retries():
                   "file": {}
               })
         m.delete(_DRIVE + "/root:/b.txt", status=204)
-        m.post(_DRIVE + "/root:/a.txt:/copy", status=202, payload={})
+        retry_monitor = "https://monitor.example/sp/1-retry"
+        m.post(_DRIVE + "/root:/a.txt:/copy",
+               status=202,
+               headers={"Location": retry_monitor})
+        m.get(retry_monitor, payload={"status": "completed"})
         await copy(_accessor(), _spec("a.txt"), _spec("b.txt"))
 
 
@@ -138,5 +146,9 @@ async def test_copy_dir_conflict_merges_per_child():
                       "file": {}
                   }]
               })
-        m.post(_DRIVE + "/root:/src/f.txt:/copy", status=202, payload={})
+        child_monitor = "https://monitor.example/sp/2-child"
+        m.post(_DRIVE + "/root:/src/f.txt:/copy",
+               status=202,
+               headers={"Location": child_monitor})
+        m.get(child_monitor, payload={"status": "completed"})
         await copy(_accessor(), _spec("src"), _spec("dst"))

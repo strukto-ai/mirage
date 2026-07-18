@@ -16,6 +16,7 @@ import asyncio
 
 from mirage.observe.context import RecordingScope
 from mirage.resource.ram import RAMResource
+from mirage.types import PathSpec
 
 
 def _run(coro):
@@ -27,7 +28,7 @@ def test_memory_read_records_bytes():
     mem._store.files["/hello.txt"] = b"hello world"
     scope = RecordingScope()
     records = scope.records
-    data = _run(mem.read_bytes("/hello.txt"))
+    data = _run(mem.read_bytes(PathSpec.from_str_path("/hello.txt")))
     scope.close()
     assert data == b"hello world"
     assert len(records) == 1
@@ -41,7 +42,7 @@ def test_memory_write_records_bytes():
     mem._store.dirs.add("/")
     scope = RecordingScope()
     records = scope.records
-    _run(mem.write("/hello.txt", b"hello"))
+    _run(mem.write(PathSpec.from_str_path("/hello.txt"), b"hello"))
     scope.close()
     assert len(records) == 1
     assert records[0].op == "write"
@@ -51,5 +52,5 @@ def test_memory_write_records_bytes():
 def test_no_recording_context_is_noop():
     mem = RAMResource()
     mem._store.files["/hello.txt"] = b"hello"
-    data = _run(mem.read_bytes("/hello.txt"))
+    data = _run(mem.read_bytes(PathSpec.from_str_path("/hello.txt")))
     assert data == b"hello"

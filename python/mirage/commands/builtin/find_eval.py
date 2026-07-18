@@ -18,7 +18,7 @@ from fnmatch import fnmatch
 from mirage.types import FindType, PathSpec
 
 
-def start_basename(path: PathSpec | str) -> str:
+def start_basename(path: PathSpec) -> str:
     """Basename of a find start path, as GNU would print and match it.
 
     Single source of truth for the start path's own name across every
@@ -27,13 +27,12 @@ def start_basename(path: PathSpec | str) -> str:
     mount root or a nested directory.
 
     Args:
-        path (PathSpec | str): The find start path.
+        path (PathSpec): The find start path.
 
     Returns:
         str: The start path's basename, or "" for the bare root "/".
     """
-    original = path.virtual if isinstance(path, PathSpec) else str(path)
-    return original.rstrip("/").rsplit("/", 1)[-1]
+    return path.virtual.rstrip("/").rsplit("/", 1)[-1]
 
 
 @dataclass(frozen=True, slots=True)

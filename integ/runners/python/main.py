@@ -15,6 +15,7 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -74,6 +75,11 @@ async def main() -> None:
             continue
         if target["mounts"][0]["resource"] not in adapters.BUILDERS:
             print(f"skip [{target_id}]: no {HOST} adapter", file=sys.stderr)
+            continue
+        if (target.get("service") == "nextcloud"
+                and not os.environ.get("NEXTCLOUD_URL")):
+            print(f"skip [{target_id}]: NEXTCLOUD_URL not set",
+                  file=sys.stderr)
             continue
         await run_target(target, cases, root, report, emit)
 

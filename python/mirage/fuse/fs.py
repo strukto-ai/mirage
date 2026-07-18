@@ -21,6 +21,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 try:
     import mfusepy as fuse
@@ -38,7 +39,7 @@ from mirage.workspace.session.session import Session
 _NO_XATTR = getattr(errno, "ENOATTR", None) or errno.ENODATA
 # Base class only when mfusepy is installed; otherwise the module still imports
 # (FUSE is the optional [fuse] extra) but instantiating MirageFS raises.
-_FUSE_OPERATIONS = fuse.Operations if fuse is not None else object
+_FUSE_OPERATIONS: Any = fuse.Operations if fuse is not None else object
 # How long prefetched bytes for size-unknown files outlive their handle, so a
 # release-then-stat burst (ls right after cat) neither refetches nor reports
 # an unknown size. Mirrors the TS PREFETCH_TTL_MS.
@@ -52,7 +53,7 @@ class Handle:
     write_buf: list[tuple[int, bytes]] = field(default_factory=list)
 
 
-class MirageFS(_FUSE_OPERATIONS):  # type: ignore[valid-type,misc]
+class MirageFS(_FUSE_OPERATIONS):
 
     use_ns = True
 

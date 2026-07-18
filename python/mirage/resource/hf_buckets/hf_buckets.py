@@ -79,15 +79,6 @@ class HfBucketsResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    async def fingerprint(self, path: str) -> str | None:
-        try:
-            s = await hf_stat(self.accessor,
-                              PathSpec.from_str_path(path),
-                              index=self._index)
-            return s.fingerprint
-        except FileNotFoundError:
-            return None
-
     def get_state(self) -> dict:
         return self.config_state(self.config)
 

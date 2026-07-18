@@ -178,14 +178,6 @@ describe('S3Resource (mocked integration)', () => {
     it('exists returns false for missing keys', async () => {
       expect(await resource.exists(mkPath('/does/not/exist.txt'))).toBe(false)
     })
-
-    it('fingerprint matches ETag from stat', async () => {
-      const p = mkPath('/fp.txt')
-      await resource.writeFile(p, ENC.encode('fingerprint me'))
-      const fp = await resource.fingerprint(p)
-      const s = await resource.stat(p)
-      expect(fp).toBe(s.fingerprint)
-    })
   })
 
   describe('recursive', () => {

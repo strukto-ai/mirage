@@ -82,6 +82,7 @@ class MockSFTPClient:
     def __init__(self, files: dict[str, bytes], dirs: set[str]):
         self.files = files
         self.dirs = dirs
+        self.filename_bytes = False
 
     async def stat(self, path):
         if path in self.dirs:
@@ -120,6 +121,9 @@ class MockSFTPClient:
             if name and name not in seen:
                 seen.add(name)
                 entries.append(MockSFTPName(name, is_dir=True, size=4096))
+        if self.filename_bytes:
+            for entry in entries:
+                entry.filename = entry.filename.encode("utf-8")
         return entries
 
     def open(self, path, mode):
@@ -161,6 +165,9 @@ class MockSFTPClient:
                 del self.files[k]
         else:
             raise asyncssh.SFTPNoSuchFile("not found")
+
+    async def posix_rename(self, src, dst):
+        await self.rename(src, dst)
 
     async def truncate(self, path, length):
         if path in self.files:
@@ -329,6 +336,14 @@ def test_find(env):
     assert "/ssh/sub/b.txt" in result
 
 
+def test_find_decodes_byte_filenames(env):
+    env.create_file("a.txt", b"a")
+    env._sftp.filename_bytes = True
+    result = env.run("find /ssh/")
+    assert "/ssh/a.txt" in result
+    assert "b'a.txt'" not in result
+
+
 def test_find_name(env):
     env.create_file("a.txt", b"a")
     env.create_file("b.py", b"b")
@@ -358,6 +373,14 @@ def test_find_maxdepth(env):
     result = env.run("find /ssh/ -maxdepth 1 -type f")
     assert "a.txt" in result
     assert "nested.txt" not in result
+
+
+def test_find_empty_matches_zero_length_file(env):
+    env.create_file("empty.txt", b"")
+    env.create_file("full.txt", b"full")
+    result = env.run("find /ssh/ -empty")
+    assert "empty.txt" in result
+    assert "full.txt" not in result
     assert "deeper.txt" not in result
 
 

@@ -12,6 +12,7 @@ from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, FindType, PathSpec
+from mirage.utils.dates import iso_timestamp
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import rebase_raw
 
@@ -81,10 +82,11 @@ async def apply_mtime_filter(
     filtered: list[str] = []
     for r in results:
         try:
-            spec = PathSpec(virtual=r,
-                            directory=r,
+            virtual = apply_mount_prefix([r], mount_prefix)[0]
+            spec = PathSpec(virtual=virtual,
+                            directory=virtual,
                             resolved=False,
-                            resource_path=mount_key(r, mount_prefix))
+                            resource_path=mount_key(virtual, mount_prefix))
             s = await stat(spec)
         except (FileNotFoundError, ValueError):
             continue
@@ -180,15 +182,7 @@ async def find(
 def _modified_ts(modified: str | None) -> float | None:
     # Missing or unparseable timestamps exclude the entry from -mtime
     # matching, mirroring the TS implementation's NaN handling.
-    if not modified:
-        return None
-    try:
-        dt = datetime.fromisoformat(modified)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.timestamp()
+    return iso_timestamp(modified)
 
 
 async def _stat_entry(

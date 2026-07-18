@@ -29,6 +29,7 @@ import {
   RAMResource,
   RedisResource,
   S3Resource,
+  SSHResource,
   Workspace,
 } from '@struktoai/mirage-node'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
@@ -149,10 +150,47 @@ async function openS3(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function adminExec(ws: Workspace, command: string): Promise<void> {
+  const result = await ws.execute(command)
+  if (result.exitCode !== 0) {
+    throw new Error(`admin command failed: ${command}: ${new TextDecoder().decode(result.stderr)}`)
+  }
+}
+
+async function openSsh(target: Target): Promise<Open> {
+  const host = process.env.SSH_HOST
+  if (!host) throw new Error('ssh target requires SSH_HOST')
+  const port = Number(process.env.SSH_PORT ?? '22')
+  const base = `mirage-integ-${runId()}`
+  const admin = new Workspace(
+    { '/admin': new SSHResource({ host, port, username: 'integ' }) },
+    { mode: MountMode.WRITE },
+  )
+  const paths = target.mounts.map((m) => `/admin/${base}/${String(m.root)}`).join(' ')
+  await adminExec(admin, `mkdir -p ${paths}`)
+  const mounts: Record<string, SSHResource> = {}
+  for (const m of target.mounts) {
+    mounts[m.path] = new SSHResource({
+      host,
+      port,
+      username: 'integ',
+      root: `/${base}/${String(m.root)}`,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await adminExec(admin, `rm -rf /admin/${base}`)
+    await admin.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
   redis: openRedis,
   opfs: openOpfs,
   s3: openS3,
+  ssh: openSsh,
 }

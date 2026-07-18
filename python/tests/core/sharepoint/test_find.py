@@ -11,15 +11,18 @@ from mirage.utils.key_prefix import mount_key
 _TREE = [
     ("reports/a.txt", {
         "name": "a.txt",
-        "size": 10
+        "size": 10,
+        "lastModifiedDateTime": "2026-07-15T12:00:00Z"
     }, False),
     ("reports/sub", {
         "name": "sub",
+        "lastModifiedDateTime": "2026-07-14T12:00:00Z",
         "folder": {}
     }, True),
     ("reports/sub/b.txt", {
         "name": "b.txt",
-        "size": 20
+        "size": 20,
+        "lastModifiedDateTime": "2026-07-13T12:00:00Z"
     }, False),
 ]
 

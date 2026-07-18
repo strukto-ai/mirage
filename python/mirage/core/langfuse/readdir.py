@@ -33,7 +33,7 @@ async def readdir(
 
     Args:
         accessor (LangfuseAccessor): langfuse accessor.
-        path (PathSpec | str): resource-relative path.
+        path_spec (PathSpec): resource-relative path.
         index (IndexCacheStore | None): index cache.
         prefix (str): mount prefix for virtual index keys.
     """

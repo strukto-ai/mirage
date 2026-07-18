@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 from collections.abc import AsyncIterator
 
@@ -27,6 +28,8 @@ from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 
 async def read_stream(
@@ -56,9 +59,9 @@ async def read_stream(
             try:
                 await readdir(accessor, parent_path, index)
                 result = await index.get(virtual_key)
-            except Exception:
-                # parent refresh failed; fall through to FileNotFoundError
-                pass
+            except FileNotFoundError as exc:
+                logger.debug("stream populate failed for %s: %s", virtual_key,
+                             exc)
         if result.entry is None:
             raise enoent(virtual)
     rt = result.entry.resource_type

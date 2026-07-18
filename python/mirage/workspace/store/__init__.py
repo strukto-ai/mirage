@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 
@@ -24,7 +26,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "RedisWorkspaceStateStore":
         from mirage.workspace.store.redis import RedisWorkspaceStateStore
         return RedisWorkspaceStateStore

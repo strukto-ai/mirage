@@ -23,7 +23,7 @@ from mirage.utils.path import norm
 
 async def find(
     accessor: RAMAccessor,
-    path_spec: str | PathSpec,
+    path_spec: PathSpec,
     name: str | None = None,
     type: str | None = None,
     min_size: int | None = None,
@@ -38,8 +38,7 @@ async def find(
     tree: PredNode | None = None,
 ) -> list[str]:
     start_name = start_basename(path_spec)
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     prefix = p.rstrip("/") + "/"

@@ -15,14 +15,17 @@
 import functools
 from collections.abc import Callable
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.filetype_factory.extensions import _EXT_MODULES
 from mirage.commands.builtin.filetype_factory.handlers import _BUILDERS
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.types import PathSpec
 
 
-async def _drop_index(read_bytes: Callable, accessor: object, path: object,
-                      index: object) -> bytes:
+async def _drop_index(read_bytes: Callable, accessor: Accessor, path: PathSpec,
+                      index: IndexCacheStore | None) -> bytes:
     return await read_bytes(accessor, path)
 
 

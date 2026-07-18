@@ -74,9 +74,9 @@ def test_to_workspace_kwargs_yields_constructible_workspace():
     cfg = load_config(FIXTURES / "minimal.yaml")
     kwargs = cfg.to_workspace_kwargs()
     assert "/" in kwargs["resources"]
-    prov, mode = kwargs["resources"]["/"]
-    assert isinstance(prov, RAMResource)
-    assert mode == MountMode.WRITE
+    mount = kwargs["resources"]["/"]
+    assert isinstance(mount.resource, RAMResource)
+    assert mount.mode == MountMode.WRITE
     ws = Workspace(**kwargs)
     assert ws is not None
 
@@ -139,6 +139,7 @@ def test_store_ram_block_builds_ram_provider():
     })
     kwargs = cfg.to_workspace_kwargs()
     assert isinstance(kwargs["store"], RAMWorkspaceStateStore)
+    assert kwargs["owns_store"] is True
     assert isinstance(kwargs["store"].namespace("ws1"), RAMNamespaceStore)
 
 
@@ -274,6 +275,6 @@ def test_resource_built_via_registry_has_correct_type():
         },
     })
     kwargs = cfg.to_workspace_kwargs()
-    prov, mode = kwargs["resources"]["/s3"]
-    assert isinstance(prov, S3Resource)
-    assert mode == MountMode.READ
+    mount = kwargs["resources"]["/s3"]
+    assert isinstance(mount.resource, S3Resource)
+    assert mount.mode == MountMode.READ

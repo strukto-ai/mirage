@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
 import tree_sitter
 import tree_sitter_bash
 
@@ -175,7 +176,12 @@ def test_get_function_name():
 
 def test_get_function_body():
     body = get_function_body(_first("f() { echo hello; }"))
-    assert body is not None
+    assert len(body) == 1
+
+
+def test_get_function_body_rejects_non_function_node():
+    with pytest.raises(ValueError, match="no compound body"):
+        get_function_body(_first("echo hello"))
 
 
 def test_get_command_name_no_args():

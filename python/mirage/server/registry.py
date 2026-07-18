@@ -57,7 +57,8 @@ class WorkspaceRegistry:
         """
         self._entries: dict[str, WorkspaceEntry] = {}
         self.idle_grace_seconds = idle_grace_seconds
-        self.exit_event = exit_event or asyncio.Event()
+        self.exit_event = (exit_event
+                           if exit_event is not None else asyncio.Event())
         self._idle_task: asyncio.Task | None = None
 
     def __contains__(self, workspace_id: str) -> bool:

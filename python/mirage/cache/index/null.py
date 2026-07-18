@@ -33,6 +33,10 @@ class NullIndexCacheStore(IndexCacheStore):
     async def get(self, resource_path: str) -> LookupResult:
         return LookupResult(status=LookupStatus.NOT_FOUND)
 
+    def seed(self, entries: dict[str, IndexEntry],
+             children: dict[str, list[str]], expires_at: datetime) -> None:
+        return None
+
     async def put(self, resource_path: str, entry: IndexEntry) -> None:
         return None
 
@@ -46,6 +50,9 @@ class NullIndexCacheStore(IndexCacheStore):
         expired_at: datetime | None = None,
     ) -> None:
         return None
+
+    async def entries(self) -> dict[str, IndexEntry]:
+        return {}
 
     async def invalidate_dir(self, resource_path: str) -> None:
         return None

@@ -13,7 +13,6 @@ async def read_bytes(accessor,
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
-    assert resolved.entry is not None
     text = await fetch_page_chunks(accessor, resolved.entry.extra["slug"])
     return text.encode()
 
@@ -25,7 +24,6 @@ async def read_stream(
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
-    assert resolved.entry is not None
     first = True
     async for chunk in iter_page_chunks(accessor,
                                         resolved.entry.extra["slug"]):

@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.errors import UsageError
@@ -35,13 +36,13 @@ def _child_spec(parent: PathSpec, name: str) -> PathSpec:
 
 async def _diff_pair(
     accessor: Accessor | None,
-    path1: PathSpec | str,
-    path2: PathSpec | str,
+    path1: PathSpec,
+    path2: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     flags: _DiffFlags,
 ) -> bytes:
-    name1 = path1.virtual if isinstance(path1, PathSpec) else path1
-    name2 = path2.virtual if isinstance(path2, PathSpec) else path2
+    name1 = path1.virtual
+    name2 = path2.virtual
     text_a = (await read_bytes(accessor, path1)).decode(errors="replace")
     text_b = (await read_bytes(accessor, path2)).decode(errors="replace")
     if flags.i:
@@ -79,7 +80,7 @@ async def _diff_dirs(
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[FileStat]],
-    index: object,
+    index: IndexCacheStore | None,
     flags: _DiffFlags,
 ) -> bytes:
     raw_a = await readdir_fn(accessor, dir_a, index)
@@ -130,9 +131,9 @@ async def diff(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
-    stat_fn: Callable[..., Awaitable[FileStat]] | None = None,
+    stat_fn: Callable[..., Awaitable[FileStat]],
     accessor: Accessor | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     i: bool = False,
     w: bool = False,
     b: bool = False,
@@ -142,19 +143,17 @@ async def diff(
     r: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error(CommandName.DIFF, paths[2].raw_path
-                                  or paths[2].virtual)
+        raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
     if len(paths) < 2:
         raise UsageError("diff: requires two paths")
     flags = _DiffFlags(i=i, w=w, b=b, e=e, u=u, q=q)
     both_dirs = False
-    if r and stat_fn is not None:
+    if r:
         both_dirs = ((await stat_fn(accessor, paths[0],
                                     index)).type == FileType.DIRECTORY
                      and (await stat_fn(accessor, paths[1],
                                         index)).type == FileType.DIRECTORY)
     if both_dirs:
-        assert stat_fn is not None
         output = await _diff_dirs(accessor, paths[0], paths[1], read_bytes,
                                   readdir_fn, stat_fn, index, flags)
     else:

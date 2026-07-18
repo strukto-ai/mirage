@@ -76,8 +76,4 @@ export class QdrantResource extends BaseResource implements Resource {
   stat(p: PathSpec): Promise<FileStat> {
     return qdrantStat(this.accessor, p, this.index)
   }
-
-  fingerprint(_path: PathSpec): Promise<string | null> {
-    return Promise.resolve(null)
-  }
 }

@@ -22,7 +22,10 @@ import mirage.core.onedrive._client as onedrive_client
 import mirage.core.sharepoint._client as sharepoint_client
 import mirage.core.sharepoint._resolver as sharepoint_resolver
 
-BASE_TIME = datetime(2026, 3, 31, tzinfo=timezone.utc)
+# Anchored at run time, mirroring moto (the s3 fake) and real Graph, which
+# stamp lastModifiedDateTime at write time. A fixed past date would make the
+# shared find_mtime case (-mtime -1) exclude every just-written item.
+BASE_TIME = datetime.now(timezone.utc).replace(microsecond=0)
 MODIFIED = BASE_TIME.strftime("%Y-%m-%dT%H:%M:%SZ")
 SITE_ID = "site-main"
 SITE_NAME = "Main"
@@ -34,6 +37,14 @@ SITE_NAME = "Main"
 # marker append so shared-case expectations stay deterministic.
 OFFICE_EXTENSIONS = (".pptx", ".docx", ".xlsx")
 ENRICH_MARKER = b"<odsp-metadata/>"
+
+
+def freeze_clock(base: datetime) -> None:
+    # Pin the stamp for suites that print raw mtimes (integ/onedrive.py's
+    # `ls -l` cases), mirroring integ/s3.py's moto freeze.
+    global BASE_TIME, MODIFIED
+    BASE_TIME = base
+    MODIFIED = base.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _norm(path: str) -> str:

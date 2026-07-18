@@ -94,6 +94,10 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: S3_ENDPOINT not set\n`)
       continue
     }
+    if (target.service === 'ssh' && !process.env.SSH_HOST) {
+      process.stderr.write(`skip [${id}]: SSH_HOST not set\n`)
+      continue
+    }
     await runTarget(target, cases, root, report, emit)
   }
 

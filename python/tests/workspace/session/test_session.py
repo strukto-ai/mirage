@@ -47,7 +47,7 @@ def test_session_env_mutation():
 
 def test_session_functions():
     s = Session(session_id="s1")
-    s.functions["myfunc"] = "body"
+    s.functions["myfunc"] = []
     assert "myfunc" in s.functions
 
 

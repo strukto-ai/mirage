@@ -27,7 +27,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.postgres import _client
 from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
-from mirage.core.postgres.scope import detect_scope
+from mirage.core.postgres.scope import PostgresEntityRowsScope, detect_scope
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -56,12 +56,16 @@ async def wc(
         # bytes too, which needs the content).
         count_only = args_l and not (w or c or m or L)
         scopes = [detect_scope(p) for p in paths]
+        row_scopes = [
+            scope for scope in scopes
+            if isinstance(scope, PostgresEntityRowsScope)
+        ]
         rows: list[tuple[WCCounts, str | None]] = []
-        if count_only and all(s.level == "entity_rows" for s in scopes):
+        if count_only and len(row_scopes) == len(scopes):
             total = 0
             pool = await accessor.pool()
             async with pool.acquire() as conn:
-                for p, scope in zip(paths, scopes):
+                for p, scope in zip(paths, row_scopes):
                     count = await _client.count_rows(conn, scope.schema,
                                                      scope.entity)
                     rows.append((WCCounts(lines=count), p.virtual))

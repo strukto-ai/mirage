@@ -14,7 +14,8 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
@@ -62,7 +63,7 @@ async def rm(
                 raise IsADirectoryError(
                     f"rm: cannot remove '{p.virtual}': Is a directory")
         else:
-            await ops.require("unlink")(accessor, p)
+            await ops.require(Operation.UNLINK)(accessor, p)
         removed[p.mount_path] = b""
         if v:
             verbose_parts.append(f"removed '{p.virtual}'")
@@ -70,4 +71,7 @@ async def rm(
     return output, IOResult(writes=removed)
 
 
-BUILDER = Builder('rm', rm, None, True, None)
+BUILDER = Builder('rm',
+                  rm,
+                  write=True,
+                  requirements=frozenset({Operation.UNLINK}))

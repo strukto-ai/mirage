@@ -15,6 +15,7 @@
 import asyncio
 
 from mirage.resource.ram import RAMResource
+from mirage.types import PathSpec
 
 
 def _make_backend():
@@ -26,30 +27,32 @@ def _make_backend():
 
 def test_cat_updates_stats():
     b = _make_backend()
-    data = asyncio.run(b.read_bytes("/data/file.txt"))
+    data = asyncio.run(b.read_bytes(PathSpec.from_str_path("/data/file.txt")))
     assert data == b"hello world"
 
 
 def test_tee_updates_stats():
     b = _make_backend()
-    asyncio.run(b.write("/data/out.txt", data=b"test data"))
+    asyncio.run(
+        b.write(PathSpec.from_str_path("/data/out.txt"), data=b"test data"))
     assert b._store.files["/data/out.txt"] == b"test data"
 
 
 def test_callback_receives_events():
     b = _make_backend()
-    data = asyncio.run(b.read_bytes("/data/file.txt"))
+    data = asyncio.run(b.read_bytes(PathSpec.from_str_path("/data/file.txt")))
     assert data == b"hello world"
 
 
 def test_write_callback_receives_events():
     b = _make_backend()
-    asyncio.run(b.write("/data/out.txt", data=b"hello"))
+    asyncio.run(b.write(PathSpec.from_str_path("/data/out.txt"),
+                        data=b"hello"))
     assert b._store.files["/data/out.txt"] == b"hello"
 
 
 def test_stats_accumulate():
     b = _make_backend()
-    asyncio.run(b.read_bytes("/data/file.txt"))
-    asyncio.run(b.read_bytes("/data/file.txt"))
+    asyncio.run(b.read_bytes(PathSpec.from_str_path("/data/file.txt")))
+    asyncio.run(b.read_bytes(PathSpec.from_str_path("/data/file.txt")))
     assert b._store.files["/data/file.txt"] == b"hello world"

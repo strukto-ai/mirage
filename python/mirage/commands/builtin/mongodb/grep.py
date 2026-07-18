@@ -28,14 +28,18 @@ from mirage.core.mongodb._client import list_databases
 from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.readdir import readdir as _readdir
-from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.scope import (MongoDBDatabaseScope,
+                                       MongoDBEntityScope, MongoDBRootScope,
+                                       detect_scope)
 from mirage.core.mongodb.search import (format_grep_results, search_collection,
                                         search_database)
 from mirage.core.mongodb.stat import stat as _stat
 from mirage.core.mongodb.stream import read_stream
-from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+SEARCHABLE_SCOPE_TYPES = (MongoDBEntityScope, MongoDBDatabaseScope,
+                          MongoDBRootScope)
 
 
 @command("grep",
@@ -60,13 +64,10 @@ async def grep(
     if paths and pattern is not None and "\n" not in pattern:
         scope = detect_scope(paths[0])
 
-        if scope.level in (ScopeLevel.ENTITY, ScopeLevel.DATABASE,
-                           ScopeLevel.ROOT):
-            if scope.level != ScopeLevel.ROOT:
+        if isinstance(scope, SEARCHABLE_SCOPE_TYPES):
+            if not isinstance(scope, MongoDBRootScope):
                 await _stat(accessor, paths[0], index=index)
-            entity_match = (scope.level == ScopeLevel.ENTITY and scope.database
-                            and scope.name)
-            if entity_match:
+            if isinstance(scope, MongoDBEntityScope):
                 docs = await search_collection(
                     accessor.client,
                     scope.database,
@@ -75,7 +76,7 @@ async def grep(
                     limit=limit,
                 )
                 results = [(scope.database, scope.name, docs)] if docs else []
-            elif scope.level == ScopeLevel.DATABASE and scope.database:
+            elif isinstance(scope, MongoDBDatabaseScope):
                 results = await search_database(
                     accessor.client,
                     scope.database,

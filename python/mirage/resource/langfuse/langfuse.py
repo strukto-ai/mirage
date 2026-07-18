@@ -46,9 +46,6 @@ class LangfuseResource(BaseResource):
             index=self._index,
         )
 
-    async def fingerprint(self, path: str) -> str | None:
-        return None
-
     def get_state(self) -> dict:
         return self.config_state(self.config)
 

@@ -21,11 +21,11 @@ from mirage.utils.path import norm
 
 async def copy(
     accessor: RedisAccessor,
-    src_spec: str | PathSpec,
-    dst_spec: str | PathSpec,
+    src_spec: PathSpec,
+    dst_spec: PathSpec,
 ) -> None:
-    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
-    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
+    src = src_spec.mount_path
+    dst = dst_spec.mount_path
     store = accessor.store
     s, d = norm(src), norm(dst)
     data = await store.get_file(s)
@@ -33,4 +33,4 @@ async def copy(
         raise FileNotFoundError(s)
     await store.set_file(d, data)
     await store.set_modified(d, now_iso())
-    await invalidate_after_write(dst)
+    await invalidate_after_write(dst_spec)

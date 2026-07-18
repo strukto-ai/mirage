@@ -17,12 +17,33 @@ import uuid
 
 import pytest
 
+from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.observe.store import RAMObserverStore
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.store.base import WorkspaceFields
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
+
+
+class ClosingStore(RAMWorkspaceStateStore):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = False
+
+    async def _close(self) -> None:
+        self.closed = True
+
+
+class ClosingCache(RAMFileCacheStore):
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
 
 
 class YieldingStore(RAMWorkspaceStateStore):
@@ -32,6 +53,35 @@ class YieldingStore(RAMWorkspaceStateStore):
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         await asyncio.sleep(0)
         return await super()._load_meta(workspace_id)
+
+
+@pytest.mark.asyncio
+async def test_workspace_closes_owned_passed_store():
+    store = ClosingStore()
+    ws = Workspace({"/data": RAMResource()}, store=store, owns_store=True)
+    await ws.close()
+    assert store.closed
+
+
+@pytest.mark.asyncio
+async def test_workspace_does_not_close_shared_passed_store():
+    store = ClosingStore()
+    ws = Workspace({"/data": RAMResource()}, store=store)
+    await ws.close()
+    assert not store.closed
+
+
+@pytest.mark.asyncio
+async def test_workspace_closes_its_cache_once(monkeypatch):
+    monkeypatch.setattr("mirage.workspace.workspace.RAMFileCacheStore",
+                        ClosingCache)
+    ws = Workspace({"/data": RAMResource()})
+    cache = ws.cache
+
+    await ws.close()
+    await ws.close()
+
+    assert cache.close_calls == 1
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.iconv import iconv as generic_iconv
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
@@ -41,7 +42,7 @@ async def iconv(
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_iconv(paths,
                                read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.require("write"),
+                               write_bytes=ops.require(Operation.WRITE),
                                accessor=accessor,
                                stdin=stdin,
                                from_enc=f or "utf-8",
@@ -50,4 +51,7 @@ async def iconv(
                                output_path=o)
 
 
-BUILDER = Builder('iconv', iconv, None, True, None)
+BUILDER = Builder('iconv',
+                  iconv,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE}))

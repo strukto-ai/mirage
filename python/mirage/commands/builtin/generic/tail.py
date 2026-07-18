@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.cache.read_through import cache_aware_read
 from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
@@ -79,7 +80,7 @@ def tail_multi(
     *,
     read: Callable[..., Any],
     accessor: Accessor | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     n: int | None = None,
     c: int | None = None,
     from_line: int | None = None,
@@ -104,7 +105,8 @@ def tail_multi(
             iterator.
         accessor (Accessor | None): Backend accessor passed
             through to ``read``.
-        index (object): Index cache store passed through to ``read``.
+        index (IndexCacheStore | None): Index cache store passed through to
+            ``read``.
         n (int | None): Line count.
         c (int | None): Byte count.
         from_line (int | None): 1-based start line for ``tail -n +N``.
@@ -125,7 +127,7 @@ async def _tail_multi(
     *,
     read: Callable[..., Any],
     accessor: Accessor | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     n: int | None = None,
     c: int | None = None,
     from_line: int | None = None,

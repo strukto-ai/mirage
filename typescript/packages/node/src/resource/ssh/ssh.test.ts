@@ -14,7 +14,6 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ResourceName } from '@struktoai/mirage-core'
-import { spec } from '../../test-utils.ts'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../core/ssh/_test_utils.ts'
@@ -85,25 +84,5 @@ describe('SSHResource — getState / loadState', () => {
     const res = makeResource(state)
     const result = await res.getState()
     await expect(res.loadState(result)).resolves.toBeUndefined()
-  })
-})
-
-describe('SSHResource — fingerprint', () => {
-  it('returns `${modified}:${size}` for an existing file', async () => {
-    state.files.set('/file.txt', {
-      data: new Uint8Array([1, 2, 3, 4, 5]),
-      attrs: { mtime: 1700000000 },
-    })
-    const res = makeResource(state)
-    const fp = await res.fingerprint(spec('/file.txt'))
-    expect(fp).not.toBeNull()
-    const expectedModified = new Date(1700000000 * 1000).toISOString()
-    expect(fp).toBe(`${expectedModified}:5`)
-  })
-
-  it('returns null for a missing file', async () => {
-    const res = makeResource(state)
-    const fp = await res.fingerprint(spec('/missing.txt'))
-    expect(fp).toBeNull()
   })
 })

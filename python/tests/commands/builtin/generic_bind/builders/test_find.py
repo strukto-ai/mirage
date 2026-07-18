@@ -31,14 +31,18 @@ def _ops(stat_calls: list[str], is_dir_name=None, find_op=None) -> CommandIO:
     async def readdir(_accessor, path, _index):
         return TREE.get(path.virtual.rstrip("/") or "/", [])
 
-    async def stat(_accessor, path, _index):
+    async def stat(_accessor, path, index=None):
         stat_calls.append(path.virtual)
         if path.virtual not in TREE and path.virtual not in TREE.get(
                 "/mnt", []) and path.virtual != "/mnt/table1/rows.jsonl":
             raise FileNotFoundError(path.virtual)
         if path.virtual in DIRS:
-            return FileStat(name=path.virtual, type=FileType.DIRECTORY)
-        return FileStat(name=path.virtual, size=3)
+            return FileStat(name=path.virtual,
+                            type=FileType.DIRECTORY,
+                            modified="2099-01-01T00:00:00+00:00")
+        return FileStat(name=path.virtual,
+                        size=3,
+                        modified="2099-01-01T00:00:00+00:00")
 
     async def read_stream(_accessor, _path, _index):
         yield b"data"

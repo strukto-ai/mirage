@@ -28,6 +28,7 @@ from mirage.runtime.js.select import validate_js_runtime_name
 from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
                                           validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
+from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
 
 try:
@@ -309,14 +310,15 @@ class WorkspaceConfig(BaseModel):
                 workspace-level settings, in the shape the
                 ``Workspace`` constructor expects.
         """
-        resources: dict[str, Any] = {}
+        resources: dict[str, Mount] = {}
         for prefix, block in self.mounts.items():
             prov = build_resource(block.resource, block.config)
             mode = block.mode if block.mode is not None else self.mode
-            if block.command_safeguards:
-                resources[prefix] = (prov, mode, block.command_safeguards)
-            else:
-                resources[prefix] = (prov, mode)
+            resources[prefix] = Mount(
+                resource=prov,
+                mode=mode,
+                command_safeguards=block.command_safeguards,
+            )
         kwargs: dict[str, Any] = {
             "resources": resources,
             "mode": self.mode,
@@ -332,6 +334,7 @@ class WorkspaceConfig(BaseModel):
             kwargs["workspace_id"] = self.workspace_id
         if self.store is not None:
             kwargs["store"] = _build_state_store(self.store)
+            kwargs["owns_store"] = True
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
             if self.runtime.js is not None:
@@ -396,25 +399,24 @@ def _build_store_group(
 
 
 def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
-    overrides: dict[str, WorkspaceStateStore | None] = {
-        "namespace":
-        _build_store_group(block.namespace)
-        if block.namespace is not None else None,
-        "observer":
-        _build_store_group(block.observer)
-        if block.observer is not None else None,
-        "workspace":
-        _build_store_group(block.workspace)
-        if block.workspace is not None else None,
-    }
+    namespace = _build_store_group(
+        block.namespace) if block.namespace is not None else None
+    observer = _build_store_group(
+        block.observer) if block.observer is not None else None
+    workspace = _build_store_group(
+        block.workspace) if block.workspace is not None else None
     if block.type == "redis":
         if RedisWorkspaceStateStore is None:
             raise ImportError("A redis store requires the 'redis' extra. "
                               "Install with: pip install mirage-ai[redis]")
         return RedisWorkspaceStateStore(url=block.url,
                                         key_prefix=block.key_prefix,
-                                        **overrides)
-    return RAMWorkspaceStateStore(**overrides)
+                                        namespace=namespace,
+                                        observer=observer,
+                                        workspace=workspace)
+    return RAMWorkspaceStateStore(namespace=namespace,
+                                  observer=observer,
+                                  workspace=workspace)
 
 
 def load_config(source: str | Path | dict,

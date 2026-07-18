@@ -284,6 +284,14 @@ def test_records_to_bytes_formats_absolute_paths_and_scores():
                       b"/knowledge/README.md\nauth segment\n")
 
 
+@pytest.mark.parametrize("value", [None, {}, ["invalid"]])
+def test_response_records_rejects_malformed_payload(value):
+    from mirage.core.dify.search import response_records
+
+    with pytest.raises(ValueError, match="records must be"):
+        response_records(value)
+
+
 def test_records_to_bytes_keeps_multiple_chunks_for_same_document():
     from mirage.core.dify.search import records_to_bytes
 

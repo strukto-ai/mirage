@@ -19,12 +19,14 @@ from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
 from mirage.core.ssh._client import _abs
+from mirage.core.ssh.config import SSHConfig
 from mirage.types import PathSpec
+from mirage.utils.dates import in_mtime_window
 
 
 async def find(
     accessor: SSHAccessor,
-    path_spec: str | PathSpec,
+    path_spec: PathSpec,
     name: str | None = None,
     type: str | None = None,
     min_size: int | None = None,
@@ -41,8 +43,7 @@ async def find(
     tree: PredNode | None = None,
 ) -> list[str]:
     start_name = start_basename(path_spec)
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     config = accessor.config
     sftp = await accessor.sftp()
     results: list[str] = []
@@ -51,7 +52,8 @@ async def find(
                                                     path_pattern=path_pattern,
                                                     type=type,
                                                     name_exclude=name_exclude,
-                                                    or_names=or_names)
+                                                    or_names=or_names,
+                                                    empty=empty)
     if maxdepth is None or maxdepth >= 0:
         try:
             root_attrs = await sftp.stat(_abs(config, path))
@@ -59,26 +61,40 @@ async def find(
             root_attrs = None
         if root_attrs is not None:
             is_dir = root_attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
-            emit_start_path(results,
-                            path,
-                            start_name,
-                            kind="d" if is_dir else "f",
-                            is_empty=False if is_dir else
-                            (root_attrs.size or 0) == 0,
-                            exists=True,
-                            tree=tree,
-                            maxdepth=maxdepth,
-                            mindepth=mindepth,
-                            size=None if is_dir else (root_attrs.size or 0),
-                            min_size=min_size,
-                            max_size=max_size)
+            if in_mtime_window(root_attrs.mtime, mtime_min, mtime_max):
+                emit_start_path(results,
+                                path,
+                                start_name,
+                                kind="d" if is_dir else "f",
+                                is_empty=False if is_dir else
+                                (root_attrs.size or 0) == 0,
+                                exists=True,
+                                tree=tree,
+                                maxdepth=maxdepth,
+                                mindepth=mindepth,
+                                size=None if is_dir else
+                                (root_attrs.size or 0),
+                                min_size=min_size,
+                                max_size=max_size)
     await _walk(sftp, config, path, results, 0, maxdepth, mindepth, tree,
                 min_size, max_size, mtime_min, mtime_max)
     return sorted(results)
 
 
-async def _walk(sftp, config, path, results, depth, maxdepth, mindepth, tree,
-                min_size, max_size, mtime_min, mtime_max):
+async def _walk(
+    sftp: asyncssh.SFTPClient,
+    config: SSHConfig,
+    path: str,
+    results: list[str],
+    depth: int,
+    maxdepth: int | None,
+    mindepth: int | None,
+    tree: PredNode,
+    min_size: int | None,
+    max_size: int | None,
+    mtime_min: float | None,
+    mtime_max: float | None,
+) -> None:
     if maxdepth is not None and depth > maxdepth:
         return
     remote = _abs(config, path)
@@ -87,9 +103,11 @@ async def _walk(sftp, config, path, results, depth, maxdepth, mindepth, tree,
     except asyncssh.SFTPNoSuchFile:
         return
     for entry in entries:
-        if entry.filename in (".", ".."):
+        filename = (entry.filename.decode("utf-8") if isinstance(
+            entry.filename, bytes) else entry.filename)
+        if filename in (".", ".."):
             continue
-        child = f"{path.rstrip('/')}/{entry.filename}"
+        child = f"{path.rstrip('/')}/{filename}"
         is_dir = entry.attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
         if _matches(entry, child, is_dir, depth + 1, maxdepth, mindepth, tree,
                     min_size, max_size, mtime_min, mtime_max):
@@ -100,8 +118,19 @@ async def _walk(sftp, config, path, results, depth, maxdepth, mindepth, tree,
                         mtime_max)
 
 
-def _matches(entry, path, is_dir, depth, maxdepth, mindepth, tree, min_size,
-             max_size, mtime_min, mtime_max):
+def _matches(
+    entry: asyncssh.SFTPName,
+    path: str,
+    is_dir: bool,
+    depth: int,
+    maxdepth: int | None,
+    mindepth: int | None,
+    tree: PredNode,
+    min_size: int | None,
+    max_size: int | None,
+    mtime_min: float | None,
+    mtime_max: float | None,
+) -> bool:
     if maxdepth is not None and depth > maxdepth:
         return False
     find_entry = FindEntry(key=path,
@@ -120,10 +149,6 @@ def _matches(entry, path, is_dir, depth, maxdepth, mindepth, tree, min_size,
         if max_size is not None and size > max_size:
             return False
     if mtime_min is not None or mtime_max is not None:
-        mtime = entry.attrs.mtime
-        if mtime is not None:
-            if mtime_min is not None and mtime < mtime_min:
-                return False
-            if mtime_max is not None and mtime > mtime_max:
-                return False
+        if not in_mtime_window(entry.attrs.mtime, mtime_min, mtime_max):
+            return False
     return True

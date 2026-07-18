@@ -1,5 +1,6 @@
 from typing import Any
 
+from mirage.accessor.chroma import ChromaAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.chroma.path import resolve_path
 from mirage.core.chroma.walk import walk
@@ -9,7 +10,7 @@ from mirage.utils.score import score_from_distance
 
 
 async def search_segments(
-    accessor,
+    accessor: ChromaAccessor,
     query: str,
     paths: list[PathSpec],
     index: IndexCacheStore = NULL_INDEX,
@@ -52,14 +53,14 @@ def validate_args(query: str, top_k: int) -> None:
 
 
 async def target_entries(
-    accessor,
+    accessor: ChromaAccessor,
     paths: list[PathSpec],
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, IndexEntry]:
     targets: dict[str, IndexEntry] = {}
     for path in paths:
         resolved = await resolve_path(accessor, path, index)
-        if resolved.entry is not None and not resolved.is_dir:
+        if not resolved.is_dir:
             targets[str(resolved.entry.extra["slug"])] = resolved.entry
             continue
         if resolved.is_dir:
@@ -73,8 +74,7 @@ async def target_entries(
                     child, rekey(path.virtual, path.resource_path, child))
                 child_resolved = await resolve_path(accessor, child_spec,
                                                     index)
-                if (child_resolved.entry is not None
-                        and not child_resolved.is_dir):
+                if not child_resolved.is_dir:
                     targets[str(child_resolved.entry.extra["slug"]
                                 )] = child_resolved.entry
     return targets
@@ -113,7 +113,7 @@ def query_result_to_bytes(
     return ("\n".join(contents) + "\n").encode()
 
 
-def first_result_list(value: object) -> list:
+def first_result_list(value: Any) -> list[Any]:
     if not isinstance(value, list):
         return []
     if value and isinstance(value[0], list):

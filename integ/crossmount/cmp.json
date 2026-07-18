@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "cmp /data/xdiff.txt /data2/xdiff.txt",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "cp /data/xdiff.txt /data2/xsame.txt && cmp /data/xdiff.txt /data2/xsame.txt && rm /data/xdiff.txt /data2/xdiff.txt /data2/xsame.txt",
       "expect": {

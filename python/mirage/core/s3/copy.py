@@ -18,10 +18,10 @@ from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.types import PathSpec
 
 
-async def copy(accessor: S3Accessor, src_spec: str | PathSpec,
-               dst_spec: str | PathSpec) -> None:
-    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
-    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
+async def copy(accessor: S3Accessor, src_spec: PathSpec,
+               dst_spec: PathSpec) -> None:
+    src = src_spec.mount_path
+    dst = dst_spec.mount_path
     config = accessor.config
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
@@ -33,4 +33,4 @@ async def copy(accessor: S3Accessor, src_spec: str | PathSpec,
             },
             Key=_key(dst, config),
         )
-    await invalidate_after_write(dst)
+    await invalidate_after_write(dst_spec)

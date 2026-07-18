@@ -7,7 +7,7 @@ from mirage.commands.builtin.generic.tar import tar
 from mirage.commands.builtin.generic.tsort import tsort
 from mirage.commands.builtin.generic.unzip import unzip
 from mirage.commands.builtin.generic.zip_cmd import zip_cmd
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
@@ -41,6 +41,10 @@ def _make_backend(files: dict[str, bytes]):
         pass
 
     return read_bytes, write_bytes, read_stream, mkdir_fn, store
+
+
+async def _stat_file(accessor, path, index=None) -> FileStat:
+    return FileStat(name=path.virtual, type=FileType.TEXT)
 
 
 @pytest.mark.asyncio
@@ -292,7 +296,8 @@ async def test_diff_identical_files():
 
     out, io_res = await diff([_spec("a"), _spec("b")],
                              read_bytes=rb,
-                             readdir_fn=rd)
+                             readdir_fn=rd,
+                             stat_fn=_stat_file)
     assert out == b""
     assert io_res.exit_code == 0
 
@@ -307,6 +312,7 @@ async def test_diff_quiet_differ():
     out, io_res = await diff([_spec("a"), _spec("b")],
                              read_bytes=rb,
                              readdir_fn=rd,
+                             stat_fn=_stat_file,
                              q=True)
     assert b"differ" in out
     assert io_res.exit_code == 1
@@ -325,6 +331,7 @@ async def test_diff_unified():
     out, _ = await diff([_spec("a"), _spec("b")],
                         read_bytes=rb,
                         readdir_fn=rd,
+                        stat_fn=_stat_file,
                         u=True)
     assert b"-world" in out
     assert b"+universe" in out
@@ -338,7 +345,10 @@ async def test_diff_too_few_paths():
         return []
 
     with pytest.raises(ValueError, match="two paths"):
-        await diff([_spec("a")], read_bytes=rb, readdir_fn=rd)
+        await diff([_spec("a")],
+                   read_bytes=rb,
+                   readdir_fn=rd,
+                   stat_fn=_stat_file)
 
 
 @pytest.mark.asyncio

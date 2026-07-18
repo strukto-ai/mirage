@@ -15,15 +15,18 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Callable
-
-try:
-    import wasmtime
-except ImportError:
-    wasmtime = None  # type: ignore[assignment]
+from typing import Any, Callable
 
 from mirage.runtime.js.base import JsRunArgs, JsRunResult, JsRuntime
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
+
+wasmtime: Any
+try:
+    import wasmtime as _wasmtime
+except ImportError:
+    wasmtime = None
+else:
+    wasmtime = _wasmtime
 
 QUICKJS_HOME_ENV = "MIRAGE_QUICKJS_HOME"
 

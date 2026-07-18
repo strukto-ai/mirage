@@ -16,11 +16,12 @@ import asyncssh
 
 from mirage.accessor.base import Accessor
 from mirage.core.ssh._client import _connect_kwargs
+from mirage.core.ssh.config import SSHConfig
 
 
 class SSHAccessor(Accessor):
 
-    def __init__(self, config) -> None:
+    def __init__(self, config: SSHConfig) -> None:
         self.config = config
         self._conn: asyncssh.SSHClientConnection | None = None
         self._sftp: asyncssh.SFTPClient | None = None

@@ -17,44 +17,43 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
+def _ps(path: str) -> PathSpec:
+    return PathSpec.from_str_path(path)
+
+
 def test_root():
-    scope = detect_scope("/")
+    scope = detect_scope(_ps("/"))
     assert scope.level == "root"
-    assert scope.database == ""
-    assert scope.kind is None
-    assert scope.name == ""
 
 
 def test_database():
-    scope = detect_scope("/sample_mflix")
+    scope = detect_scope(_ps("/sample_mflix"))
     assert scope.level == "database"
     assert scope.database == "sample_mflix"
-    assert scope.kind is None
-    assert scope.name == ""
 
 
 def test_database_json():
-    scope = detect_scope("/sample_mflix/database.json")
+    scope = detect_scope(_ps("/sample_mflix/database.json"))
     assert scope.level == "database_json"
     assert scope.database == "sample_mflix"
 
 
 def test_collections_kind_dir():
-    scope = detect_scope("/sample_mflix/collections")
+    scope = detect_scope(_ps("/sample_mflix/collections"))
     assert scope.level == "kind_dir"
     assert scope.database == "sample_mflix"
     assert scope.kind == "collection"
 
 
 def test_views_kind_dir():
-    scope = detect_scope("/sample_mflix/views")
+    scope = detect_scope(_ps("/sample_mflix/views"))
     assert scope.level == "kind_dir"
     assert scope.database == "sample_mflix"
     assert scope.kind == "view"
 
 
 def test_collection_entity_dir():
-    scope = detect_scope("/sample_mflix/collections/movies")
+    scope = detect_scope(_ps("/sample_mflix/collections/movies"))
     assert scope.level == "entity"
     assert scope.database == "sample_mflix"
     assert scope.kind == "collection"
@@ -62,7 +61,7 @@ def test_collection_entity_dir():
 
 
 def test_view_entity_dir():
-    scope = detect_scope("/sample_mflix/views/top_rated")
+    scope = detect_scope(_ps("/sample_mflix/views/top_rated"))
     assert scope.level == "entity"
     assert scope.database == "sample_mflix"
     assert scope.kind == "view"
@@ -70,7 +69,7 @@ def test_view_entity_dir():
 
 
 def test_collection_schema_json():
-    scope = detect_scope("/sample_mflix/collections/movies/schema.json")
+    scope = detect_scope(_ps("/sample_mflix/collections/movies/schema.json"))
     assert scope.level == "schema_json"
     assert scope.database == "sample_mflix"
     assert scope.kind == "collection"
@@ -78,7 +77,8 @@ def test_collection_schema_json():
 
 
 def test_collection_documents_jsonl():
-    scope = detect_scope("/sample_mflix/collections/movies/documents.jsonl")
+    scope = detect_scope(
+        _ps("/sample_mflix/collections/movies/documents.jsonl"))
     assert scope.level == "documents"
     assert scope.database == "sample_mflix"
     assert scope.kind == "collection"
@@ -86,19 +86,19 @@ def test_collection_documents_jsonl():
 
 
 def test_view_documents_jsonl():
-    scope = detect_scope("/sample_mflix/views/top_rated/documents.jsonl")
+    scope = detect_scope(_ps("/sample_mflix/views/top_rated/documents.jsonl"))
     assert scope.level == "documents"
     assert scope.kind == "view"
     assert scope.name == "top_rated"
 
 
 def test_unknown_leaf_under_entity():
-    scope = detect_scope("/sample_mflix/collections/movies/weird.txt")
+    scope = detect_scope(_ps("/sample_mflix/collections/movies/weird.txt"))
     assert scope.level == "unknown"
 
 
 def test_unknown_top_segment_under_db():
-    scope = detect_scope("/sample_mflix/randomdir")
+    scope = detect_scope(_ps("/sample_mflix/randomdir"))
     assert scope.level == "unknown"
 
 

@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.csplit import csplit as generic_csplit
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
@@ -43,7 +44,7 @@ async def csplit(
     return await generic_csplit(paths,
                                 texts,
                                 read_bytes=with_index(ops.read_bytes, index),
-                                write_bytes=ops.require("write"),
+                                write_bytes=ops.require(Operation.WRITE),
                                 accessor=accessor,
                                 stdin=stdin,
                                 prefix=f or "xx",
@@ -53,4 +54,7 @@ async def csplit(
                                 silent=s)
 
 
-BUILDER = Builder('csplit', csplit, None, True, None)
+BUILDER = Builder('csplit',
+                  csplit,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE}))

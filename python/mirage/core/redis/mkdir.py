@@ -21,11 +21,10 @@ from mirage.utils.path import norm, parent
 
 async def mkdir(
     accessor: RedisAccessor,
-    path_spec: str | PathSpec,
+    path_spec: PathSpec,
     parents: bool = False,
 ) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     if parents:
@@ -45,4 +44,4 @@ async def mkdir(
             f"parent directory does not exist: {parent_dir}")
     await store.add_dir(p)
     await store.set_modified(p, now_iso())
-    await invalidate_after_write(p)
+    await invalidate_after_write(path_spec)

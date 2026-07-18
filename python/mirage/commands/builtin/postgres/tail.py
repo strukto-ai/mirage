@@ -28,7 +28,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.postgres import _client
 from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
-from mirage.core.postgres.scope import detect_scope
+from mirage.core.postgres.scope import PostgresEntityRowsScope, detect_scope
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -60,9 +60,8 @@ async def tail(
     c_int = int(c) if c is not None else None
     if paths:
         scope = detect_scope(paths[0])
-        is_file = scope.level == "entity_rows"
-        if (len(paths) == 1 and is_file and c_int is None
-                and n_int is not None):
+        if (len(paths) == 1 and isinstance(scope, PostgresEntityRowsScope)
+                and c_int is None and n_int is not None):
             limit = min(n_int, accessor.config.default_row_limit)
             pool = await accessor.pool()
             async with pool.acquire() as conn:

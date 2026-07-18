@@ -5,7 +5,6 @@ from mirage.core.dify._client import get_document_detail
 from mirage.core.dify.path import resolve_path
 from mirage.core.dify.tree import extract_document_size
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 
 
 async def stat_light(accessor,
@@ -18,8 +17,6 @@ async def stat_light(accessor,
             type=FileType.DIRECTORY,
             extra={"children_count": 0},
         )
-    if resolved.entry is None:
-        raise enoent(path)
     # size stays None: the entry size is the uploaded source file (e.g. the
     # original PDF), not the rendered segment text this mount serves
     # (FileStat.size must be render-derived or None, see the CLAUDE.md FUSE
@@ -48,8 +45,6 @@ async def stat(accessor,
             type=FileType.DIRECTORY,
             extra={"children_count": 0},
         )
-    if resolved.entry is None:
-        raise enoent(path)
     detail = await get_document_detail(accessor.config, resolved.entry.id)
     source_size = extract_document_size(detail)
     if source_size is None:
