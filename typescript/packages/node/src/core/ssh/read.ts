@@ -15,6 +15,7 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import { enoent } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
+import { readChunks } from './stream.ts'
 import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
 
 export async function read(accessor: SSHAccessor, p: PathSpec): Promise<Uint8Array> {
@@ -29,9 +30,7 @@ export async function read(accessor: SSHAccessor, p: PathSpec): Promise<Uint8Arr
   const chunks: Uint8Array[] = []
   let total = 0
   try {
-    for await (const chunk of rs) {
-      const buf = chunk as Buffer
-      const u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+    for await (const u8 of readChunks(rs)) {
       chunks.push(u8)
       total += u8.byteLength
     }

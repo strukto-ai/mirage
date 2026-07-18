@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator, Callable
 
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -11,7 +12,10 @@ from mirage.types import PathSpec
 def _parse_count(value: str | None) -> int | None:
     if value is None:
         return None
-    count = int(value)
+    normalized = value.strip()
+    if re.fullmatch(r"[+-]?[0-9]+", normalized) is None:
+        raise ValueError(f"uniq: invalid count: '{value}'")
+    count = int(normalized)
     if count < 0:
         raise ValueError(f"uniq: invalid count: '{value}'")
     return count
@@ -105,7 +109,7 @@ async def uniq(
         source: AsyncIterator[bytes] = read_stream(paths[0])
         cache = [paths[0].mount_path]
     else:
-        source = _resolve_source(stdin, "uniq: missing operand")
+        source = _resolve_source(stdin)
 
     return _uniq_stream(
         source,

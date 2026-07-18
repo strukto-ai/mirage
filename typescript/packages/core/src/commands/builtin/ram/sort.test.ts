@@ -126,9 +126,10 @@ describe('sort', () => {
     expect(r.lines).toEqual(['30', '10', '2', '1'])
   })
 
-  it('missing stdin and no path returns error', async () => {
+  it('missing stdin and no path uses empty standard input', async () => {
     const resource = new RAMResource()
     const r = await runSort(resource, [])
-    expect(r.exitCode).toBe(1)
+    expect(r.exitCode).toBe(0)
+    expect(r.lines).toEqual([])
   })
 })

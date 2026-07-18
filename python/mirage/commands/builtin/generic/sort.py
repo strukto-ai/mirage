@@ -30,9 +30,7 @@ async def sort(
             all_lines.extend(split_lines(data))
     else:
         raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("sort: missing operand")
-        all_lines = split_lines(raw.decode(errors="replace"))
+        all_lines = split_lines((raw or b"").decode(errors="replace"))
 
     key_args = (key_field, field_separator, fold_case, numeric, human_numeric,
                 version_sort, month_sort, ignore_blanks)

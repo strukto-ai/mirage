@@ -27,7 +27,7 @@ async function runUniq(
   paths: PathSpec[],
   flags: Record<string, string | boolean | string[]> = {},
   stdin: Uint8Array | null = null,
-): Promise<{ lines: string[]; exitCode: number }> {
+): Promise<{ lines: string[]; exitCode: number; stderr: string }> {
   const cmd = RAM_UNIQ[0]
   if (cmd === undefined) throw new Error('uniq not registered')
   const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
@@ -37,7 +37,7 @@ async function runUniq(
     cwd: '/',
     resource,
   })
-  if (result === null) return { lines: [], exitCode: -1 }
+  if (result === null) return { lines: [], exitCode: -1, stderr: '' }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -48,7 +48,8 @@ async function runUniq(
   const text = DEC.decode(buf)
   const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
   const lines = stripped === '' ? [] : stripped.split('\n')
-  return { lines, exitCode: ioResult.exitCode }
+  const stderr = DEC.decode(await materialize(ioResult.stderr))
+  return { lines, exitCode: ioResult.exitCode, stderr }
 }
 
 describe('uniq', () => {
@@ -123,5 +124,19 @@ describe('uniq', () => {
     const resource = new RAMResource()
     const r = await runUniq(resource, [], {}, ENC.encode('a\na\nb\n'))
     expect(r.lines).toEqual(['a', 'b'])
+  })
+
+  it('missing stdin and no path uses empty standard input', async () => {
+    const resource = new RAMResource()
+    const r = await runUniq(resource, [])
+    expect(r.exitCode).toBe(0)
+    expect(r.lines).toEqual([])
+  })
+
+  it('rejects trailing text in numeric options', async () => {
+    const resource = new RAMResource()
+    const r = await runUniq(resource, [], { f: '2junk' })
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr).toBe("uniq: invalid count: '2junk'\n")
   })
 })

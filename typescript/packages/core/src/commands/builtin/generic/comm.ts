@@ -105,7 +105,7 @@ export async function commGeneric(
   const lines1 = splitLinesNoTrailing(data1)
   const lines2 = splitLinesNoTrailing(data2)
   let stderr = ''
-  if (opts.flags['check-order'] === true) {
+  if (opts.flags.check_order === true) {
     if (!isSorted(lines1)) stderr = 'comm: file 1 is not in sorted order\n'
     else if (!isSorted(lines2)) stderr = 'comm: file 2 is not in sorted order\n'
   }
@@ -115,5 +115,11 @@ export async function commGeneric(
   const merged = commMerge(lines1, lines2)
   const output = formatComm(merged, suppress1, suppress2, suppress3)
   const result: ByteSource = ENC.encode(output)
-  return [result, new IOResult({ stderr: stderr !== '' ? ENC.encode(stderr) : null })]
+  return [
+    result,
+    new IOResult({
+      stderr: stderr !== '' ? ENC.encode(stderr) : null,
+      exitCode: stderr !== '' ? 1 : 0,
+    }),
+  ]
 }

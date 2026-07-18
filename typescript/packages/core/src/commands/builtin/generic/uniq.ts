@@ -35,8 +35,10 @@ interface UniqOptions {
 
 function parseCount(value: string | boolean | string[] | undefined): number | null {
   if (typeof value !== 'string') return null
-  const count = Number.parseInt(value, 10)
-  if (Number.isNaN(count) || count < 0) throw new Error(`uniq: invalid count: '${value}'`)
+  const normalized = value.trim()
+  if (!/^[+-]?\d+$/.test(normalized)) throw new Error(`uniq: invalid count: '${value}'`)
+  const count = Number(normalized)
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error(`uniq: invalid count: '${value}'`)
   return count
 }
 
@@ -121,14 +123,20 @@ export async function uniqGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   if (paths.length > 2) throw extraOperandError(CommandName.UNIQ, paths[2]?.rawPath ?? '')
-  const uniqOpts = parseOptions(opts.flags)
+  let uniqOpts: UniqOptions
+  try {
+    uniqOpts = parseOptions(opts.flags)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+  }
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     return [uniqStream(stream(first), uniqOpts), new IOResult({ cache: [first.mountPath] })]
   }
   try {
-    const source = resolveSource(opts.stdin, 'uniq: missing operand')
+    const source = resolveSource(opts.stdin)
     return [uniqStream(source, uniqOpts), new IOResult()]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

@@ -80,7 +80,9 @@ async def comm(
     merged = _comm_merge(lines1, lines2)
     output = _format_comm(merged, suppress1, suppress2, suppress3)
     return output.encode(), IOResult(
-        stderr=stderr.encode() if stderr else None)
+        stderr=stderr.encode() if stderr else None,
+        exit_code=1 if stderr else 0,
+    )
 
 
 __all__ = ["comm"]

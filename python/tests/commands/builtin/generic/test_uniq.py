@@ -12,7 +12,7 @@ async def _generator_read_stream(_path):
     yield b"dup\ndup\nsolo\n"
 
 
-async def _collect(stdin: bytes, **kwargs) -> bytes:
+async def _collect(stdin: bytes | None, **kwargs) -> bytes:
     source, _io = await uniq(
         [],
         read_stream=_unused_read_stream,
@@ -38,6 +38,16 @@ def test_parse_count_positive():
 def test_parse_count_negative_raises():
     with pytest.raises(ValueError, match="invalid count"):
         _parse_count("-1")
+
+
+def test_parse_count_trailing_text_raises():
+    with pytest.raises(ValueError, match="invalid count"):
+        _parse_count("2junk")
+
+
+@pytest.mark.asyncio
+async def test_no_operand_uses_empty_standard_input():
+    assert await _collect(None) == b""
 
 
 @pytest.mark.asyncio

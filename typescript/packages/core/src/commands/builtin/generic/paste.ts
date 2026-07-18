@@ -46,14 +46,11 @@ export async function pasteGeneric(
   }
   if (fileLines.length === 0 && !stdinConsumed) {
     const raw = await readStdinAsync(opts.stdin)
-    if (raw !== null) fileLines.push(splitLinesNoEnds(DEC.decode(raw)))
-  }
-  if (fileLines.length === 0) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('paste: missing operand\n') })]
+    fileLines.push(splitLinesNoEnds(raw !== null ? DEC.decode(raw) : ''))
   }
   let outLines: string[]
   if (serial) {
-    outLines = fileLines.map((lines) => lines.join(delimiter))
+    outLines = fileLines.filter((lines) => lines.length > 0).map((lines) => lines.join(delimiter))
   } else {
     const maxLen = Math.max(...fileLines.map((l) => l.length))
     outLines = []
@@ -61,6 +58,7 @@ export async function pasteGeneric(
       outLines.push(fileLines.map((lines) => lines[i] ?? '').join(delimiter))
     }
   }
-  const out: ByteSource = ENC.encode(outLines.join('\n') + '\n')
+  const out: ByteSource =
+    outLines.length === 0 ? new Uint8Array(0) : ENC.encode(outLines.join('\n') + '\n')
   return [out, new IOResult()]
 }
