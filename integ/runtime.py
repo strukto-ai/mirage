@@ -34,6 +34,7 @@ from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.resource.redis import RedisResource  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
 from mirage.runtime.python.monty import MontyRuntime  # noqa: E402
+from mirage.runtime.route import ScriptSource  # noqa: E402
 from mirage.runtime.table import VfsRuntime  # noqa: E402
 from mirage.types import CommandSafeguard, PathSpec  # noqa: E402
 
@@ -319,7 +320,7 @@ async def main() -> None:
         # everything turns python3 lines into admission failures (126)
         # while vfs commands keep running.
         routed_monty = MontyRuntime()
-        routed_monty.script = "'use-local' not in ctx['line']"
+        routed_monty.script = ScriptSource("'use-local' not in ctx['line']")
         ws_route = Workspace({"/ram": RAMResource()},
                              mode=MountMode.EXEC,
                              runtimes=[routed_monty, "local", "vfs"])
@@ -334,7 +335,7 @@ async def main() -> None:
         await ws_route.close()
 
         deny_monty = MontyRuntime()
-        deny_monty.script = "False"
+        deny_monty.script = ScriptSource("False")
         ws_deny = Workspace({"/ram": RAMResource()},
                             mode=MountMode.EXEC,
                             runtimes=[deny_monty, "vfs"])
@@ -353,7 +354,8 @@ async def main() -> None:
             {"/ram": RAMResource()},
             mode=MountMode.EXEC,
             runtimes=["monty", "local", "vfs"],
-            route="'local' if 'go-local' in ctx['line'] else None")
+            route=ScriptSource(
+                "'local' if 'go-local' in ctx['line'] else None"))
         result = await ws_groute.execute('python3 -c "print(argv[0])"')
         print("=== global_route_default ===")
         print(await result.stdout_str(), end="")
@@ -401,7 +403,7 @@ async def main() -> None:
         # Per-runtime context: monty's script sees its own stage, so
         # a pipeline led by cat still routes python3 onto monty.
         ctx_monty = MontyRuntime()
-        ctx_monty.script = "ctx['command'] == 'python3'"
+        ctx_monty.script = ScriptSource("ctx['command'] == 'python3'")
         ws_ctx = Workspace({"/ram": RAMResource()},
                            mode=MountMode.EXEC,
                            runtimes=[ctx_monty, "vfs"])
@@ -417,7 +419,9 @@ async def main() -> None:
         ws_lock = Workspace(
             {"/ram": RAMResource()},
             mode=MountMode.EXEC,
-            runtimes=[VfsRuntime(script="'secret' not in ctx['line']")])
+            runtimes=[
+                VfsRuntime(script=ScriptSource("'secret' not in ctx['line']"))
+            ])
         result = await ws_lock.execute("echo fine")
         print("=== vfs_script_allow ===")
         print(await result.stdout_str(), end="")

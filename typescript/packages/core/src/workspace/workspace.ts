@@ -73,6 +73,7 @@ import {
   bindCommands,
   catchAll,
   runtimeBindingsFor,
+  scriptStringError,
   DEFAULT_ENTRIES,
   VfsRuntime,
   type Runtime,
@@ -151,10 +152,10 @@ export interface WorkspaceOptions {
   runtimes?: RuntimeEntry[]
   /**
    * Global route script for the routing ladder: a function taking the
-   * RouteContext (or monty source whose last expression is the
-   * verdict) naming the runtime for a line, or null to fall to the
-   * entries' own scripts. Ladder: the runtime argument > route >
-   * scripts by list order > admission failure (exit 126).
+   * RouteContext (or a config-borne ScriptSource) naming the runtime
+   * for a line, or null to fall to the entries' own scripts. Ladder:
+   * the runtime argument > route > scripts by list order > admission
+   * failure (exit 126).
    */
   route?: RouteFn
 }
@@ -345,10 +346,13 @@ export class Workspace {
     this.registry.vfsRuntime =
       this.runtimeEntries.find((entry) => entry instanceof VfsRuntime) ?? null
     for (const entry of this.runtimeEntries) {
+      if (typeof entry.script === 'string')
+        throw scriptStringError(`runtime '${entry.name}' script`)
       entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
       this.closers.push(() => entry.close())
     }
     this.runtimeBindings = bindCommands(this.runtimeEntries)
+    if (typeof options.route === 'string') throw scriptStringError('route')
     this.route = options.route ?? null
     this.observer = new Observer(observeStore)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
@@ -443,6 +447,7 @@ export class Workspace {
    */
   addRuntime(runtime: RuntimeEntry): Runtime {
     const entry: Runtime = typeof runtime === 'string' ? buildRuntime(runtime) : runtime
+    if (typeof entry.script === 'string') throw scriptStringError(`runtime '${entry.name}' script`)
     const candidate = [...this.runtimeEntries, entry]
     const bindings = bindCommands(candidate)
     entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())

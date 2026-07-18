@@ -94,6 +94,28 @@ ResourceMount: TypeAlias = (BaseResource | Mount
                                     dict[str, CommandSafeguard]])
 
 
+def _reject_config_script(kind: str, value: object) -> None:
+    """Guard the code API: script source strings belong to config.
+
+    In code, scripts and routes are callables; a plain string is
+    almost always a script that should live next to the workspace
+    yaml and be referenced there (``script:`` on an entry, ``route:``
+    on the workspace), where the loader wraps it as ScriptSource.
+
+    Args:
+        kind (str): what carried the string, for the error message.
+        value (object): the suspect script value.
+
+    Raises:
+        TypeError: the value is a plain string.
+    """
+    if isinstance(value, str):
+        raise TypeError(
+            f"{kind} must be a callable taking the RouteContext; config "
+            f"scripts reference a .py file (script:/route: in the "
+            f"workspace yaml)")
+
+
 class Workspace:
     """Unified virtual filesystem over heterogeneous resources.
 
@@ -248,6 +270,7 @@ class Workspace:
         self._registry.vfs_runtime = next(
             (entry for entry in self._runtime_entries
              if isinstance(entry, VfsRuntime)), None)
+        _reject_config_script("route", route)
         self._route = route
 
         for prefix, fuse_target in fuse_targets:
@@ -430,6 +453,8 @@ class Workspace:
         if not any(entry.name == VfsRuntime.name for entry in entries):
             entries.append(VfsRuntime())
         for entry in entries:
+            _reject_config_script(f"runtime {entry.name!r} script",
+                                  entry.script)
             entry.attach(self.dispatch, self._runtime_mount_prefixes)
         return entries
 
@@ -450,6 +475,7 @@ class Workspace:
         """
         entry = (build_runtime(runtime)
                  if isinstance(runtime, str) else runtime)
+        _reject_config_script(f"runtime {entry.name!r} script", entry.script)
         candidate = [*self._runtime_entries, entry]
         bindings = bind_commands(candidate)
         entry.attach(self.dispatch, self._runtime_mount_prefixes)

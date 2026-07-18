@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from mirage.runtime.base import Runtime
+from mirage.runtime.base import Runtime, ScriptSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,28 +148,37 @@ class RouteContext:
 
 
 # A per-runtime willingness script, answering "do I want this line?".
-# A callable (sync or async) on the RouteContext returning a truthy
-# verdict, or monty source that sees ctx as a dict (to_dict) and whose
-# LAST EXPRESSION is the verdict. Mirrors the TS RouteScript.
+# In code: a callable (sync or async) on the RouteContext returning a
+# truthy verdict. From config: a .py file reference, loaded as
+# ScriptSource (its last expression is the verdict). Mirrors the TS
+# RouteScript.
 #
 #     def wants(ctx: RouteContext) -> bool:
 #         return ctx.builtin and "/secret" not in ctx.line
 #
 #     VfsRuntime(script=wants)
-#     VfsRuntime(script="'/secret' not in ctx['line']")
-RouteScript = Callable[[RouteContext], bool | Awaitable[bool]] | str
+#
+#     # workspace yaml: guard.py next to the config file
+#     runtimes:
+#       - name: vfs
+#         script: guard.py
+RouteScript = Callable[[RouteContext], bool | Awaitable[bool]] | ScriptSource
 
-# The global route, answering "who takes this line?". A callable (sync
-# or async) on the RouteContext returning a runtime name, or None to
-# pass down the ladder; or monty source whose LAST EXPRESSION is that
-# name or None. Mirrors the TS RouteFn.
+# The global route, answering "who takes this line?". In code: a
+# callable (sync or async) on the RouteContext returning a runtime
+# name, or None to pass down the ladder. From config: a .py file
+# reference, loaded as ScriptSource (its last expression is that name
+# or None). Mirrors the TS RouteFn.
 #
 #     def route(ctx: RouteContext) -> str | None:
 #         return "wasi" if ctx.command == "python3" else None
 #
 #     Workspace(..., route=route)
-#     Workspace(..., route="'wasi' if ctx['command'] == 'python3' else None")
-RouteFn = Callable[[RouteContext], str | None | Awaitable[str | None]] | str
+#
+#     # workspace yaml: route.py next to the config file
+#     route: route.py
+RouteFn = Callable[[RouteContext],
+                   str | None | Awaitable[str | None]] | ScriptSource
 
 
 @dataclass(frozen=True, slots=True)

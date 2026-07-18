@@ -18,7 +18,7 @@ import pytest_asyncio
 from mirage import MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import RunArgs, RunResult, Runtime, ScriptSource
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.table import VfsRuntime
 
@@ -350,17 +350,12 @@ async def test_add_runtime_appends_and_rebinds():
         await ws.close()
 
 
-def test_config_entry_script_and_route_load():
-    entries = _build_runtime_entries([{
-        "name": "local",
-        "script": "ctx['command'] == 'python3'"
-    }, {
-        "name": "vfs",
-        "script": "True"
-    }])
-    assert entries[0].script == "ctx['command'] == 'python3'"
-    assert isinstance(entries[1], VfsRuntime)
-    assert entries[1].script == "True"
+def test_config_inline_script_is_rejected():
+    with pytest.raises(ValueError, match=r"reference a \.py file"):
+        _build_runtime_entries([{
+            "name": "local",
+            "script": "ctx['command'] == 'python3'"
+        }])
 
 
 def test_config_script_path_form_embeds_content(tmp_path):
@@ -369,8 +364,26 @@ def test_config_script_path_form_embeds_content(tmp_path):
     entries = _build_runtime_entries([{
         "name": "local",
         "script": str(script)
+    }, {
+        "name": "vfs",
+        "script": str(script)
     }])
-    assert entries[0].script == "ctx['command'] == 'python3'"
+    assert entries[0].script == ScriptSource("ctx['command'] == 'python3'")
+    assert isinstance(entries[1], VfsRuntime)
+    assert entries[1].script == ScriptSource("ctx['command'] == 'python3'")
+
+
+def test_code_string_script_is_rejected():
+    vfs = VfsRuntime()
+    vfs.script = "ctx['command'] == 'python3'"
+    with pytest.raises(TypeError, match="reference a .py file"):
+        Workspace({"/ram": RAMResource()}, runtimes=[vfs])
+
+
+@pytest.mark.asyncio
+async def test_code_string_route_is_rejected():
+    with pytest.raises(TypeError, match="reference a .py file"):
+        Workspace({"/ram": RAMResource()}, route="'local'")
 
 
 def test_config_script_path_form_missing_file_fails_loud(tmp_path):

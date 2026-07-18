@@ -18,6 +18,7 @@ import {
   RedisFileCacheStore,
   RedisNamespaceStore,
   RedisWorkspaceStateStore,
+  ScriptSource,
 } from '@struktoai/mirage-node'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -131,7 +132,7 @@ describe('configToWorkspaceArgs', () => {
     writeFileSync(join(dir, 'ws.yaml'), 'mounts:\n  /data:\n    resource: ram\nroute: route.py\n')
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.route).toBe("'quickjs'")
+    expect(args.options.route).toEqual(new ScriptSource("'quickjs'"))
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -146,20 +147,35 @@ describe('configToWorkspaceArgs', () => {
   })
 
   it('carries entry scripts and the global route through', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'entry.py'), "ctx['command'] == 'node'")
+    writeFileSync(join(dir, 'vfs.py'), 'True')
+    writeFileSync(join(dir, 'route.py'), "'quickjs'")
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
       runtimes: [
-        { name: 'quickjs', script: "ctx['command'] == 'node'" },
-        { name: 'vfs', script: 'True' },
+        { name: 'quickjs', script: join(dir, 'entry.py') },
+        { name: 'vfs', script: join(dir, 'vfs.py') },
       ],
-      route: "'quickjs'",
+      route: join(dir, 'route.py'),
     })
     const args = await configToWorkspaceArgs(cfg)
     const entries = args.options.runtimes
-    expect((entries?.[0] as { script?: string }).script).toBe("ctx['command'] == 'node'")
-    expect((entries?.[1] as { name: string; script?: string }).name).toBe('vfs')
-    expect((entries?.[1] as { script?: string }).script).toBe('True')
-    expect(args.options.route).toBe("'quickjs'")
+    expect((entries?.[0] as { script?: ScriptSource }).script).toEqual(
+      new ScriptSource("ctx['command'] == 'node'"),
+    )
+    expect((entries?.[1] as { name: string }).name).toBe('vfs')
+    expect((entries?.[1] as { script?: ScriptSource }).script).toEqual(new ScriptSource('True'))
+    expect(args.options.route).toEqual(new ScriptSource("'quickjs'"))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('rejects inline monty source in config', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      route: "'quickjs'",
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reference a \.py file/)
   })
 
   it('builds a redis index config from an index block', async () => {

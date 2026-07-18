@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { VfsRuntime, type RunArgs, type Runtime, type RunResult } from './executor/runtime.ts'
-import type { RouteScript } from './executor/route/index.ts'
+import { ScriptSource, type RouteScript } from './executor/route/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -212,14 +212,14 @@ describe('routing ladder', () => {
   it('a monty string script decides from parsed ctx', async () => {
     const parser = await getTestParser()
     const alpha = new NamedFakeRuntime('alpha')
-    alpha.script = `
+    alpha.script = new ScriptSource(`
 big = False
 for c in ctx['commands']:
     for p in c['paths']:
         if p.startswith('/secret'):
             big = True
 not big
-`
+`)
     const ws = new Workspace(
       { '/': new RAMResource() },
       { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, 'vfs'] },

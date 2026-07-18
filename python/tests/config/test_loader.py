@@ -23,6 +23,7 @@ from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
                            load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
+from mirage.runtime.base import ScriptSource
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
@@ -341,6 +342,6 @@ runtimes:
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
-    assert kwargs["route"] == "'local'"
+    assert kwargs["route"] == ScriptSource("'local'")
     entry = kwargs["runtimes"][0]
-    assert entry.script == "ctx['command'] == 'python3'"
+    assert entry.script == ScriptSource("ctx['command'] == 'python3'")

@@ -16,7 +16,13 @@ import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
 import { evalMontyValue } from '../python/runtimes/monty.ts'
 import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../runtime.ts'
 import { RoutingDecisionError } from './errors.ts'
-import type { RoutingDecision, RouteContext, RouteFn, RouteScript } from './types.ts'
+import {
+  ScriptSource,
+  type RoutingDecision,
+  type RouteContext,
+  type RouteFn,
+  type RouteScript,
+} from './types.ts'
 
 function ctxPayload(ctx: RouteContext, runtime?: Runtime): Record<string, unknown> {
   const payload: Record<string, unknown> = {
@@ -79,8 +85,8 @@ async function evaluateScript(
   bridge: BridgeDispatchFn | null,
 ): Promise<boolean> {
   const view = ctxForRuntime(ctx, runtime)
-  if (typeof script === 'string') {
-    return Boolean(await evalMonty(script, ctxPayload(view, runtime), bridge))
+  if (script instanceof ScriptSource) {
+    return Boolean(await evalMonty(script.source, ctxPayload(view, runtime), bridge))
   }
   return await script(view)
 }
@@ -92,7 +98,9 @@ async function evaluateRoute(
   bridge: BridgeDispatchFn | null,
 ): Promise<string | null> {
   const verdict =
-    typeof route === 'string' ? await evalMonty(route, ctxPayload(ctx), bridge) : await route(ctx)
+    route instanceof ScriptSource
+      ? await evalMonty(route.source, ctxPayload(ctx), bridge)
+      : await route(ctx)
   if (verdict === null || verdict === undefined) return null
   if (typeof verdict === 'string') return verdict
   throw new RoutingDecisionError(

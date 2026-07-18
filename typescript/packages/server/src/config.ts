@@ -19,6 +19,7 @@ import {
   buildResource,
   CommandSafeguard,
   ConsistencyPolicy,
+  ScriptSource,
   MountMode,
   OnExceed,
   RAMFileCacheStore,
@@ -45,21 +46,22 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
 
-/**
- * Resolve a config script value: a .py path loads, else inline.
- * Docker-style route-by-path: the client embeds the file's content,
- * the wire carries content.
- */
 /** True for the docker-style single-line `.py` path form. */
 function isScriptPath(value: string): boolean {
   return !value.includes('\n') && value.trim().endsWith('.py')
 }
 
-function loadScriptSource(value: string): string {
-  if (isScriptPath(value)) {
-    return readFileSync(value.trim(), 'utf-8')
+// Config carries a reference, the wire carries content (the docker
+// build-context model): the value must be a path to a .py file, read
+// at load time. In code, scripts are functions; config is the only
+// door for script source.
+function loadScriptSource(value: string): ScriptSource {
+  if (!isScriptPath(value)) {
+    throw new Error(
+      `a config script must reference a .py file (e.g. script: guard.py), got '${value}'`,
+    )
   }
-  return value
+  return new ScriptSource(readFileSync(value.trim(), 'utf-8'))
 }
 
 function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
@@ -75,7 +77,7 @@ function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
       throw new Error("runtime entry needs a non-empty 'name'")
     }
     if (script !== undefined && typeof script !== 'string') {
-      throw new Error('a runtime entry script must be a string (inline monty source or a .py path)')
+      throw new Error('a runtime entry script must be a .py path string')
     }
     const built = buildRuntime(name, options)
     if (script !== undefined) built.script = loadScriptSource(script)
@@ -366,7 +368,7 @@ export interface WorkspaceArgs {
     workspaceId?: string
     store?: WorkspaceStateStore
     runtimes?: RuntimeEntry[]
-    route?: string
+    route?: ScriptSource
   }
   fuseMounts: Record<string, boolean | string>
 }

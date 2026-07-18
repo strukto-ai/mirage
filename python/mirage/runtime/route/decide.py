@@ -20,7 +20,7 @@ from typing import Any
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.monty import _MirageOS, pydantic_monty
 from mirage.runtime.route.types import (RouteContext, RouteFn, RouteScript,
-                                        RoutingDecision)
+                                        RoutingDecision, ScriptSource)
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 
 
@@ -69,14 +69,15 @@ async def evaluate_script(script: RouteScript, ctx: RouteContext,
 
     Args:
         script (RouteScript): a callable taking the RouteContext, or
-            monty source whose last expression is the verdict.
+            a config-borne ScriptSource.
         ctx (RouteContext): facts about the line.
         runtime (Runtime): the runtime being asked (ctx.runtime).
         dispatch (Callable | None): workspace dispatch for file reads.
     """
     view = ctx.for_runtime(runtime)
-    if isinstance(script, str):
-        verdict = await _eval_monty(script, view.to_dict(runtime), dispatch)
+    if isinstance(script, ScriptSource):
+        verdict = await _eval_monty(script.source, view.to_dict(runtime),
+                                    dispatch)
     else:
         verdict = script(view)
         if inspect.isawaitable(verdict):
@@ -89,8 +90,8 @@ async def evaluate_route(route: RouteFn, ctx: RouteContext,
     """Run the global route, returning a runtime name or None to pass.
 
     Args:
-        route (RouteFn): a callable taking the RouteContext, or monty
-            source whose last expression is the name (or None).
+        route (RouteFn): a callable taking the RouteContext, or a
+            config-borne ScriptSource (last expression = the name).
         ctx (RouteContext): facts about the line.
         dispatch (Callable | None): workspace dispatch for file reads.
 
@@ -98,8 +99,8 @@ async def evaluate_route(route: RouteFn, ctx: RouteContext,
         ValueError: the route returned something other than a runtime
             name or None.
     """
-    if isinstance(route, str):
-        verdict = await _eval_monty(route, ctx.to_dict(), dispatch)
+    if isinstance(route, ScriptSource):
+        verdict = await _eval_monty(route.source, ctx.to_dict(), dispatch)
     else:
         verdict = route(ctx)
         if inspect.isawaitable(verdict):

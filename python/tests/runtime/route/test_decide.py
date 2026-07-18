@@ -15,8 +15,8 @@
 import pytest
 
 from mirage.runtime.base import RunArgs, RunResult, Runtime
-from mirage.runtime.route import (RouteContext, command_facts, decide_line,
-                                  evaluate_route, evaluate_script)
+from mirage.runtime.route import (RouteContext, ScriptSource, command_facts,
+                                  decide_line, evaluate_route, evaluate_script)
 from mirage.runtime.table import VfsRuntime
 from mirage.workspace.workspace import parse
 
@@ -65,7 +65,8 @@ async def test_script_callable_and_awaitable():
 @pytest.mark.asyncio
 async def test_script_monty_last_expression_is_verdict():
     runtime = AlphaRuntime()
-    script = "ctx['runtime']['name'] == 'alpha' and ctx['command'] == 'cat'"
+    script = ScriptSource(
+        "ctx['runtime']['name'] == 'alpha' and ctx['command'] == 'cat'")
     assert await evaluate_script(script, ctx_for("cat /a"), runtime, None)
     assert not await evaluate_script(script, ctx_for("ls /a"), runtime, None)
 
@@ -73,16 +74,18 @@ async def test_script_monty_last_expression_is_verdict():
 @pytest.mark.asyncio
 async def test_script_monty_errors_fail_loud():
     with pytest.raises(ValueError, match="syntax error"):
-        await evaluate_script("def broken(", ctx_for("x"), AlphaRuntime(),
-                              None)
+        await evaluate_script(ScriptSource("def broken("), ctx_for("x"),
+                              AlphaRuntime(), None)
     with pytest.raises(ValueError, match="failed"):
-        await evaluate_script("1 / 0", ctx_for("x"), AlphaRuntime(), None)
+        await evaluate_script(ScriptSource("1 / 0"), ctx_for("x"),
+                              AlphaRuntime(), None)
 
 
 @pytest.mark.asyncio
 async def test_route_returns_name_or_none_only():
     assert await evaluate_route(lambda c: None, ctx_for("x"), None) is None
-    assert await evaluate_route("'beta'", ctx_for("x"), None) == "beta"
+    assert await evaluate_route(ScriptSource("'beta'"), ctx_for("x"),
+                                None) == "beta"
     with pytest.raises(ValueError, match="runtime name or None"):
         await evaluate_route(lambda c: 42, ctx_for("x"), None)
 

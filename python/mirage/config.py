@@ -24,7 +24,7 @@ from mirage.accessor.s3 import S3Config
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
-from mirage.runtime.base import Runtime
+from mirage.runtime.base import Runtime, ScriptSource
 from mirage.runtime.table import build_runtime
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 from mirage.workspace.mount.spec import Mount
@@ -247,23 +247,25 @@ def _is_script_path(value: str) -> bool:
     return "\n" not in value and value.strip().endswith(".py")
 
 
-def _load_script_source(value: str) -> str:
-    """Resolve a config script value: a .py path loads, else inline.
+def _load_script_source(value: str) -> ScriptSource:
+    """Embed the referenced ``.py`` file as script source.
 
-    Docker-style route-by-path: the client embeds the file's content,
-    the wire carries content. A single-line value ending in ``.py`` is
-    a path; anything else (typically a yaml block scalar) is inline
-    monty source.
+    Config carries a reference, the wire carries content (the docker
+    build-context model): the value must be a path to a ``.py`` file,
+    read at load time. In code, scripts are callables; config is the
+    only door for script source.
 
     Args:
         value (str): the yaml ``script``/``route`` value.
 
     Raises:
-        FileNotFoundError: a path-form value that does not exist.
+        ValueError: the value is not a ``.py`` path.
+        FileNotFoundError: the referenced file does not exist.
     """
-    if _is_script_path(value):
-        return Path(value.strip()).read_text()
-    return value
+    if not _is_script_path(value):
+        raise ValueError("a config script must reference a .py file "
+                         f"(e.g. script: guard.py), got {value!r}")
+    return ScriptSource(Path(value.strip()).read_text())
 
 
 def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
@@ -318,8 +320,8 @@ def _build_runtime_entries(
             raise ValueError("runtime entry needs a non-empty 'name'")
         script = options.pop("script", None)
         if script is not None and not isinstance(script, str):
-            raise ValueError("a runtime entry script must be a string "
-                             "(inline monty source or a .py path)")
+            raise ValueError(
+                "a runtime entry script must be a .py path string")
         built = build_runtime(name, **options)
         if script is not None:
             built.script = _load_script_source(script)
@@ -335,9 +337,9 @@ class WorkspaceConfig(BaseModel):
     # with a name plus constructor options flat on the entry
     # ({name: wasi, home: /opt/...}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
-    # Global route script: inline monty source (block scalar) or a
-    # .py path whose content is embedded. Its last expression names
-    # the runtime for the line, or None to fall to entry scripts.
+    # Global route script: a .py path whose content is embedded at
+    # load. Its last expression names the runtime for the line, or
+    # None to fall to entry scripts.
     route: str | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY

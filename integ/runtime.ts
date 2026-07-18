@@ -23,6 +23,7 @@ import {
   RAMResource,
   RedisResource,
   S3Resource,
+  ScriptSource,
   VfsRuntime,
   Workspace,
 } from "@struktoai/mirage-node";
@@ -279,7 +280,7 @@ async function main(): Promise<void> {
   // admission failures (126) while vfs commands keep running. A
   // scripted vfs entry locks down the lines it refuses.
   const routedMonty = buildRuntime("monty");
-  routedMonty.script = "'skip-monty' not in ctx['line']";
+  routedMonty.script = new ScriptSource("'skip-monty' not in ctx['line']");
   const wsRoute = new Workspace(
     { "/ram": new RAMResource() },
     { mode: MountMode.EXEC, runtimes: [routedMonty, "vfs"] },
@@ -296,7 +297,7 @@ async function main(): Promise<void> {
     { "/ram": new RAMResource() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new VfsRuntime("'secret' not in ctx['line']")],
+      runtimes: [new VfsRuntime(new ScriptSource("'secret' not in ctx['line']"))],
     },
   );
   await run(wsLock, "lockdown_allow", "echo fine");
@@ -306,7 +307,7 @@ async function main(): Promise<void> {
   // Per-runtime context: monty's script sees its own stage, so a
   // pipeline led by cat still routes python3 onto monty.
   const ctxMonty = buildRuntime("monty");
-  ctxMonty.script = "ctx['command'] == 'python3'";
+  ctxMonty.script = new ScriptSource("ctx['command'] == 'python3'");
   const wsCtx = new Workspace(
     { "/ram": new RAMResource() },
     { mode: MountMode.EXEC, runtimes: [ctxMonty, "vfs"] },

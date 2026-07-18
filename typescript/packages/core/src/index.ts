@@ -464,6 +464,7 @@ export {
 export {
   commandFacts,
   decideLine,
+  ScriptSource,
   RoutingDecisionError,
   type CommandFacts,
   type RoutingDecision,

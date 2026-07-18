@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
-import type { RouteScript } from './route/index.ts'
+import { ScriptSource, type RouteScript } from './route/types.ts'
 
 /** One interpreter execution request, language-agnostic. */
 export interface RunArgs {
@@ -49,11 +49,10 @@ export interface Runtime {
   readonly name: string
   readonly captures: readonly string[]
   /**
-   * Per-line admission script for the routing ladder: a callable
-   * taking a RouteContext (or monty source whose last expression is
-   * the verdict) answering "do I want this line". Absent = always
-   * willing. Policy, not capability: it can only refuse lines the
-   * captures already allow.
+   * Per-line admission script for the routing ladder, answering "do I
+   * want this line": a function taking a RouteContext, or a
+   * config-borne ScriptSource. Absent = always willing. Policy, not
+   * capability: it can only refuse lines the captures already allow.
    */
   script?: RouteScript
   /**
@@ -68,6 +67,14 @@ export interface Runtime {
 
 /** A workspace runtimes-list entry: an instance or a name shorthand. */
 export type RuntimeEntry = Runtime | string
+
+/** The code API takes functions; script source belongs to config. */
+export function scriptStringError(kind = 'a script'): Error {
+  return new Error(
+    `${kind} in code must be a function taking the RouteContext; config ` +
+      `scripts reference a .py file (script:/route: in the workspace yaml)`,
+  )
+}
 
 /**
  * The workspace's built-in command engine as a runtime.
@@ -93,13 +100,15 @@ export class VfsRuntime implements Runtime {
   // The record form exists for the shared buildRuntime path, which
   // hands every runtime its options object ({script?, captures?}).
   constructor(options?: RouteScript | Record<string, unknown>) {
-    if (typeof options === 'string' || typeof options === 'function') {
+    if (typeof options === 'function' || options instanceof ScriptSource) {
       this.script = options
       return
     }
     if (options === undefined) return
+    if (typeof options === 'string') throw scriptStringError()
     const script = options.script
-    if (typeof script === 'string' || typeof script === 'function') {
+    if (typeof script === 'string') throw scriptStringError()
+    if (typeof script === 'function' || script instanceof ScriptSource) {
       this.script = script as RouteScript
     }
     if (Array.isArray(options.captures)) {

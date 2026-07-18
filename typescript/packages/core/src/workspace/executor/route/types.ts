@@ -63,30 +63,50 @@ export interface RouteContext {
 }
 
 /**
+ * Script source arriving from a workspace config, not from code.
+ *
+ * The programmatic API takes functions; a yaml `script:`/`route:`
+ * value references a `.py` file whose content is embedded here at
+ * load. The source sees ctx as a dict and its LAST EXPRESSION is the
+ * verdict. It runs on the routing interpreter (monty today; a sandbox
+ * runtime is a candidate door later).
+ */
+export class ScriptSource {
+  constructor(readonly source: string) {}
+}
+
+/**
  * A per-runtime willingness script, answering "do I want this line?".
- * A function (sync or async) on the RouteContext returning a truthy
- * verdict, or monty source that sees ctx as a dict and whose LAST
- * EXPRESSION is the verdict.
+ * In code: a function (sync or async) on the RouteContext returning a
+ * truthy verdict. From config: a `.py` file reference, loaded as
+ * ScriptSource (its last expression is the verdict).
  *
  * ```
  * new VfsRuntime((ctx) => ctx.builtin && !ctx.line.includes('/secret'))
- * new VfsRuntime("'/secret' not in ctx['line']")
+ *
+ * // workspace yaml: guard.py next to the config file
+ * // runtimes:
+ * //   - name: vfs
+ * //     script: guard.py
  * ```
  */
-export type RouteScript = ((ctx: RouteContext) => boolean | Promise<boolean>) | string
+export type RouteScript = ((ctx: RouteContext) => boolean | Promise<boolean>) | ScriptSource
 
 /**
- * The global route, answering "who takes this line?". A function (sync
- * or async) on the RouteContext returning a runtime name, or null to
- * pass down the ladder; or monty source whose LAST EXPRESSION is that
- * name or None.
+ * The global route, answering "who takes this line?". In code: a
+ * function (sync or async) on the RouteContext returning a runtime
+ * name, or null to pass down the ladder. From config: a `.py` file
+ * reference, loaded as ScriptSource (its last expression is that name
+ * or None).
  *
  * ```
  * route: (ctx) => (ctx.command === 'python3' ? 'monty' : null)
- * route: "'monty' if ctx['command'] == 'python3' else None"
+ *
+ * // workspace yaml: route.py next to the config file
+ * // route: route.py
  * ```
  */
-export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | null>) | string
+export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | null>) | ScriptSource
 
 /**
  * The one-line placement decision the dispatcher consults.

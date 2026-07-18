@@ -15,7 +15,7 @@
 from collections.abc import Sequence
 from typing import Any, Callable
 
-from mirage.runtime.base import Runtime
+from mirage.runtime.base import Runtime, ScriptSource
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
@@ -42,8 +42,8 @@ class VfsRuntime(Runtime):
     executor serves its commands internally.
 
     Args:
-        script (Callable | str | None): per-line admission script, the
-            same contract as any runtime's script.
+        script (Callable | ScriptSource | None): per-line admission
+            script, the same contract as any runtime's script.
         captures (Sequence[str] | None): restrict the workspace to
             exactly these commands, the same field every runtime uses.
             An empty sequence serves nothing (full lockdown). None
@@ -54,7 +54,7 @@ class VfsRuntime(Runtime):
     captures: tuple[str, ...] = ()
 
     def __init__(self,
-                 script: "Callable[..., Any] | str | None" = None,
+                 script: "Callable[..., Any] | ScriptSource | None" = None,
                  captures: Sequence[str] | None = None) -> None:
         self.script = script
         # Declaring captures (even empty) turns the catch-all off; the

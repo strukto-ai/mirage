@@ -18,6 +18,23 @@ from typing import Any, Callable
 
 
 @dataclass(frozen=True, slots=True)
+class ScriptSource:
+    """Script source arriving from a workspace config, not from code.
+
+    The programmatic API takes callables; a yaml ``script:``/``route:``
+    value references a ``.py`` file whose content is embedded here at
+    load. The source sees ctx as a dict and its LAST EXPRESSION is the
+    verdict. It runs on the routing interpreter (monty today; a
+    sandbox runtime is a candidate door later).
+
+    Args:
+        source (str): the script program.
+    """
+
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
 class RunArgs:
     """One interpreter execution request, language-agnostic.
 
@@ -71,12 +88,11 @@ class Runtime(ABC):
 
     name: str
     captures: tuple[str, ...] = ()
-    # Per-line admission script for the routing ladder: a callable
-    # taking a RouteContext (or monty source whose last expression is
-    # the verdict) answering "do I want this line". None = always
-    # willing. Policy, not capability: it can only refuse lines the
-    # captures already allow.
-    script: Callable[..., Any] | str | None = None
+    # Per-line admission script for the routing ladder, answering "do
+    # I want this line": a callable taking a RouteContext, or a
+    # config-borne ScriptSource. None = always willing. Policy, not
+    # capability: it can only refuse lines the captures already allow.
+    script: Callable[..., Any] | ScriptSource | None = None
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:

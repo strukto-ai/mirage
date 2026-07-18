@@ -17,10 +17,12 @@ from mirage.runtime.route.decide import (decide_line, evaluate_route,
 from mirage.runtime.route.errors import RoutingDecisionError
 from mirage.runtime.route.facts import command_facts
 from mirage.runtime.route.types import (CommandFacts, RouteContext, RouteFn,
-                                        RouteScript, RoutingDecision)
+                                        RouteScript, RoutingDecision,
+                                        ScriptSource)
 
 __all__ = [
     "CommandFacts",
+    "ScriptSource",
     "RoutingDecision",
     "RouteContext",
     "RouteFn",
