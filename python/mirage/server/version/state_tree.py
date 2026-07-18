@@ -39,7 +39,7 @@ def _is_reserved(tree_path: str) -> bool:
     return tree_path.startswith(CONTROL_PREFIX)
 
 
-def _history_entries(events: list[dict]) -> dict[str, bytes]:
+def _history_entries(events: list[dict[str, Any]]) -> dict[str, bytes]:
     by_session: dict[str, list[str]] = {}
     for e in events:
         session = e.get("session") or "default"
@@ -52,8 +52,8 @@ def _history_entries(events: list[dict]) -> dict[str, bytes]:
     }
 
 
-def _history_from_entries(entries: dict[str, bytes]) -> list[dict]:
-    events: list[dict] = []
+def _history_from_entries(entries: dict[str, bytes]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
     for tree_path in sorted(entries):
         if not tree_path.startswith(HISTORY_PREFIX):
             continue

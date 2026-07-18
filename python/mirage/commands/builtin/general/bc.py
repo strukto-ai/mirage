@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.base import Accessor, NOOPAccessor

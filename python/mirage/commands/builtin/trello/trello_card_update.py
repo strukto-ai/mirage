@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.builtin.trello._input import resolve_text_input
