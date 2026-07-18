@@ -29,7 +29,8 @@ from mirage.server.daemon_config import (ALLOWED_KEYS, NUMERIC_KEYS,
                                          DaemonConfigError, read_daemon_table)
 from mirage.server.env import (ENV_ALLOWED_HOSTS, ENV_DAEMON_PORT,
                                ENV_IDLE_GRACE_SECONDS, ENV_PID_FILE,
-                               ENV_SNAPSHOT_ROOT, ENV_VERSION_ROOT)
+                               ENV_SNAPSHOT_ROOT, ENV_STATE_ROOT,
+                               ENV_VERSION_ROOT)
 from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
 from mirage.server.paths import mirage_home
 
@@ -51,6 +52,7 @@ _ENV_FOR_KEY = {
     "pid_file": ENV_PID_FILE,
     "version_root": ENV_VERSION_ROOT,
     "snapshot_root": ENV_SNAPSHOT_ROOT,
+    "state_root": ENV_STATE_ROOT,
 }
 
 
@@ -130,6 +132,7 @@ def _default_for_key(key: str, home: Path) -> str:
         "pid_file": str(home / "daemon.pid"),
         "version_root": str(home / "repos"),
         "snapshot_root": str(home / "snapshots"),
+        "state_root": str(home / "state"),
     }
     return defaults[key]
 

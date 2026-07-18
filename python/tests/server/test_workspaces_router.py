@@ -414,3 +414,46 @@ def test_registry_zero_grace_fires_immediately():
         assert registry.exit_event.is_set()
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_create_defaults_to_disk_store_under_state_root(tmp_path):
+    """The daemon default is disk: a workspace created without a store:
+    block persists its sessions+meta under the app's state root."""
+    exit_event = asyncio.Event()
+    app = build_app(idle_grace_seconds=10.0,
+                    exit_event=exit_event,
+                    state_root=tmp_path)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        body = {**_minimal_config(), "id": "diskws"}
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+        r = await client.post("/v1/workspaces/diskws/execute",
+                              json={"command": "echo hi"})
+        assert r.status_code == 200
+    assert (tmp_path / "workspaces" / "diskws" / "workspace.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_create_explicit_store_block_wins_over_disk_default(tmp_path):
+    exit_event = asyncio.Event()
+    app = build_app(idle_grace_seconds=10.0,
+                    exit_event=exit_event,
+                    state_root=tmp_path)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        body = {
+            "config": {
+                **_minimal_config()["config"],
+                "store": {
+                    "type": "ram"
+                },
+            },
+            "id": "ramws",
+        }
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+    assert not (tmp_path / "workspaces" / "ramws").exists()

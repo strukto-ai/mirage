@@ -30,7 +30,8 @@ from mirage.server.host_validation import (HostHeaderMiddleware,
                                            resolve_allowed_hosts)
 from mirage.server.jobs import JobTable
 from mirage.server.paths import (mirage_home, pid_file_path,
-                                 snapshot_root_path, version_root_path)
+                                 snapshot_root_path, state_root_path,
+                                 version_root_path)
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import (execute, health, jobs, sessions, versions,
                                    workspaces)
@@ -82,6 +83,7 @@ def build_app(idle_grace_seconds: float = 30.0,
               auth_config: AuthConfig | None = None,
               version_root: str | Path | None = None,
               snapshot_root: str | Path | None = None,
+              state_root: str | Path | None = None,
               pid_file: str | Path | None = None) -> FastAPI:
     """Construct a daemon FastAPI app.
 
@@ -108,6 +110,9 @@ def build_app(idle_grace_seconds: float = 30.0,
             (default) uses ``$MIRAGE_HOME/repos`` (or ``~/.mirage/repos``).
         snapshot_root (str | Path | None): snapshot root. ``None``
             (default) uses ``$MIRAGE_HOME/snapshots``.
+        state_root (str | Path | None): live-state root for the disk
+            store the daemon defaults workspaces to. ``None`` (default)
+            resolves ``$MIRAGE_STATE_ROOT`` then ``$MIRAGE_HOME/state``.
         pid_file (str | Path | None): daemon pid file path. ``None``
             (default) resolves ``$MIRAGE_PID_FILE`` then
             ``$MIRAGE_HOME/daemon.pid`` (or ``~/.mirage/daemon.pid``).
@@ -139,6 +144,7 @@ def build_app(idle_grace_seconds: float = 30.0,
     app.state.pid_file = pid_file_path(pid_file)
     app.state.version_backend = LocalBackend(version_root_path(version_root))
     app.state.snapshot_root = snapshot_root_path(snapshot_root)
+    app.state.state_root = state_root_path(state_root)
     app.include_router(workspaces.router)
     app.include_router(versions.router)
     app.include_router(sessions.router)

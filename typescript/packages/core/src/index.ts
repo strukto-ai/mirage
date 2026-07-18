@@ -406,7 +406,7 @@ export {
 } from './workspace/types.ts'
 export { Session, type SessionInit } from './workspace/session/session.ts'
 export { SessionManager } from './workspace/session/manager.ts'
-export { SessionStore, type SessionFields } from './workspace/session/store.ts'
+export { SessionStore, generationOf, type SessionFields } from './workspace/session/store.ts'
 export { RAMSessionStore } from './workspace/session/ram.ts'
 export { S3RecordClient, S3SessionStore, isConditionLostError } from './workspace/session/s3.ts'
 export {

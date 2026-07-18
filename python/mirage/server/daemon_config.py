@@ -33,6 +33,7 @@ ALLOWED_KEYS = frozenset({
     "pid_file",
     "version_root",
     "snapshot_root",
+    "state_root",
 })
 NUMERIC_KEYS = frozenset({"idle_grace_seconds", "jwt_clock_skew", "port"})
 
