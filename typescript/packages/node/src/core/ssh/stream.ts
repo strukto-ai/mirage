@@ -12,10 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { once } from 'node:events'
 import type { PathSpec } from '@struktoai/mirage-core'
 import { enoent } from '@struktoai/mirage-core'
+import type { ReadStream } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
+
+async function waitForClose(rs: ReadStream): Promise<Error | null> {
+  try {
+    await once(rs, 'close')
+    return null
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+export async function* readChunks(rs: ReadStream): AsyncIterable<Uint8Array> {
+  const closed = waitForClose(rs)
+  let closeError: Error | null = null
+  try {
+    for await (const chunk of rs) {
+      const buf = chunk as Buffer
+      yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+    }
+  } finally {
+    if (!rs.destroyed) rs.destroy()
+    closeError = await closed
+  }
+  if (closeError !== null) throw closeError
+}
 
 export async function* stream(accessor: SSHAccessor, p: PathSpec): AsyncIterable<Uint8Array> {
   const sftp = await accessor.sftp()
@@ -23,10 +49,7 @@ export async function* stream(accessor: SSHAccessor, p: PathSpec): AsyncIterable
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   const rs = sftp.createReadStream(remote)
   try {
-    for await (const chunk of rs) {
-      const buf = chunk as Buffer
-      yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
-    }
+    yield* readChunks(rs)
   } catch (err) {
     if (isNoSuchFile(err)) throw enoent(p)
     throw err
@@ -46,9 +69,7 @@ export async function rangeRead(
   const chunks: Uint8Array[] = []
   let total = 0
   try {
-    for await (const chunk of rs) {
-      const buf = chunk as Buffer
-      const u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+    for await (const u8 of readChunks(rs)) {
       chunks.push(u8)
       total += u8.byteLength
     }
