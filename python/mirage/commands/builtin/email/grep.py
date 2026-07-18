@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_count_has_matches,
                                                  grep_lines, pattern_arg)
@@ -90,13 +89,11 @@ async def grep(
         resolved,
         texts,
         flags,
-        readdir=_readdir,
-        stat=_stat,
-        read_bytes=email_read,
+        readdir=bound_op(_readdir, accessor, index),
+        stat=bound_op(_stat, accessor, index),
+        read_bytes=bound_op(email_read, accessor, index),
         read_stream=None,
-        accessor=accessor,
         stdin=stdin,
-        index=index,
     )
 
 

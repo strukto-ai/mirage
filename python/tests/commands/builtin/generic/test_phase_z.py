@@ -21,29 +21,29 @@ def _spec(path: str, prefix: str = "") -> PathSpec:
 def _make_backend(files: dict[str, bytes]):
     store = dict(files)
 
-    async def read_bytes(accessor, path, index=None):
+    async def read_bytes(path):
         key = path.virtual if isinstance(path, PathSpec) else path
         if key not in store:
             raise FileNotFoundError(key)
         return store[key]
 
-    async def write_bytes(accessor, path, data, index=None):
+    async def write_bytes(path, data):
         key = path.virtual if isinstance(path, PathSpec) else path
         store[key] = data
 
-    async def read_stream(accessor, path, index=None):
+    async def read_stream(path):
         key = path.virtual if isinstance(path, PathSpec) else path
         if key not in store:
             raise FileNotFoundError(key)
         yield store[key]
 
-    async def mkdir_fn(accessor, path, parents=False):
+    async def mkdir_fn(path, parents=False):
         pass
 
     return read_bytes, write_bytes, read_stream, mkdir_fn, store
 
 
-async def _stat_file(accessor, path, index=None) -> FileStat:
+async def _stat_file(path) -> FileStat:
     return FileStat(name=path.virtual, type=FileType.TEXT)
 
 
@@ -291,7 +291,7 @@ async def test_tar_requires_f():
 async def test_diff_identical_files():
     rb, _, _, _, _ = _make_backend({"a": b"hello\n", "b": b"hello\n"})
 
-    async def rd(accessor, path, index=None):
+    async def rd(path):
         return []
 
     out, io_res = await diff([_spec("a"), _spec("b")],
@@ -306,7 +306,7 @@ async def test_diff_identical_files():
 async def test_diff_quiet_differ():
     rb, _, _, _, _ = _make_backend({"a": b"x\n", "b": b"y\n"})
 
-    async def rd(accessor, path, index=None):
+    async def rd(path):
         return []
 
     out, io_res = await diff([_spec("a"), _spec("b")],
@@ -325,7 +325,7 @@ async def test_diff_unified():
         "b": b"hello\nuniverse\n"
     })
 
-    async def rd(accessor, path, index=None):
+    async def rd(path):
         return []
 
     out, _ = await diff([_spec("a"), _spec("b")],
@@ -341,7 +341,7 @@ async def test_diff_unified():
 async def test_diff_too_few_paths():
     rb, _, _, _, _ = _make_backend({"a": b"x\n"})
 
-    async def rd(accessor, path, index=None):
+    async def rd(path):
         return []
 
     with pytest.raises(ValueError, match="two paths"):

@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.cache.read_through import cached_prefix_bytes
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -57,9 +56,7 @@ async def head(
                 data = await range_read(accessor, paths[0], 0, c_int)
             return yield_bytes(data), IOResult()
         return head_multi(paths,
-                          read=read_stream,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(read_stream, accessor, index),
                           n=n_int,
                           c=c_int,
                           show_headers=(v or len(paths) > 1)

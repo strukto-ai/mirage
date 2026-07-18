@@ -4,7 +4,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.output import format_records
 from mirage.types import PathSpec
@@ -188,7 +187,6 @@ async def format_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
-    accessor: Accessor | None = None,
     args_l: bool = False,
     w: bool = False,
     c: bool = False,
@@ -207,15 +205,8 @@ async def format_multi(
 
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
-        read (Callable[..., Any]): Reader called as ``read(accessor, path)``;
+        read (Callable[..., Any]): Reader called as ``read(path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
-        accessor (Accessor | None): Backend accessor passed
-            through to ``read``.
-        args_l (bool): Report line count only.
-        w (bool): Report word count only.
-        c (bool): Report byte count only.
-        m (bool): Report character count only.
-        L (bool): Report longest line length only.
 
     Returns:
         tuple[bytes, bytes]: Encoded wc output (``b""`` when nothing prints)
@@ -227,7 +218,7 @@ async def format_multi(
     err = b""
     for path in paths:
         try:
-            source = read(accessor, path)
+            source = read(path)
             if inspect.isawaitable(source):
                 source = await source
             counts = await wc(source)

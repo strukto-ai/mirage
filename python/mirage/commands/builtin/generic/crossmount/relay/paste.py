@@ -40,6 +40,5 @@ async def run_paste(scopes: list[PathSpec], flag_kwargs: dict,
     return await generic_paste(flat_scopes(scopes),
                                read_bytes=functools.partial(
                                    relay, dispatch, "read"),
-                               accessor=None,
                                delimiter=d if d else "\t",
                                serial=fl.as_bool("s"))

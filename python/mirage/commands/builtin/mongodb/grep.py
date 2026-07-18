@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import AsyncIterator
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.mongodb._provision import search_provision
 from mirage.commands.builtin.utils.output import format_records
@@ -112,11 +112,9 @@ async def grep(
         resolved,
         texts,
         flags,
-        readdir=_readdir,
-        stat=_stat,
-        read_bytes=mongodb_read,
-        read_stream=read_stream,
-        accessor=accessor,
+        readdir=bound_op(_readdir, accessor, index),
+        stat=bound_op(_stat, accessor, index),
+        read_bytes=bound_op(mongodb_read, accessor, index),
+        read_stream=bound_op(read_stream, accessor, index),
         stdin=stdin,
-        index=index,
     )

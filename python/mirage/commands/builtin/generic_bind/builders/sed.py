@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.sed import sed as generic_sed
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.commands.builtin.generic_bind.provision import make_sed_provision
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -66,10 +66,10 @@ async def _scripts_from_files(ops: CommandIO, accessor: Accessor,
         index (IndexCacheStore | None): optional cache index.
         f_files (list[PathSpec]): -f script-file paths.
     """
-    reader = with_index(ops.read_bytes, index)
+    reader = bound_op(ops.read_bytes, accessor, index)
     out: list[str] = []
     for pf in f_files:
-        data = await reader(accessor, pf)
+        data = await reader(pf)
         text = data.decode(errors="replace")
         if text.endswith("\n"):
             text = text[:-1]
@@ -121,14 +121,13 @@ async def sed(
     return await generic_sed(
         operands,
         script,
-        read_bytes=with_index(ops.read_bytes, index),
-        write_bytes=ops.write,
-        accessor=accessor,
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        write_bytes=(partial(ops.write, accessor)
+                     if ops.write is not None else None),
         stdin=stdin,
         in_place=i,
         suppress=n,
         extended=E or r,
-        index=index,
     )
 
 

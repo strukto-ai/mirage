@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github.narrow import (files_only_shortcircuit,
                                                    narrow_scope)
 from mirage.commands.builtin.grep_helper import pattern_arg
@@ -124,11 +123,9 @@ async def grep(
         resolved,
         texts,
         flags,
-        readdir=github_readdir,
-        stat=github_stat,
-        read_bytes=github_read,
+        readdir=bound_op(github_readdir, accessor, index),
+        stat=bound_op(github_stat, accessor, index),
+        read_bytes=bound_op(github_read, accessor, index),
         read_stream=None,
-        accessor=accessor,
         stdin=stdin,
-        index=index,
     )

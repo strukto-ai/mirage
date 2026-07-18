@@ -20,7 +20,8 @@ from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation,
-                                                          OperationFn)
+                                                          OperationFn,
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import NativeCopy, PathSpec
 from mirage.utils.key_prefix import rekey
@@ -75,11 +76,10 @@ async def cp(
     return await generic_cp(paths,
                             strategy=strategy,
                             find_type="f",
-                            stat=partial(ops.stat, accessor),
+                            stat=bound_op(ops.stat, accessor, index),
                             recursive=r or R or a,
                             n=n,
-                            v=v,
-                            index=index)
+                            v=v)
 
 
 BUILDER = Builder('cp',

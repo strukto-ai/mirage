@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.xxd import xxd as generic_xxd
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -47,8 +45,8 @@ async def xxd(
     cols = int(c) if c and c is not True else 16
     group = int(g) if g and g is not True else 2
     return await generic_xxd(paths,
-                             read_stream=with_index(ops.read_stream, index),
-                             accessor=accessor,
+                             read_stream=bound_op(ops.read_stream, accessor,
+                                                  index),
                              stdin=stdin,
                              reverse=r,
                              plain=p,

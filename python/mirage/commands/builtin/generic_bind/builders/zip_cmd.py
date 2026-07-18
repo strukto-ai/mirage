@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.zip_cmd import zip_cmd as generic_zip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation,
-                                                          with_index)
+                                                          Operation, bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,9 +39,10 @@ async def zip_cmd(
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_zip(paths,
-                             read_bytes=with_index(ops.read_bytes, index),
-                             write_bytes=ops.require(Operation.WRITE),
-                             accessor=accessor,
+                             read_bytes=bound_op(ops.read_bytes, accessor,
+                                                 index),
+                             write_bytes=partial(ops.require(Operation.WRITE),
+                                                 accessor),
                              r=r,
                              j=j,
                              q=q)

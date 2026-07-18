@@ -3,8 +3,6 @@ from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any, Callable
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.cache.read_through import cache_aware_read
 from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
@@ -74,8 +72,6 @@ def head_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
-    accessor: Accessor | None = None,
-    index: IndexCacheStore | None = None,
     n: int | None = None,
     c: int | None = None,
     show_headers: bool = False,
@@ -97,21 +93,11 @@ def head_multi(
 
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
-        read (Callable[..., Any]): Reader called as ``read(accessor, path,
-            index)``; returns bytes, an awaitable of bytes, or an async byte
-            iterator.
-        accessor (Accessor | None): Backend accessor passed through to
-            ``read``.
-        index (IndexCacheStore | None): Index cache store passed through to
-            ``read``.
-        n (int | None): Line count (negative = all-but-last-N, per head).
-        c (int | None): Byte count.
-        show_headers (bool): Emit ``==> path <==`` banners between files.
+        read (Callable[..., Any]): Bound reader called as ``read(path)``;
+            returns bytes, an awaitable of bytes, or an async byte iterator.
     """
     return _head_multi(paths,
                        read=cache_aware_read(read),
-                       accessor=accessor,
-                       index=index,
                        n=n,
                        c=c,
                        show_headers=show_headers)
@@ -121,8 +107,6 @@ async def _head_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
-    accessor: Accessor | None = None,
-    index: IndexCacheStore | None = None,
     n: int | None = None,
     c: int | None = None,
     show_headers: bool = False,
@@ -133,7 +117,7 @@ async def _head_multi(
             if i > 0:
                 header = "\n" + header
             yield header.encode()
-        source = read(accessor, p, index)
+        source = read(p)
         if inspect.isawaitable(source):
             source = await source
         async for chunk in head(source, n=n, c=c):

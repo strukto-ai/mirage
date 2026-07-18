@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.md5 import md5 as generic_md5
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
@@ -37,8 +37,7 @@ async def md5(
         return None, IOResult(exit_code=1, stderr=err)
     return await merge_split_errors(
         await generic_md5(paths,
-                          read_bytes=with_index(ops.read_bytes, index),
-                          accessor=accessor,
+                          read_bytes=bound_op(ops.read_bytes, accessor, index),
                           stdin=stdin), err)
 
 

@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tr import tr as generic_tr
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -41,8 +39,7 @@ async def tr(
     return await generic_tr(
         paths,
         texts,
-        read_stream=with_index(ops.read_stream, index),
-        accessor=accessor,
+        read_stream=bound_op(ops.read_stream, accessor, index),
         stdin=stdin,
         delete=d,
         squeeze=s,

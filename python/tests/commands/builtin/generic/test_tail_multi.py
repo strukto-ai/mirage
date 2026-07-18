@@ -39,7 +39,7 @@ async def _collect(gen) -> bytes:
 async def test_tail_multi_bytes_reader_no_headers():
     data = {"/a": b"a1\na2\na3\n", "/b": b"b1\nb2\n"}
 
-    async def read(accessor, p, index):
+    async def read(p):
         return data[p.virtual]
 
     out = await _collect(
@@ -51,7 +51,7 @@ async def test_tail_multi_bytes_reader_no_headers():
 async def test_tail_multi_with_headers():
     data = {"/a": b"a1\na2\n", "/b": b"b1\nb2\n"}
 
-    async def read(accessor, p, index):
+    async def read(p):
         return data[p.virtual]
 
     out = await _collect(
@@ -63,7 +63,7 @@ async def test_tail_multi_with_headers():
 async def test_tail_multi_stream_reader():
     chunks = {"/a": [b"a1\n", b"a2\n"], "/b": [b"b1\n"]}
 
-    def read(accessor, p, index):
+    def read(p):
 
         async def gen():
             for ch in chunks[p.virtual]:

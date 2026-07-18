@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.strings import strings as generic_strings
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
@@ -40,8 +38,8 @@ async def strings(
         return None, IOResult(exit_code=1, stderr=err)
     return await merge_split_errors(
         await generic_strings(paths,
-                              read_bytes=with_index(ops.read_bytes, index),
-                              accessor=accessor,
+                              read_bytes=bound_op(ops.read_bytes, accessor,
+                                                  index),
                               stdin=stdin,
                               min_len=int(n) if n else 4), err)
 

@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.postgres._provision import head_tail_provision
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -86,9 +85,7 @@ async def tail(
         paths = await resolve_glob(accessor, paths, index=index)
         show_headers = (v or len(paths) > 1) and not q
         return tail_multi(paths,
-                          read=postgres_read,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(postgres_read, accessor, index),
                           n=n_int,
                           c=c_int,
                           from_line=from_line,

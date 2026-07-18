@@ -15,7 +15,8 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,11 +36,9 @@ async def stat(
         raise ValueError("stat: no resource")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_stat(paths,
-                              stat_fn=ops.stat,
-                              accessor=accessor,
+                              stat_fn=bound_op(ops.stat, accessor, index),
                               c=c,
-                              f=f,
-                              index=index)
+                              f=f)
 
 
 BUILDER = Builder('stat', stat, None, False, None)

@@ -527,8 +527,8 @@ async def write_metadata_provision(
 
 
 async def pure_provision(
-    accessor: Accessor | None = None,
-    paths: list[PathSpec] | None = None,
+    accessor: Accessor,
+    paths: list[PathSpec],
     *_args: str,
     command: str = "",
     **kwargs,

@@ -30,7 +30,7 @@ def _key(p) -> str:
 
 def _make_backend(files: dict[str, bytes], dirs: set[str]):
 
-    async def stat(p, index=None) -> FileStat:
+    async def stat(p) -> FileStat:
         k = _key(p)
         if k in dirs:
             return FileStat(name=k.rsplit("/", 1)[-1], type=FileType.DIRECTORY)

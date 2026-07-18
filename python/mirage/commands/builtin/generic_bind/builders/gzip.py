@@ -12,15 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as generic_gzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation,
-                                                          with_index)
+                                                          Operation, bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,10 +41,12 @@ async def gzip(
     if paths:
         paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_gzip(paths,
-                              read_bytes=with_index(ops.read_bytes, index),
-                              write_bytes=ops.require(Operation.WRITE),
-                              unlink=ops.require(Operation.UNLINK),
-                              accessor=accessor,
+                              read_bytes=bound_op(ops.read_bytes, accessor,
+                                                  index),
+                              write_bytes=partial(ops.require(Operation.WRITE),
+                                                  accessor),
+                              unlink=partial(ops.require(Operation.UNLINK),
+                                             accessor),
                               stdin=stdin,
                               decompress=d,
                               keep=k,

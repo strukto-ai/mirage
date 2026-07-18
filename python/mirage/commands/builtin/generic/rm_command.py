@@ -32,7 +32,7 @@ def make_rm(
     """Build a file-only ``rm`` over an index-threaded unlink.
 
     For backends whose unlink resolves ids through the cache index; the
-    factory rm builder calls ``ops.unlink(accessor, path)`` without an
+    factory rm builder calls ``ops.unlink(path)`` without an
     index, so those backends bind this wrapper instead.
 
     Args:
@@ -59,7 +59,7 @@ def make_rm(
         removed: dict[str, ByteSource] = {}
         for p in paths:
             try:
-                await unlink(accessor, p, index)
+                await unlink(p)
             except (FileNotFoundError, ValueError):
                 if f:
                     continue

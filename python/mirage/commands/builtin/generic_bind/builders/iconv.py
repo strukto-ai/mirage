@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.iconv import iconv as generic_iconv
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation,
-                                                          with_index)
+                                                          Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -41,9 +40,10 @@ async def iconv(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_iconv(paths,
-                               read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.require(Operation.WRITE),
-                               accessor=accessor,
+                               read_bytes=bound_op(ops.read_bytes, accessor,
+                                                   index),
+                               write_bytes=partial(
+                                   ops.require(Operation.WRITE), accessor),
                                stdin=stdin,
                                from_enc=f or "utf-8",
                                to_enc=t or "utf-8",

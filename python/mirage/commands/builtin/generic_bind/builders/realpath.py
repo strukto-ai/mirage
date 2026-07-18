@@ -17,7 +17,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.realpath import \
     realpath as generic_realpath
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,8 +35,7 @@ async def realpath(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await ops.resolve_glob(accessor, paths or [], index)
     return await generic_realpath(paths,
-                                  stat_fn=with_index(ops.stat, index),
-                                  accessor=accessor,
+                                  stat_fn=bound_op(ops.stat, accessor, index),
                                   e=e,
                                   m=m)
 

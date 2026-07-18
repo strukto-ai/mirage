@@ -19,17 +19,17 @@ def _spec(path: str) -> PathSpec:
 def _make_backend(files: dict[str, bytes]):
     store = dict(files)
 
-    async def read_bytes(accessor, path, index=None):
+    async def read_bytes(path):
         key = path.virtual if isinstance(path, PathSpec) else path
         if key not in store:
             raise FileNotFoundError(key)
         return store[key]
 
-    async def write_bytes(accessor, path, data, index=None):
+    async def write_bytes(path, data):
         key = path.virtual if isinstance(path, PathSpec) else path
         store[key] = data
 
-    async def unlink(accessor, path, index=None):
+    async def unlink(path):
         key = path.virtual if isinstance(path, PathSpec) else path
         store.pop(key, None)
 

@@ -14,13 +14,13 @@ def _spec(path: str) -> PathSpec:
 
 def _make_backend(files: dict[str, bytes]):
 
-    async def read_bytes(accessor, path, index=None):
+    async def read_bytes(path):
         key = path.virtual if isinstance(path, PathSpec) else path
         if key not in files:
             raise FileNotFoundError(key)
         return files[key]
 
-    async def read_stream(accessor, path, index=None):
+    async def read_stream(path):
         assert isinstance(path, PathSpec)
         key = path.virtual
         if key not in files:

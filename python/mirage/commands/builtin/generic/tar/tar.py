@@ -3,7 +3,6 @@ import io
 import tarfile
 from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tar.constants import (READ_MODES,
                                                            WRITE_MODES)
 from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
@@ -43,7 +42,6 @@ async def _create_archive(
     verbose: bool,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    accessor: Accessor | None,
 ) -> tuple[ByteSource | None, IOResult]:
     buf = io.BytesIO()
     names: list[str] = []
@@ -52,13 +50,13 @@ async def _create_archive(
             name = p.virtual.lstrip("/")
             if exclude and _excluded(name, exclude):
                 continue
-            data = await read_bytes(accessor, p)
+            data = await read_bytes(p)
             info = tarfile.TarInfo(name=name)
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
             names.append(name)
     archive = buf.getvalue()
-    await write_bytes(accessor, archive_path, archive)
+    await write_bytes(archive_path, archive)
     stdout = ("\n".join(names) + "\n").encode() if verbose and names else None
     return stdout, IOResult(writes={archive_path.mount_path: archive})
 
@@ -67,9 +65,8 @@ async def _list_archive(
     archive_path: PathSpec,
     mode_suffix: CompressionSuffix,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None,
 ) -> tuple[ByteSource | None, IOResult]:
-    data = await read_bytes(accessor, archive_path)
+    data = await read_bytes(archive_path)
     with tarfile.open(fileobj=io.BytesIO(data),
                       mode=_read_mode(mode_suffix)) as tf:
         names = tf.getnames()
@@ -85,9 +82,8 @@ async def _extract_archive(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
-    accessor: Accessor | None,
 ) -> tuple[ByteSource | None, IOResult]:
-    data = await read_bytes(accessor, archive_path)
+    data = await read_bytes(archive_path)
     writes: dict[str, ByteSource] = {}
     names: list[str] = []
     with tarfile.open(fileobj=io.BytesIO(data),
@@ -107,11 +103,8 @@ async def _extract_archive(
             out_path = dest_path.rstrip("/") + "/" + "/".join(name_parts)
             parent = out_path.rsplit("/", 1)[0] or "/"
             if parent != "/":
-                await mkdir_fn(accessor,
-                               PathSpec.from_str_path(parent),
-                               parents=True)
-            await write_bytes(accessor, PathSpec.from_str_path(out_path),
-                              content)
+                await mkdir_fn(PathSpec.from_str_path(parent), parents=True)
+            await write_bytes(PathSpec.from_str_path(out_path), content)
             writes[out_path] = content
             names.append(member.name)
     stdout = ("\n".join(names) + "\n").encode() if verbose and names else None
@@ -124,7 +117,6 @@ async def tar(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
-    accessor: Accessor | None = None,
     c: bool = False,
     x: bool = False,
     t: bool = False,
@@ -145,17 +137,16 @@ async def tar(
         if archive is None:
             raise ValueError("tar: -f is required")
         return await _create_archive(paths, archive, mode_suffix, exclude, v,
-                                     read_bytes, write_bytes, accessor)
+                                     read_bytes, write_bytes)
     if t:
         if archive is None:
             raise ValueError("tar: -f is required")
-        return await _list_archive(archive, mode_suffix, read_bytes, accessor)
+        return await _list_archive(archive, mode_suffix, read_bytes)
     if x:
         if archive is None:
             raise ValueError("tar: -f is required")
         return await _extract_archive(archive, dest_path, mode_suffix, strip_n,
-                                      v, read_bytes, write_bytes, mkdir_fn,
-                                      accessor)
+                                      v, read_bytes, write_bytes, mkdir_fn)
     raise ValueError("tar: must specify -c, -x, or -t")
 
 

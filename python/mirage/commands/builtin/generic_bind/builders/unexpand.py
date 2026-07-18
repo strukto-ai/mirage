@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.unexpand import \
     unexpand as generic_unexpand
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
@@ -43,8 +41,8 @@ async def unexpand(
         return None, IOResult(exit_code=1, stderr=err)
     return await merge_split_errors(
         await generic_unexpand(paths,
-                               read_bytes=with_index(ops.read_bytes, index),
-                               accessor=accessor,
+                               read_bytes=bound_op(ops.read_bytes, accessor,
+                                                   index),
                                stdin=stdin,
                                tabsize=int(t) if t is not None else 8,
                                all_spaces=a), err)

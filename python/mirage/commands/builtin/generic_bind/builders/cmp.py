@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cmp import cmp_cmd as generic_cmp
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,8 +39,8 @@ async def cmp_cmd(
         raise ValueError('cmp: requires two paths')
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_cmp(paths,
-                             read_bytes=with_index(ops.read_bytes, index),
-                             accessor=accessor,
+                             read_bytes=bound_op(ops.read_bytes, accessor,
+                                                 index),
                              silent=s,
                              verbose=args_l,
                              limit=int(n) if n is not None else None,

@@ -1,8 +1,6 @@
 import re
 from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
@@ -40,10 +38,8 @@ async def stat(
     paths: list[PathSpec],
     *,
     stat_fn: Callable[..., Awaitable[FileStat]],
-    accessor: Accessor | None = None,
     c: str | None = None,
     f: str | None = None,
-    index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
@@ -52,7 +48,7 @@ async def stat(
     err = b""
     for p in paths:
         try:
-            s = await stat_fn(accessor, p, index)
+            s = await stat_fn(p)
         except FS_ERRORS as exc:
             # GNU stat keeps reporting the remaining operands, exit 1.
             err += fs_error_line("stat", p, exc).encode()

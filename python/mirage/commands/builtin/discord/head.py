@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -88,9 +88,7 @@ async def head(
 
         paths = await resolve_glob(accessor, paths, index)
         return head_multi(paths,
-                          read=discord_read,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(discord_read, accessor, index),
                           n=n_int,
                           c=c_int,
                           show_headers=(v or len(paths) > 1)

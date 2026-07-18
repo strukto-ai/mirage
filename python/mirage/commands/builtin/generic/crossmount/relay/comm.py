@@ -39,7 +39,6 @@ async def run_comm(scopes: list[PathSpec], flag_kwargs: dict,
     return await generic_comm(flat_scopes(scopes),
                               read_bytes=functools.partial(
                                   relay, dispatch, "read"),
-                              accessor=None,
                               suppress1=fl.as_bool("args_1"),
                               suppress2=fl.as_bool("2"),
                               suppress3=fl.as_bool("3"),

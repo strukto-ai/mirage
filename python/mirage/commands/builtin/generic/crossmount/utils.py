@@ -17,8 +17,6 @@ import functools
 from collections.abc import AsyncIterator
 from typing import Any, Callable
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.crossmount.types import (OperandRun,
                                                               RunSingle)
 from mirage.io import IOResult
@@ -27,24 +25,16 @@ from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
-async def relay(dispatch: Callable,
-                name: str,
-                accessor: Accessor | None,
-                path: PathSpec,
-                index: IndexCacheStore | None = None,
+async def relay(dispatch: Callable, name: str, path: PathSpec,
                 **kwargs: Any) -> Any:
     # Relay one op for one path to the mount that owns it. The generics call
-    # ops as (accessor, path, index); dispatch ignores both and keys off the
-    # path.
+    # ops as (path); dispatch keys off the path.
     data, _ = await dispatch(name, path, **kwargs)
     return data
 
 
-async def stream(dispatch: Callable,
-                 accessor: Accessor | None,
-                 path: PathSpec,
-                 index: IndexCacheStore | None = None) -> AsyncIterator[bytes]:
-    yield await relay(dispatch, "read", accessor, path)
+async def stream(dispatch: Callable, path: PathSpec) -> AsyncIterator[bytes]:
+    yield await relay(dispatch, "read", path)
 
 
 async def run_operands(run_single: RunSingle,
@@ -120,9 +110,9 @@ def transfer_primitives(dispatch: Callable) -> dict[str, Any]:
     """
     p = functools.partial
     return dict(
-        stat=p(relay, dispatch, "stat", None),
-        read_bytes=p(relay, dispatch, "read", None),
-        write=p(relay, dispatch, "write", None),
-        mkdir=p(relay, dispatch, "mkdir", None),
-        readdir=p(relay, dispatch, "readdir", None),
+        stat=p(relay, dispatch, "stat"),
+        read_bytes=p(relay, dispatch, "read"),
+        write=p(relay, dispatch, "write"),
+        mkdir=p(relay, dispatch, "mkdir"),
+        readdir=p(relay, dispatch, "readdir"),
     )

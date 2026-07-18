@@ -8,7 +8,7 @@ def _unused_read_stream(_accessor, _path):
     raise AssertionError("read_stream should not be called for stdin input")
 
 
-async def _generator_read_stream(_accessor, _path):
+async def _generator_read_stream(_path):
     yield b"dup\ndup\nsolo\n"
 
 

@@ -46,32 +46,37 @@ async def overlaid_stat(stat: OperationFn, overlay: StatOverlay,
 
 
 @overload
-def with_index(fn: OperationFn, index: IndexCacheStore | None) -> OperationFn:
+def bound_op(fn: OperationFn, accessor: Accessor,
+             index: IndexCacheStore | None) -> OperationFn:
     ...
 
 
 @overload
-def with_index(fn: None, index: IndexCacheStore | None) -> None:
+def bound_op(fn: None, accessor: Accessor,
+             index: IndexCacheStore | None) -> None:
     ...
 
 
-def with_index(fn: OperationFn | None,
-               index: IndexCacheStore | None) -> OperationFn | None:
-    """Bind the runtime cache index into a read op for the generics.
+def bound_op(fn: OperationFn | None, accessor: Accessor,
+             index: IndexCacheStore | None) -> OperationFn | None:
+    """Bind the backend accessor and cache index into an op for the generics.
 
-    A generic command calls its injected reader as ``read(accessor, path)``
-    with no index, but index-backed backends (gdrive, gmail, slack, ...)
-    resolve a path to its real id through the index, so the bound index must
-    travel with the reader. Harmless for backends that ignore it. ``None``
-    passes through so a backend/test can still opt out of streaming.
+    A generic command calls its injected ops as ``op(path)``: backend
+    identity (the accessor) and index-backed path resolution (gdrive,
+    gmail, slack, ... resolve a path to its real id through the index)
+    are wiring, so both bind here, mirroring the TS builders' closures.
+    ``None`` passes through so a backend/test can still opt out of
+    streaming.
 
     Args:
-        fn (OperationFn | None): read op, or None to opt out of streaming.
+        fn (OperationFn | None): backend op ``(accessor, path, *, index)``,
+            or None to opt out of streaming.
+        accessor (Accessor): backend handle bound into the op.
         index (IndexCacheStore | None): the per-call cache index.
     """
     if fn is None:
         return None
-    return functools.partial(fn, index=index)
+    return functools.partial(fn, accessor, index=index)
 
 
 class Operation(StrEnum):

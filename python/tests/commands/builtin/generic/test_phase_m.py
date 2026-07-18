@@ -18,14 +18,14 @@ def _spec(path: str) -> PathSpec:
 
 def _make_backend(files: dict[str, bytes]):
 
-    async def read_bytes(accessor, path, index=None):
+    async def read_bytes(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         if spec.virtual not in files:
             raise FileNotFoundError(spec.virtual)
         return files[spec.virtual]
 
-    async def read_stream(accessor, path, index=None):
+    async def read_stream(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         if spec.virtual not in files:

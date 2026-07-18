@@ -187,7 +187,7 @@ async def test_write_metadata_zero_bytes_recursive_floors():
 
 @pytest.mark.asyncio
 async def test_pure_provision_zero_exact():
-    result = await pure_provision(command="seq 3")
+    result = await pure_provision(None, [], command="seq 3")
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 0
     assert result.read_ops == 0

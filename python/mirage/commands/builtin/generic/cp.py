@@ -14,7 +14,6 @@
 
 from typing import Callable
 
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
@@ -35,8 +34,11 @@ def mounted_path(root: PathSpec, mount_path: str) -> PathSpec:
     return PathSpec.from_str_path(virtual, mount_path.strip("/"))
 
 
-async def walk(readdir: ReaddirFn, stat: StatFn, root: PathSpec,
-               index: IndexCacheStore | None) -> list[tuple[PathSpec, bool]]:
+async def walk(
+    readdir: ReaddirFn,
+    stat: StatFn,
+    root: PathSpec,
+) -> list[tuple[PathSpec, bool]]:
     """List a tree as ``(path, is_dir)`` pairs, parents before children.
 
     The dir/file type is captured here, while the tree is intact, so a caller
@@ -48,18 +50,17 @@ async def walk(readdir: ReaddirFn, stat: StatFn, root: PathSpec,
         readdir (Callable): Lists a directory's full child paths.
         stat (Callable): Stats a path; ``.type`` distinguishes directories.
         root (PathSpec): Root of the tree.
-        index (IndexCacheStore | None): Optional cache index for stat/readdir.
     """
-    info = await stat(root, index)
+    info = await stat(root)
     if info.type != FileType.DIRECTORY:
         return [(root, False)]
     entries = [(root, True)]
     queue = [root]
     while queue:
         directory = queue.pop(0)
-        for child_virtual in await readdir(directory, index):
+        for child_virtual in await readdir(directory):
             child = descendant_path(root, child_virtual)
-            child_info = await stat(child, index)
+            child_info = await stat(child)
             is_dir = child_info.type == FileType.DIRECTORY
             entries.append((child, is_dir))
             if is_dir:
@@ -76,7 +77,6 @@ async def cp(
     n: bool,
     v: bool,
     find_type: str = "f",
-    index: IndexCacheStore | None = None,
     backend_key: Callable[[PathSpec], str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Copy sources to a destination, fanning out into a directory.
@@ -94,7 +94,6 @@ async def cp(
         v (bool): Verbose; emit one ``src -> target`` line per write.
         strategy (CopyStrategy): Complete native or primitive copy capability.
         find_type (str): File-type selector passed to ``find``.
-        index (IndexCacheStore | None): Cache for the destination dir probe.
         backend_key (Callable | None): Maps a path to its backend storage key
             for the same-file and into-own-subtree guards; defaults to the
             normalized mount-relative path.
@@ -106,7 +105,7 @@ async def cp(
     """
     key_of = backend_key if backend_key is not None else backend_key_default
     *sources, dst = paths
-    dst_is_dir = await is_directory(stat, dst, index)
+    dst_is_dir = await is_directory(stat, dst)
     writes: dict[str, ByteSource] = {}
     reads: dict[str, ByteSource] = {}
     lines: list[str] = []
@@ -124,7 +123,7 @@ async def cp(
             errors.append(f"cp: cannot copy a directory, '{src.virtual}', "
                           f"into itself, '{target.virtual}'")
             continue
-        if not recursive and await is_directory(stat, src, index):
+        if not recursive and await is_directory(stat, src):
             errors.append("cp: -r not specified; omitting directory "
                           f"'{src.virtual}'")
             continue
@@ -132,15 +131,14 @@ async def cp(
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             if isinstance(strategy, PrimitiveCopy):
-                for entry, is_dir in await walk(strategy.readdir, stat, src,
-                                                index):
+                for entry, is_dir in await walk(strategy.readdir, stat, src):
                     entry_dst = descendant_path(
                         target,
                         target.virtual.rstrip("/") +
                         entry.virtual[len(src.virtual.rstrip("/")):],
                     )
                     if is_dir:
-                        if not await is_directory(stat, entry_dst, index):
+                        if not await is_directory(stat, entry_dst):
                             await strategy.mkdir(entry_dst)
                             writes[entry_dst.mount_path] = b""
                             if v:

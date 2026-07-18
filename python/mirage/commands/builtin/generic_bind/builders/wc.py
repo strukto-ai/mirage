@@ -45,8 +45,8 @@ async def wc(
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
         body, err = await format_multi(paths,
-                                       read=dir_refusing_read(ops, index),
-                                       accessor=accessor,
+                                       read=dir_refusing_read(
+                                           ops, accessor, index),
                                        args_l=args_l,
                                        w=w,
                                        c=c,

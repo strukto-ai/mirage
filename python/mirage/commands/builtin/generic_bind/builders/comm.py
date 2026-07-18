@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.comm import comm as generic_comm
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -38,8 +36,7 @@ async def comm(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_comm(
         paths,
-        read_bytes=with_index(ops.read_bytes, index),
-        accessor=accessor,
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
         suppress1=bool(kwargs.get("args_1", False)),
         suppress2=bool(kwargs.get("2", False)),
         suppress3=bool(kwargs.get("3", False)),

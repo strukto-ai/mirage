@@ -14,11 +14,11 @@
 
 import json
 import re
-from collections.abc import AsyncIterator
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import compile_pattern, pattern_arg
 from mirage.commands.builtin.langfuse._provision import file_read_provision
 from mirage.commands.builtin.utils.output import format_records
@@ -180,11 +180,9 @@ async def grep(
         resolved,
         texts,
         flags,
-        readdir=_readdir,
-        stat=_stat,
-        read_bytes=langfuse_read,
+        readdir=bound_op(_readdir, accessor, index),
+        stat=bound_op(_stat, accessor, index),
+        read_bytes=bound_op(langfuse_read, accessor, index),
         read_stream=None,
-        accessor=accessor,
         stdin=stdin,
-        index=index,
     )

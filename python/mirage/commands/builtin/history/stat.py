@@ -15,6 +15,7 @@
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -40,8 +41,6 @@ async def stat(
     if not paths:
         raise ValueError("stat: missing operand")
     return await generic_stat(list(paths),
-                              stat_fn=history_stat,
-                              accessor=accessor,
+                              stat_fn=bound_op(history_stat, accessor, index),
                               c=c,
-                              f=f,
-                              index=index)
+                              f=f)

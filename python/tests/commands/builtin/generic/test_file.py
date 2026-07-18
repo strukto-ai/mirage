@@ -12,7 +12,7 @@ def _spec(path: str) -> PathSpec:
 
 def _make_backend(files: dict[str, tuple[bytes, FileType]], dirs: set[str]):
 
-    async def stat_fn(accessor: object, p: PathSpec) -> FileStat:
+    async def stat_fn(p: PathSpec) -> FileStat:
         if p.virtual in dirs:
             return FileStat(name=p.virtual, type=FileType.DIRECTORY, size=0)
         if p.virtual in files:
@@ -20,7 +20,7 @@ def _make_backend(files: dict[str, tuple[bytes, FileType]], dirs: set[str]):
             return FileStat(name=p.virtual, type=ftype, size=len(data))
         raise FileNotFoundError(p.virtual)
 
-    async def read_bytes(accessor: object, p: PathSpec) -> bytes:
+    async def read_bytes(p: PathSpec) -> bytes:
         return files[p.virtual][0]
 
     return stat_fn, read_bytes

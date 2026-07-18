@@ -140,21 +140,23 @@ async def _read_refusing_dirs(ops: CommandIO, index: IndexCacheStore | None,
         yield chunk
 
 
-def dir_refusing_read(ops: CommandIO,
+def dir_refusing_read(ops: CommandIO, accessor: Accessor,
                       index: IndexCacheStore | None) -> Callable:
-    """Read-stream callable that reports directory operands as EISDIR.
+    """Bound read-stream callable that reports directory operands as EISDIR.
 
     For generics that read per operand and format FS errors inline (wc):
     the raw backend read raises ENOENT for an implicit keyed-backend
     directory, so the injected reader refines the error the same way
     ``split_readable`` does before the generic formats the line (#457).
+    Called as ``read(path)``; accessor and index are bound here.
 
     Args:
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``
             and ``read_stream``.
+        accessor (Accessor): Backend accessor bound into reads.
         index (IndexCacheStore | None): Index cache store bound into reads.
     """
-    return partial(_read_refusing_dirs, ops, index)
+    return partial(_read_refusing_dirs, ops, index, accessor)
 
 
 async def resolve_readable(

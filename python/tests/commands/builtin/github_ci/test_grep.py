@@ -86,17 +86,17 @@ async def test_grep_recursive_directory(accessor, index):
     dir_stat = FileStat(name="workflows", type=FileType.DIRECTORY)
     file_stat = FileStat(name="ci.json", type=FileType.JSON)
 
-    async def fake_stat(_acc, p, _idx=None):
+    async def fake_stat(_acc, p, index=None):
         if p.virtual.endswith(".json"):
             return file_stat
         return dir_stat
 
-    async def fake_readdir(_acc, p, _idx=None):
+    async def fake_readdir(_acc, p, index=None):
         if p.virtual == "/workflows":
             return ["/workflows/ci_1.json", "/workflows/build_2.json"]
         return []
 
-    async def fake_read(_acc, p, _idx=None):
+    async def fake_read(_acc, p, index=None):
         if "ci_1" in p.virtual:
             return b"name: Test\non: push\n"
         return b"name: Build\non: push\n"
