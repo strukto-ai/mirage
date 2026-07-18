@@ -53,7 +53,11 @@ const FILETYPE_CATS: Record<string, (raw: Uint8Array) => unknown> = {
 }
 
 export interface MakeGenericOpsOptions {
-  /** Extensions to emit rendered `read` ops for (keys of FILETYPE_CATS). */
+  /**
+   * Extensions to emit rendered `read` ops for (keys of FILETYPE_CATS).
+   * Explicit list rather than Python's `filetype_read` bool: TS has no
+   * ORC support and backends opt in per extension.
+   */
   filetypeRead?: readonly string[]
   /** Synthesize truncate from readBytes + write (no native partial write). */
   emulateTruncate?: boolean
@@ -66,7 +70,8 @@ export interface MakeGenericOpsOptions {
    * local backends (ram/disk/redis/ssh) historically call their cores
    * index-less: their readdir caches listings into the index store while
    * mutations never invalidate them, so forwarding would serve stale
-   * listings after mkdir/rmdir/write.
+   * listings after mkdir/rmdir/write. Python has no such knob — its
+   * cores invalidate the index through the cache context on mutation.
    */
   forwardIndex?: boolean
 }

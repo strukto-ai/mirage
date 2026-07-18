@@ -166,6 +166,17 @@ def make_generic_ops(
     once. Ops whose table field is None are omitted, mirroring how the
     command factory skips write commands on read-only backends.
 
+    Parity with TS ``makeGenericOps``: there is deliberately no
+    ``forward_index`` knob here — Python cores invalidate the index
+    store through the cache context on mutation, so forwarding
+    ``index`` into read/readdir/stat is always safe, whereas the TS
+    ram/disk/redis/ssh cores cache listings that mutations never
+    invalidate and need ``forwardIndex: false``. Likewise
+    ``filetype_read`` is a bool (every backend that opts in gets the
+    full cat set, with missing optional deps skipped at import) while
+    TS takes an explicit ``filetypeRead`` extension list (TS has no ORC
+    support and its backends opt in per extension).
+
     Args:
         resource (str | list[str]): resource name(s) the ops register
             under; a list fans out one ``RegisteredOp`` per name (the

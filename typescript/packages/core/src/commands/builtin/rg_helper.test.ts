@@ -109,3 +109,144 @@ describe('rgFull countOnly', () => {
     expect(out).toEqual(['/db/a.txt:Graph', '/db/a.txt:Graph again'])
   })
 })
+
+const LOG_FILES: Record<string, string> = {
+  '/log/app.log':
+    'error: disk full\nwarning: low memory\ninfo: all good\nerror: timeout\nnote: done\n',
+  '/log/far.txt': 'hit\na\nb\nc\nhit\n',
+}
+
+function logReaddirFn(path: string): Promise<string[]> {
+  if (path === '/log') return Promise.resolve(['/log/app.log', '/log/far.txt'])
+  return Promise.reject(new Error(`not a dir: ${path}`))
+}
+
+function logStatFn(path: string): Promise<FileStat> {
+  if (path === '/log') {
+    return Promise.resolve(new FileStat({ name: 'log', type: FileType.DIRECTORY }))
+  }
+  const content = LOG_FILES[path]
+  if (content === undefined) return Promise.reject(new Error(`ENOENT: ${path}`))
+  const name = path.split('/').pop() ?? ''
+  return Promise.resolve(new FileStat({ name, type: FileType.TEXT, size: content.length }))
+}
+
+function logReadBytesFn(path: string): Promise<Uint8Array> {
+  const content = LOG_FILES[path]
+  if (content === undefined) return Promise.reject(new Error(`ENOENT: ${path}`))
+  return Promise.resolve(ENC.encode(content))
+}
+
+describe('rgFull single-file context', () => {
+  it('renders after-context lines', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log/app.log',
+      'warning',
+      opts({ contextAfter: 1 }),
+      null,
+    )
+    expect(out).toEqual(['warning: low memory', 'info: all good'])
+  })
+
+  it('merges adjacent context groups without a separator', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log/app.log',
+      'error',
+      opts({ contextBefore: 1, contextAfter: 1 }),
+      null,
+    )
+    expect(out).toEqual([
+      'error: disk full',
+      'warning: low memory',
+      'info: all good',
+      'error: timeout',
+      'note: done',
+    ])
+  })
+
+  it('labels context lines with a dash under -n', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log/app.log',
+      'warning',
+      opts({ lineNumbers: true, contextAfter: 1 }),
+      null,
+    )
+    expect(out).toEqual(['2:warning: low memory', '3-info: all good'])
+  })
+
+  it('separates distant groups with --', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log/far.txt',
+      'hit',
+      opts({ contextAfter: 1 }),
+      null,
+    )
+    expect(out).toEqual(['hit', 'a', '--', 'hit'])
+  })
+
+  it('respects maxCount with context', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log/app.log',
+      'error',
+      opts({ maxCount: 1, contextBefore: 1, contextAfter: 1 }),
+      null,
+    )
+    expect(out).toEqual(['error: disk full', 'warning: low memory'])
+  })
+
+  it('skips context on directory walks (documented divergence)', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log',
+      'warning',
+      opts({ contextAfter: 1 }),
+      null,
+    )
+    expect(out).toEqual(['/log/app.log:warning: low memory'])
+  })
+})
+
+describe('rgFull -I in directory walks', () => {
+  it('drops per-file labels', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log',
+      'warning',
+      opts({ noFilename: true }),
+      null,
+    )
+    expect(out).toEqual(['warning: low memory'])
+  })
+
+  it('keeps paths for -l', async () => {
+    const out = await rgFull(
+      logReaddirFn,
+      logStatFn,
+      logReadBytesFn,
+      '/log',
+      'warning',
+      opts({ noFilename: true, filesOnly: true }),
+      null,
+    )
+    expect(out).toEqual(['/log/app.log'])
+  })
+})

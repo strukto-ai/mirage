@@ -26,12 +26,12 @@ import { LINEAR_ISSUE_SET_PROJECT } from './linear_issue_set_project.ts'
 import { LINEAR_ISSUE_TRANSITION } from './linear_issue_transition.ts'
 import { LINEAR_ISSUE_UPDATE } from './linear_issue_update.ts'
 import { LINEAR_SEARCH } from './linear_search.ts'
-import { LINEAR_CMD_OPS } from './ops.ts'
+import { LINEAR_IO } from './io.ts'
 
 const LINEAR_OVERRIDES = new Set<string>()
 
 export const LINEAR_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<LinearAccessor>(ResourceName.LINEAR, LINEAR_CMD_OPS, {
+  ...makeGenericCommands<LinearAccessor>(ResourceName.LINEAR, LINEAR_IO, {
     overrides: LINEAR_OVERRIDES,
   }),
   ...LINEAR_ISSUE_ADD_LABEL,

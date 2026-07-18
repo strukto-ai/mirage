@@ -21,12 +21,12 @@ import { NOTION_COMMENT_ADD } from './notion_comment_add.ts'
 import { NOTION_FIND } from './find.ts'
 import { NOTION_PAGE_CREATE } from './notion_page_create.ts'
 import { NOTION_SEARCH } from './notion_search.ts'
-import { NOTION_CMD_OPS } from './ops.ts'
+import { NOTION_IO } from './io.ts'
 
 const NOTION_OVERRIDES = new Set(['find'])
 
 export const NOTION_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<NotionAccessor>(ResourceName.NOTION, NOTION_CMD_OPS, {
+  ...makeGenericCommands<NotionAccessor>(ResourceName.NOTION, NOTION_IO, {
     overrides: NOTION_OVERRIDES,
   }),
   ...NOTION_FIND,

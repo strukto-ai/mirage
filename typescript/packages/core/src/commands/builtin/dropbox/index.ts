@@ -16,11 +16,11 @@ import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { DROPBOX_CMD_OPS } from './ops.ts'
+import { DROPBOX_IO } from './io.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 
 export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DropboxAccessor>(ResourceName.DROPBOX, DROPBOX_CMD_OPS, {
+  ...makeGenericCommands<DropboxAccessor>(ResourceName.DROPBOX, DROPBOX_IO, {
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,

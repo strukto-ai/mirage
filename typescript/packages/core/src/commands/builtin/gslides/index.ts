@@ -16,13 +16,13 @@ import type { GSlidesAccessor } from '../../../accessor/gslides.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GSLIDES_CMD_OPS } from './ops.ts'
+import { GSLIDES_IO } from './io.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GSLIDES_RM } from './rm.ts'
 import { GWS_SLIDES_API_COMMANDS } from '../gws/index.ts'
 
 export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GSlidesAccessor>(ResourceName.GSLIDES, GSLIDES_CMD_OPS, {
+  ...makeGenericCommands<GSlidesAccessor>(ResourceName.GSLIDES, GSLIDES_IO, {
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,

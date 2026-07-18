@@ -30,12 +30,12 @@ import {
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
-import { EMAIL_CMD_OPS } from './ops.ts'
+import { EMAIL_IO } from './io.ts'
 import { metadataProvision } from './provision.ts'
 import { fnmatch } from '@struktoai/mirage-core'
 import { findSizeMtimeError, invalidFindArg } from '@struktoai/mirage-core'
 
-const resolveGlob = resolveGlobOf(EMAIL_CMD_OPS)
+const resolveGlob = resolveGlobOf(EMAIL_IO)
 
 async function walk(
   accessor: EmailAccessor,

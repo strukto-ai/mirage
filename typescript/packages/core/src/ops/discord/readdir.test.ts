@@ -21,9 +21,9 @@ import type {
   DiscordTransport,
 } from '../../core/discord/_client.ts'
 import { PathSpec, ResourceName } from '../../types.ts'
-import { DISCORD_VFS_OPS } from './index.ts'
+import { DISCORD_OPS } from './index.ts'
 
-const readdirOp = DISCORD_VFS_OPS.find((o) => o.name === 'readdir' && o.filetype === null)
+const readdirOp = DISCORD_OPS.find((o) => o.name === 'readdir' && o.filetype === null)
 if (!readdirOp) throw new Error('discord readdir op not registered')
 
 class FakeDiscordTransport implements DiscordTransport {

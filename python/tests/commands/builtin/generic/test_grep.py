@@ -513,3 +513,107 @@ async def test_grep_multi_file_no_filename_suppresses_prefix():
     )
     decoded = (await _drain_async(output)).decode()
     assert decoded == "apple\napricot\n"
+
+
+@pytest.mark.asyncio
+async def test_grep_quiet_multi_file_suppresses_output():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"apple\n",
+        "/b.txt": b"banana\n",
+    })
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["apple"],
+        {"q": True},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_grep_quiet_multi_file_no_match_exits_1():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"apple\n",
+        "/b.txt": b"banana\n",
+    })
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["zzz"],
+        {"q": True},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_quiet_recursive_suppresses_output():
+    readdir, stat, rb, rs = _make_backend({
+        "/dir/a.txt": b"apple\n",
+        "/dir/sub/b.txt": b"apricot\n",
+    })
+    output, io = await grep(
+        [_spec("/dir")],
+        ["ap"],
+        {
+            "q": True,
+            "r": True
+        },
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_grep_quiet_files_only_suppresses_output():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"apple\n",
+        "/b.txt": b"banana\n",
+    })
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["apple"],
+        {
+            "q": True,
+            "args_l": True
+        },
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_grep_quiet_count_zero_counts_exits_1():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"apple\n",
+        "/b.txt": b"banana\n",
+    })
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["zzz"],
+        {
+            "q": True,
+            "c": True
+        },
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 1

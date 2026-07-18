@@ -14,7 +14,7 @@
 
 import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { GITHUB_CI_CMD_OPS } from './ops.ts'
+import { GITHUB_CI_IO } from './io.ts'
 import { stream as ciStream } from '../../../core/github_ci/read.ts'
 import { isCrossRunRoot, readdir as ciReaddir } from '../../../core/github_ci/readdir.ts'
 import { stat as ciStat } from '../../../core/github_ci/stat.ts'
@@ -24,7 +24,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { rgGeneric } from '../generic/rg.ts'
 
-const resolveGlob = resolveGlobOf(GITHUB_CI_CMD_OPS)
+const resolveGlob = resolveGlobOf(GITHUB_CI_IO)
 
 const ENC = new TextEncoder()
 

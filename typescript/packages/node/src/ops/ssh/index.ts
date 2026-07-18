@@ -14,9 +14,9 @@
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
 import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
-import { SSH_CMD_OPS } from '../../commands/builtin/ssh/ops.ts'
+import { SSH_IO } from '../../commands/builtin/ssh/io.ts'
 
-export const SSH_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.SSH, SSH_CMD_OPS, {
+export const SSH_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.SSH, SSH_IO, {
   mkdirParents: true,
   forwardIndex: false,
 })

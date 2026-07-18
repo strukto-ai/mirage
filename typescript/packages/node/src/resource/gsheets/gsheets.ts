@@ -16,7 +16,7 @@ import {
   BaseResource,
   GSHEETS_COMMANDS,
   GSHEETS_PROMPT,
-  GSHEETS_VFS_OPS,
+  GSHEETS_OPS,
   GSHEETS_WRITE_PROMPT,
   GSheetsAccessor,
   PathSpec,
@@ -77,7 +77,7 @@ export class GSheetsResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GSHEETS_VFS_OPS
+    return GSHEETS_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

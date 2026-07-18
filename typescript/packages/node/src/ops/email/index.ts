@@ -14,6 +14,6 @@
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
 import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
-import { EMAIL_CMD_OPS } from '../../commands/builtin/email/ops.ts'
+import { EMAIL_IO } from '../../commands/builtin/email/io.ts'
 
-export const EMAIL_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.EMAIL, EMAIL_CMD_OPS)
+export const EMAIL_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.EMAIL, EMAIL_IO)

@@ -18,6 +18,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import { getExtension } from '../resolve.ts'
 import { BINARY_EXTENSIONS, compilePattern, grepLines } from './grep_helper.ts'
+import { grepContextLines } from './grep_context.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import type { AsyncReadBytesFn, AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
 
@@ -75,6 +76,7 @@ export interface RgFullOptions {
   fileType: string | null
   globPattern: string | null
   hidden: boolean
+  noFilename?: boolean
 }
 
 function searchFile(
@@ -158,6 +160,28 @@ export async function rgFull(
       if (warnings !== null) warnings.push(`rg: ${path}: ${String(err)}`)
       return []
     }
+    if (
+      (opts.contextBefore > 0 || opts.contextAfter > 0) &&
+      !opts.filesOnly &&
+      !opts.countOnly &&
+      !opts.onlyMatching &&
+      filePrefix === null
+    ) {
+      // Single-file context rides the shared grep renderer (match lines
+      // `N:`, context lines `N-`, `--` between groups). Directory search
+      // and filename-prefixed fanout skip context, mirroring grep's -H
+      // divergence.
+      const rendered = grepContextLines(
+        data,
+        compiled,
+        opts.invert,
+        opts.lineNumbers,
+        opts.maxCount,
+        opts.contextAfter,
+        opts.contextBefore,
+      )
+      return rendered.map((chunk) => DEC.decode(chunk).replace(/\n$/, ''))
+    }
     return searchFile(data, compiled, opts, filePrefix)
   }
 
@@ -202,7 +226,10 @@ export async function rgFull(
       if (warnings !== null) warnings.push(`rg: ${entry}: ${String(err)}`)
       continue
     }
-    const fileResults = searchFile(data, compiled, opts, entry)
+    // ripgrep -I drops per-file labels in directory walks; -l keeps
+    // paths (they are the output).
+    const walkPrefix = opts.noFilename === true && !opts.filesOnly ? null : entry
+    const fileResults = searchFile(data, compiled, opts, walkPrefix)
     results.push(...fileResults)
   }
 

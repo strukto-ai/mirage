@@ -19,7 +19,7 @@ import {
   type IndexCacheStore,
   LANGFUSE_COMMANDS,
   LANGFUSE_PROMPT,
-  LANGFUSE_VFS_OPS,
+  LANGFUSE_OPS,
   LangfuseAccessor,
   langfuseRead,
   langfuseReaddir,
@@ -88,7 +88,7 @@ export class LangfuseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return LANGFUSE_VFS_OPS
+    return LANGFUSE_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

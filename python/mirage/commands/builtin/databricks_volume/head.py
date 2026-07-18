@@ -15,8 +15,7 @@
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.cache.read_through import cached_prefix_bytes
-from mirage.commands.builtin.databricks_volume.ops import \
-    RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.databricks_volume.io import resolve_glob
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic_bind.adapter import bound_op

@@ -17,7 +17,7 @@ import {
   DISCORD_API,
   DISCORD_COMMANDS,
   DISCORD_PROMPT,
-  DISCORD_VFS_OPS,
+  DISCORD_OPS,
   DISCORD_WRITE_PROMPT,
   DiscordAccessor,
   HttpDiscordTransport,
@@ -83,7 +83,7 @@ export class DiscordResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return DISCORD_VFS_OPS
+    return DISCORD_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

@@ -16,7 +16,7 @@ import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { SLACK_CMD_OPS } from './ops.ts'
+import { SLACK_IO } from './io.ts'
 import { read as slackRead } from '../../../core/slack/read.ts'
 import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { stat as slackStat } from '../../../core/slack/stat.ts'
@@ -34,7 +34,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_helper.ts'
 import { rgGeneric } from '../generic/rg.ts'
 
-const resolveSlackGlob = resolveGlobOf(SLACK_CMD_OPS)
+const resolveSlackGlob = resolveGlobOf(SLACK_IO)
 
 const ENC = new TextEncoder()
 

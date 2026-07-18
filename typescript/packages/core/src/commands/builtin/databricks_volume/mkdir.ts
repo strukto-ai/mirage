@@ -14,14 +14,14 @@
 
 import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
+import { DATABRICKS_VOLUME_IO } from './io.ts'
 import { mkdir as dbxMkdir } from '../../../core/databricks_volume/mkdir.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 
-const resolveGlob = resolveGlobOf(DATABRICKS_VOLUME_CMD_OPS)
+const resolveGlob = resolveGlobOf(DATABRICKS_VOLUME_IO)
 
 const ENC = new TextEncoder()
 

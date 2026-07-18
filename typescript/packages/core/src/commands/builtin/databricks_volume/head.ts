@@ -15,7 +15,7 @@
 import { cachedPrefixBytes } from '../../../cache/read_through.ts'
 import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
+import { DATABRICKS_VOLUME_IO } from './io.ts'
 import { stat as dbxStat } from '../../../core/databricks_volume/stat.ts'
 import { rangeRead, readStream as dbxStream } from '../../../core/databricks_volume/stream.ts'
 import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
@@ -25,7 +25,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
 import { makeHeadTailProvision } from '../generic_bind/provision.ts'
 
-const resolveGlob = resolveGlobOf(DATABRICKS_VOLUME_CMD_OPS)
+const resolveGlob = resolveGlobOf(DATABRICKS_VOLUME_IO)
 
 async function headCommand(
   accessor: DatabricksVolumeAccessor,

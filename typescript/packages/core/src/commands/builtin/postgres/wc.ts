@@ -15,7 +15,7 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { countRows } from '../../../core/postgres/_client.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { POSTGRES_CMD_OPS } from './ops.ts'
+import { POSTGRES_IO } from './io.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
@@ -26,7 +26,7 @@ import { formatRecords } from '../utils/output.ts'
 import { formatWcLines, wcGeneric, type WcRow } from '../generic/wc.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const resolveGlob = resolveGlobOf(POSTGRES_CMD_OPS)
+const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
 function rowsScope(p: PathSpec): { schema: string; entity: string } | null {
   const scope = detectScope(p)

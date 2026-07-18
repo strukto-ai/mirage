@@ -20,7 +20,7 @@ from mirage.commands.builtin.email.email_send import email_send
 from mirage.commands.builtin.email.email_triage import email_triage
 from mirage.commands.builtin.email.find import find
 from mirage.commands.builtin.email.grep import grep
-from mirage.commands.builtin.email.ops import OPS as _EMAIL_CMD_OPS
+from mirage.commands.builtin.email.io import IO as _IO
 from mirage.commands.builtin.email.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
@@ -30,10 +30,10 @@ _EMAIL_OVERRIDES = {"find", "grep", "rg"}
 
 COMMANDS = [
     *make_filetype_commands(
-        "email", _EMAIL_CMD_OPS.resolve_glob, _read, read_takes_index=True),
+        "email", _IO.resolve_glob, _read, read_takes_index=True),
     *make_generic_commands(
         "email",
-        _EMAIL_CMD_OPS,
+        _IO,
         overrides=_EMAIL_OVERRIDES,
     ),
     find,

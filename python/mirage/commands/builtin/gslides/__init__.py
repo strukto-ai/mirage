@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.gslides.ops import OPS as _GSLIDES_CMD_OPS
+from mirage.commands.builtin.gslides.io import IO as _IO
 from mirage.commands.builtin.gslides.rm import rm
 from mirage.commands.builtin.gws import GWS_SLIDES_API_COMMANDS
 
 COMMANDS = [
     *make_generic_commands(
         "gslides",
-        _GSLIDES_CMD_OPS,
+        _IO,
     ),
     rm,
     *GWS_SLIDES_API_COMMANDS,

@@ -17,7 +17,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
-from mirage.commands.builtin.s3.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.s3.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.stat import stat as stat_core

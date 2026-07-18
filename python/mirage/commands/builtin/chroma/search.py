@@ -1,5 +1,5 @@
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.chroma.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.chroma.io import resolve_glob
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS

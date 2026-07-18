@@ -127,3 +127,41 @@ describe('grepGeneric count-only exit codes', () => {
     expect(io.exitCode).toBe(1)
   })
 })
+
+describe('grepGeneric quiet mode', () => {
+  it('grep -q on multiple files suppresses output and exits 0 on match', async () => {
+    const [out, io] = await runGrep([spec('/a.txt'), spec('/b.txt')], 'hello', { q: true })
+    expect(out).toBe('')
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('grep -q on multiple files exits 1 with no match', async () => {
+    const [out, io] = await runGrep([spec('/a.txt'), spec('/b.txt')], 'zzz', { q: true })
+    expect(out).toBe('')
+    expect(io.exitCode).toBe(1)
+  })
+
+  it('grep -qr suppresses output and exits 0 on match', async () => {
+    const [out, io] = await runGrep([spec('/d')], 'hello', { q: true, r: true })
+    expect(out).toBe('')
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('grep -ql suppresses the file list', async () => {
+    const [out, io] = await runGrep([spec('/a.txt'), spec('/b.txt')], 'hello', {
+      q: true,
+      args_l: true,
+    })
+    expect(out).toBe('')
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('grep -qc exits 1 when every count is zero', async () => {
+    const [out, io] = await runGrep([spec('/a.txt'), spec('/b.txt')], 'zzz', {
+      q: true,
+      c: true,
+    })
+    expect(out).toBe('')
+    expect(io.exitCode).toBe(1)
+  })
+})

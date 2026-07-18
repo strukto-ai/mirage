@@ -19,7 +19,7 @@ import {
   type FileStat,
   GITHUB_COMMANDS,
   GITHUB_PROMPT,
-  GITHUB_VFS_OPS,
+  GITHUB_OPS,
   GitHubAccessor,
   HttpGitHubTransport,
   type IndexCacheStore,
@@ -100,7 +100,7 @@ export class GitHubResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GITHUB_VFS_OPS
+    return GITHUB_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

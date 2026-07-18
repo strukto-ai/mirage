@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.hf_buckets.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.hf_buckets.io import resolve_glob
 from mirage.types import PathSpec
 
 

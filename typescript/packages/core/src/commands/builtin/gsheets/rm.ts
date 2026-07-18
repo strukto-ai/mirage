@@ -14,7 +14,7 @@
 
 import type { GSheetsAccessor } from '../../../accessor/gsheets.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { GSHEETS_CMD_OPS } from './ops.ts'
+import { GSHEETS_IO } from './io.ts'
 import { unlink } from '../../../core/gsheets/unlink.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
@@ -22,7 +22,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
 
-const resolveGlob = resolveGlobOf(GSHEETS_CMD_OPS)
+const resolveGlob = resolveGlobOf(GSHEETS_IO)
 
 const ENC = new TextEncoder()
 

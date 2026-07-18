@@ -177,6 +177,7 @@ async def rg(
                     hidden=f.hidden,
                     warnings=warnings_f,
                     file_prefix=p.raw_path if label else None,
+                    no_filename=f.no_filename,
                 )
                 results.extend(rebase_raw(hits_full, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings_f)

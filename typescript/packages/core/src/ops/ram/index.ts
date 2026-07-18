@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAM_CMD_OPS } from '../../commands/builtin/ram/ops.ts'
+import { RAM_IO } from '../../commands/builtin/ram/io.ts'
 import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const RAM_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.RAM, RAM_CMD_OPS, {
+export const RAM_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.RAM, RAM_IO, {
   filetypeRead: ['.feather', '.h5', '.parquet'],
   forwardIndex: false,
 })

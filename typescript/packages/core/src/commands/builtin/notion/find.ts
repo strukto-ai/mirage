@@ -15,14 +15,14 @@
 import type { NotionAccessor } from '../../../accessor/notion.ts'
 import { find as notionFind } from '../../../core/notion/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { NOTION_CMD_OPS } from './ops.ts'
+import { NOTION_IO } from './io.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
 import { metadataProvision } from '../generic_bind/provision.ts'
 
-const resolveNotionGlob = resolveGlobOf(NOTION_CMD_OPS)
+const resolveNotionGlob = resolveGlobOf(NOTION_IO)
 
 async function findCommand(
   accessor: NotionAccessor,

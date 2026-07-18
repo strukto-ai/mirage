@@ -16,7 +16,7 @@ import {
   BaseResource,
   GMAIL_COMMANDS,
   GMAIL_PROMPT,
-  GMAIL_VFS_OPS,
+  GMAIL_OPS,
   GMAIL_WRITE_PROMPT,
   GmailAccessor,
   PathSpec,
@@ -71,7 +71,7 @@ export class GmailResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GMAIL_VFS_OPS
+    return GMAIL_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

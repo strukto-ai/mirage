@@ -15,8 +15,8 @@
 import type { RegisteredOp } from '@struktoai/mirage-core'
 import { makeGenericOps } from '@struktoai/mirage-core'
 import { HF_RESOURCES } from '../../accessor/hf.ts'
-import { HF_CMD_OPS } from '../../commands/builtin/hf/ops.ts'
+import { HF_IO } from '../../commands/builtin/hf/io.ts'
 
-export const HF_OPS: readonly RegisteredOp[] = makeGenericOps(HF_RESOURCES, HF_CMD_OPS, {
+export const HF_OPS: readonly RegisteredOp[] = makeGenericOps(HF_RESOURCES, HF_IO, {
   filetypeRead: ['.feather', '.hdf5', '.parquet'],
 })

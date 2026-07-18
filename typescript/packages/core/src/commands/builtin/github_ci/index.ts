@@ -18,13 +18,13 @@ import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GITHUB_CI_FIND } from './find.ts'
 import { GITHUB_CI_GREP } from './grep.ts'
-import { GITHUB_CI_CMD_OPS } from './ops.ts'
+import { GITHUB_CI_IO } from './io.ts'
 import { GITHUB_CI_RG } from './rg.ts'
 
 const GITHUB_CI_OVERRIDES = new Set(['find', 'grep', 'rg'])
 
 export const GITHUB_CI_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GitHubCIAccessor>(ResourceName.GITHUB_CI, GITHUB_CI_CMD_OPS, {
+  ...makeGenericCommands<GitHubCIAccessor>(ResourceName.GITHUB_CI, GITHUB_CI_IO, {
     overrides: GITHUB_CI_OVERRIDES,
   }),
   ...GITHUB_CI_FIND,

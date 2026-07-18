@@ -187,11 +187,12 @@ export async function zgrepGeneric(
         }
       }
     } else {
+      // GNU zgrep labels stdin "(standard input)" under -H.
       const [result, hadMatch] = zgrepSearch(
         data,
         pattern,
         { ignoreCase, invert, count: countOnly, lineNumbers, onlyMatching, maxCount },
-        null,
+        forceH ? '(standard input)' : null,
       )
       if (hadMatch) anyMatch = true
       for (const r of result) allResults.push(r)

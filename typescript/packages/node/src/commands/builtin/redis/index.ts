@@ -21,7 +21,7 @@ import {
 import type { RedisAccessor } from '../../../accessor/redis.ts'
 import { read as redisRead } from '../../../core/redis/read.ts'
 import { stat as redisStat } from '../../../core/redis/stat.ts'
-import { REDIS_CMD_OPS } from './ops.ts'
+import { REDIS_IO } from './io.ts'
 
 export const REDIS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeFiletypeCommands<RedisAccessor>({
@@ -29,5 +29,5 @@ export const REDIS_COMMANDS: readonly RegisteredCommand[] = [
     readBytes: redisRead,
     statEntry: redisStat,
   }),
-  ...makeGenericCommands<RedisAccessor>(ResourceName.REDIS, REDIS_CMD_OPS),
+  ...makeGenericCommands<RedisAccessor>(ResourceName.REDIS, REDIS_IO),
 ]

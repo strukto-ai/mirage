@@ -207,6 +207,402 @@
         "stdout": "",
         "stderr": "zgrep: usage: zgrep [flags] pattern [path]\n"
       }
+    },
+    {
+      "id": "zgrep_flags_provision",
+      "seq": 500500,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "mkdir -p /data/z4 && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/z4/app.log && printf 'alpha\\nbeta\\ngamma\\nALPHA\\n' > /data/z4/notes.txt && gzip /data/z4/app.log /data/z4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_i_ignore_case",
+      "seq": 500501,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -i ALPHA /data/z4/notes.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\nALPHA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_l_files_only",
+      "seq": 500502,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -l alpha /data/z4/notes.txt.gz /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/z4/notes.txt.gz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_n_line_numbers",
+      "seq": 500503,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -n error /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:error: disk full\n4:error: timeout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_v_invert",
+      "seq": 500504,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -v error /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "warning: low memory\ninfo: all good\nnote: done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_E_extended",
+      "seq": 500505,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -E \"err(or|ata)\" /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nerror: timeout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_F_fixed",
+      "seq": 500506,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -F \"info: all good\" /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "info: all good\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_H_filename",
+      "seq": 500507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -H error /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/z4/app.log.gz:error: disk full\n/data/z4/app.log.gz:error: timeout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_multi_auto_prefix",
+      "seq": 500508,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep error /data/z4/app.log.gz /data/z4/notes.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/z4/app.log.gz:error: disk full\n/data/z4/app.log.gz:error: timeout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_h_suppress_prefix",
+      "seq": 500509,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -h error /data/z4/app.log.gz /data/z4/notes.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nerror: timeout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_m_max_count",
+      "seq": 500510,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -m2 o /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_o_only_matching",
+      "seq": 500511,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -o \"err[a-z]*\" /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "error\nerror\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_q_match",
+      "seq": 500512,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -q error /data/z4/app.log.gz; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_q_no_match",
+      "seq": 500513,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -q zzz /data/z4/app.log.gz; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_w_word",
+      "seq": 500514,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -w alpha /data/z4/notes.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_w_no_partial",
+      "seq": 500515,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -w alph /data/z4/notes.txt.gz; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_c_multi_includes_zero",
+      "seq": 500516,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zgrep -c error /data/z4/app.log.gz /data/z4/notes.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/z4/app.log.gz:2\n/data/z4/notes.txt.gz:0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_H_stdin_label",
+      "seq": 500517,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo hi | gzip | zgrep -H hi",
+      "expect": {
+        "exit": 0,
+        "stdout": "(standard input):hi\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -16,7 +16,7 @@ import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { find as chromaFind } from '../../../core/chroma/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { CHROMA_CMD_OPS } from './ops.ts'
+import { CHROMA_IO } from './io.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -24,7 +24,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
 
-const resolveGlob = resolveGlobOf(CHROMA_CMD_OPS)
+const resolveGlob = resolveGlobOf(CHROMA_IO)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })

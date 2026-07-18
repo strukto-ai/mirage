@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.notion.io import IO as _IO
 from mirage.commands.builtin.notion.notion_block_append import \
     notion_block_append
 from mirage.commands.builtin.notion.notion_comment_add import \
@@ -20,12 +21,11 @@ from mirage.commands.builtin.notion.notion_comment_add import \
 from mirage.commands.builtin.notion.notion_page_create import \
     notion_page_create
 from mirage.commands.builtin.notion.notion_search import notion_search
-from mirage.commands.builtin.notion.ops import OPS as _NOTION_CMD_OPS
 
 COMMANDS = [
     *make_generic_commands(
         "notion",
-        _NOTION_CMD_OPS,
+        _IO,
     ),
     notion_block_append,
     notion_comment_add,

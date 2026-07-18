@@ -15,7 +15,7 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.slack.grep import grep
-from mirage.commands.builtin.slack.ops import OPS as _SLACK_CMD_OPS
+from mirage.commands.builtin.slack.io import IO as _IO
 from mirage.commands.builtin.slack.rg import rg
 from mirage.commands.builtin.slack.slack_add_reaction import slack_react
 from mirage.commands.builtin.slack.slack_get_user_profile import \
@@ -28,10 +28,10 @@ from mirage.core.slack.read import read as _read
 
 COMMANDS = [
     *make_filetype_commands(
-        "slack", _SLACK_CMD_OPS.resolve_glob, _read, read_takes_index=True),
+        "slack", _IO.resolve_glob, _read, read_takes_index=True),
     *make_generic_commands(
         "slack",
-        _SLACK_CMD_OPS,
+        _IO,
         overrides={"grep", "rg"},
     ),
     grep,

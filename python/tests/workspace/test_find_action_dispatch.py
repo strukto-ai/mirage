@@ -199,3 +199,20 @@ def test_mount_entries_filtered_by_name() -> None:
         assert "/b" not in lines
 
     _run(_go())
+
+
+def test_delete_removes_emptied_directories() -> None:
+
+    async def _go():
+        ws = _ws()
+        ws.create_session("s")
+        await ws.execute("mkdir -p /tree/deep", session_id="s")
+        await ws.execute("touch /tree/deep/f.txt", session_id="s")
+        r = await ws.execute("find /tree -delete", session_id="s")
+        assert r.exit_code == 0
+        assert await r.stderr_str() == ""
+        check = await ws.execute("find / -name tree", session_id="s")
+        assert await check.stdout_str() == ""
+        await ws.close()
+
+    _run(_go())

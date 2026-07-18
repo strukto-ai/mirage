@@ -17,7 +17,7 @@ import {
   type FileStat,
   GDRIVE_COMMANDS,
   GDRIVE_PROMPT,
-  GDRIVE_VFS_OPS,
+  GDRIVE_OPS,
   GDriveAccessor,
   type IndexCacheStore,
   PathSpec,
@@ -78,7 +78,7 @@ export class GDriveResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GDRIVE_VFS_OPS
+    return GDRIVE_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

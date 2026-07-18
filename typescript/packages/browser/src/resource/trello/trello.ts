@@ -26,7 +26,7 @@ import {
   makeResolveGlob,
   TRELLO_COMMANDS,
   TRELLO_PROMPT,
-  TRELLO_VFS_OPS,
+  TRELLO_OPS,
   TRELLO_WRITE_PROMPT,
   TrelloAccessor,
   type TrelloReaddirFilter,
@@ -85,7 +85,7 @@ export class TrelloResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return TRELLO_VFS_OPS
+    return TRELLO_OPS
   }
 
   private filter(): TrelloReaddirFilter {

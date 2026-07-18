@@ -79,3 +79,11 @@ def test_zgrep_dash_e_and_dash_f_union():
     stdout, io = _run_raw(ws, "zgrep -e foo -f /data/pats.txt /data/f.gz")
     assert io.exit_code == 0
     assert _bytes(stdout) == b"foo\nbaz\n"
+
+
+def test_zgrep_stdin_h_labels_standard_input():
+    ws, _ = _ws()
+    compressed = gzip.compress(b"foo\nbar\n")
+    stdout, io = _run_raw(ws, "zgrep -H bar", stdin=compressed)
+    assert _bytes(stdout) == b"(standard input):bar\n"
+    assert io.exit_code == 0

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.postgres.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.postgres.io import resolve_glob
 from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob

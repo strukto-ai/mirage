@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.nextcloud.ops import OPS as _TABLE
+from mirage.commands.builtin.nextcloud.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("nextcloud", _TABLE)
+OPS = make_generic_ops("nextcloud", IO)

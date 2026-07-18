@@ -14,7 +14,7 @@
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.langfuse.grep import grep
-from mirage.commands.builtin.langfuse.ops import OPS as _LANGFUSE_CMD_OPS
+from mirage.commands.builtin.langfuse.io import IO as _IO
 from mirage.commands.builtin.langfuse.rg import rg
 
 _LANGFUSE_OVERRIDES = {"grep", "rg"}
@@ -22,7 +22,7 @@ _LANGFUSE_OVERRIDES = {"grep", "rg"}
 COMMANDS = [
     *make_generic_commands(
         "langfuse",
-        _LANGFUSE_CMD_OPS,
+        _IO,
         overrides=_LANGFUSE_OVERRIDES,
     ),
     grep,

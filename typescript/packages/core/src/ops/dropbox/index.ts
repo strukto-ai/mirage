@@ -12,12 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DROPBOX_CMD_OPS } from '../../commands/builtin/dropbox/ops.ts'
+import { DROPBOX_IO } from '../../commands/builtin/dropbox/io.ts'
 import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const DROPBOX_VFS_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.DROPBOX,
-  DROPBOX_CMD_OPS,
-)
+export const DROPBOX_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.DROPBOX, DROPBOX_IO)

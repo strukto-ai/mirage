@@ -26,7 +26,7 @@ import {
   makeResolveGlob,
   SLACK_COMMANDS,
   SLACK_PROMPT,
-  SLACK_VFS_OPS,
+  SLACK_OPS,
   SLACK_WRITE_PROMPT,
   SlackAccessor,
   slackRead,
@@ -76,7 +76,7 @@ export class SlackResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return SLACK_VFS_OPS
+    return SLACK_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

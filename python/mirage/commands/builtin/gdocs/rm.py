@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gdocs.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.gdocs.io import resolve_glob
 from mirage.commands.builtin.generic.rm_command import make_rm
 from mirage.core.gdocs.unlink import unlink
 

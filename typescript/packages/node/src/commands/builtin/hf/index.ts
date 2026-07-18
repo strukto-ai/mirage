@@ -22,7 +22,7 @@ import { read as hfRead } from '../../../core/hf/read.ts'
 import { stat as hfStat } from '../../../core/hf/stat.ts'
 import { HF_DU } from './du.ts'
 import { HF_FIND } from './find.ts'
-import { HF_CMD_OPS } from './ops.ts'
+import { HF_IO } from './io.ts'
 
 const HF_OVERRIDES = new Set(['cp', 'mv', 'du', 'find'])
 
@@ -35,7 +35,7 @@ export const HF_COMMANDS: readonly RegisteredCommand[] = [
     }),
   ),
   ...HF_RESOURCES.flatMap((resource) =>
-    makeGenericCommands<HfAccessor>(resource, HF_CMD_OPS, {
+    makeGenericCommands<HfAccessor>(resource, HF_IO, {
       overrides: HF_OVERRIDES,
     }),
   ),

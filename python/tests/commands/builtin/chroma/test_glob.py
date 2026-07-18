@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.chroma.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.chroma.io import resolve_glob
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 

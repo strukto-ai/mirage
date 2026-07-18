@@ -961,6 +961,270 @@
         "stdout": "",
         "stderr": "find: unknown predicate '-boguspredicate'\n"
       }
+    },
+    {
+      "id": "find_flags_provision",
+      "seq": 500300,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "mkdir -p /data/f4/sub1/skipme /data/f4/del && printf 'alpha inner\\n' > /data/f4/sub1/inner.txt && printf 'alpha skip\\n' > /data/f4/sub1/skipme/deep.txt && printf 'x\\n' > /data/f4/del/f1.tmp && printf 'y\\n' > /data/f4/del/f2.tmp && printf 'keep\\n' > /data/f4/del/keep.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_print_trailing",
+      "seq": 500301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_print0",
+      "seq": 500302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/sub1 -print0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1\u0000/data/f4/sub1/inner.txt\u0000/data/f4/sub1/skipme\u0000/data/f4/sub1/skipme/deep.txt\u0000",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_print0_name",
+      "seq": 500303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -print0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\u0000/data/f4/sub1/skipme/deep.txt\u0000",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_a_alias",
+      "seq": 500304,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -a -name \"inner*\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_and_alias",
+      "seq": 500305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/sub1 -name inner.txt -and -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_parens_or",
+      "seq": 500306,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/sub1 \\( -name inner.txt -o -name deep.txt \\)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_ls_paths",
+      "seq": 500307,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -ls | awk '{print $NF}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_delete_by_name",
+      "seq": 500308,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data/f4/del -name \"*.tmp\" -delete && ls /data/f4/del",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_delete_with_print",
+      "seq": 500309,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "mkdir -p /data/f4/del2 && printf 'x\\n' > /data/f4/del2/g.tmp && find /data/f4/del2 -name \"*.tmp\" -delete -print && ls /data/f4/del2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/del2/g.tmp\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_delete_tree",
+      "seq": 500310,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "mkdir -p /data/f4/del3 && printf 'z\\n' > /data/f4/del3/h.txt && find /data/f4/del3 -delete && find /data/f4 -name del3",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_delete_mount_root_noop",
+      "seq": 500311,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "find /data -maxdepth 0 -delete; echo rc=$?; ls /data/f4/sub1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\ninner.txt\nskipme\n",
+        "stderr": ""
+      }
     }
   ]
 }

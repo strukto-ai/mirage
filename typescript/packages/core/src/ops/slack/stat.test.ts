@@ -19,9 +19,9 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/_client.ts'
 import { type FileStat, FileType, PathSpec, ResourceName } from '../../types.ts'
-import { SLACK_VFS_OPS } from './index.ts'
+import { SLACK_OPS } from './index.ts'
 
-const statOp = SLACK_VFS_OPS.find((o) => o.name === 'stat' && o.filetype === null)
+const statOp = SLACK_OPS.find((o) => o.name === 'stat' && o.filetype === null)
 if (!statOp) throw new Error('slack stat op not registered')
 
 class FakeTransport implements SlackTransport {

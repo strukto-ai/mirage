@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.postgres.ops import OPS as _TABLE
+from mirage.commands.builtin.postgres.io import IO
 from mirage.core.postgres.read import read as core_read
 from mirage.core.postgres.readdir import readdir as core_readdir
 from mirage.core.postgres.stat import stat as core_stat
@@ -33,9 +33,9 @@ def test_registers_read_only_trio():
 
 
 def test_table_wires_core_functions():
-    assert _TABLE.read_bytes is core_read
-    assert _TABLE.readdir is core_readdir
-    assert _TABLE.stat is core_stat
+    assert IO.read_bytes is core_read
+    assert IO.readdir is core_readdir
+    assert IO.stat is core_stat
 
 
 def test_ops_resolve_to_callables():

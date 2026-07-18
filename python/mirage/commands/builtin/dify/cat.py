@@ -1,5 +1,5 @@
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.dify.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.dify.io import resolve_glob
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.generic_bind.provision import \

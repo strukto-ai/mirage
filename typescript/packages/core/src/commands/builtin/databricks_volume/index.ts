@@ -18,7 +18,7 @@ import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DATABRICKS_VOLUME_HEAD } from './head.ts'
 import { DATABRICKS_VOLUME_MKDIR } from './mkdir.ts'
-import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
+import { DATABRICKS_VOLUME_IO } from './io.ts'
 import { DATABRICKS_VOLUME_RM } from './rm.ts'
 import { DATABRICKS_VOLUME_TOUCH } from './touch.ts'
 
@@ -27,7 +27,7 @@ const DATABRICKS_VOLUME_OVERRIDES = new Set(['head', 'mkdir', 'touch', 'rm'])
 export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DatabricksVolumeAccessor>(
     ResourceName.DATABRICKS_VOLUME,
-    DATABRICKS_VOLUME_CMD_OPS,
+    DATABRICKS_VOLUME_IO,
     {
       overrides: DATABRICKS_VOLUME_OVERRIDES,
     },

@@ -16,7 +16,7 @@ import {
   BaseResource,
   GITHUB_CI_COMMANDS,
   GITHUB_CI_PROMPT,
-  GITHUB_CI_VFS_OPS,
+  GITHUB_CI_OPS,
   GitHubCIAccessor,
   HttpCITransport,
   PathSpec,
@@ -76,7 +76,7 @@ export class GitHubCIResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GITHUB_CI_VFS_OPS
+    return GITHUB_CI_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

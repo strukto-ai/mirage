@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gsheets.ops import OPS as _TABLE
+from mirage.commands.builtin.gsheets.io import IO
 from mirage.ops.generic import make_generic_ops
 from mirage.ops.gsheets.read import read
 
 # The only read is the dual-resource .gsheet.json filetype op (registered for
 # both gsheets and gdrive), so the factory's plain read is overridden.
-OPS = [*make_generic_ops("gsheets", _TABLE, overrides={"read"}), read]
+OPS = [*make_generic_ops("gsheets", IO, overrides={"read"}), read]

@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gslides.ops import OPS as _TABLE
+from mirage.commands.builtin.gslides.io import IO
 from mirage.ops.generic import make_generic_ops
 from mirage.ops.gslides.read import read
 
 # The only read is the dual-resource .gslide.json filetype op (registered for
 # both gslides and gdrive), so the factory's plain read is overridden.
-OPS = [*make_generic_ops("gslides", _TABLE, overrides={"read"}), read]
+OPS = [*make_generic_ops("gslides", IO, overrides={"read"}), read]

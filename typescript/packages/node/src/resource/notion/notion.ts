@@ -17,7 +17,7 @@ import {
   HttpNotionTransport,
   NOTION_COMMANDS,
   NOTION_PROMPT,
-  NOTION_VFS_OPS,
+  NOTION_OPS,
   NOTION_WRITE_PROMPT,
   NotionAccessor,
   PathSpec,
@@ -72,7 +72,7 @@ export class NotionResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return NOTION_VFS_OPS
+    return NOTION_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

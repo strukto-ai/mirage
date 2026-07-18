@@ -16,7 +16,7 @@ import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { findDocuments } from '../../../core/mongodb/_client.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { MONGODB_CMD_OPS } from './ops.ts'
+import { MONGODB_IO } from './io.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
 import {
@@ -34,7 +34,7 @@ import { tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_helper.ts'
 import { headTailProvision } from './_provision.ts'
 
-const resolveGlob = resolveGlobOf(MONGODB_CMD_OPS)
+const resolveGlob = resolveGlobOf(MONGODB_IO)
 
 const ENC = new TextEncoder()
 

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.lancedb.ops import OPS as _LANCEDB_CMD_OPS
+from mirage.commands.builtin.lancedb.io import IO as _IO
 from mirage.commands.builtin.lancedb.search import search
 
 _LANCEDB_OVERRIDES = {"search"}
@@ -21,7 +21,7 @@ _LANCEDB_OVERRIDES = {"search"}
 COMMANDS = [
     *make_generic_commands(
         "lancedb",
-        _LANCEDB_CMD_OPS,
+        _IO,
         overrides=_LANCEDB_OVERRIDES,
     ),
     search,

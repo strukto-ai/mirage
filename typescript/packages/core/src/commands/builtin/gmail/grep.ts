@@ -16,7 +16,7 @@ import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { GMAIL_CMD_OPS } from './ops.ts'
+import { GMAIL_IO } from './io.ts'
 import { read as gmailRead } from '../../../core/gmail/read.ts'
 import { readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
 import { detectScope } from '../../../core/gmail/scope.ts'
@@ -30,7 +30,7 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { fileReadProvision } from './provision.ts'
 
-const resolveGlob = resolveGlobOf(GMAIL_CMD_OPS)
+const resolveGlob = resolveGlobOf(GMAIL_IO)
 
 const ENC = new TextEncoder()
 

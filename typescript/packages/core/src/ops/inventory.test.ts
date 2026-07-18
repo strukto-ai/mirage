@@ -14,29 +14,29 @@
 
 import { expect, test } from 'vitest'
 
-import { BOX_VFS_OPS } from './box/index.ts'
+import { BOX_OPS } from './box/index.ts'
 import { CHROMA_OPS } from './chroma/index.ts'
 import { DATABRICKS_VOLUME_OPS } from './databricks_volume/index.ts'
-import { DISCORD_VFS_OPS } from './discord/index.ts'
-import { DROPBOX_VFS_OPS } from './dropbox/index.ts'
-import { GDOCS_VFS_OPS } from './gdocs/index.ts'
-import { GDRIVE_VFS_OPS } from './gdrive/index.ts'
-import { GITHUB_VFS_OPS } from './github/index.ts'
-import { GITHUB_CI_VFS_OPS } from './github_ci/index.ts'
-import { GMAIL_VFS_OPS } from './gmail/index.ts'
-import { GSHEETS_VFS_OPS } from './gsheets/index.ts'
-import { GSLIDES_VFS_OPS } from './gslides/index.ts'
+import { DISCORD_OPS } from './discord/index.ts'
+import { DROPBOX_OPS } from './dropbox/index.ts'
+import { GDOCS_OPS } from './gdocs/index.ts'
+import { GDRIVE_OPS } from './gdrive/index.ts'
+import { GITHUB_OPS } from './github/index.ts'
+import { GITHUB_CI_OPS } from './github_ci/index.ts'
+import { GMAIL_OPS } from './gmail/index.ts'
+import { GSHEETS_OPS } from './gsheets/index.ts'
+import { GSLIDES_OPS } from './gslides/index.ts'
 import { HISTORY_OPS } from './history/index.ts'
 import { LANCEDB_OPS } from './lancedb/index.ts'
-import { LANGFUSE_VFS_OPS } from './langfuse/index.ts'
-import { LINEAR_VFS_OPS } from './linear/index.ts'
+import { LANGFUSE_OPS } from './langfuse/index.ts'
+import { LINEAR_OPS } from './linear/index.ts'
 import { MONGODB_OPS } from './mongodb/index.ts'
-import { NOTION_VFS_OPS } from './notion/index.ts'
+import { NOTION_OPS } from './notion/index.ts'
 import { POSTGRES_OPS } from './postgres/index.ts'
 import { QDRANT_OPS } from './qdrant/index.ts'
 import { RAM_OPS } from './ram/index.ts'
-import { SLACK_VFS_OPS } from './slack/index.ts'
-import { TRELLO_VFS_OPS } from './trello/index.ts'
+import { SLACK_OPS } from './slack/index.ts'
+import { TRELLO_OPS } from './trello/index.ts'
 
 // Golden snapshot of every backend's registered op surface, taken before
 // the ops-layer refactor. Each row is [name, resource, filetype, write];
@@ -46,29 +46,29 @@ import { TRELLO_VFS_OPS } from './trello/index.ts'
 type Row = [string, string, string, boolean]
 
 const TABLES = {
-  box: BOX_VFS_OPS,
+  box: BOX_OPS,
   chroma: CHROMA_OPS,
   databricks_volume: DATABRICKS_VOLUME_OPS,
-  discord: DISCORD_VFS_OPS,
-  dropbox: DROPBOX_VFS_OPS,
-  gdocs: GDOCS_VFS_OPS,
-  gdrive: GDRIVE_VFS_OPS,
-  github: GITHUB_VFS_OPS,
-  github_ci: GITHUB_CI_VFS_OPS,
-  gmail: GMAIL_VFS_OPS,
-  gsheets: GSHEETS_VFS_OPS,
-  gslides: GSLIDES_VFS_OPS,
+  discord: DISCORD_OPS,
+  dropbox: DROPBOX_OPS,
+  gdocs: GDOCS_OPS,
+  gdrive: GDRIVE_OPS,
+  github: GITHUB_OPS,
+  github_ci: GITHUB_CI_OPS,
+  gmail: GMAIL_OPS,
+  gsheets: GSHEETS_OPS,
+  gslides: GSLIDES_OPS,
   history: HISTORY_OPS,
   lancedb: LANCEDB_OPS,
-  langfuse: LANGFUSE_VFS_OPS,
-  linear: LINEAR_VFS_OPS,
+  langfuse: LANGFUSE_OPS,
+  linear: LINEAR_OPS,
   mongodb: MONGODB_OPS,
-  notion: NOTION_VFS_OPS,
+  notion: NOTION_OPS,
   postgres: POSTGRES_OPS,
   qdrant: QDRANT_OPS,
   ram: RAM_OPS,
-  slack: SLACK_VFS_OPS,
-  trello: TRELLO_VFS_OPS,
+  slack: SLACK_OPS,
+  trello: TRELLO_OPS,
 }
 
 const OPS_INVENTORY: Record<string, Row[]> = {

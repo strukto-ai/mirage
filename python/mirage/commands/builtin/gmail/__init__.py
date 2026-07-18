@@ -23,16 +23,16 @@ from mirage.commands.builtin.gmail.gws_gmail_reply_all import \
     gws_gmail_reply_all
 from mirage.commands.builtin.gmail.gws_gmail_send import gws_gmail_send
 from mirage.commands.builtin.gmail.gws_gmail_triage import gws_gmail_triage
-from mirage.commands.builtin.gmail.ops import OPS as _GMAIL_CMD_OPS
+from mirage.commands.builtin.gmail.io import IO as _IO
 from mirage.commands.builtin.gmail.rg import rg
 from mirage.core.gmail.read import read as _read
 
 COMMANDS = [
     *make_filetype_commands(
-        "gmail", _GMAIL_CMD_OPS.resolve_glob, _read, read_takes_index=True),
+        "gmail", _IO.resolve_glob, _read, read_takes_index=True),
     *make_generic_commands(
         "gmail",
-        _GMAIL_CMD_OPS,
+        _IO,
         overrides={"grep", "rg"},
     ),
     grep,

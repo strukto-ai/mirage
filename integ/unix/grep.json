@@ -1247,6 +1247,424 @@
         "stdout": "/data/a.txt:hello\n",
         "stderr": "grep: /data/sub: Is a directory\n"
       }
+    },
+    {
+      "id": "grep_flags_provision",
+      "seq": 500200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "mkdir -p /data/g4/sub && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/g4/app.log && printf 'alpha\\nbeta\\ngamma\\nALPHA\\n' > /data/g4/notes.txt && printf 'alpha inner\\n' > /data/g4/sub/inner.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_q_match",
+      "seq": 500201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -q alpha /data/g4/notes.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_q_no_match",
+      "seq": 500202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -q zzz /data/g4/notes.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_q_multi_file",
+      "seq": 500203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -q alpha /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_q_multi_file_no_match",
+      "seq": 500204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -q zzz /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_q_recursive",
+      "seq": 500205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -qR alpha /data/g4; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_q_files_only",
+      "seq": 500206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -ql alpha /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_q_count_all_zero",
+      "seq": 500207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -qc zzz /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_H_single_file",
+      "seq": 500208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -H alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_Hn_single_file",
+      "seq": 500209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -Hn alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:1:alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_Hc_single_file",
+      "seq": 500210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -Hc alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_C1_context",
+      "seq": 500211,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -C1 warning /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\ninfo: all good\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_C1_merges_groups",
+      "seq": 500212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -C1 error /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\ninfo: all good\nerror: timeout\nnote: done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_A_B_combined",
+      "seq": 500213,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -A1 -B2 timeout /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "warning: low memory\ninfo: all good\nerror: timeout\nnote: done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_nC1_dash_context",
+      "seq": 500214,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -nC1 warning /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "1-error: disk full\n2:warning: low memory\n3-info: all good\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_R_recursive",
+      "seq": 500215,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -R alpha /data/g4 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:alpha\n/data/g4/sub/inner.txt:alpha inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_Rl_recursive",
+      "seq": 500216,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep -Rl alpha /data/g4 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt\n/data/g4/sub/inner.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_colour_noop",
+      "seq": 500217,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep --colour=auto alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_color_never_noop",
+      "seq": 500218,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "grep --color=never alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.databricks_volume.head import head
-from mirage.commands.builtin.databricks_volume.ops import \
-    OPS as _DATABRICKS_CMD_OPS
+from mirage.commands.builtin.databricks_volume.io import IO as _IO
 from mirage.commands.builtin.generic_bind import make_generic_commands
 
 _DATABRICKS_OVERRIDES = {"head"}
@@ -22,7 +21,7 @@ _DATABRICKS_OVERRIDES = {"head"}
 COMMANDS = [
     *make_generic_commands(
         "databricks_volume",
-        _DATABRICKS_CMD_OPS,
+        _IO,
         overrides=_DATABRICKS_OVERRIDES,
     ),
     head,

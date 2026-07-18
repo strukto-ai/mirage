@@ -16,7 +16,7 @@ from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.gdrive.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.gdrive.io import resolve_glob
 from mirage.commands.builtin.generic.du import du_multi
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command

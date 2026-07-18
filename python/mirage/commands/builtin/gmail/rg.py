@@ -16,7 +16,7 @@ from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.gmail.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.gmail.io import resolve_glob
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError

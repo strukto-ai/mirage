@@ -18,7 +18,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.github._provision import metadata_provision
-from mirage.commands.builtin.github.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.github.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.find import find as find_core

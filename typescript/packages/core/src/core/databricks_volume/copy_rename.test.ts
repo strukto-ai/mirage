@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { copy } from './copy.ts'
 import { rename } from './rename.ts'
 import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
-import { DATABRICKS_VOLUME_CMD_OPS } from '../../commands/builtin/databricks_volume/ops.ts'
+import { DATABRICKS_VOLUME_IO } from '../../commands/builtin/databricks_volume/io.ts'
 import { PathSpec } from '../../types.ts'
 import {
   jsonResponse,
@@ -29,7 +29,7 @@ import {
   type FetchCall,
 } from './_test_util.ts'
 
-const resolveGlob = resolveGlobOf(DATABRICKS_VOLUME_CMD_OPS)
+const resolveGlob = resolveGlobOf(DATABRICKS_VOLUME_IO)
 
 afterEach(() => {
   vi.unstubAllGlobals()

@@ -1,7 +1,7 @@
 from functools import partial
 
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.dify.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.dify.io import resolve_glob
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import default_paths

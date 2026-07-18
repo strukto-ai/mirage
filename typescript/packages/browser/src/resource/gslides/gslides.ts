@@ -17,7 +17,7 @@ import {
   type FileStat,
   GSLIDES_COMMANDS,
   GSLIDES_PROMPT,
-  GSLIDES_VFS_OPS,
+  GSLIDES_OPS,
   GSLIDES_WRITE_PROMPT,
   GSlidesAccessor,
   type IndexCacheStore,
@@ -78,7 +78,7 @@ export class GSlidesResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GSLIDES_VFS_OPS
+    return GSLIDES_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

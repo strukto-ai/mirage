@@ -167,6 +167,14 @@ export async function grepGeneric(
         for (const h of rebaseRaw(hits, p.virtual, p.rawPath)) results.push(h)
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
+      if (f.quiet)
+        return [
+          new Uint8Array(0),
+          new IOResult({
+            exitCode: results.length > 0 ? 0 : 1,
+            ...(stderr !== undefined ? { stderr } : {}),
+          }),
+        ]
       if (results.length === 0)
         return [
           new Uint8Array(0),
@@ -215,15 +223,23 @@ export async function grepGeneric(
         }
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
+      const matched = allResults.length > 0 && (!f.countOnly || countRecordsHaveMatches(allResults))
+      if (f.quiet)
+        return [
+          new Uint8Array(0),
+          new IOResult({
+            exitCode: matched ? 0 : 1,
+            ...(stderr !== undefined ? { stderr } : {}),
+          }),
+        ]
       if (allResults.length === 0)
         return [
           new Uint8Array(0),
           new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
         ]
-      const exitCode = f.countOnly && !countRecordsHaveMatches(allResults) ? 1 : 0
       return [
         ENC.encode(allResults.join('\n') + '\n'),
-        new IOResult({ exitCode, ...(stderr !== undefined ? { stderr } : {}) }),
+        new IOResult({ exitCode: matched ? 0 : 1, ...(stderr !== undefined ? { stderr } : {}) }),
       ]
     }
 
@@ -256,6 +272,16 @@ export async function grepGeneric(
       }
       const multiStderr =
         multiWarnings.length > 0 ? ENC.encode(multiWarnings.join('\n') + '\n') : undefined
+      const multiMatched =
+        allResults.length > 0 && (!f.countOnly || countRecordsHaveMatches(allResults))
+      if (f.quiet)
+        return [
+          new Uint8Array(0),
+          new IOResult({
+            exitCode: multiMatched ? 0 : 1,
+            ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
+          }),
+        ]
       if (allResults.length === 0)
         return [
           new Uint8Array(0),
@@ -264,12 +290,11 @@ export async function grepGeneric(
             ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
           }),
         ]
-      const multiExit = f.countOnly && !countRecordsHaveMatches(allResults) ? 1 : 0
       const out: ByteSource = ENC.encode(allResults.join('\n') + '\n')
       return [
         out,
         new IOResult({
-          exitCode: multiExit,
+          exitCode: multiMatched ? 0 : 1,
           ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
         }),
       ]

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.onedrive.ops import OPS as _TABLE
+from mirage.commands.builtin.onedrive.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("onedrive", _TABLE, filetype_read=True)
+OPS = make_generic_ops("onedrive", IO, filetype_read=True)

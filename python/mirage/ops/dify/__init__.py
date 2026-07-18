@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.dify.ops import OPS as _TABLE
+from mirage.commands.builtin.dify.io import IO
 from mirage.ops.dify.grep import grep
 from mirage.ops.dify.search import search
 from mirage.ops.generic import make_generic_ops
 
-OPS = [*make_generic_ops("dify", _TABLE), grep, search]
+OPS = [*make_generic_ops("dify", IO), grep, search]

@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.ssh.ops import OPS as _TABLE
+from mirage.commands.builtin.ssh.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("ssh",
-                       _TABLE,
-                       filetype_read=True,
-                       emulate_truncate=True)
+OPS = make_generic_ops("ssh", IO, filetype_read=True, emulate_truncate=True)

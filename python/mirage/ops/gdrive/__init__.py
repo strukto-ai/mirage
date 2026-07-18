@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gdrive.ops import OPS as _TABLE
+from mirage.commands.builtin.gdrive.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("gdrive", _TABLE, filetype_read=True)
+OPS = make_generic_ops("gdrive", IO, filetype_read=True)

@@ -429,6 +429,446 @@
         "stdout": "",
         "stderr": "rg: usage: rg [flags] pattern [path]\n"
       }
+    },
+    {
+      "id": "rg_flags_provision",
+      "seq": 500400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "mkdir -p /data/r4/sub && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/r4/app.log && printf 'alpha\\nbeta\\ngamma\\nALPHA\\n' > /data/r4/notes.txt && printf 'def main():\\n    return 42\\n' > /data/r4/code.py && printf 'function main() { return 42; }\\n' > /data/r4/code.js && printf 'secret alpha\\n' > /data/r4/.hidden.txt && printf 'alpha inner\\n' > /data/r4/sub/inner.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_v_invert",
+      "seq": 500401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -v error /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "warning: low memory\ninfo: all good\nnote: done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_n_line_numbers",
+      "seq": 500402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -n alpha /data/r4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_w_word",
+      "seq": 500403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -w alpha /data/r4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_w_word_no_partial",
+      "seq": 500404,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -w alph /data/r4/notes.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_F_fixed",
+      "seq": 500405,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -F \"main()\" /data/r4/code.py",
+      "expect": {
+        "exit": 0,
+        "stdout": "def main():\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_o_only_matching",
+      "seq": 500406,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -o \"err[a-z]*\" /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error\nerror\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_H_single_file",
+      "seq": 500407,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -H alpha /data/r4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/r4/notes.txt:alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_I_no_filename_dir",
+      "seq": 500408,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -I alpha /data/r4/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_m_max_count",
+      "seq": 500409,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -m1 error /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_A1_after",
+      "seq": 500410,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -A1 warning /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "warning: low memory\ninfo: all good\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_B1_before",
+      "seq": 500411,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -B1 info /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "warning: low memory\ninfo: all good\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_C1_context",
+      "seq": 500412,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -C1 warning /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\ninfo: all good\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_C1_merges_groups",
+      "seq": 500413,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -C1 error /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\ninfo: all good\nerror: timeout\nnote: done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_nA1_dash_context",
+      "seq": 500414,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg -nA1 warning /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:warning: low memory\n3-info: all good\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_hidden_skipped_by_default",
+      "seq": 500415,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg alpha /data/r4 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_hidden_flag",
+      "seq": 500416,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg --hidden alpha /data/r4 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_type_py",
+      "seq": 500417,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg --type py \"return\" /data/r4",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/r4/code.py:    return 42\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_glob_log",
+      "seq": 500418,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg --glob \"*.log\" error /data/r4",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/r4/app.log:error: disk full\n/data/r4/app.log:error: timeout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_color_noop",
+      "seq": 500419,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "rg --color=never alpha /data/r4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
     }
   ]
 }

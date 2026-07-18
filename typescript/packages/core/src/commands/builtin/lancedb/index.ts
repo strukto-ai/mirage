@@ -16,13 +16,13 @@ import type { LanceDBAccessor } from '../../../accessor/lancedb.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { LANCEDB_CMD_OPS } from './ops.ts'
+import { LANCEDB_IO } from './io.ts'
 import { LANCEDB_SEARCH } from './search.ts'
 
 const LANCEDB_OVERRIDES = new Set(['search'])
 
 export const LANCEDB_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<LanceDBAccessor>(ResourceName.LANCEDB, LANCEDB_CMD_OPS, {
+  ...makeGenericCommands<LanceDBAccessor>(ResourceName.LANCEDB, LANCEDB_IO, {
     overrides: LANCEDB_OVERRIDES,
   }),
   ...LANCEDB_SEARCH,

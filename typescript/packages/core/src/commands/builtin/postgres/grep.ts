@@ -15,7 +15,7 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { POSTGRES_CMD_OPS } from './ops.ts'
+import { POSTGRES_IO } from './io.ts'
 import { read as postgresRead } from '../../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../../core/postgres/readdir.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
@@ -36,7 +36,7 @@ import { patternArg } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
 import { searchProvision } from './_provision.ts'
 
-const resolveGlob = resolveGlobOf(POSTGRES_CMD_OPS)
+const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
 async function* postgresStream(
   accessor: PostgresAccessor,

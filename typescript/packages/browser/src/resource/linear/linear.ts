@@ -19,7 +19,7 @@ import {
   type IndexCacheStore,
   LINEAR_COMMANDS,
   LINEAR_PROMPT,
-  LINEAR_VFS_OPS,
+  LINEAR_OPS,
   LINEAR_WRITE_PROMPT,
   LinearAccessor,
   type LinearReaddirFilter,
@@ -82,7 +82,7 @@ export class LinearResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return LINEAR_VFS_OPS
+    return LINEAR_OPS
   }
 
   private filter(): LinearReaddirFilter {

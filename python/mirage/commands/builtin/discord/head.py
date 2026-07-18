@@ -17,7 +17,7 @@ import json
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
-from mirage.commands.builtin.discord.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.discord.io import resolve_glob
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic_bind.adapter import bound_op

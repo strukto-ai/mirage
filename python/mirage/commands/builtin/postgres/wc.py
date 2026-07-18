@@ -18,7 +18,7 @@ from mirage.commands.builtin.generic.wc import (WCCounts, format_wc,
                                                 format_wc_lines)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.postgres._provision import file_read_provision
-from mirage.commands.builtin.postgres.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.postgres.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command

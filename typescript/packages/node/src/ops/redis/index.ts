@@ -14,10 +14,9 @@
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
 import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
-import { REDIS_CMD_OPS } from '../../commands/builtin/redis/ops.ts'
+import { REDIS_IO } from '../../commands/builtin/redis/io.ts'
 
-export const REDIS_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.REDIS,
-  REDIS_CMD_OPS,
-  { filetypeRead: ['.feather', '.hdf5', '.parquet'], forwardIndex: false },
-)
+export const REDIS_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.REDIS, REDIS_IO, {
+  filetypeRead: ['.feather', '.hdf5', '.parquet'],
+  forwardIndex: false,
+})

@@ -19,14 +19,14 @@ import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GITHUB_DU } from './du.ts'
 import { GITHUB_FIND } from './find.ts'
 import { GITHUB_GREP } from './grep.ts'
-import { GITHUB_CMD_OPS } from './ops.ts'
+import { GITHUB_IO } from './io.ts'
 import { metadataProvision } from './provision.ts'
 import { GITHUB_RG } from './rg.ts'
 
 const GITHUB_OVERRIDES = new Set(['du', 'find', 'grep', 'rg'])
 
 export const GITHUB_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GitHubAccessor>(ResourceName.GITHUB, GITHUB_CMD_OPS, {
+  ...makeGenericCommands<GitHubAccessor>(ResourceName.GITHUB, GITHUB_IO, {
     overrides: GITHUB_OVERRIDES,
     provisionOverrides: {
       ls: metadataProvision as ProvisionFn,

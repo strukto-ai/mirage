@@ -16,14 +16,14 @@ from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.ssh._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.ssh.ops import OPS as _SSH_CMD_OPS
+from mirage.commands.builtin.ssh.io import IO as _IO
 from mirage.core.ssh.read import read_bytes as _read
 
 COMMANDS = [
     *make_filetype_commands(
-        "ssh", _SSH_CMD_OPS.resolve_glob, _read, provision=_ft_provision),
+        "ssh", _IO.resolve_glob, _read, provision=_ft_provision),
     *make_generic_commands(
         "ssh",
-        _SSH_CMD_OPS,
+        _IO,
     ),
 ]

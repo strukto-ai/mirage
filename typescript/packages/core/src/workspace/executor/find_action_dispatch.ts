@@ -58,7 +58,9 @@ export async function applyFindActions(
         resolved: true,
       })
       try {
-        const [, rmIo] = await mount.executeCmd('rm', [ps], [], {}, { stdin: null, cwd })
+        // -d so directories emptied by the deepest-first pass are removable,
+        // matching GNU -delete's rmdir behavior.
+        const [, rmIo] = await mount.executeCmd('rm', [ps], [], { d: true }, { stdin: null, cwd })
         if (rmIo.exitCode !== 0) {
           const errBytes = await materialize(rmIo.stderr)
           if (errBytes.length > 0) errors.push(errBytes)

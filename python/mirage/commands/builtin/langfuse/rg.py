@@ -21,7 +21,7 @@ from mirage.commands.builtin.langfuse.grep import (_filter_traces,
                                                    _format_dataset_results,
                                                    _format_prompt_results,
                                                    _format_session_results)
-from mirage.commands.builtin.langfuse.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.langfuse.io import resolve_glob
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS

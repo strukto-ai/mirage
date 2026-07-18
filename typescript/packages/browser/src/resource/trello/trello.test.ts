@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '@struktoai/mirage-core'
-import { PathSpec, ResourceName, TRELLO_VFS_OPS } from '@struktoai/mirage-core'
+import { PathSpec, ResourceName, TRELLO_OPS } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildResource } from '../registry.ts'
 import { redactTrelloConfig } from './config.ts'
@@ -46,9 +46,9 @@ describe('TrelloResource (browser)', () => {
     expect(typeof r.writePrompt).toBe('string')
   })
 
-  it('ops() returns TRELLO_VFS_OPS', () => {
+  it('ops() returns TRELLO_OPS', () => {
     const r = new TrelloResource({ apiKey: 'k', apiToken: 't' })
-    expect(r.ops()).toBe(TRELLO_VFS_OPS)
+    expect(r.ops()).toBe(TRELLO_OPS)
   })
 
   it('getState() redacts apiKey/apiToken', async () => {

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.qdrant.ops import OPS as _TABLE
+from mirage.commands.builtin.qdrant.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("qdrant", _TABLE)
+OPS = make_generic_ops("qdrant", IO)

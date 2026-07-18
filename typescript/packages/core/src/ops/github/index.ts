@@ -12,12 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GITHUB_CMD_OPS } from '../../commands/builtin/github/ops.ts'
+import { GITHUB_IO } from '../../commands/builtin/github/io.ts'
 import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const GITHUB_VFS_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.GITHUB,
-  GITHUB_CMD_OPS,
-)
+export const GITHUB_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.GITHUB, GITHUB_IO)

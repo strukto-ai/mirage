@@ -15,7 +15,7 @@
 import {
   MemoryOAuthClientProvider,
   NOTION_COMMANDS,
-  NOTION_VFS_OPS,
+  NOTION_OPS,
   ResourceName,
 } from '@struktoai/mirage-core'
 import type { OAuthClientMetadata } from '@modelcontextprotocol/sdk/shared/auth.js'
@@ -53,9 +53,9 @@ describe('NotionResource (browser)', () => {
     expect(r.commands()).toBe(NOTION_COMMANDS)
   })
 
-  it('ops() returns NOTION_VFS_OPS', () => {
+  it('ops() returns NOTION_OPS', () => {
     const r = new NotionResource({ authProvider: makeAuthProvider() })
-    expect(r.ops()).toBe(NOTION_VFS_OPS)
+    expect(r.ops()).toBe(NOTION_OPS)
   })
 
   it('getState() returns redacted config for default config', async () => {

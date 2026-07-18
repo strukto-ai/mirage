@@ -23,9 +23,9 @@ import {
 } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { du as hfDu, duAll as hfDuAll } from '../../../core/hf/du.ts'
-import { HF_CMD_OPS } from './ops.ts'
+import { HF_IO } from './io.ts'
 
-const resolveGlob = resolveGlobOf(HF_CMD_OPS)
+const resolveGlob = resolveGlobOf(HF_IO)
 
 async function duCommand(
   accessor: HfAccessor,

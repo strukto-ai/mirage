@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.commands.builtin.dify.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.dify.io import resolve_glob
 from mirage.core.dify import tree
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key

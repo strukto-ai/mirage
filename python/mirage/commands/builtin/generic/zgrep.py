@@ -169,9 +169,11 @@ async def zgrep(
                 all_results.append("(standard input)")
                 any_match = True
         else:
+            # GNU zgrep labels stdin "(standard input)" under -H.
+            stdin_name = "(standard input)" if f.force_filename else None
             result, had_match = _zgrep_search(data, compiled, f.ignore_case,
                                               f.invert, f.count,
-                                              f.line_numbers, None,
+                                              f.line_numbers, stdin_name,
                                               f.only_matching, f.max_count)
             if had_match:
                 any_match = True

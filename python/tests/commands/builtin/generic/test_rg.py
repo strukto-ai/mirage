@@ -514,3 +514,132 @@ async def test_rg_no_filename_suppresses_multi_file_labels():
         read_stream=rs,
     )
     assert (await _drain_async(output)).decode() == "apple\napricot\n"
+
+
+LOG = (b"error: disk full\nwarning: low memory\ninfo: all good\n"
+       b"error: timeout\nnote: done\n")
+
+
+@pytest.mark.asyncio
+async def test_rg_context_after_single_file():
+    readdir, stat, rb, rs = _make_backend({"/app.log": LOG})
+    output, io = await rg(
+        [_spec("/app.log")],
+        ["warning"],
+        {"A": "1"},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "warning: low memory\ninfo: all good\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_rg_context_c_merges_adjacent_groups():
+    readdir, stat, rb, rs = _make_backend({"/app.log": LOG})
+    output, _ = await rg(
+        [_spec("/app.log")],
+        ["error"],
+        {"C": "1"},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == ("error: disk full\nwarning: low memory\n"
+                       "info: all good\nerror: timeout\nnote: done\n")
+
+
+@pytest.mark.asyncio
+async def test_rg_context_line_numbers_use_dash_separator():
+    readdir, stat, rb, rs = _make_backend({"/app.log": LOG})
+    output, _ = await rg(
+        [_spec("/app.log")],
+        ["warning"],
+        {
+            "n": True,
+            "A": "1"
+        },
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "2:warning: low memory\n3-info: all good\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_context_respects_max_count():
+    readdir, stat, rb, rs = _make_backend({"/app.log": LOG})
+    output, _ = await rg(
+        [_spec("/app.log")],
+        ["error"],
+        {
+            "m": "1",
+            "C": "1"
+        },
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "error: disk full\nwarning: low memory\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_context_separates_distant_groups():
+    readdir, stat, rb, rs = _make_backend({"/f.txt": b"hit\na\nb\nc\nhit\n"})
+    output, _ = await rg(
+        [_spec("/f.txt")],
+        ["hit"],
+        {"A": "1"},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "hit\na\n--\nhit\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_dir_search_ignores_context():
+    # Deliberate divergence: directory search skips context lines,
+    # mirroring grep's -H divergence.
+    readdir, stat, rb, rs = _make_backend({"/dir/app.log": LOG})
+    output, _ = await rg(
+        [_spec("/dir")],
+        ["warning"],
+        {"A": "1"},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/dir/app.log:warning: low memory\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_no_filename_dir_walk():
+    readdir, stat, rb, rs = _make_backend({
+        "/dir/a.txt": b"alpha one\n",
+        "/dir/b.txt": b"alpha two\n",
+    })
+    output, _ = await rg(
+        [_spec("/dir")],
+        ["alpha"],
+        {"args_I": True},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "alpha one\nalpha two\n"

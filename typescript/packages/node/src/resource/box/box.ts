@@ -15,7 +15,7 @@
 import {
   BOX_COMMANDS,
   BOX_PROMPT,
-  BOX_VFS_OPS,
+  BOX_OPS,
   BaseResource,
   BoxAccessor,
   BoxTokenManager,
@@ -79,7 +79,7 @@ export class BoxResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return BOX_VFS_OPS
+    return BOX_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

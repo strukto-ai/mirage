@@ -71,7 +71,9 @@ async def _apply_find_actions(
                 resolved=True,
             )
             try:
-                _, rm_io = await mount.execute_cmd("rm", [ps], [], {},
+                # -d so directories emptied by the deepest-first pass are
+                # removable, matching GNU -delete's rmdir behavior.
+                _, rm_io = await mount.execute_cmd("rm", [ps], [], {"d": True},
                                                    stdin=None,
                                                    cwd=cwd)
             except (FileNotFoundError, NotADirectoryError, PermissionError,

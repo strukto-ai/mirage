@@ -18,7 +18,7 @@ from functools import partial
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import metadata_provision
-from mirage.commands.builtin.email.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.email.io import resolve_glob
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command

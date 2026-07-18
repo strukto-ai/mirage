@@ -14,10 +14,10 @@
 
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.redis.ops import OPS as _REDIS_CMD_OPS
+from mirage.commands.builtin.redis.io import IO as _IO
 from mirage.core.redis.read import read_bytes as _ft_read
 
 COMMANDS = [
-    *make_filetype_commands("redis", _REDIS_CMD_OPS.resolve_glob, _ft_read),
-    *make_generic_commands("redis", _REDIS_CMD_OPS),
+    *make_filetype_commands("redis", _IO.resolve_glob, _ft_read),
+    *make_generic_commands("redis", _IO),
 ]

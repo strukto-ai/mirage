@@ -19,7 +19,7 @@ import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { RAM_CMD_OPS } from './ops.ts'
+import { RAM_IO } from './io.ts'
 
 export const RAM_COMMANDS: readonly RegisteredCommand[] = [
   ...makeFiletypeCommands<RAMAccessor>({
@@ -27,5 +27,5 @@ export const RAM_COMMANDS: readonly RegisteredCommand[] = [
     readBytes: ramRead,
     statEntry: ramStat,
   }),
-  ...makeGenericCommands<RAMAccessor>(ResourceName.RAM, RAM_CMD_OPS),
+  ...makeGenericCommands<RAMAccessor>(ResourceName.RAM, RAM_IO),
 ]

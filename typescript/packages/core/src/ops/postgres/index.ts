@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { POSTGRES_CMD_OPS } from '../../commands/builtin/postgres/ops.ts'
+import { POSTGRES_IO } from '../../commands/builtin/postgres/io.ts'
 import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 import { readOp } from './read.ts'
 
 export const POSTGRES_OPS: readonly RegisteredOp[] = [
-  ...makeGenericOps(ResourceName.POSTGRES, POSTGRES_CMD_OPS, {
+  ...makeGenericOps(ResourceName.POSTGRES, POSTGRES_IO, {
     overrides: new Set(['read']),
   }),
   readOp,

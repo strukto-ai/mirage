@@ -17,7 +17,7 @@ from collections.abc import Callable
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import PatternType
-from mirage.commands.builtin.github.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.github.io import resolve_glob
 from mirage.commands.builtin.grep_helper import classify_pattern, search_query
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.spec.types import FlagView

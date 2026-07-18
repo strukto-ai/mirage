@@ -14,7 +14,7 @@
 
 import {
   DISCORD_COMMANDS,
-  DISCORD_VFS_OPS,
+  DISCORD_OPS,
   PathSpec,
   ResourceName,
   mountKey,
@@ -62,9 +62,9 @@ describe('DiscordResource (node)', () => {
     expect(r.commands()).toBe(DISCORD_COMMANDS)
   })
 
-  it('ops() returns DISCORD_VFS_OPS', () => {
+  it('ops() returns DISCORD_OPS', () => {
     const r = new DiscordResource({ token: 'bot-test' })
-    expect(r.ops()).toBe(DISCORD_VFS_OPS)
+    expect(r.ops()).toBe(DISCORD_OPS)
   })
 
   it('getState() redacts token', async () => {

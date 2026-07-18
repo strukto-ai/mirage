@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.github.ops import OPS as _TABLE
+from mirage.commands.builtin.github.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("github", _TABLE)
+OPS = make_generic_ops("github", IO)

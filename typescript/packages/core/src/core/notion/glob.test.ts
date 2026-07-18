@@ -18,9 +18,9 @@ import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
 import { NotionAccessor } from '../../accessor/notion.ts'
 import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
-import { NOTION_CMD_OPS } from '../../commands/builtin/notion/ops.ts'
+import { NOTION_IO } from '../../commands/builtin/notion/io.ts'
 
-const resolveNotionGlob = resolveGlobOf(NOTION_CMD_OPS)
+const resolveNotionGlob = resolveGlobOf(NOTION_IO)
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []

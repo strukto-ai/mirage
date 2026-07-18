@@ -14,19 +14,19 @@
 
 from mirage.commands.builtin.dify.cat import make_cat
 from mirage.commands.builtin.dify.find import find
-from mirage.commands.builtin.dify.ops import OPS as _DIFY_CMD_OPS
+from mirage.commands.builtin.dify.io import IO as _IO
 from mirage.commands.builtin.dify.search import search
 from mirage.commands.builtin.generic_bind import (make_generic_commands,
                                                   with_read_cache)
 
 _DIFY_OVERRIDES = {"cat", "find"}
 
-_DIFY_CACHED_OPS = with_read_cache(_DIFY_CMD_OPS)
+_DIFY_CACHED_OPS = with_read_cache(_IO)
 
 COMMANDS = [
     *make_generic_commands(
         "dify",
-        _DIFY_CMD_OPS,
+        _IO,
         overrides=_DIFY_OVERRIDES,
     ),
     make_cat(_DIFY_CACHED_OPS),

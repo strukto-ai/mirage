@@ -23,7 +23,7 @@ import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GSHEETS_COMMANDS } from '../gsheets/index.ts'
 import { GSLIDES_COMMANDS } from '../gslides/index.ts'
 import { GWS_DRIVE_API_COMMANDS } from '../gws/index.ts'
-import { GDRIVE_CMD_OPS } from './ops.ts'
+import { GDRIVE_IO } from './io.ts'
 
 const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
   ...GDOCS_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
@@ -38,6 +38,6 @@ export const GDRIVE_COMMANDS: readonly RegisteredCommand[] = [
     readBytes: gdriveRead,
     statEntry: gdriveStat,
   }),
-  ...makeGenericCommands<GDriveAccessor>(ResourceName.GDRIVE, GDRIVE_CMD_OPS, {}),
+  ...makeGenericCommands<GDriveAccessor>(ResourceName.GDRIVE, GDRIVE_IO, {}),
   ...GWS_FOR_GDRIVE,
 ]

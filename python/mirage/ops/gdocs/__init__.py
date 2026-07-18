@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gdocs.ops import OPS as _TABLE
+from mirage.commands.builtin.gdocs.io import IO
 from mirage.ops.gdocs.read import read
 from mirage.ops.generic import make_generic_ops
 
 # The only read is the dual-resource .gdoc.json filetype op (registered for
 # both gdocs and gdrive), so the factory's plain read is overridden.
-OPS = [*make_generic_ops("gdocs", _TABLE, overrides={"read"}), read]
+OPS = [*make_generic_ops("gdocs", IO, overrides={"read"}), read]

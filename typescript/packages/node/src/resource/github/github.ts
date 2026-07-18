@@ -15,7 +15,7 @@
 import {
   BaseResource,
   GITHUB_COMMANDS,
-  GITHUB_VFS_OPS,
+  GITHUB_OPS,
   GitHubAccessor,
   HttpGitHubTransport,
   PathSpec,
@@ -100,7 +100,7 @@ export class GitHubResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GITHUB_VFS_OPS
+    return GITHUB_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

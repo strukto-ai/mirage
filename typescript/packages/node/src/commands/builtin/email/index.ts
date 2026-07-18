@@ -17,7 +17,7 @@ import type { EmailAccessor } from '../../../accessor/email.ts'
 import { EMAIL_FIND } from './find.ts'
 import { EMAIL_FORWARD } from './email_forward.ts'
 import { EMAIL_GREP } from './grep.ts'
-import { EMAIL_CMD_OPS } from './ops.ts'
+import { EMAIL_IO } from './io.ts'
 import { EMAIL_READ } from './email_read.ts'
 import { EMAIL_REPLY } from './email_reply.ts'
 import { EMAIL_REPLY_ALL } from './email_reply_all.ts'
@@ -28,7 +28,7 @@ import { EMAIL_TRIAGE } from './email_triage.ts'
 const EMAIL_OVERRIDES = new Set(['find', 'grep', 'rg'])
 
 export const EMAIL_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<EmailAccessor>(ResourceName.EMAIL, EMAIL_CMD_OPS, {
+  ...makeGenericCommands<EmailAccessor>(ResourceName.EMAIL, EMAIL_IO, {
     overrides: EMAIL_OVERRIDES,
   }),
   ...EMAIL_FIND,

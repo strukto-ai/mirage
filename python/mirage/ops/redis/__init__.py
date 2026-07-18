@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.redis.ops import OPS as _TABLE
+from mirage.commands.builtin.redis.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("redis",
-                       _TABLE,
-                       filetype_read=True,
-                       emulate_truncate=True)
+OPS = make_generic_ops("redis", IO, filetype_read=True, emulate_truncate=True)

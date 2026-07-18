@@ -18,7 +18,7 @@ import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { metadataProvision } from './_provision.ts'
 import { SLACK_GREP } from './grep.ts'
-import { SLACK_CMD_OPS } from './ops.ts'
+import { SLACK_IO } from './io.ts'
 import { SLACK_RG } from './rg.ts'
 import { SLACK_ADD_REACTION } from './slack_add_reaction.ts'
 import { SLACK_GET_USER_PROFILE } from './slack_get_user_profile.ts'
@@ -30,7 +30,7 @@ import { SLACK_SEARCH } from './slack_search.ts'
 const SLACK_OVERRIDES = new Set(['grep', 'rg'])
 
 export const SLACK_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<SlackAccessor>(ResourceName.SLACK, SLACK_CMD_OPS, {
+  ...makeGenericCommands<SlackAccessor>(ResourceName.SLACK, SLACK_IO, {
     overrides: SLACK_OVERRIDES,
     provisionOverrides: {
       ls: metadataProvision as ProvisionFn,

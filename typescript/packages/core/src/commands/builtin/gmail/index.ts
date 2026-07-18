@@ -24,14 +24,14 @@ import { GMAIL_GWS_REPLY } from './gws_gmail_reply.ts'
 import { GMAIL_GWS_REPLY_ALL } from './gws_gmail_reply_all.ts'
 import { GMAIL_GWS_SEND } from './gws_gmail_send.ts'
 import { GMAIL_GWS_TRIAGE } from './gws_gmail_triage.ts'
-import { GMAIL_CMD_OPS } from './ops.ts'
+import { GMAIL_IO } from './io.ts'
 import { metadataProvision } from './provision.ts'
 import { GMAIL_RG } from './rg.ts'
 
 const GMAIL_OVERRIDES = new Set(['grep', 'rg'])
 
 export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GmailAccessor>(ResourceName.GMAIL, GMAIL_CMD_OPS, {
+  ...makeGenericCommands<GmailAccessor>(ResourceName.GMAIL, GMAIL_IO, {
     overrides: GMAIL_OVERRIDES,
     provisionOverrides: {
       ls: metadataProvision as ProvisionFn,

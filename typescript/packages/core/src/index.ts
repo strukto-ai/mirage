@@ -625,13 +625,13 @@ export {
 } from './core/discord/_client_browser.ts'
 export { DiscordAccessor, type DiscordResourceLike } from './accessor/discord.ts'
 export { SLACK_COMMANDS } from './commands/builtin/slack/index.ts'
-export { SLACK_VFS_OPS } from './ops/slack/index.ts'
+export { SLACK_OPS } from './ops/slack/index.ts'
 export { read as slackRead } from './core/slack/read.ts'
 export { readdir as slackReaddir } from './core/slack/readdir.ts'
 export { stat as slackStat } from './core/slack/stat.ts'
 export { SLACK_PROMPT, SLACK_WRITE_PROMPT } from './resource/slack/prompt.ts'
 export { DISCORD_COMMANDS } from './commands/builtin/discord/index.ts'
-export { DISCORD_VFS_OPS } from './ops/discord/index.ts'
+export { DISCORD_OPS } from './ops/discord/index.ts'
 export { read as discordRead } from './core/discord/read.ts'
 export { readdir as discordReaddir } from './core/discord/readdir.ts'
 export { stat as discordStat } from './core/discord/stat.ts'
@@ -644,7 +644,7 @@ export {
 } from './core/trello/_client.ts'
 export { TrelloAccessor, type TrelloResourceLike } from './accessor/trello.ts'
 export { TRELLO_COMMANDS } from './commands/builtin/trello/index.ts'
-export { TRELLO_VFS_OPS } from './ops/trello/index.ts'
+export { TRELLO_OPS } from './ops/trello/index.ts'
 export {
   HttpLinearTransport,
   type HttpLinearTransportOptions,
@@ -653,7 +653,7 @@ export {
 } from './core/linear/_client.ts'
 export { LinearAccessor, type LinearResourceLike } from './accessor/linear.ts'
 export { LINEAR_COMMANDS } from './commands/builtin/linear/index.ts'
-export { LINEAR_VFS_OPS } from './ops/linear/index.ts'
+export { LINEAR_OPS } from './ops/linear/index.ts'
 export { read as linearRead } from './core/linear/read.ts'
 export { readdir as linearReaddir, type LinearReaddirFilter } from './core/linear/readdir.ts'
 export { stat as linearStat } from './core/linear/stat.ts'
@@ -677,7 +677,7 @@ export { readdir as notionReaddir } from './core/notion/readdir.ts'
 export { stat as notionStat } from './core/notion/stat.ts'
 export { NOTION_PROMPT, NOTION_WRITE_PROMPT } from './resource/notion/prompt.ts'
 export { NOTION_COMMANDS } from './commands/builtin/notion/index.ts'
-export { NOTION_VFS_OPS } from './ops/notion/index.ts'
+export { NOTION_OPS } from './ops/notion/index.ts'
 export {
   HttpLangfuseTransport,
   type HttpLangfuseTransportOptions,
@@ -686,7 +686,7 @@ export {
 } from './core/langfuse/_client.ts'
 export { LangfuseAccessor, type LangfuseResourceLike } from './accessor/langfuse.ts'
 export { LANGFUSE_COMMANDS } from './commands/builtin/langfuse/index.ts'
-export { LANGFUSE_VFS_OPS } from './ops/langfuse/index.ts'
+export { LANGFUSE_OPS } from './ops/langfuse/index.ts'
 export { read as langfuseRead } from './core/langfuse/read.ts'
 export { readdir as langfuseReaddir } from './core/langfuse/readdir.ts'
 export { stat as langfuseStat } from './core/langfuse/stat.ts'
@@ -712,7 +712,7 @@ export {
 } from './core/github/_client.ts'
 export { GitHubAccessor, type GitHubResourceLike } from './accessor/github.ts'
 export { GITHUB_COMMANDS } from './commands/builtin/github/index.ts'
-export { GITHUB_VFS_OPS } from './ops/github/index.ts'
+export { GITHUB_OPS } from './ops/github/index.ts'
 export { read as githubRead, stream as githubStream } from './core/github/read.ts'
 export { readdir as githubReaddir } from './core/github/readdir.ts'
 export {
@@ -733,7 +733,7 @@ export { GITHUB_PROMPT } from './resource/github/prompt.ts'
 export { type CITransport, HttpCITransport } from './core/github_ci/_client.ts'
 export { GitHubCIAccessor, type GitHubCIResourceLike } from './accessor/github_ci.ts'
 export { GITHUB_CI_COMMANDS } from './commands/builtin/github_ci/index.ts'
-export { GITHUB_CI_VFS_OPS } from './ops/github_ci/index.ts'
+export { GITHUB_CI_OPS } from './ops/github_ci/index.ts'
 export { read as githubCiRead, stream as githubCiStream } from './core/github_ci/read.ts'
 export { readdir as githubCiReaddir } from './core/github_ci/readdir.ts'
 export { stat as githubCiStat } from './core/github_ci/stat.ts'
@@ -802,7 +802,7 @@ export {
 } from './core/google/drive.ts'
 export { GDocsAccessor } from './accessor/gdocs.ts'
 export { GDOCS_COMMANDS } from './commands/builtin/gdocs/index.ts'
-export { GDOCS_VFS_OPS } from './ops/gdocs/index.ts'
+export { GDOCS_OPS } from './ops/gdocs/index.ts'
 export {
   read as gdocsRead,
   stream as gdocsStream,
@@ -819,7 +819,7 @@ export {
 } from './resource/gdocs/doc_entry.ts'
 export { GSheetsAccessor } from './accessor/gsheets.ts'
 export { GSHEETS_COMMANDS } from './commands/builtin/gsheets/index.ts'
-export { GSHEETS_VFS_OPS } from './ops/gsheets/index.ts'
+export { GSHEETS_OPS } from './ops/gsheets/index.ts'
 export {
   read as gsheetsRead,
   stream as gsheetsStream,
@@ -837,7 +837,7 @@ export {
 } from './resource/gsheets/sheet_entry.ts'
 export { GSlidesAccessor } from './accessor/gslides.ts'
 export { GSLIDES_COMMANDS } from './commands/builtin/gslides/index.ts'
-export { GSLIDES_VFS_OPS } from './ops/gslides/index.ts'
+export { GSLIDES_OPS } from './ops/gslides/index.ts'
 export {
   read as gslidesRead,
   stream as gslidesStream,
@@ -854,7 +854,7 @@ export {
 export { GoogleApiAccessor } from './accessor/google_api.ts'
 export { GDriveAccessor } from './accessor/gdrive.ts'
 export { GDRIVE_COMMANDS } from './commands/builtin/gdrive/index.ts'
-export { GDRIVE_VFS_OPS } from './ops/gdrive/index.ts'
+export { GDRIVE_OPS } from './ops/gdrive/index.ts'
 export {
   read as gdriveRead,
   stream as gdriveStream,
@@ -885,7 +885,7 @@ export {
 } from './core/dropbox/api.ts'
 export { DropboxAccessor } from './accessor/dropbox.ts'
 export { DROPBOX_COMMANDS } from './commands/builtin/dropbox/index.ts'
-export { DROPBOX_VFS_OPS } from './ops/dropbox/index.ts'
+export { DROPBOX_OPS } from './ops/dropbox/index.ts'
 export { read as dropboxRead, stream as dropboxStream } from './core/dropbox/read.ts'
 export { readdir as dropboxReaddir } from './core/dropbox/readdir.ts'
 export { stat as dropboxStat } from './core/dropbox/stat.ts'
@@ -913,7 +913,7 @@ export {
 } from './core/box/api.ts'
 export { BoxAccessor } from './accessor/box.ts'
 export { BOX_COMMANDS } from './commands/builtin/box/index.ts'
-export { BOX_VFS_OPS } from './ops/box/index.ts'
+export { BOX_OPS } from './ops/box/index.ts'
 export { read as boxRead, stream as boxStream } from './core/box/read.ts'
 export { readdir as boxReaddir } from './core/box/readdir.ts'
 export { stat as boxStat } from './core/box/stat.ts'
@@ -930,7 +930,7 @@ export {
 } from './core/filetype/boxcanvas.ts'
 export { GmailAccessor } from './accessor/gmail.ts'
 export { GMAIL_COMMANDS } from './commands/builtin/gmail/index.ts'
-export { GMAIL_VFS_OPS } from './ops/gmail/index.ts'
+export { GMAIL_OPS } from './ops/gmail/index.ts'
 export { read as gmailRead } from './core/gmail/read.ts'
 export { readdir as gmailReaddir } from './core/gmail/readdir.ts'
 export { stat as gmailStat } from './core/gmail/stat.ts'

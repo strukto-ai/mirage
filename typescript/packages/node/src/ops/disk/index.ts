@@ -14,9 +14,9 @@
 
 import type { RegisteredOp } from '@struktoai/mirage-core'
 import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
-import { DISK_CMD_OPS } from '../../commands/builtin/disk/ops.ts'
+import { DISK_IO } from '../../commands/builtin/disk/io.ts'
 
-export const DISK_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.DISK, DISK_CMD_OPS, {
+export const DISK_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.DISK, DISK_IO, {
   filetypeRead: ['.feather', '.hdf5', '.parquet'],
   mkdirParents: true,
   forwardIndex: false,

@@ -147,6 +147,9 @@ async def grep(
                 )
                 results.extend(rebase_raw(hits, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings)
+            if f.quiet:
+                return b"", IOResult(exit_code=0 if results else 1,
+                                     stderr=stderr)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
             return format_records(results), IOResult(stderr=stderr)
@@ -196,9 +199,14 @@ async def grep(
                     else:
                         all_results.extend(f"{label}{rl}" for rl in hits)
             stderr = format_optional_records(warnings)
+            matched = bool(all_results) and (
+                not f.count_only or count_records_have_matches(all_results))
+            if f.quiet:
+                return b"", IOResult(exit_code=0 if matched else 1,
+                                     stderr=stderr)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            if f.count_only and not count_records_have_matches(all_results):
+            if not matched:
                 return format_records(all_results), IOResult(exit_code=1,
                                                              stderr=stderr)
             return format_records(all_results), IOResult(stderr=stderr)
@@ -234,9 +242,14 @@ async def grep(
                 else:
                     all_results.extend(f"{label}{r}" for r in hits)
             stderr = format_optional_records(multi_warnings)
+            matched = bool(all_results) and (
+                not f.count_only or count_records_have_matches(all_results))
+            if f.quiet:
+                return b"", IOResult(exit_code=0 if matched else 1,
+                                     stderr=stderr)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            if f.count_only and not count_records_have_matches(all_results):
+            if not matched:
                 return format_records(all_results), IOResult(exit_code=1,
                                                              stderr=stderr)
             return format_records(all_results), IOResult(stderr=stderr)

@@ -228,6 +228,7 @@ export async function rgGeneric(
       fileType: flags.fileType,
       globPattern: flags.globPattern,
       hidden: flags.hidden,
+      noFilename: flags.noFilename,
     }
     const results: string[] = []
     for (const p of paths) {

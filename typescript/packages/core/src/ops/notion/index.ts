@@ -12,12 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NOTION_CMD_OPS } from '../../commands/builtin/notion/ops.ts'
+import { NOTION_IO } from '../../commands/builtin/notion/io.ts'
 import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const NOTION_VFS_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.NOTION,
-  NOTION_CMD_OPS,
-)
+export const NOTION_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.NOTION, NOTION_IO)

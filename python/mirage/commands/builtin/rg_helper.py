@@ -15,6 +15,7 @@
 import fnmatch
 import posixpath
 
+from mirage.commands.builtin.grep_context import grep_context_lines
 from mirage.commands.builtin.grep_helper import (BINARY_EXTENSIONS,
                                                  compile_pattern,
                                                  get_extension)
@@ -187,6 +188,7 @@ async def rg_full(
     hidden: bool,
     warnings: list[str] | None,
     file_prefix: str | None = None,
+    no_filename: bool = False,
 ) -> list[str]:
     compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
 
@@ -212,6 +214,17 @@ async def rg_full(
             if warnings is not None:
                 warnings.append(f"rg: {path}: {exc}")
             return []
+        if ((context_before or context_after) and not files_only
+                and not count_only and not only_matching
+                and file_prefix is None):
+            # Single-file context rides the shared grep renderer (match
+            # lines `N:`, context lines `N-`, `--` between groups).
+            # Directory search and filename-prefixed fanout skip context,
+            # mirroring grep's -H divergence.
+            rendered = grep_context_lines(data, compiled, invert, line_numbers,
+                                          max_count, context_after,
+                                          context_before)
+            return [b.decode().rstrip("\n") for b in rendered]
         results: list[str] = []
         count = 0
         for i_ln, line in enumerate(data, 1):
@@ -280,6 +293,7 @@ async def rg_full(
                 glob_pattern,
                 hidden,
                 warnings,
+                no_filename=no_filename,
             ))
         else:
             if get_extension(entry) in BINARY_EXTENSIONS:
@@ -308,9 +322,12 @@ async def rg_full(
                     else:
                         text = line
                     pfx = f"{i_ln}:{text}" if line_numbers else text
-                    results.append(f"{entry}:{pfx}")
+                    # ripgrep -I drops per-file labels in directory walks.
+                    results.append(pfx if no_filename else f"{entry}:{pfx}")
                 if count_only and file_count > 0:
-                    results.append(f"{entry}:{file_count}")
+                    results.append(
+                        str(file_count
+                            ) if no_filename else f"{entry}:{file_count}")
             except Exception as exc:
                 if warnings is not None:
                     warnings.append(f"rg: {entry}: {exc}")

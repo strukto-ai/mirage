@@ -37,9 +37,9 @@ import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
 import { stat as emailStat } from '../../../core/email/stat.ts'
 import { detectScope } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
-import { EMAIL_CMD_OPS } from './ops.ts'
+import { EMAIL_IO } from './io.ts'
 
-const resolveGlob = resolveGlobOf(EMAIL_CMD_OPS)
+const resolveGlob = resolveGlobOf(EMAIL_IO)
 
 const ENC = new TextEncoder()
 

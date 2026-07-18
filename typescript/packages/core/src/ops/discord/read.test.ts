@@ -23,9 +23,9 @@ import type {
   DiscordTransport,
 } from '../../core/discord/_client.ts'
 import { PathSpec, ResourceName } from '../../types.ts'
-import { DISCORD_VFS_OPS } from './index.ts'
+import { DISCORD_OPS } from './index.ts'
 
-const readOp = DISCORD_VFS_OPS.find((o) => o.name === 'read' && o.filetype === null)
+const readOp = DISCORD_OPS.find((o) => o.name === 'read' && o.filetype === null)
 if (!readOp) throw new Error('discord read op not registered')
 
 class FakeDiscordTransport implements DiscordTransport {

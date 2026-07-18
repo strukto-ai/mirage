@@ -18,7 +18,7 @@ import {
   GMAIL_COMMANDS,
   GMAIL_PROMPT,
   GMAIL_WRITE_PROMPT,
-  GMAIL_VFS_OPS,
+  GMAIL_OPS,
   GmailAccessor,
   type IndexCacheStore,
   PathSpec,
@@ -72,7 +72,7 @@ export class GmailResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GMAIL_VFS_OPS
+    return GMAIL_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

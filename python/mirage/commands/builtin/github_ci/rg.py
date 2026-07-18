@@ -16,7 +16,7 @@ from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.github_ci.ops import RESOLVE_GLOB as resolve_glob
+from mirage.commands.builtin.github_ci.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github_ci.read import read as ci_read

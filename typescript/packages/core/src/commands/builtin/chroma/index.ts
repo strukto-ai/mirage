@@ -17,13 +17,13 @@ import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { CHROMA_FIND } from './find.ts'
-import { CHROMA_CMD_OPS } from './ops.ts'
+import { CHROMA_IO } from './io.ts'
 import { CHROMA_SEARCH } from './search.ts'
 
 const CHROMA_OVERRIDES = new Set(['find', 'search'])
 
 export const CHROMA_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<ChromaAccessor>(ResourceName.CHROMA, CHROMA_CMD_OPS, {
+  ...makeGenericCommands<ChromaAccessor>(ResourceName.CHROMA, CHROMA_IO, {
     overrides: CHROMA_OVERRIDES,
   }),
   ...CHROMA_FIND,

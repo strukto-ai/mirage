@@ -15,7 +15,7 @@
 import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
 import { walkFind } from '../../../core/generic/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { GITHUB_CI_CMD_OPS } from './ops.ts'
+import { GITHUB_CI_IO } from './io.ts'
 import { isCrossRunRoot, isDirName, readdir as ciReaddir } from '../../../core/github_ci/readdir.ts'
 import { stat as ciStat } from '../../../core/github_ci/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
@@ -24,7 +24,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
 import { metadataProvision } from './provision.ts'
 
-const resolveGlob = resolveGlobOf(GITHUB_CI_CMD_OPS)
+const resolveGlob = resolveGlobOf(GITHUB_CI_IO)
 
 async function findCommand(
   accessor: GitHubCIAccessor,

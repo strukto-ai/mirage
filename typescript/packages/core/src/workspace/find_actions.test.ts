@@ -103,6 +103,18 @@ describe('find action layer', () => {
       })
       expect(r.exitCode).toBe(0)
     })
+
+    it('removes directories emptied by the deepest-first pass', async () => {
+      const ws = await singleMountWs()
+      ws.createSession('s')
+      await ws.execute('mkdir -p /tree/deep', { sessionId: 's' })
+      await ws.execute('touch /tree/deep/f.txt', { sessionId: 's' })
+      const r = await ws.execute('find /tree -delete', { sessionId: 's' })
+      expect(r.exitCode).toBe(0)
+      expect(r.stderrText).toBe('')
+      const after = await ws.execute('find / -name tree', { sessionId: 's' })
+      expect(after.stdoutText).toBe('')
+    })
   })
 
   describe('-print0', () => {

@@ -17,7 +17,7 @@ import {
   type FileStat,
   DROPBOX_COMMANDS,
   DROPBOX_PROMPT,
-  DROPBOX_VFS_OPS,
+  DROPBOX_OPS,
   DropboxAccessor,
   DropboxTokenManager,
   type IndexCacheStore,
@@ -75,7 +75,7 @@ export class DropboxResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return DROPBOX_VFS_OPS
+    return DROPBOX_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

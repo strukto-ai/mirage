@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.trello.ops import OPS as _TRELLO_CMD_OPS
+from mirage.commands.builtin.trello.io import IO as _IO
 from mirage.commands.builtin.trello.trello_card_assign import \
     trello_card_assign
 from mirage.commands.builtin.trello.trello_card_comment_add import \
@@ -33,7 +33,7 @@ from mirage.commands.builtin.trello.trello_card_update import \
 COMMANDS = [
     *make_generic_commands(
         "trello",
-        _TRELLO_CMD_OPS,
+        _IO,
     ),
     trello_card_assign,
     trello_card_comment_add,

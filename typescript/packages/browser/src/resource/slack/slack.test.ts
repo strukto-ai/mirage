@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '@struktoai/mirage-core'
-import { PathSpec, ResourceName, SLACK_COMMANDS, SLACK_VFS_OPS } from '@struktoai/mirage-core'
+import { PathSpec, ResourceName, SLACK_COMMANDS, SLACK_OPS } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildResource } from '../registry.ts'
 import { redactSlackConfig } from './config.ts'
@@ -60,9 +60,9 @@ describe('SlackResource (browser)', () => {
     expect(r.commands()).toBe(SLACK_COMMANDS)
   })
 
-  it('ops() returns SLACK_VFS_OPS', () => {
+  it('ops() returns SLACK_OPS', () => {
     const r = new SlackResource({ proxyUrl: '/api/slack' })
-    expect(r.ops()).toBe(SLACK_VFS_OPS)
+    expect(r.ops()).toBe(SLACK_OPS)
   })
 
   it('getState() redacts getHeaders but keeps proxyUrl visible', async () => {

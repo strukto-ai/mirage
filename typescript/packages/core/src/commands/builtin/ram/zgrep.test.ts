@@ -72,4 +72,12 @@ describe('zgrep', () => {
     const r = await runZgrep(resource, [PathSpec.fromStrPath('/f.gz')], ['xyz'])
     expect(r.exitCode).toBe(1)
   })
+
+  it('labels stdin "(standard input)" under -H', async () => {
+    const resource = new RAMResource()
+    const compressed = await gzip(ENC.encode('foo\nbar\n'))
+    const r = await runZgrep(resource, [], ['bar'], { H: true }, compressed)
+    expect(r.exitCode).toBe(0)
+    expect(r.out).toBe('(standard input):bar\n')
+  })
 })

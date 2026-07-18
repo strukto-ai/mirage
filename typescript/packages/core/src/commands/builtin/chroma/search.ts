@@ -15,7 +15,7 @@
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { CHROMA_CMD_OPS } from './ops.ts'
+import { CHROMA_IO } from './io.ts'
 import { searchSegments } from '../../../core/chroma/search.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -25,7 +25,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { defaultPaths } from '../utils/operands.ts'
 
-const resolveGlob = resolveGlobOf(CHROMA_CMD_OPS)
+const resolveGlob = resolveGlobOf(CHROMA_IO)
 
 const ENC = new TextEncoder()
 

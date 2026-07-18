@@ -16,7 +16,7 @@ import {
   BaseResource,
   GDRIVE_COMMANDS,
   GDRIVE_PROMPT,
-  GDRIVE_VFS_OPS,
+  GDRIVE_OPS,
   GDriveAccessor,
   PathSpec,
   ResourceName,
@@ -77,7 +77,7 @@ export class GDriveResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return GDRIVE_VFS_OPS
+    return GDRIVE_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

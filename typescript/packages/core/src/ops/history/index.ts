@@ -12,12 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HISTORY_CMD_OPS } from '../../commands/builtin/history/ops.ts'
+import { HISTORY_IO } from '../../commands/builtin/history/io.ts'
 import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const HISTORY_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.HISTORY,
-  HISTORY_CMD_OPS,
-)
+export const HISTORY_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.HISTORY, HISTORY_IO)

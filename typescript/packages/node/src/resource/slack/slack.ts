@@ -19,7 +19,7 @@ import {
   ResourceName,
   SLACK_COMMANDS,
   SLACK_PROMPT,
-  SLACK_VFS_OPS,
+  SLACK_OPS,
   SLACK_WRITE_PROMPT,
   SlackAccessor,
   mountKey,
@@ -70,7 +70,7 @@ export class SlackResource extends BaseResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return SLACK_VFS_OPS
+    return SLACK_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {

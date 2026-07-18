@@ -17,7 +17,7 @@ import {
   BrowserDiscordTransport,
   DISCORD_COMMANDS,
   DISCORD_PROMPT,
-  DISCORD_VFS_OPS,
+  DISCORD_OPS,
   DISCORD_WRITE_PROMPT,
   DiscordAccessor,
   type FileStat,
@@ -76,7 +76,7 @@ export class DiscordResource implements Resource {
   }
 
   ops(): readonly RegisteredOp[] {
-    return DISCORD_VFS_OPS
+    return DISCORD_OPS
   }
 
   readFile(p: PathSpec): Promise<Uint8Array> {
