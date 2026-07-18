@@ -86,14 +86,14 @@ export function formatTable(headers: string[], rows: (string | undefined)[][]): 
     headers
       .map((h, i) => pad(h, widths[i] ?? h.length))
       .join('  ')
-      .replace(/\s+$/, ''),
+      .trimEnd(),
   )
   for (const row of norm) {
     out.push(
       row
         .map((c, i) => pad(c, widths[i] ?? c.length))
         .join('  ')
-        .replace(/\s+$/, ''),
+        .trimEnd(),
     )
   }
   return out.join('\n')

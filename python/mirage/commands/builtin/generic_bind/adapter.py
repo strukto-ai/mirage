@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, overload
 
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.ops.config import StatOverlay
 from mirage.types import FileStat, PathSpec

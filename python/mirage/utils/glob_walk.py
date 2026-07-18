@@ -141,9 +141,9 @@ async def expand_pattern(
 
 
 def make_resolve_glob(
-    readdir: Callable,
+    readdir: Callable[..., Any],
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES,
-) -> Callable:
+) -> Callable[..., Any]:
     """Build a resolve_glob generic over a backend's readdir.
 
     Args:
@@ -155,7 +155,7 @@ def make_resolve_glob(
     async def resolve_glob(
         accessor: Accessor,
         paths: list[PathSpec],
-        index: IndexCacheStore | None = NULL_INDEX,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec]:
         return await resolve_glob_with(readdir, accessor, paths, index,
                                        max_glob_matches)

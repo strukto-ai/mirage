@@ -60,7 +60,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     res.end(JSON.stringify({ error: 'invalid slack api endpoint' }))
     return
   }
-  const upstream = new URL(`/api/${endpoint}`, UPSTREAM_ORIGIN)
+  // Re-encode each validated segment; encoding is the barrier static
+  // analyzers recognize against URL-authority manipulation.
+  const safePath = endpoint.split('/').map(encodeURIComponent).join('/')
+  const upstream = new URL(`/api/${safePath}`, UPSTREAM_ORIGIN)
   upstream.search = url.search
 
   const method = (req.method ?? 'GET').toUpperCase()

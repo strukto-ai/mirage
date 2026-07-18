@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexConfig
@@ -66,9 +67,9 @@ class GenericResource(BaseResource):
         prompt: str = "",
         write_prompt: str = "",
         overrides: set[str] | None = None,
-        commands: list[Callable] | None = None,
-        ops: list[Callable] | None = None,
-        provision_overrides: dict[str, Callable] | None = None,
+        commands: list[Callable[..., Any]] | None = None,
+        ops: list[Callable[..., Any]] | None = None,
+        provision_overrides: dict[str, Callable[..., Any]] | None = None,
         caches_reads: bool = False,
         index: IndexConfig | None = None,
     ) -> None:
@@ -94,9 +95,9 @@ class GenericResource(BaseResource):
             self.register_op(fn)
 
     async def resolve_glob(self,
-                           paths: list,
+                           paths: list[Any],
                            prefix: str = "") -> list[PathSpec]:
         return await self._resolve(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return {"type": self.name}
