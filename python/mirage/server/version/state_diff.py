@@ -17,12 +17,7 @@ from typing import Any
 from mirage.server.version.api import read_version, resolve_ref, version_diff
 from mirage.server.version.state_tree import to_state
 from mirage.server.version.store import VersionStore
-from mirage.types import MOUNT_MODE_RANK, SessionKey, StateKey
-
-# String-keyed view of the canonical READ < WRITE < EXEC lattice; a
-# transition that moves UP it is a widening and must be surfaced,
-# never silent. Unknown modes rank below READ.
-_MODE_RANK = {mode.value: rank for mode, rank in MOUNT_MODE_RANK.items()}
+from mirage.types import SessionKey, StateKey
 
 
 def _dict_delta(before: dict[str, Any], after: dict[str,
@@ -89,46 +84,14 @@ def _commands_between(history_a: list[dict[str, Any]],
     return [e for e in history_b if tuple(sorted(e.items())) not in seen]
 
 
-def grant_widenings(sessions_diff: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every mount-grant transition in the diff that widens access.
-
-    The judge's safety rail: applying B over A re-grants these. Also
-    counts grants that only exist on the B side (added sessions or
-    newly granted mounts).
-    """
-    out: list[dict[str, Any]] = []
-    for sid, delta in sessions_diff.get("modified", {}).items():
-        grants = delta.get("mount_modes")
-        if not grants:
-            continue
-        for mount, change in grants["modified"].items():
-            before_rank = _MODE_RANK.get(change["from"], 0)
-            after_rank = _MODE_RANK.get(change["to"], 0)
-            if after_rank > before_rank:
-                out.append({
-                    "session_id": sid,
-                    "mount": mount,
-                    "from": change["from"],
-                    "to": change["to"],
-                })
-        for mount, mode in grants["added"].items():
-            out.append({
-                "session_id": sid,
-                "mount": mount,
-                "from": None,
-                "to": mode,
-            })
-    return out
-
-
 async def state_diff(store: VersionStore, ref_a, ref_b) -> dict[str, Any]:
     """The structured difference, category by category, between two versions.
 
     The judge's evidence surface: files (content), sessions (env
-    references, mount grants, cwd), namespace nodes (symlinks and
-    overlays), the commands that ran between the two states, and the
-    grant widenings that applying B would re-open. Wire shape is plain
-    snake_case JSON, agent-legible by design.
+    references, mount grants with from/to, cwd), namespace nodes
+    (symlinks and overlays), and the commands that ran between the two
+    states. Wire shape is plain snake_case JSON, agent-legible by
+    design.
     """
     version_a = await resolve_ref(store, ref_a)
     version_b = await resolve_ref(store, ref_b)
@@ -151,5 +114,4 @@ async def state_diff(store: VersionStore, ref_a, ref_b) -> dict[str, Any]:
         "sessions": sessions,
         "namespace": namespace,
         "commands": commands,
-        "grant_widenings": grant_widenings(sessions),
     }

@@ -65,16 +65,10 @@ async def test_state_diff_covers_every_category(tmp_path):
     ]
     assert "echo two > /m/a.txt" in commands
     assert "echo one > /m/a.txt" not in commands
-    assert diff["grant_widenings"] == [{
-        "session_id": "narrow",
-        "mount": "/m",
-        "from": "read",
-        "to": "write",
-    }]
 
 
 @pytest.mark.asyncio
-async def test_state_diff_reversed_reports_no_widening_for_narrowing(tmp_path):
+async def test_state_diff_reports_grant_changes_with_direction(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
     session = ws.create_session("narrow", mounts={"/m": "write"})
@@ -87,13 +81,10 @@ async def test_state_diff_reversed_reports_no_widening_for_narrowing(tmp_path):
     forward = await state_diff(store, v1, v2)
     backward = await state_diff(store, v2, v1)
 
-    assert forward["grant_widenings"] == []
-    assert backward["grant_widenings"] == [{
-        "session_id": "narrow",
-        "mount": "/m",
-        "from": "read",
-        "to": "write",
-    }]
+    forward_grants = forward["sessions"]["modified"]["narrow"]["mount_modes"]
+    backward_grants = backward["sessions"]["modified"]["narrow"]["mount_modes"]
+    assert forward_grants["modified"]["/m"] == {"from": "write", "to": "read"}
+    assert backward_grants["modified"]["/m"] == {"from": "read", "to": "write"}
 
 
 @pytest.mark.asyncio

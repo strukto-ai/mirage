@@ -15,24 +15,18 @@
 from typing import Any
 
 from mirage.server.version.api import read_version, resolve_ref
-from mirage.server.version.state_diff import _sessions_diff, grant_widenings
-from mirage.server.version.state_tree import to_state
+from mirage.server.version.state_tree import CATEGORIES, to_state
 from mirage.server.version.store import VersionStore
 from mirage.types import DriftPolicy, MountKey, ResourceStateKey, StateKey
+from mirage.utils.path import norm
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
                                        to_state_dict)
 
-CATEGORIES = ("files", "sessions", "namespace", "history")
-
-
-def _norm_path(path: str) -> str:
-    return "/" + path.strip("/")
-
 
 def _selected_file(path: str, wanted: list[str]) -> bool:
-    p = _norm_path(path)
+    p = norm(path)
     for want in wanted:
-        w = _norm_path(want)
+        w = norm(want)
         if p == w or p.startswith(w + "/"):
             return True
     return False
@@ -71,10 +65,9 @@ async def restore(
     ``categories`` picks a subset of files/sessions/namespace/history and
     leaves the live state of the others untouched; ``paths`` restores
     only the matching files (a path selects itself or its subtree) and
-    implies the files category alone. Restoring sessions re-applies their
-    mount grants, so the report carries ``grant_widenings``: every
-    grant the restore widened relative to the live state, surfaced,
-    never silent.
+    implies the files category alone. Restoring sessions re-applies
+    their mount grants exactly like any other state; compare two
+    versions with :func:`state_diff` to see grant changes up front.
     """
     if paths is not None and categories is not None:
         raise ValueError("restore takes paths= or categories=, not both")
@@ -88,13 +81,6 @@ async def restore(
     live = await to_state_dict(ws)
     selected = (set(categories) if categories is not None else
                 {"files"} if paths is not None else set(CATEGORIES))
-
-    widenings: list[dict[str, Any]] = []
-    if "sessions" in selected:
-        delta = _sessions_diff(
-            live.get(StateKey.SESSIONS) or [],
-            target.get(StateKey.SESSIONS) or [])
-        widenings = grant_widenings(delta)
 
     merged = dict(target)
     if "sessions" not in selected:
@@ -129,5 +115,4 @@ async def restore(
         "version": version.decode(),
         "categories": sorted(selected),
         "paths": paths,
-        "grant_widenings": widenings,
     }

@@ -42,7 +42,7 @@ async def _two_file_history(ws, store):
 
 
 @pytest.mark.asyncio
-async def test_restore_whole_world_reports_widenings(tmp_path):
+async def test_restore_whole_world_restores_grants(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
     session = ws.create_session("narrow", mounts={"/m": "write"})
@@ -60,12 +60,6 @@ async def test_restore_whole_world_reports_widenings(tmp_path):
     assert report["categories"] == [
         "files", "history", "namespace", "sessions"
     ]
-    assert report["grant_widenings"] == [{
-        "session_id": "narrow",
-        "mount": "/m",
-        "from": "read",
-        "to": "write",
-    }]
 
 
 @pytest.mark.asyncio
@@ -79,7 +73,7 @@ async def test_restore_single_path_leaves_other_files_alone(tmp_path):
     assert await _cat(ws, "/m/a.txt") == "one\n"
     assert await _cat(ws, "/m/b.txt") == "edited\n"
     assert report["categories"] == ["files"]
-    assert report["grant_widenings"] == []
+    assert report["paths"] == ["/m/a.txt"]
 
 
 @pytest.mark.asyncio
@@ -100,7 +94,6 @@ async def test_restore_files_category_keeps_live_sessions(tmp_path):
     assert await _cat(ws, "/m/a.txt") == "one\n"
     assert ws.get_session("narrow").env["API_KEY"] == "@aws:new-key"
     assert report["categories"] == ["files"]
-    assert report["grant_widenings"] == []
 
 
 @pytest.mark.asyncio

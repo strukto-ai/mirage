@@ -16,7 +16,11 @@ import { lstripSlash, stripSlash, type WorkspaceStateDict } from '@struktoai/mir
 
 export type { WorkspaceStateDict }
 
-type AnyDict = Record<string, unknown>
+export type AnyDict = Record<string, unknown>
+
+// The four restorable categories of a whole-world version.
+export const CATEGORIES = ['files', 'sessions', 'namespace', 'history'] as const
+export type Category = (typeof CATEGORIES)[number]
 
 // The control-plane subtree: everything about the workspace that is
 // not file content lives under one reserved directory, so a commit is

@@ -12,17 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MOUNT_MODE_RANK } from '@struktoai/mirage-core'
 import { readVersion, resolveRef, versionDiff } from './api.ts'
-import { toState } from './stateTree.ts'
+import { toState, type AnyDict } from './stateTree.ts'
 import type { VersionStore } from './store.ts'
-
-type AnyDict = Record<string, unknown>
-
-// String-keyed view of the canonical READ < WRITE < EXEC lattice; a
-// transition that moves UP it is a widening and must be surfaced,
-// never silent. Unknown modes rank below READ.
-const MODE_RANK: Readonly<Record<string, number>> = MOUNT_MODE_RANK
 
 interface DictDelta {
   added: AnyDict
@@ -30,17 +22,10 @@ interface DictDelta {
   modified: Record<string, { from: unknown; to: unknown }>
 }
 
-export interface SessionsDiff {
+interface SessionsDiff {
   added: string[]
   deleted: string[]
   modified: Record<string, AnyDict>
-}
-
-export interface GrantWidening {
-  session_id: string
-  mount: string
-  from: string | null
-  to: string
 }
 
 function dictDelta(before: AnyDict, after: AnyDict): DictDelta {
@@ -83,7 +68,7 @@ function sessionDelta(before: AnyDict, after: AnyDict): AnyDict {
   return out
 }
 
-export function sessionsDiff(before: AnyDict[], after: AnyDict[]): SessionsDiff {
+function sessionsDiff(before: AnyDict[], after: AnyDict[]): SessionsDiff {
   const a = new Map(before.map((s) => [s.session_id as string, s]))
   const b = new Map(after.map((s) => [s.session_id as string, s]))
   const modified: Record<string, AnyDict> = {}
@@ -111,45 +96,14 @@ function commandsBetween(historyA: AnyDict[], historyB: AnyDict[]): AnyDict[] {
 }
 
 /**
- * Every mount-grant transition in the diff that widens access.
- *
- * The judge's safety rail: applying B over A re-grants these. Also
- * counts grants that only exist on the B side (added sessions or newly
- * granted mounts). Mirrors the Python grant_widenings.
- */
-export function grantWidenings(diff: SessionsDiff): GrantWidening[] {
-  const out: GrantWidening[] = []
-  for (const [sid, delta] of Object.entries(diff.modified)) {
-    const grants = delta.mount_modes as DictDelta | undefined
-    if (grants === undefined) continue
-    for (const [mount, change] of Object.entries(grants.modified)) {
-      const beforeRank = MODE_RANK[change.from as string] ?? 0
-      const afterRank = MODE_RANK[change.to as string] ?? 0
-      if (afterRank > beforeRank) {
-        out.push({
-          session_id: sid,
-          mount,
-          from: change.from as string,
-          to: change.to as string,
-        })
-      }
-    }
-    for (const [mount, mode] of Object.entries(grants.added)) {
-      out.push({ session_id: sid, mount, from: null, to: mode as string })
-    }
-  }
-  return out
-}
-
-/**
  * The structured difference, category by category, between two versions.
  *
  * The judge's evidence surface: files (content), sessions (env
- * references, mount grants, cwd), namespace nodes (symlinks and
- * overlays), the commands that ran between the two states, and the
- * grant widenings that applying B would re-open. Wire shape is plain
- * snake_case JSON with git's added/modified/deleted vocabulary at
- * every level. Mirrors the Python state_diff.
+ * references, mount grants with from/to, cwd), namespace nodes
+ * (symlinks and overlays), and the commands that ran between the two
+ * states. Wire shape is plain snake_case JSON with git's
+ * added/modified/deleted vocabulary at every level. Mirrors the
+ * Python state_diff.
  */
 export async function stateDiff(store: VersionStore, refA: string, refB: string): Promise<AnyDict> {
   const versionA = await resolveRef(store, refA)
@@ -174,6 +128,5 @@ export async function stateDiff(store: VersionStore, refA: string, refB: string)
       (stateA.history as AnyDict[] | undefined) ?? [],
       (stateB.history as AnyDict[] | undefined) ?? [],
     ),
-    grant_widenings: grantWidenings(sessions),
   }
 }

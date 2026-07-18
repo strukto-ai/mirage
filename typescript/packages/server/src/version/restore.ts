@@ -14,25 +14,19 @@
 
 import {
   applyStateDict,
+  norm,
   toStateDict,
   type Workspace as CoreWorkspace,
   type WorkspaceStateDict,
 } from '@struktoai/mirage-core'
 import { readVersion, resolveRef } from './api.ts'
-import { grantWidenings, sessionsDiff, type GrantWidening } from './stateDiff.ts'
-import { toState } from './stateTree.ts'
+import { CATEGORIES, toState, type AnyDict, type Category } from './stateTree.ts'
 import type { VersionStore } from './store.ts'
-
-type AnyDict = Record<string, unknown>
-
-const CATEGORIES = ['files', 'sessions', 'namespace', 'history'] as const
-type Category = (typeof CATEGORIES)[number]
 
 export interface RestoreReport {
   version: string
   categories: Category[]
   paths: string[] | null
-  grant_widenings: GrantWidening[]
 }
 
 export interface RestoreOptions {
@@ -40,18 +34,10 @@ export interface RestoreOptions {
   categories?: Category[]
 }
 
-function normPath(p: string): string {
-  let start = 0
-  let end = p.length
-  while (start < end && p[start] === '/') start++
-  while (end > start && p[end - 1] === '/') end--
-  return `/${p.slice(start, end)}`
-}
-
 function selectedFile(path: string, wanted: string[]): boolean {
-  const p = normPath(path)
+  const p = norm(path)
   return wanted.some((w) => {
-    const want = normPath(w)
+    const want = norm(w)
     return p === want || p.startsWith(`${want}/`)
   })
 }
@@ -84,9 +70,9 @@ function mergeMountFiles(
  * `categories` picks a subset and leaves the live state of the others
  * untouched; `paths` restores only the matching files (a path selects
  * itself or its subtree) and implies the files category alone. Restoring
- * sessions re-applies their mount grants, so the report carries
- * `grant_widenings`: every grant the restore widened relative to the
- * live state, surfaced, never silent. Mirrors the Python restore.
+ * sessions re-applies their mount grants exactly like any other state;
+ * compare two versions with stateDiff to see grant changes up front.
+ * Mirrors the Python restore.
  */
 export async function restore(
   store: VersionStore,
@@ -111,15 +97,6 @@ export async function restore(
   const live = (await toStateDict(ws)) as unknown as AnyDict
   const fallback: readonly Category[] = paths !== undefined ? ['files'] : CATEGORIES
   const selected = new Set<Category>(categories ?? fallback)
-
-  let widenings: GrantWidening[] = []
-  if (selected.has('sessions')) {
-    const delta = sessionsDiff(
-      (live.sessions as AnyDict[] | undefined) ?? [],
-      (target.sessions as AnyDict[] | undefined) ?? [],
-    )
-    widenings = grantWidenings(delta)
-  }
 
   const merged: AnyDict = { ...target }
   if (!selected.has('sessions')) {
@@ -149,6 +126,5 @@ export async function restore(
     version,
     categories: [...selected].sort(),
     paths: paths ?? null,
-    grant_widenings: widenings,
   }
 }

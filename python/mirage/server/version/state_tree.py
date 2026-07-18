@@ -33,6 +33,9 @@ NAMESPACE_PATH = ".mirage/namespace.json"
 # identical blob, so it dedups in the content-addressed store.
 HISTORY_PREFIX = ".mirage/history/"
 
+# The four restorable categories of a whole-world version.
+CATEGORIES = ("files", "sessions", "namespace", "history")
+
 
 def _is_reserved(tree_path: str) -> bool:
     return tree_path.startswith(CONTROL_PREFIX)

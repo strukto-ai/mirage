@@ -39,7 +39,7 @@ describe('stateDiff + restore', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('covers every category and flags grant widenings', async () => {
+  it('covers every category', async () => {
     await ws.execute('echo one > /m/a.txt')
     const session = ws.createSession('narrow', { mounts: { '/m': 'read' } })
     session.env.API_KEY = '@aws:prod-key'
@@ -71,9 +71,6 @@ describe('stateDiff + restore', () => {
       .map((e) => e.command)
     expect(commands).toContain('echo two > /m/a.txt')
     expect(commands).not.toContain('echo one > /m/a.txt')
-    expect(diff.grant_widenings).toEqual([
-      { session_id: 'narrow', mount: '/m', from: 'read', to: 'write' },
-    ])
   })
 
   it('restores a single path, leaving other files and categories alone', async () => {
@@ -90,10 +87,10 @@ describe('stateDiff + restore', () => {
     expect(new TextDecoder().decode(a.stdout)).toBe('one\n')
     expect(new TextDecoder().decode(b.stdout)).toBe('edited\n')
     expect(report.categories).toEqual(['files'])
-    expect(report.grant_widenings).toEqual([])
+    expect(report.paths).toEqual(['/m/a.txt'])
   })
 
-  it('restores the sessions category only, reporting widenings', async () => {
+  it('restores the sessions category only, keeping live files', async () => {
     const session = ws.createSession('narrow', { mounts: { '/m': 'write' } })
     await ws.execute('echo one > /m/a.txt')
     await ws.flushSessions()
@@ -107,9 +104,7 @@ describe('stateDiff + restore', () => {
     const a = await ws.execute('cat /m/a.txt')
     expect(new TextDecoder().decode(a.stdout)).toBe('two\n')
     expect(ws.getSession('narrow').mountModes?.get('/m')).toBe(MountMode.WRITE)
-    expect(report.grant_widenings).toEqual([
-      { session_id: 'narrow', mount: '/m', from: 'read', to: 'write' },
-    ])
+    expect(report.categories).toEqual(['sessions'])
   })
 
   it('rejects bad scopes', async () => {
