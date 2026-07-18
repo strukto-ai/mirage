@@ -65,8 +65,8 @@ verdict() { jq -r 'if (.exit_code // .exitCode // .result.exit_code // 1) == 0 t
 # Run the full battery against one CLI; emit one "key=value" line per probe.
 probe() {
   local cli="$1" lang="$2"
-  export MIRAGE_VERSION_ROOT="/tmp/parity-repos-$lang"
-  rm -rf "$MIRAGE_VERSION_ROOT"
+  export MIRAGE_HOME="/tmp/parity-home-$lang"
+  rm -rf "$MIRAGE_HOME"
   freeport
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1

@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') env[k] = v
   env.MIRAGE_DAEMON_URL = `http://127.0.0.1:${String(await freePort())}`
-  env.MIRAGE_VERSION_ROOT = join(work, 'repos')
+  env.MIRAGE_HOME = join(work, 'mirage-home')
   env.MIRAGE_IDLE_GRACE_SECONDS = '60'
   const cfg = join(work, 'config.yaml')
   writeFileSync(cfg, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')

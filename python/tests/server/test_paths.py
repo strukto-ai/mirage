@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from mirage.server.env import ENV_HOME, ENV_PID_FILE
+from mirage.server.env import ENV_HOME
 from mirage.server.paths import (PathOutsideRootError, mirage_home,
                                  pid_file_path, resolve_within_root,
-                                 snapshot_root_path, validate_path_segment,
-                                 version_root_path)
+                                 snapshot_root_path, state_root_path,
+                                 validate_path_segment, version_root_path)
 
 
 def test_resolve_within_root_relative(tmp_path):
@@ -75,19 +75,12 @@ def test_mirage_home_honors_env(monkeypatch, tmp_path):
 
 
 def test_pid_file_defaults_under_home(monkeypatch, tmp_path):
-    monkeypatch.delenv(ENV_PID_FILE, raising=False)
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     assert pid_file_path() == tmp_path / "daemon.pid"
 
 
-def test_pid_file_env_wins_over_home(monkeypatch, tmp_path):
+def test_pid_file_explicit_wins_over_home(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
-    monkeypatch.setenv(ENV_PID_FILE, "/run/mirage/daemon.pid")
-    assert pid_file_path() == Path("/run/mirage/daemon.pid")
-
-
-def test_pid_file_explicit_wins_over_env(monkeypatch, tmp_path):
-    monkeypatch.setenv(ENV_PID_FILE, "/run/mirage/daemon.pid")
     assert pid_file_path(tmp_path / "x.pid") == tmp_path / "x.pid"
 
 
@@ -95,6 +88,7 @@ def test_roots_follow_mirage_home(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     assert version_root_path() == tmp_path / "repos"
     assert snapshot_root_path() == tmp_path / "snapshots"
+    assert state_root_path() == tmp_path / "state"
 
 
 def test_mirage_home_relative_env_is_absolutized(monkeypatch, tmp_path):
@@ -103,92 +97,13 @@ def test_mirage_home_relative_env_is_absolutized(monkeypatch, tmp_path):
     assert mirage_home() == tmp_path / "mhome"
 
 
-def test_pid_file_relative_env_is_absolutized(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(ENV_PID_FILE, "rel/daemon.pid")
-    assert pid_file_path() == tmp_path / "rel" / "daemon.pid"
-
-
 def test_pid_file_explicit_relative_is_absolutized(monkeypatch, tmp_path):
-    monkeypatch.delenv(ENV_PID_FILE, raising=False)
     monkeypatch.chdir(tmp_path)
     assert pid_file_path("x.pid") == tmp_path / "x.pid"
 
 
-def _write_config(home, body):
-    (home / "config.toml").write_text(f"[daemon]\n{body}\n")
-
-
-def test_pid_file_config_beats_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv("MIRAGE_PID_FILE", raising=False)
-    _write_config(tmp_path, 'pid_file = "/tmp/from-config.pid"')
-    assert pid_file_path() == Path("/tmp/from-config.pid")
-
-
-def test_pid_file_env_beats_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.setenv("MIRAGE_PID_FILE", "/tmp/from-env.pid")
-    _write_config(tmp_path, 'pid_file = "/tmp/from-config.pid"')
-    assert pid_file_path() == Path("/tmp/from-env.pid")
-
-
-def test_pid_file_explicit_beats_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_PID_FILE", "/tmp/from-env.pid")
-    assert pid_file_path("/tmp/explicit.pid") == Path("/tmp/explicit.pid")
-
-
-def test_pid_file_default_when_unset(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv("MIRAGE_PID_FILE", raising=False)
-    assert pid_file_path() == tmp_path / "daemon.pid"
-
-
-def test_version_root_config_beats_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv("MIRAGE_VERSION_ROOT", raising=False)
-    _write_config(tmp_path, 'version_root = "/data/repos"')
-    assert version_root_path() == Path("/data/repos")
-
-
-def test_version_root_env_beats_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.setenv("MIRAGE_VERSION_ROOT", "/env/repos")
-    _write_config(tmp_path, 'version_root = "/data/repos"')
-    assert version_root_path() == Path("/env/repos")
-
-
-def test_snapshot_root_config_beats_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv("MIRAGE_SNAPSHOT_ROOT", raising=False)
-    _write_config(tmp_path, 'snapshot_root = "/data/snaps"')
-    assert snapshot_root_path() == Path("/data/snaps")
-
-
-def test_snapshot_root_default_when_unset(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv("MIRAGE_SNAPSHOT_ROOT", raising=False)
-    assert snapshot_root_path() == tmp_path / "snapshots"
-
-
-def test_version_root_explicit_beats_env(monkeypatch):
-    monkeypatch.setenv("MIRAGE_VERSION_ROOT", "/env/repos")
+def test_roots_explicit_beats_home(monkeypatch, tmp_path):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
     assert version_root_path("/explicit/repos") == Path("/explicit/repos")
-
-
-def test_version_root_default_when_unset(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv("MIRAGE_VERSION_ROOT", raising=False)
-    assert version_root_path() == tmp_path / "repos"
-
-
-def test_snapshot_root_env_beats_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.setenv("MIRAGE_SNAPSHOT_ROOT", "/env/snaps")
-    _write_config(tmp_path, 'snapshot_root = "/data/snaps"')
-    assert snapshot_root_path() == Path("/env/snaps")
-
-
-def test_snapshot_root_explicit_beats_env(monkeypatch):
-    monkeypatch.setenv("MIRAGE_SNAPSHOT_ROOT", "/env/snaps")
     assert snapshot_root_path("/explicit/snaps") == Path("/explicit/snaps")
+    assert state_root_path("/explicit/state") == Path("/explicit/state")

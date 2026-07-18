@@ -112,10 +112,10 @@ def build_app(idle_grace_seconds: float = 30.0,
             (default) uses ``$MIRAGE_HOME/snapshots``.
         state_root (str | Path | None): live-state root for the disk
             store the daemon defaults workspaces to. ``None`` (default)
-            resolves ``$MIRAGE_STATE_ROOT`` then ``$MIRAGE_HOME/state``.
+            uses ``$MIRAGE_HOME/state``.
         pid_file (str | Path | None): daemon pid file path. ``None``
-            (default) resolves ``$MIRAGE_PID_FILE`` then
-            ``$MIRAGE_HOME/daemon.pid`` (or ``~/.mirage/daemon.pid``).
+            (default) uses ``$MIRAGE_HOME/daemon.pid`` (or
+            ``~/.mirage/daemon.pid``).
 
     Returns:
         FastAPI: configured app with all routers mounted.
