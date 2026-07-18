@@ -26,6 +26,7 @@ import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-b
 import {
   DiskResource,
   GDriveResource,
+  HfBucketsResource,
   MountMode,
   RAMResource,
   RedisResource,
@@ -151,6 +152,25 @@ async function openS3(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function openHf(target: Target): Promise<Open> {
+  const endpoint = process.env.HF_ENDPOINT
+  if (!endpoint) throw new Error('hf target requires HF_ENDPOINT')
+  const id = runId()
+  const mounts: Record<string, HfBucketsResource> = {}
+  for (const m of target.mounts) {
+    // Buckets auto-create on first touch in the fake hub, so a per-run
+    // bucket name is enough isolation.
+    mounts[m.path] = new HfBucketsResource({
+      bucket: `integ/${id}-${String(m.bucket)}`,
+      token: 'integ-token',
+      endpoint,
+      keyPrefix: m.prefix,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 async function adminExec(ws: Workspace, command: string): Promise<void> {
   const result = await ws.execute(command)
   if (result.exitCode !== 0) {
@@ -246,4 +266,5 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   s3: openS3,
   ssh: openSsh,
   gdrive: openGws,
+  hf: openHf,
 }

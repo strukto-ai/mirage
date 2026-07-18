@@ -30,10 +30,11 @@ export const RM_BUILDER: Builder = {
     const idx = opts.index ?? undefined
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     const recursive = opts.flags.r === true || opts.flags.R === true
+    const dirFlag = opts.flags.d === true
     const force = opts.flags.f === true
     const verbose = opts.flags.v === true
     const { rmR, rmdir, unlink } = ops
-    if (rmR === undefined || rmdir === undefined || unlink === undefined) {
+    if (unlink === undefined) {
       throw new Error('rm: backend provides no remove op')
     }
     const lines: string[] = []
@@ -47,10 +48,20 @@ export const RM_BUILDER: Builder = {
         throw new Error(`rm: cannot remove '${p.virtual}': No such file or directory`)
       }
       if (isDir) {
+        // rmR/rmdir are resolved lazily so object stores without a real
+        // directory-remove op still unlink plain files (mirrors Python).
         if (recursive) {
+          if (rmR === undefined) {
+            throw new Error('rm: recursive remove not supported on this backend')
+          }
           await rmR(accessor, p)
-        } else {
+        } else if (dirFlag) {
+          if (rmdir === undefined) {
+            throw new Error('rm: directory remove not supported on this backend')
+          }
           await rmdir(accessor, p)
+        } else {
+          throw new Error(`rm: cannot remove '${p.virtual}': Is a directory`)
         }
       } else {
         await unlink(accessor, p)

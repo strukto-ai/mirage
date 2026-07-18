@@ -385,7 +385,7 @@ jobs:
 
       - name: Start sftp server shared by both hosts
         run: |
-          nohup ./python/.venv/bin/python integ/runners/tools/ssh_server.py --port 2222 > /tmp/sshsrv.log 2>&1 &
+          nohup ./python/.venv/bin/python integ/server/ssh_server.py --port 2222 > /tmp/sshsrv.log 2>&1 &
           for i in $(seq 1 30); do
             grep -q "SSH_PORT=" /tmp/sshsrv.log && break
             sleep 1
@@ -397,13 +397,23 @@ jobs:
       - name: Start fake Google Workspace server shared by both hosts
         working-directory: integ
         run: |
-          nohup pnpm exec tsx gws_server.ts --port 19999 > /tmp/gws.log 2>&1 &
+          nohup pnpm exec tsx server/gws_server.ts --port 19999 > /tmp/gws.log 2>&1 &
           for i in $(seq 1 30); do
             grep -q "GWS_URL=" /tmp/gws.log && break
             sleep 1
           done
           cat /tmp/gws.log
           echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
+
+      - name: Start fake Hugging Face hub shared by both hosts
+        run: |
+          nohup ./python/.venv/bin/python integ/server/hf_server.py --port 5099 > /tmp/hfsrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "HF_ENDPOINT=" /tmp/hfsrv.log && break
+            sleep 1
+          done
+          cat /tmp/hfsrv.log
+          echo "HF_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
 
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py

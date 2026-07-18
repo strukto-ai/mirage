@@ -119,17 +119,17 @@ async def main():
 
     # Read cell values
     r = await ws.execute(
-        'gws-sheets-read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"')
+        'gws sheets +read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"')
     print(await r.stdout_str())
 
     # Append rows
     r = await ws.execute(
-        "gws-sheets-append --spreadsheet 1AbCdEf --values Alice,30,NYC")
+        "gws sheets +append --spreadsheet 1AbCdEf --values Alice,30,NYC")
     print(await r.stdout_str())
 
     # Create a new spreadsheet
     r = await ws.execute(
-        'gws-sheets-spreadsheets-create'
+        'gws sheets spreadsheets create'
         ' --json \'{"properties":{"title":"MIRAGE Sheet"}}\'')
     print(await r.stdout_str())
 
@@ -160,12 +160,12 @@ Standard commands available on the mounted Google Sheets tree:
 
 Resource-specific commands:
 
-### `gws-sheets-read`
+### `gws sheets +read`
 
 Read cell values from a spreadsheet range.
 
 ```bash
-gws-sheets-read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"
+gws sheets +read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"
 ```
 
 | Option          | Required | Description               |
@@ -175,28 +175,32 @@ gws-sheets-read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"
 
 Returns the cell values as JSON.
 
-### `gws-sheets-write`
+### `gws sheets +write`
 
 Write cell values to a spreadsheet range.
 
 ```bash
-gws-sheets-write --params '{"spreadsheetId":"1AbCdEf","range":"Sheet1!A1"}' --json '{"values":[["x"]]}'
+gws sheets +write --spreadsheet 1AbCdEf --range "Sheet1!A1" --values "x,y,z"
 ```
 
-| Option     | Required | Description                                                     |
-| ---------- | -------- | --------------------------------------------------------------- |
-| `--params` | yes      | JSON with `spreadsheetId`, `range`, optional `valueInputOption` |
-| `--json`   | yes      | JSON with `values` 2D array                                     |
+| Option          | Required | Description                                    |
+| --------------- | -------- | ---------------------------------------------- |
+| `--spreadsheet` | yes      | Spreadsheet ID                                 |
+| `--range`       | yes      | A1 notation range to overwrite                 |
+| `--values`      | no       | Comma-separated values for a single row        |
+| `--json-values` | no       | JSON array of rows (alternative to `--values`) |
+
+One of `--values` or `--json-values` is required.
 
 Returns the update response JSON.
 
-### `gws-sheets-append`
+### `gws sheets +append`
 
 Append rows to a spreadsheet.
 
 ```bash
-gws-sheets-append --spreadsheet 1AbCdEf --values Alice,30,NYC
-gws-sheets-append --spreadsheet 1AbCdEf --range "Sheet1!A1" --json-values '[["Bob",25,"LA"]]'
+gws sheets +append --spreadsheet 1AbCdEf --values Alice,30,NYC
+gws sheets +append --spreadsheet 1AbCdEf --range "Sheet1!A1" --json-values '[["Bob",25,"LA"]]'
 ```
 
 | Option          | Required | Description                          |
@@ -209,12 +213,12 @@ gws-sheets-append --spreadsheet 1AbCdEf --range "Sheet1!A1" --json-values '[["Bo
 Either `--values` or `--json-values` is required. Returns the
 append response JSON.
 
-### `gws-sheets-spreadsheets-create`
+### `gws sheets spreadsheets create`
 
 Create a new spreadsheet.
 
 ```bash
-gws-sheets-spreadsheets-create --json '{"properties":{"title":"MIRAGE Sheet"}}'
+gws sheets spreadsheets create --json '{"properties":{"title":"MIRAGE Sheet"}}'
 ```
 
 | Option   | Required | Description                             |
@@ -223,12 +227,12 @@ gws-sheets-spreadsheets-create --json '{"properties":{"title":"MIRAGE Sheet"}}'
 
 Returns the created spreadsheet JSON.
 
-### `gws-sheets-spreadsheets-batchUpdate`
+### `gws sheets spreadsheets batchUpdate`
 
 Batch update a spreadsheet.
 
 ```bash
-gws-sheets-spreadsheets-batchUpdate --params '{"spreadsheetId":"1AbCdEf"}' --json '{"requests":[]}'
+gws sheets spreadsheets batchUpdate --params '{"spreadsheetId":"1AbCdEf"}' --json '{"requests":[]}'
 ```
 
 | Option     | Required | Description                |

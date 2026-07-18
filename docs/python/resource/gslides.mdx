@@ -119,12 +119,12 @@ async def main():
 
     # Create a new presentation
     r = await ws.execute(
-        'gws-slides-presentations-create --json \'{"title":"MIRAGE Deck"}\'')
+        'gws slides presentations create --json \'{"title":"MIRAGE Deck"}\'')
     print(await r.stdout_str())
 
     # Batch update a presentation
     r = await ws.execute(
-        'gws-slides-presentations-batchUpdate'
+        'gws slides presentations batchUpdate'
         ' --params \'{"presentationId":"1AbCdEf"}\''
         ' --json \'{"requests":[]}\'')
     print(await r.stdout_str())
@@ -156,12 +156,12 @@ Standard commands available on the mounted Google Slides tree:
 
 Resource-specific commands:
 
-### `gws-slides-presentations-create`
+### `gws slides presentations create`
 
 Create a new presentation.
 
 ```bash
-gws-slides-presentations-create --json '{"title":"MIRAGE Deck"}'
+gws slides presentations create --json '{"title":"MIRAGE Deck"}'
 ```
 
 | Option   | Required | Description                  |
@@ -170,12 +170,12 @@ gws-slides-presentations-create --json '{"title":"MIRAGE Deck"}'
 
 Returns the created presentation JSON.
 
-### `gws-slides-presentations-batchUpdate`
+### `gws slides presentations batchUpdate`
 
 Batch update a presentation.
 
 ```bash
-gws-slides-presentations-batchUpdate --params '{"presentationId":"1AbCdEf"}' --json '{"requests":[]}'
+gws slides presentations batchUpdate --params '{"presentationId":"1AbCdEf"}' --json '{"requests":[]}'
 ```
 
 | Option     | Required | Description                |

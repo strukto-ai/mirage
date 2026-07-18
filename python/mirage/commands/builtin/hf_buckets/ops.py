@@ -21,6 +21,7 @@ from mirage.core.hf_buckets.find import find as _find
 from mirage.core.hf_buckets.mkdir import mkdir as _mkdir
 from mirage.core.hf_buckets.read import read_bytes as _read
 from mirage.core.hf_buckets.readdir import readdir as _readdir
+from mirage.core.hf_buckets.rm import rm_r as _rm_r
 from mirage.core.hf_buckets.stat import stat as _stat
 from mirage.core.hf_buckets.stream import read_stream as _read_stream
 from mirage.core.hf_buckets.unlink import unlink as _unlink
@@ -41,6 +42,7 @@ OPS = CommandIO(
     exists=_exists,
     mkdir=_mkdir,
     unlink=_unlink,
+    rm_r=_rm_r,
     create=_create,
     find=_find,
     du_total=_du,

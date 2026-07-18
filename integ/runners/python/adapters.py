@@ -33,6 +33,7 @@ from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.disk import DiskResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
 from mirage.resource.gdrive.gdrive import GoogleDriveResource
+from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.resource.onedrive.onedrive import OneDriveResource
 from mirage.resource.ram import RAMResource
@@ -114,12 +115,17 @@ def _load_module(path: Path) -> ModuleType:
 
 def _load_onedrive_server() -> ModuleType:
     return _load_module(
-        Path(__file__).resolve().parents[2] / "onedrive_server.py")
+        Path(__file__).resolve().parents[2] / "server" / "onedrive_server.py")
+
+
+def _load_hf_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" / "hf_server.py")
 
 
 def _load_ssh_server() -> ModuleType:
     return _load_module(
-        Path(__file__).resolve().parents[1] / "tools" / "ssh_server.py")
+        Path(__file__).resolve().parents[2] / "server" / "ssh_server.py")
 
 
 async def _admin_exec(ws: Workspace, command: str) -> None:
@@ -229,7 +235,7 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 class GwsService:
     """Points gdrive mounts at the fake Google Workspace server.
 
-    The server is external (integ/gws_server.ts) and shared across runs;
+    The server is external (integ/server/gws_server.ts) and shared across runs;
     /reset gives each run a clean, deterministic state. Each mount is scoped
     to a per-mount folder via GoogleConfig.folder_id, the s3 key_prefix
     analog, so the three mounts never see each other.
@@ -304,6 +310,34 @@ class OneDriveService:
         await self.runner.cleanup()
 
 
+class HfService:
+
+    def __init__(self, run_id: str, runner, endpoint: str) -> None:
+        self.run_id = run_id
+        self.runner = runner
+        self.endpoint = endpoint
+
+    @classmethod
+    async def create(cls, run_id: str) -> "HfService":
+        module = _load_hf_server()
+        _hub, server, runner = await module.start_fake_hub()
+        return cls(run_id, runner, server.endpoint)
+
+    def resource(self, mount: dict) -> HfBucketsResource:
+        # Buckets auto-create on first touch in the fake, so a per-run
+        # bucket name is enough isolation.
+        return HfBucketsResource(
+            HfBucketsConfig(
+                bucket=f"integ/{self.run_id}-{mount['bucket']}",
+                token="integ-token",
+                endpoint=self.endpoint,
+                key_prefix=mount.get("prefix"),
+            ))
+
+    async def teardown(self) -> None:
+        await self.runner.cleanup()
+
+
 def _clear_sharepoint_caches() -> None:
     # The resolver's site/drive id caches are module globals; a fresh
     # fake tenant per run must not see ids from the previous one.
@@ -337,7 +371,7 @@ class SharePointService:
 
 
 Service = (S3Service | OneDriveService | SharePointService | SSHService
-           | NextcloudService | GwsService)
+           | NextcloudService | GwsService | HfService)
 
 
 def build_ram(
@@ -386,6 +420,13 @@ def build_sharepoint(
     return service.resource(mount), _noop
 
 
+def build_hf(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, HfService)
+    return service.resource(mount), _noop
+
+
 def build_ssh(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -417,6 +458,7 @@ BUILDERS = {
     "ssh": build_ssh,
     "nextcloud": build_nextcloud,
     "gdrive": build_gdrive,
+    "hf": build_hf,
 }
 
 
@@ -436,6 +478,8 @@ async def open_target(
         service = await NextcloudService.create(run_id, target)
     elif target.get("service") == "gws":
         service = await GwsService.create(run_id, target)
+    elif target.get("service") == "hf":
+        service = await HfService.create(run_id)
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
     for mount in target["mounts"]:

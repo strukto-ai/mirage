@@ -19,6 +19,7 @@ from opendal.exceptions import NotFound
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.hf_buckets.invalidate import invalidate_ancestors
 from mirage.observe.context import record
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -38,3 +39,4 @@ async def write_bytes(accessor: HfBucketsAccessor,
         raise enoent(path) from exc
     record("write", path.virtual, accessor.RESOURCE_NAME, len(data), start_ms)
     await invalidate_after_write(path)
+    await invalidate_ancestors(path)

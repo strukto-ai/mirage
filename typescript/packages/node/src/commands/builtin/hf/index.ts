@@ -12,16 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type RegisteredCommand, makeGenericCommands } from '@struktoai/mirage-core'
+import {
+  type RegisteredCommand,
+  makeFiletypeCommands,
+  makeGenericCommands,
+} from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
+import { read as hfRead } from '../../../core/hf/read.ts'
+import { stat as hfStat } from '../../../core/hf/stat.ts'
 import { HF_DU } from './du.ts'
 import { HF_FIND } from './find.ts'
 import { HF_CMD_OPS } from './ops.ts'
-import { HF_RM } from './rm.ts'
 
-const HF_OVERRIDES = new Set(['cp', 'mv', 'rm', 'du', 'find'])
+const HF_OVERRIDES = new Set(['cp', 'mv', 'du', 'find'])
 
 export const HF_COMMANDS: readonly RegisteredCommand[] = [
+  ...HF_RESOURCES.flatMap((resource) =>
+    makeFiletypeCommands<HfAccessor>({
+      resource,
+      readBytes: hfRead,
+      statEntry: hfStat,
+    }),
+  ),
   ...HF_RESOURCES.flatMap((resource) =>
     makeGenericCommands<HfAccessor>(resource, HF_CMD_OPS, {
       overrides: HF_OVERRIDES,
@@ -29,5 +41,4 @@ export const HF_COMMANDS: readonly RegisteredCommand[] = [
   ),
   ...HF_DU,
   ...HF_FIND,
-  ...HF_RM,
 ]

@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import run_cache_verify_cases  # noqa: E402
 from cases import run_not_found, run_provision_cache_cases  # noqa: E402
-from onedrive_server import freeze_clock, start_fake_graph  # noqa: E402
+from server.onedrive_server import freeze_clock, start_fake_graph  # noqa: E402
 
 # Freeze the timestamp the fake Graph stamps onto every item so the `ls -l`
 # mtime column is deterministic, mirroring integ/s3.py's moto freeze. The

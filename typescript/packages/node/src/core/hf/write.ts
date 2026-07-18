@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { invalidateAfterWrite } from '@struktoai/mirage-core'
+import { invalidateAncestors } from './invalidate.ts'
 import { type IndexCacheStore, type PathSpec, record } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { hfKey, isNotFound, rawPathOf } from './util.ts'
@@ -36,4 +37,5 @@ export async function write(
   }
   record('write', path.virtual, accessor.resourceName, data.byteLength, startMs)
   await invalidateAfterWrite(path)
+  await invalidateAncestors(path)
 }

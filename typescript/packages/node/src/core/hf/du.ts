@@ -12,11 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type PathSpec, stripSlash } from '@struktoai/mirage-core'
+import { FileType, type FileStat, type PathSpec, stripSlash } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
+import { stat } from './stat.ts'
 import { isNotFound, rawPathOf } from './util.ts'
 
+async function statOrNull(accessor: HfAccessor, path: PathSpec): Promise<FileStat | null> {
+  try {
+    return await stat(accessor, path)
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code === 'ENOENT') return null
+    throw err
+  }
+}
+
 export async function du(accessor: HfAccessor, path: PathSpec): Promise<number> {
+  const info = await statOrNull(accessor, path)
+  if (info !== null && info.type !== FileType.DIRECTORY) return info.size ?? 0
   const target = rawPathOf(path)
   const pfx = stripSlash(target)
   const scanPath = pfx !== '' ? `${pfx}/` : '/'
@@ -39,6 +51,8 @@ export async function duAll(
   accessor: HfAccessor,
   path: PathSpec,
 ): Promise<[[string, number][], number]> {
+  const info = await statOrNull(accessor, path)
+  if (info !== null && info.type !== FileType.DIRECTORY) return [[], info.size ?? 0]
   const target = rawPathOf(path)
   const pfx = stripSlash(target)
   const scanPath = pfx !== '' ? `${pfx}/` : '/'

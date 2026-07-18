@@ -20,6 +20,7 @@ import { mkdir as hfMkdir } from '../../../core/hf/mkdir.ts'
 import { unlink as hfUnlink } from '../../../core/hf/unlink.ts'
 import { read as hfRead } from '../../../core/hf/read.ts'
 import { readdir as hfReaddir } from '../../../core/hf/readdir.ts'
+import { rmR as hfRmR } from '../../../core/hf/rm.ts'
 import { stat as hfStat } from '../../../core/hf/stat.ts'
 import { stream as hfStream } from '../../../core/hf/stream.ts'
 import { exists as hfExists } from '../../../core/hf/exists.ts'
@@ -37,5 +38,6 @@ export const HF_CMD_OPS: CommandIO<HfAccessor> = {
   exists: hfExists,
   mkdir: (accessor, path) => hfMkdir(accessor, path),
   unlink: hfUnlink,
+  rmR: hfRmR,
   create: hfCreate,
 }
