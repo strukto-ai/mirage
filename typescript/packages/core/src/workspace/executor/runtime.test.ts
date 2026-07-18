@@ -81,3 +81,18 @@ describe('bindCommands', () => {
     )
   })
 })
+
+describe('buildRuntime option validation', () => {
+  it('rejects unknown option keys with the entry name', () => {
+    expect(() => buildRuntime('pyodide', { homee: '/typo-key' })).toThrow(
+      /unknown pyodide runtime option 'homee'/,
+    )
+    expect(() => buildRuntime('quickjs', { home: '/x' })).toThrow(
+      /unknown quickjs runtime option 'home'/,
+    )
+  })
+
+  it('accepts declared option keys', () => {
+    expect(() => buildRuntime('pyodide', { home: '/assets/pyodide' })).not.toThrow()
+  })
+})

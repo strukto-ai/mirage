@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# CLI runtime battery. Verifies the yaml `runtime:` block end to end
-# through each daemon: the default python runtime executes python3 against
-# a mounted file, the default named explicitly in yaml works, a
-# non-default runtime is honored, a cross-language runtime name
+# CLI runtime battery. Verifies the yaml `runtimes:` list end to end
+# through each daemon: the default world executes python3 against a
+# mounted file, the default named explicitly in yaml works, a
+# non-default runtime entry is honored, a cross-language runtime name
 # ('pyodide' on Python, 'local' on TypeScript) is rejected at workspace
-# create with a helpful message, and a per-mount command_safeguards
-# timeout guards python3 like any other command (exit 124).
+# create with a helpful message, a bad entry option is rejected, and a
+# per-mount command_safeguards timeout guards python3 like any other
+# command (exit 124).
 #
 # Usage: cli_runtime.sh "<py-cli>" "<ts-cli>"
 set -uo pipefail
@@ -47,8 +48,9 @@ YML
   # --- the language's default runtime configured explicitly in yaml ---
   cat > "$work/explicit.yaml" <<YML
 mode: EXEC
-runtime:
-  python: $explicit
+runtimes:
+  - $explicit
+  - vfs
 mounts:
   /data:
     resource: ram
@@ -59,8 +61,9 @@ YML
   # --- explicitly selected runtime ---
   cat > "$work/selected.yaml" <<YML
 mode: EXEC
-runtime:
-  python: $selected
+runtimes:
+  - $selected
+  - vfs
 mounts:
   /data:
     resource: ram
@@ -77,8 +80,9 @@ YML
   # --- command_safeguards timeout guards python3 like any command ---
   cat > "$work/safeguard.yaml" <<YML
 mode: EXEC
-runtime:
-  python: monty
+runtimes:
+  - monty
+  - vfs
 mounts:
   /data:
     resource: ram
@@ -96,8 +100,9 @@ YML
   # --- the other language's runtime name is rejected with a hint ---
   cat > "$work/invalid.yaml" <<YML
 mode: EXEC
-runtime:
-  python: $invalid
+runtimes:
+  - $invalid
+  - vfs
 mounts:
   /data:
     resource: ram
@@ -107,19 +112,16 @@ YML
   echo "invalid_create=exit$?"
   echo "invalid_msg=$(grep -oE 'TypeScript-only|Python-only' /tmp/cli-runtime-$lang-invalid.txt | head -1)"
 
-  # --- per-runtime option blocks: py validates the wasi build dir at
-  # create (portable pyodide block ignored); ts ignores the portable
-  # wasi block but rejects an unknown option key on the selected
-  # runtime ---
+  # --- per-entry options: py validates the wasi build dir when the
+  # entry constructs at create; ts rejects an unknown option key on
+  # the entry ---
   if [ "$lang" == "py" ]; then
     cat > "$work/wasip.yaml" <<YML
 mode: EXEC
-runtime:
-  python: wasi
-  wasi:
+runtimes:
+  - name: wasi
     home: /nonexistent-wasi-build
-  pyodide:
-    home: https://assets.example.com/pyodide/
+  - vfs
 mounts:
   /data:
     resource: ram
@@ -127,12 +129,10 @@ YML
   else
     cat > "$work/wasip.yaml" <<YML
 mode: EXEC
-runtime:
-  python: pyodide
-  wasi:
-    home: /nonexistent-wasi-build
-  pyodide:
+runtimes:
+  - name: pyodide
     homee: /typo-key
+  - vfs
 mounts:
   /data:
     resource: ram
@@ -158,8 +158,10 @@ sandbox_probe() {
   local yaml="/tmp/cli-runtime-sbx.yaml"
   cat > "$yaml" <<YML
 mode: EXEC
-runtime:
-  python: wasi
+runtimes:
+  - wasi
+  - quickjs
+  - vfs
 mounts:
   /data:
     resource: ram

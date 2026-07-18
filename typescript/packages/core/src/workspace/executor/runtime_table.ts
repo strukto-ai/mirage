@@ -32,9 +32,25 @@ export function candidates(command: string): (typeof RUNTIMES)[number][] {
   return RUNTIMES.filter((cls) => cls.commands.includes(command))
 }
 
+// Constructor option keys per runtime name. Python gets this check
+// for free (`**options` raises TypeError on an unknown kwarg); a TS
+// object literal would silently swallow a typo key without it.
+const OPTION_KEYS: Record<string, readonly string[]> = {
+  pyodide: [
+    'workspaceBridge',
+    'listMounts',
+    'autoLoadFromImports',
+    'bootstrapCode',
+    'denyPackages',
+    'home',
+  ],
+  monty: ['workspaceBridge', 'listMounts'],
+  quickjs: ['workspaceBridge', 'listMounts'],
+}
+
 /**
- * Construct a runtime by name, failing loud on unknown names with a
- * cross-language hint for Python-only names.
+ * Construct a runtime by name, failing loud on unknown names (with a
+ * cross-language hint for Python-only names) and on unknown options.
  */
 export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
   const cls = NAMED[name]
@@ -45,6 +61,13 @@ export function buildRuntime(name: string, options: Record<string, unknown> = {}
       .map((n) => `'${n}'`)
       .join(', ')
     throw new Error(`unknown runtime: '${name}' (expected one of ${known}, or 'vfs')`)
+  }
+  const allowed = OPTION_KEYS[name] ?? []
+  for (const key of Object.keys(options)) {
+    if (!allowed.includes(key)) {
+      const knownKeys = allowed.map((k) => `'${k}'`).join(', ')
+      throw new Error(`unknown ${name} runtime option '${key}' (expected: ${knownKeys})`)
+    }
   }
   return new cls(options)
 }
