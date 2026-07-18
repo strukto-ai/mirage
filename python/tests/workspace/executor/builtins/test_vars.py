@@ -3,7 +3,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from mirage.io.stream import materialize
-from mirage.workspace.executor.builtins.vars import (handle_read,
+from mirage.shell.errors import ExitSignal
+from mirage.workspace.executor.builtins.vars import (handle_exit, handle_read,
                                                      handle_return,
                                                      handle_shift,
                                                      handle_whoami)
@@ -54,6 +55,48 @@ async def test_return_numeric():
         await handle_return(["7"])
     assert exc.value.exit_code == 7
     assert exc.value.stderr == b""
+
+
+@pytest.mark.asyncio
+async def test_exit_numeric_raises_signal():
+    with pytest.raises(ExitSignal) as exc:
+        await handle_exit(["3"], make_session())
+    assert exc.value.exit_code == 3
+    assert exc.value.contained_code == 3
+
+
+@pytest.mark.asyncio
+async def test_exit_no_arg_uses_last_exit_code():
+    session = make_session()
+    session.last_exit_code = 5
+    with pytest.raises(ExitSignal) as exc:
+        await handle_exit([], session)
+    assert exc.value.exit_code == 5
+
+
+@pytest.mark.asyncio
+async def test_exit_wraps_status_mod_256():
+    with pytest.raises(ExitSignal) as exc:
+        await handle_exit(["300"], make_session())
+    assert exc.value.exit_code == 44
+    with pytest.raises(ExitSignal) as exc:
+        await handle_exit(["-1"], make_session())
+    assert exc.value.exit_code == 255
+
+
+@pytest.mark.asyncio
+async def test_exit_non_numeric_exits_2_with_message():
+    with pytest.raises(ExitSignal) as exc:
+        await handle_exit(["abc"], make_session())
+    assert exc.value.exit_code == 2
+    assert exc.value.stderr == b"exit: abc: numeric argument required\n"
+
+
+@pytest.mark.asyncio
+async def test_exit_too_many_arguments_does_not_exit():
+    _, io, _ = await handle_exit(["1", "2"], make_session())
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == b"exit: too many arguments\n"
 
 
 @pytest.mark.asyncio

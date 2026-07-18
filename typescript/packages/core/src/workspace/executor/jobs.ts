@@ -16,6 +16,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { CommandTimeoutError } from '../../commands/builtin/utils/safeguard.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
@@ -59,6 +60,18 @@ export async function handleBackground(
           new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 }),
         ]
       }
+      if (err instanceof ExitSignal) {
+        // A background job is its own shell: exit ends the job only.
+        return [
+          err.stdout ?? new Uint8Array(),
+          new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
+          new ExecutionNode({
+            command: cmdStrInner,
+            stderr: err.stderr,
+            exitCode: err.containedCode,
+          }),
+        ]
+      }
       throw err
     }
     const materialized = await materialize(stdout)
@@ -80,6 +93,7 @@ export async function handleBackground(
       agent: agentId ?? '',
       sessionId: session.sessionId,
     })
+    session.lastBgJobId = job.id
     jobLine = new TextEncoder().encode(`[${job.id.toString()}]\n`)
   } else {
     jobLine = new TextEncoder().encode('[bg]\n')

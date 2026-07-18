@@ -43,9 +43,55 @@ CASES = [
     ('X=hello; echo "${X^}"', "Hello\n"),
     ('X=HELLO; echo "${X,}"', "hELLO\n"),
     ('X=hello; Y=X; echo "${!Y}"', "hello\n"),
+    ('echo "${UNSET:=def}"; echo "$UNSET"', "def\ndef\n"),
+    ('X=""; echo "${X:=def}"; echo "$X"', "def\ndef\n"),
+    ('X=hi; echo "${X:=def}"; echo "$X"', "hi\nhi\n"),
+    ('X=""; echo "start${X=def}end"; echo "[$X]"', "startend\n[]\n"),
+    ('echo "${UNSET=def}"; echo "$UNSET"', "def\ndef\n"),
+    ('X=""; echo "start${X?msg}end"', "startend\n"),
+    ('X=hi; echo "${X:?msg}"', "hi\n"),
 ]
 
 
 @pytest.mark.parametrize("cmd,expected", CASES)
 def test_param_expansion(shell, cmd, expected):
     assert shell.mirage(cmd) == expected
+
+
+def test_error_op_unset_is_fatal_127(shell):
+    code, out, err = shell.mirage_result("echo ${UNSET:?}; echo after")
+    assert code == 127
+    assert out == ""
+    assert err == "bash: UNSET: parameter null or not set\n"
+
+
+def test_error_op_custom_multiword_message(shell):
+    code, _, err = shell.mirage_result("echo ${UNSET:?custom msg}")
+    assert code == 127
+    assert err == "bash: UNSET: custom msg\n"
+
+
+def test_error_op_unset_only_default_message(shell):
+    code, _, err = shell.mirage_result("echo ${UNSET?}")
+    assert code == 127
+    assert err == "bash: UNSET: parameter not set\n"
+
+
+def test_error_op_contained_by_subshell(shell):
+    code, out, _ = shell.mirage_result("(echo ${UNSET:?}); echo after code=$?")
+    assert code == 0
+    assert out == "after code=1\n"
+
+
+def test_error_op_contained_by_pipeline(shell):
+    code, out, _ = shell.mirage_result(
+        "echo ${UNSET:?} | cat; echo after code=$?")
+    assert code == 0
+    assert out == "after code=0\n"
+
+
+def test_assign_op_inside_function_local(shell):
+    out = shell.mirage(
+        'f(){ local v=; echo "${v:=zz}"; echo "inner=$v"; }; f; '
+        'echo "outer=[$v]"')
+    assert out == "zz\ninner=zz\nouter=[]\n"

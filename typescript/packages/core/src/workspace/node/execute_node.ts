@@ -418,5 +418,15 @@ export async function executeNode(
     return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
   }
 
-  throw new TypeError(`unsupported tree-sitter node type: ${node.type}`)
+  // Constructs the parser accepts but the executor cannot honor (e.g.
+  // C-style `for ((;;))`). Mirrors the unsupported-builtin diagnostic
+  // so agents see a capability gap, not a crash.
+  const unsupportedErr = new TextEncoder().encode(
+    `mirage: unsupported shell construct: ${node.type}\n`,
+  )
+  return [
+    null,
+    new IOResult({ exitCode: 2, stderr: unsupportedErr }),
+    new ExecutionNode({ command: node.text, exitCode: 2, stderr: unsupportedErr }),
+  ]
 }

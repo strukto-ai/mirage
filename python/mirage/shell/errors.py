@@ -15,3 +15,36 @@
 
 class ArithError(ValueError):
     """A bash arithmetic syntax or evaluation error."""
+
+
+class ExitSignal(Exception):
+    """A fatal shell exit request unwinding the current execution.
+
+    Raised by the ``exit`` builtin and by fatal expansion errors
+    (``${var:?msg}``), which bash treats as an implicit ``exit 1`` in a
+    non-interactive shell. Contained at subshell, pipeline-segment, and
+    background-job boundaries; the top-level program loop stops the
+    remaining statements and reports ``exit_code``.
+
+    Args:
+        exit_code (int): status the shell exits with.
+        stderr (bytes): diagnostic already formatted for the user.
+        stdout (bytes | None): output produced before the exit that
+            boundary handlers accumulated while unwinding (e.g. the left
+            side of ``echo a && exit 3``).
+        contained_code (int | None): status a containing boundary
+            reports instead of ``exit_code``. GNU bash exits 127 on a
+            fatal expansion error but a subshell wrapping one returns 1;
+            ``exit N`` uses N in both positions (the default).
+    """
+
+    def __init__(self,
+                 exit_code: int = 0,
+                 stderr: bytes = b"",
+                 stdout: bytes | None = None,
+                 contained_code: int | None = None) -> None:
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.stdout = stdout
+        self.contained_code = (contained_code
+                               if contained_code is not None else exit_code)

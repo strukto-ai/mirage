@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeIntegrationWS, run } from './fixtures/integration_fixture.ts'
+import { makeIntegrationWS, run, runResult } from './fixtures/integration_fixture.ts'
 
 const CASES: [string, string][] = [
   ['X=hi; echo "${X:-fallback}"', 'hi\n'],
@@ -44,7 +44,56 @@ const CASES: [string, string][] = [
   ['X=hello; echo "${X^}"', 'Hello\n'],
   ['X=HELLO; echo "${X,}"', 'hELLO\n'],
   ['X=hello; Y=X; echo "${!Y}"', 'hello\n'],
+  ['echo "${UNSET:=def}"; echo "$UNSET"', 'def\ndef\n'],
+  ['X=""; echo "${X:=def}"; echo "$X"', 'def\ndef\n'],
+  ['X=hi; echo "${X:=def}"; echo "$X"', 'hi\nhi\n'],
+  ['X=""; echo "start${X=def}end"; echo "[$X]"', 'startend\n[]\n'],
+  ['echo "${UNSET=def}"; echo "$UNSET"', 'def\ndef\n'],
+  ['X=""; echo "start${X?msg}end"', 'startend\n'],
+  ['X=hi; echo "${X:?msg}"', 'hi\n'],
 ]
+
+const ERROR_CASES: [string, number, string, string][] = [
+  ['echo ${UNSET:?}; echo after', 127, '', 'bash: UNSET: parameter null or not set\n'],
+  ['echo ${UNSET:?custom msg}', 127, '', 'bash: UNSET: custom msg\n'],
+  ['echo ${UNSET?}', 127, '', 'bash: UNSET: parameter not set\n'],
+  [
+    '(echo ${UNSET:?}); echo after code=$?',
+    0,
+    'after code=1\n',
+    'bash: UNSET: parameter null or not set\n',
+  ],
+  [
+    'echo ${UNSET:?} | cat; echo after code=$?',
+    0,
+    'after code=0\n',
+    'bash: UNSET: parameter null or not set\n',
+  ],
+]
+
+describe('parameter expansion error operators', () => {
+  for (const [cmd, exitCode, stdout, stderr] of ERROR_CASES) {
+    it(cmd, async () => {
+      const { ws } = await makeIntegrationWS()
+      try {
+        expect(await runResult(ws, cmd)).toEqual([exitCode, stdout, stderr])
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  it('assigns inside a function local without leaking', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(
+        await run(ws, 'f(){ local v=; echo "${v:=zz}"; echo "inner=$v"; }; f; echo "outer=[$v]"'),
+      ).toBe('zz\ninner=zz\nouter=[]\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})
 
 describe('parameter expansion operators', () => {
   for (const [cmd, expected] of CASES) {

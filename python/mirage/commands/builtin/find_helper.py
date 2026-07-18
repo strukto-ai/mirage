@@ -29,13 +29,6 @@ def _parse_depth(value: str, flag: str) -> int:
             f"find: invalid argument '{value}' to '{flag}'") from None
 
 
-def _validate_size_mtime(size: str | None, mtime: str | None) -> None:
-    if size is not None:
-        _parse_size(size)
-    if mtime is not None:
-        _parse_mtime(mtime)
-
-
 def _parse_size(spec: str) -> tuple[int | None, int | None]:
     # GNU rounds the file size up to whole units before comparing, and
     # +N / -N are strict: +N keeps ceil(size/unit) > N, -N keeps

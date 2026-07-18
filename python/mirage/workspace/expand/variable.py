@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import fnmatch
+import os
 from typing import Any
 
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ExitSignal
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
@@ -45,6 +47,13 @@ def _lookup_var(var: str, session: Session,
         return "0"
     if var == "?":
         return str(last_exit_code)
+    if var == "$":
+        return str(os.getpid())
+    if var == "!":
+        # Deliberate divergence from bash: jobs are identified by job
+        # table id, not OS pid, so $! yields the id `wait`/`kill` accept.
+        last_job = session.last_bg_job_id
+        return str(last_job) if last_job is not None else ""
     if var.isdigit():
         idx = int(var)
         if idx == 0:
@@ -181,6 +190,11 @@ def _expand_braces(
         if c.type in (NT.WORD, NT.STRING, NT.RAW_STRING, NT.STRING_CONTENT,
                       NT.NUMBER, "regex"):
             args.append(c.text.decode())
+            continue
+        if c.type == NT.CONCATENATION:
+            # A multi-word operand (`${x:?custom msg}`) parses as one
+            # concatenation node; take its text verbatim.
+            args.append(c.text.decode())
 
     val = ""
     var_in_env = False
@@ -222,4 +236,31 @@ def _expand_braces(
         return str(len(val))
     if op is None:
         return val
+    if op in ("?", ":?"):
+        triggered = (not var_in_env) if op == "?" else (not val)
+        if not triggered:
+            return val
+        if args:
+            message = " ".join(args)
+        elif op == "?":
+            message = "parameter not set"
+        else:
+            message = "parameter null or not set"
+        # GNU: fatal at top level with status 127; a containing
+        # subshell/pipeline segment reports 1.
+        raise ExitSignal(127,
+                         stderr=f"bash: {var_name}: {message}\n".encode(),
+                         contained_code=1)
+    if op in ("=", ":="):
+        triggered = (not var_in_env) if op == "=" else (not val)
+        if not triggered:
+            return val
+        default = args[0] if args else ""
+        if var_name is not None:
+            if (call_stack is not None
+                    and call_stack.get_local(var_name) is not None):
+                call_stack.set_local(var_name, default)
+            else:
+                env[var_name] = default
+        return default
     return _apply_op(op, val, var_in_env, args)

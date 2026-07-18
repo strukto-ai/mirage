@@ -56,6 +56,7 @@ import {
   handleRead,
   handleReadlink,
   handleTouch,
+  handleExit,
   handleReturn,
   handleSet,
   handleShift,
@@ -499,6 +500,9 @@ async function runArgv(
   }
   if (name === SB.RETURN) {
     return handleReturn(args)
+  }
+  if (name === SB.EXIT) {
+    return handleExit(args, session)
   }
   if (name === SB.BREAK) throw new BreakSignal()
   if (name === SB.CONTINUE) throw new ContinueSignal()

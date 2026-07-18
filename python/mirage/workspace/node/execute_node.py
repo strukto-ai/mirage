@@ -389,4 +389,11 @@ async def execute_node(
             session.arrays.pop(key, None)
         return None, IOResult(), ExecutionNode(command=text, exit_code=0)
 
-    raise TypeError(f"unsupported tree-sitter node type: {node.type}")
+    # Constructs the parser accepts but the executor cannot honor (e.g.
+    # C-style `for ((;;))`). Mirrors the unsupported-builtin diagnostic
+    # so agents see a capability gap, not a crash.
+    err = f"mirage: unsupported shell construct: {node.type}\n".encode()
+    return None, IOResult(exit_code=2,
+                          stderr=err), ExecutionNode(command=get_text(node),
+                                                     exit_code=2,
+                                                     stderr=err)

@@ -1,0 +1,224 @@
+{
+  "cases": [
+    {
+      "id": "errop_unset_default_msg",
+      "seq": 500000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo ${ERRQ1:?}; echo after",
+      "expect": {
+        "exit": 127,
+        "stdout": "",
+        "stderr": "bash: ERRQ1: parameter null or not set\n"
+      }
+    },
+    {
+      "id": "errop_custom_multiword_msg",
+      "seq": 500001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo ${ERRQ2:?custom msg}",
+      "expect": {
+        "exit": 127,
+        "stdout": "",
+        "stderr": "bash: ERRQ2: custom msg\n"
+      }
+    },
+    {
+      "id": "errop_unset_only_default_msg",
+      "seq": 500002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo ${ERRQ3?}",
+      "expect": {
+        "exit": 127,
+        "stdout": "",
+        "stderr": "bash: ERRQ3: parameter not set\n"
+      }
+    },
+    {
+      "id": "errop_empty_set_no_error",
+      "seq": 500003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ERRQ4=; echo start${ERRQ4?msg}end",
+      "expect": {
+        "exit": 0,
+        "stdout": "startend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "errop_contained_by_subshell",
+      "seq": 500004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "(echo ${ERRQ5:?}); echo after code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after code=1\n",
+        "stderr": "bash: ERRQ5: parameter null or not set\n"
+      }
+    },
+    {
+      "id": "errop_contained_by_pipeline",
+      "seq": 500005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo ${ERRQ6:?} | cat; echo after code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after code=0\n",
+        "stderr": "bash: ERRQ6: parameter null or not set\n"
+      }
+    },
+    {
+      "id": "errop_assign_unset",
+      "seq": 500006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo ${ERRA1:=def}; echo $ERRA1",
+      "expect": {
+        "exit": 0,
+        "stdout": "def\ndef\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "errop_assign_empty",
+      "seq": 500007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ERRA2=; echo ${ERRA2:=zz}; echo $ERRA2",
+      "expect": {
+        "exit": 0,
+        "stdout": "zz\nzz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "errop_assign_unset_only_keeps_empty",
+      "seq": 500008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ERRA3=; echo start${ERRA3=def}end; echo [$ERRA3]",
+      "expect": {
+        "exit": 0,
+        "stdout": "startend\n[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "errop_assign_local_no_leak",
+      "seq": 500009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "f(){ local ERRA4=; echo ${ERRA4:=zz}; echo inner=$ERRA4; }; f; echo outer=[$ERRA4]",
+      "expect": {
+        "exit": 0,
+        "stdout": "zz\ninner=zz\nouter=[]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -17,7 +17,6 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
-from mirage.utils.stream import collect_bytes
 from tests.core.databricks_volume.conftest import (accessor, databricks_config,
                                                    files, index, remote_root)
 from tests.resource.databricks_volume.test_databricks_volume import (
@@ -51,7 +50,9 @@ def seed_text_command_fixture(files: FakeFiles) -> str:
 async def materialize(source) -> bytes:
     if source is None:
         return b""
-    return await collect_bytes(source)
+    if isinstance(source, bytes):
+        return source
+    return b"".join([chunk async for chunk in source])
 
 
 class IndexTrackingReader:

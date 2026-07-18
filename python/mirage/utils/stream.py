@@ -8,12 +8,3 @@ async def ensure_stream(
         return
     async for chunk in src:
         yield chunk
-
-
-async def collect_bytes(src: bytes | AsyncIterator[bytes]) -> bytes:
-    if isinstance(src, bytes):
-        return src
-    chunks: list[bytes] = []
-    async for chunk in src:
-        chunks.append(chunk)
-    return b"".join(chunks)

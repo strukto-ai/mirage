@@ -15,6 +15,7 @@
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
@@ -85,7 +86,29 @@ export async function executeProgram(
       lastExec = bgExec
       i += 2
     } else {
-      const [s, ioResult, execNode] = await recurse(child, session, stdin, callStack)
+      let s: ByteSource | null
+      let ioResult: IOResult
+      let execNode: ExecutionNode
+      try {
+        ;[s, ioResult, execNode] = await recurse(child, session, stdin, callStack)
+      } catch (err) {
+        if (err instanceof ExitSignal) {
+          // exit (or a fatal expansion error) ends the line: keep
+          // what earlier statements produced, drop the rest.
+          if (err.stdout !== null && err.stdout.byteLength > 0) allStdout.push(err.stdout)
+          const sigIo = new IOResult({ exitCode: err.exitCode, stderr: err.stderr })
+          mergedIo = await mergedIo.merge(sigIo)
+          mergedIo.exitCode = err.exitCode
+          session.lastExitCode = err.exitCode
+          lastExec = new ExecutionNode({
+            command: 'exit',
+            exitCode: err.exitCode,
+            stderr: err.stderr,
+          })
+          break
+        }
+        throw err
+      }
       let drainErr: string | null = null
       try {
         stdout = await materialize(s)

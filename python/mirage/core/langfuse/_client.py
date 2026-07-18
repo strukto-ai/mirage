@@ -59,12 +59,6 @@ async def fetch_sessions(
     return [_to_dict(s) for s in result.data]
 
 
-async def fetch_session(api: AsyncLangfuseAPI,
-                        session_id: str) -> dict[str, Any]:
-    result = await api.sessions.get(session_id)
-    return _to_dict(result)
-
-
 async def fetch_prompts(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
     result = await api.prompts.list()
     return [_to_dict(p) for p in result.data]
@@ -85,11 +79,6 @@ async def fetch_prompt(
 async def fetch_datasets(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
     result = await api.datasets.list()
     return [_to_dict(d) for d in result.data]
-
-
-async def fetch_dataset(api: AsyncLangfuseAPI, name: str) -> dict[str, Any]:
-    result = await api.datasets.get(dataset_name=name)
-    return _to_dict(result)
 
 
 async def fetch_dataset_items(

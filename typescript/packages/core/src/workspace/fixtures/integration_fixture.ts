@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
@@ -59,6 +60,11 @@ export async function run(ws: Workspace, cmd: string): Promise<string> {
 export async function runExit(ws: Workspace, cmd: string): Promise<number> {
   const io = await ws.execute(cmd)
   return io.exitCode
+}
+
+export async function runResult(ws: Workspace, cmd: string): Promise<[number, string, string]> {
+  const io = await ws.execute(cmd)
+  return [io.exitCode, DEC.decode(io.stdout), DEC.decode(await materialize(io.stderr))]
 }
 
 export const INTEGRATION_FILES: Record<string, string> = {
