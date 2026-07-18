@@ -21,6 +21,7 @@ import { GDOCS_CMD_OPS } from './ops.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GDOCS_RM } from './rm.ts'
 import { GWS_DOCS_API_COMMANDS } from '../gws/index.ts'
+import { GWS_DISPATCH } from '../gws/dispatch.ts'
 
 export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GDocsAccessor>(ResourceName.GDOCS, GDOCS_CMD_OPS, {
@@ -34,4 +35,5 @@ export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...GDOCS_RM,
   ...GDOCS_GWS_WRITE,
   ...GWS_DOCS_API_COMMANDS,
+  ...GWS_DISPATCH.filter((c) => c.resource === ResourceName.GDOCS),
 ]
