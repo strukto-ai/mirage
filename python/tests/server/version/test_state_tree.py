@@ -134,6 +134,12 @@ async def test_whole_world_round_trip_sessions_nodes_history():
         "type": "COMMAND",
         "command": "echo hi > /a.txt",
         "timestamp": 123.0,
+        "session": "agent_a",
+    }, {
+        "type": "COMMAND",
+        "command": "cat /a.txt",
+        "timestamp": 456.0,
+        "session": "agent_b",
     }]
 
     entries, meta = tree_inputs_from_state(state)
@@ -149,7 +155,8 @@ async def test_whole_world_round_trip_sessions_nodes_history():
     assert session[SessionKey.ENV] == {"API_KEY": "@aws:prod-key"}
     assert session["mount_modes"] == {"/": "read"}
     assert restored[StateKey.NODES] == {"/link.txt": {"target": "/a.txt"}}
-    assert restored[StateKey.HISTORY][0]["command"] == "echo hi > /a.txt"
+    assert [e["command"] for e in restored[StateKey.HISTORY]
+            ] == ["echo hi > /a.txt", "cat /a.txt"]
 
     # Cache is the one exclusion: derived and rebuildable.
     assert restored[StateKey.CACHE][CacheKey.ENTRIES] == []
@@ -158,7 +165,9 @@ async def test_whole_world_round_trip_sessions_nodes_history():
     # Control-plane state lives under .mirage/, never in mount files.
     assert ".mirage/sessions.json" in entries
     assert ".mirage/namespace.json" in entries
-    assert ".mirage/history.jsonl" in entries
+    # One history file per session, mirroring the live ObserverStore.
+    assert ".mirage/history/agent_a.jsonl" in entries
+    assert ".mirage/history/agent_b.jsonl" in entries
     assert all(not p.startswith(".mirage/") for p in files)
 
 

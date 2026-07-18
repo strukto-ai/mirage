@@ -27,22 +27,41 @@ CONTROL_PREFIX = ".mirage/"
 META_PATH = ".mirage/meta.json"
 SESSIONS_PATH = ".mirage/sessions.json"
 NAMESPACE_PATH = ".mirage/namespace.json"
-HISTORY_PATH = ".mirage/history.jsonl"
+# History mirrors the live ObserverStore layout: one append-only jsonl
+# per session, merged on read by stable timestamp sort (the events()
+# contract). A session that ran nothing since the last commit keeps an
+# identical blob, so it dedups in the content-addressed store.
+HISTORY_PREFIX = ".mirage/history/"
 
 
 def _is_reserved(tree_path: str) -> bool:
     return tree_path.startswith(CONTROL_PREFIX)
 
 
-def _history_to_blob(events: list[dict]) -> bytes:
-    lines = [json.dumps(e, default=_json_default) for e in events]
-    return ("\n".join(lines) + "\n" if lines else "").encode("utf-8")
+def _history_entries(events: list[dict]) -> dict[str, bytes]:
+    by_session: dict[str, list[str]] = {}
+    for e in events:
+        session = e.get("session") or "default"
+        by_session.setdefault(session,
+                              []).append(json.dumps(e, default=_json_default))
+    return {
+        f"{HISTORY_PREFIX}{session}.jsonl":
+        ("\n".join(lines) + "\n").encode("utf-8")
+        for session, lines in by_session.items()
+    }
 
 
-def _blob_to_history(data: bytes) -> list[dict]:
-    return [
-        json.loads(line) for line in data.decode("utf-8").splitlines() if line
-    ]
+def _history_from_entries(entries: dict[str, bytes]) -> list[dict]:
+    events: list[dict] = []
+    for tree_path in sorted(entries):
+        if not tree_path.startswith(HISTORY_PREFIX):
+            continue
+        events.extend(
+            json.loads(line)
+            for line in entries[tree_path].decode("utf-8").splitlines()
+            if line)
+    events.sort(key=lambda e: e.get("timestamp", 0))
+    return events
 
 
 def _tree_path(prefix: str, rel: str) -> str:
@@ -114,7 +133,7 @@ def tree_inputs_from_state(state: dict) -> tuple[dict[str, bytes], dict]:
     entries[NAMESPACE_PATH] = meta_to_blob({
         "nodes": state.get(StateKey.NODES) or {},
     })
-    entries[HISTORY_PATH] = _history_to_blob(state.get(StateKey.HISTORY) or [])
+    entries.update(_history_entries(state.get(StateKey.HISTORY) or []))
     meta = {
         "mounts": mounts_meta,
         "config": config,
@@ -151,9 +170,7 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
     namespace_blob = entries.get(NAMESPACE_PATH)
     nodes = (blob_to_meta(namespace_blob).get("nodes", {})
              if namespace_blob is not None else {})
-    history_blob = entries.get(HISTORY_PATH)
-    history = (_blob_to_history(history_blob)
-               if history_blob is not None else [])
+    history = _history_from_entries(entries)
     return {
         StateKey.VERSION: FORMAT_VERSION,
         StateKey.MIRAGE_VERSION: config.get(StateKey.MIRAGE_VERSION,

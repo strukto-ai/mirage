@@ -26,7 +26,11 @@ export const CONTROL_PREFIX = '.mirage/'
 export const META_PATH = '.mirage/meta.json'
 const SESSIONS_PATH = '.mirage/sessions.json'
 const NAMESPACE_PATH = '.mirage/namespace.json'
-const HISTORY_PATH = '.mirage/history.jsonl'
+// History mirrors the live ObserverStore layout: one append-only jsonl
+// per session, merged on read by stable timestamp sort (the events()
+// contract). A session that ran nothing since the last commit keeps an
+// identical blob, so it dedups in the content-addressed store.
+const HISTORY_PREFIX = '.mirage/history/'
 
 export interface VersionMeta {
   version: number
@@ -83,17 +87,37 @@ function parseJsonBlob(data: Uint8Array): AnyDict {
   return JSON.parse(new TextDecoder().decode(data)) as AnyDict
 }
 
-function historyToBlob(events: unknown[]): Uint8Array {
-  const lines = events.map((e) => JSON.stringify(e))
-  return new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+function historyEntries(events: unknown[]): Record<string, Uint8Array> {
+  const bySession = new Map<string, string[]>()
+  for (const e of events) {
+    const session = ((e as AnyDict).session as string | undefined) ?? 'default'
+    const lines = bySession.get(session) ?? []
+    lines.push(JSON.stringify(e))
+    bySession.set(session, lines)
+  }
+  const entries: Record<string, Uint8Array> = {}
+  for (const [session, lines] of bySession) {
+    entries[`${HISTORY_PREFIX}${session}.jsonl`] = new TextEncoder().encode(`${lines.join('\n')}\n`)
+  }
+  return entries
 }
 
-function blobToHistory(data: Uint8Array): unknown[] {
-  return new TextDecoder()
-    .decode(data)
-    .split('\n')
-    .filter((line) => line !== '')
-    .map((line) => JSON.parse(line) as unknown)
+function historyFromEntries(entries: Record<string, Uint8Array>): unknown[] {
+  const events: unknown[] = []
+  for (const treePath of Object.keys(entries).sort()) {
+    if (!treePath.startsWith(HISTORY_PREFIX)) continue
+    const data = entries[treePath]
+    if (data === undefined) continue
+    for (const line of new TextDecoder().decode(data).split('\n')) {
+      if (line !== '') events.push(JSON.parse(line) as unknown)
+    }
+  }
+  events.sort(
+    (a, b) =>
+      (((a as AnyDict).timestamp as number | undefined) ?? 0) -
+      (((b as AnyDict).timestamp as number | undefined) ?? 0),
+  )
+  return events
 }
 
 export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
@@ -116,7 +140,7 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
 
   entries[SESSIONS_PATH] = jsonBlob({ sessions: state.sessions })
   entries[NAMESPACE_PATH] = jsonBlob({ nodes: state.nodes ?? {} })
-  entries[HISTORY_PATH] = historyToBlob((state.history as unknown[] | undefined) ?? [])
+  Object.assign(entries, historyEntries((state.history as unknown[] | undefined) ?? []))
   const cache = state.cache as unknown as { limit: number }
   const meta: VersionMeta = {
     version: state.version,
@@ -157,8 +181,7 @@ export function toState(
   const sessions = sessionsBlob !== undefined ? (parseJsonBlob(sessionsBlob).sessions ?? []) : []
   const namespaceBlob = entries[NAMESPACE_PATH]
   const nodes = namespaceBlob !== undefined ? (parseJsonBlob(namespaceBlob).nodes ?? {}) : {}
-  const historyBlob = entries[HISTORY_PATH]
-  const history = historyBlob !== undefined ? blobToHistory(historyBlob) : []
+  const history = historyFromEntries(entries)
   return {
     version: meta.version,
     mounts,

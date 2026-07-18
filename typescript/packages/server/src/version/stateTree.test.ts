@@ -57,7 +57,10 @@ function makeState(): WorkspaceStateDict {
       },
     ],
     nodes: { '/link.txt': { target: '/m/a.txt' } },
-    history: [{ type: 'COMMAND', command: 'echo hi', timestamp: 123 }],
+    history: [
+      { type: 'COMMAND', command: 'echo hi', timestamp: 123, session: 'agent_a' },
+      { type: 'COMMAND', command: 'cat /a.txt', timestamp: 456, session: 'agent_b' },
+    ],
     default_session_id: 'agent_a',
   } as unknown as WorkspaceStateDict
 }
@@ -65,8 +68,10 @@ function makeState(): WorkspaceStateDict {
 describe('stateTree', () => {
   it('splits mount files from the .mirage/ control-plane subtree', () => {
     const { entries, meta } = treeInputsFromState(makeState())
+    // One history file per session, mirroring the live ObserverStore.
     expect(Object.keys(entries).sort()).toEqual([
-      '.mirage/history.jsonl',
+      '.mirage/history/agent_a.jsonl',
+      '.mirage/history/agent_b.jsonl',
       '.mirage/namespace.json',
       '.mirage/sessions.json',
       'm/a.txt',
@@ -96,7 +101,10 @@ describe('stateTree', () => {
     expect(session.env).toEqual({ API_KEY: '@aws:prod-key' })
     expect(session.mount_modes).toEqual({ '/m': 'read' })
     expect(back.nodes).toEqual({ '/link.txt': { target: '/m/a.txt' } })
-    expect((back.history[0] as unknown as Record<string, unknown>).command).toBe('echo hi')
+    expect((back.history as unknown as Record<string, unknown>[]).map((e) => e.command)).toEqual([
+      'echo hi',
+      'cat /a.txt',
+    ])
     expect(back.default_session_id).toBe('agent_a')
     expect(back.cache.entries).toEqual([])
   })
