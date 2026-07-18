@@ -24,23 +24,15 @@ describe('buildApp pid file wiring', () => {
     vi.unstubAllEnvs()
   })
 
-  it('explicit pidFile option wins over env', async () => {
-    vi.stubEnv('MIRAGE_PID_FILE', '/run/env.pid')
+  it('explicit pidFile option wins over home', async () => {
+    vi.stubEnv('MIRAGE_HOME', '/data/mirage')
     const app = buildApp({ pidFile: '/x/y.pid' })
     expect(app.pidFile).toBe('/x/y.pid')
     await app.close()
   })
 
-  it('resolves MIRAGE_PID_FILE from env', async () => {
-    vi.stubEnv('MIRAGE_PID_FILE', '/run/env.pid')
-    const app = buildApp()
-    expect(app.pidFile).toBe('/run/env.pid')
-    await app.close()
-  })
-
   it('defaults under MIRAGE_HOME', async () => {
     vi.stubEnv('MIRAGE_HOME', '/data/mirage')
-    vi.stubEnv('MIRAGE_PID_FILE', '')
     const app = buildApp()
     expect(app.pidFile).toBe(join('/data/mirage', 'daemon.pid'))
     await app.close()
@@ -56,7 +48,6 @@ describe('buildApp config validation', () => {
     const home = mkdtempSync(join(tmpdir(), 'mir-app-'))
     writeFileSync(join(home, 'config.toml'), '[daemon]\ntypo_key = "x"\n')
     vi.stubEnv('MIRAGE_HOME', home)
-    vi.stubEnv('MIRAGE_PID_FILE', '')
     expect(() => buildApp()).toThrow(DaemonConfigError)
     expect(() => buildApp()).toThrow(/typo_key/)
   })
@@ -65,7 +56,6 @@ describe('buildApp config validation', () => {
     const home = mkdtempSync(join(tmpdir(), 'mir-app-'))
     writeFileSync(join(home, 'config.toml'), '[daemon]\nurl = "http://h:1"\n')
     vi.stubEnv('MIRAGE_HOME', home)
-    vi.stubEnv('MIRAGE_PID_FILE', '')
     const app = buildApp()
     await app.close()
   })

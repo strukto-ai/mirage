@@ -30,10 +30,10 @@ def test_read_daemon_table_no_daemon_section(tmp_path):
 
 def test_read_daemon_table_reads_keys(tmp_path):
     (tmp_path / "config.toml"
-     ).write_text('[daemon]\nurl = "http://h:1"\npid_file = "/tmp/p.pid"\n')
+     ).write_text('[daemon]\nurl = "http://h:1"\nsocket = "/tmp/s.sock"\n')
     table = read_daemon_table(tmp_path)
     assert table["url"] == "http://h:1"
-    assert table["pid_file"] == "/tmp/p.pid"
+    assert table["socket"] == "/tmp/s.sock"
 
 
 def test_read_daemon_table_malformed_toml(tmp_path):
@@ -43,7 +43,7 @@ def test_read_daemon_table_malformed_toml(tmp_path):
 
 
 def test_allowed_keys_contents():
-    assert "pid_file" in ALLOWED_KEYS
+    assert "port" in ALLOWED_KEYS
     assert "MIRAGE_HOME" not in ALLOWED_KEYS
 
 
@@ -57,8 +57,8 @@ def test_validate_rejects_unknown_keys():
 
 
 def test_validate_rejects_wrong_type():
-    with pytest.raises(DaemonConfigError, match="pid_file"):
-        validate_daemon_table({"pid_file": 123})
+    with pytest.raises(DaemonConfigError, match="url"):
+        validate_daemon_table({"url": 123})
 
 
 def test_validate_accepts_numeric_grace_and_rejects_string():

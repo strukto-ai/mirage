@@ -21,16 +21,15 @@ runner = CliRunner()
 
 def _isolate_home(monkeypatch, tmp_path):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv("MIRAGE_PID_FILE", raising=False)
 
 
 def test_config_set_then_get(monkeypatch, tmp_path):
     _isolate_home(monkeypatch, tmp_path)
-    r = runner.invoke(app, ["set", "version_root", "/data/repos"])
+    r = runner.invoke(app, ["set", "port", "9314"])
     assert r.exit_code == 0
-    r = runner.invoke(app, ["get", "version_root"])
+    r = runner.invoke(app, ["get", "port"])
     assert r.exit_code == 0
-    assert "/data/repos" in r.stdout
+    assert "9314" in r.stdout
 
 
 def test_config_list(monkeypatch, tmp_path):
@@ -51,7 +50,7 @@ def test_config_unset(monkeypatch, tmp_path):
 
 def test_config_get_unset_exits_nonzero(monkeypatch, tmp_path):
     _isolate_home(monkeypatch, tmp_path)
-    r = runner.invoke(app, ["get", "pid_file"])
+    r = runner.invoke(app, ["get", "jwt_issuer"])
     assert r.exit_code != 0
 
 
@@ -89,11 +88,11 @@ def test_config_list_warns_on_unknown_keys(monkeypatch, tmp_path):
 
 def test_config_list_resolved_shows_origin(monkeypatch, tmp_path):
     _isolate_home(monkeypatch, tmp_path)
-    monkeypatch.setenv("MIRAGE_VERSION_ROOT", "/env/repos")
+    monkeypatch.setenv("MIRAGE_DAEMON_PORT", "9314")
     r = runner.invoke(app, ["list", "--resolved"])
     assert r.exit_code == 0
-    assert "/env/repos" in r.output
-    assert "MIRAGE_VERSION_ROOT" in r.output
+    assert "9314" in r.output
+    assert "MIRAGE_DAEMON_PORT" in r.output
 
 
 def test_config_list_resolved_masks_auth_token(monkeypatch, tmp_path):

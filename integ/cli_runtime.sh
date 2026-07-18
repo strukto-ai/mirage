@@ -21,8 +21,7 @@ probe() {
   home="$(mktemp -d "/tmp/cli-runtime-$lang-home.XXXXXX")"
   work="$(mktemp -d "/tmp/cli-runtime-$lang-work.XXXXXX")"
   export MIRAGE_HOME="$home"
-  unset MIRAGE_PID_FILE MIRAGE_VERSION_ROOT MIRAGE_SNAPSHOT_ROOT \
-    MIRAGE_DAEMON_PORT MIRAGE_DAEMON_URL MIRAGE_ALLOWED_HOSTS \
+  unset MIRAGE_DAEMON_PORT MIRAGE_DAEMON_URL MIRAGE_ALLOWED_HOSTS \
     MIRAGE_AUTH_MODE 2>/dev/null || true
 
   $cli config set port "$port" >/dev/null </dev/null

@@ -29,9 +29,6 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'jwt_authorized_parties',
   'idle_grace_seconds',
   'port',
-  'pid_file',
-  'version_root',
-  'snapshot_root',
 ])
 export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'idle_grace_seconds',
