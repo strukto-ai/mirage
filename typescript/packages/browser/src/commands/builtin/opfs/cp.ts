@@ -20,7 +20,6 @@ import {
   specOf,
   type CommandFnResult,
   type CommandOpts,
-  type FindOptions,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { copy as coreCopy } from '../../../core/opfs/copy.ts'
@@ -43,9 +42,11 @@ function cpCommand(
   const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
   return cpGeneric(
     paths,
-    (src: PathSpec, target: PathSpec) => coreCopy(accessor, src, target),
-    (src: PathSpec, options: FindOptions) => coreFind(accessor, src, options),
     (p: PathSpec) => coreStat(accessor, p),
+    {
+      copy: (src: PathSpec, target: PathSpec) => coreCopy(accessor, src, target),
+      find: (src, options) => coreFind(accessor, src, options),
+    },
     recursive,
     opts.flags.n === true,
     opts.flags.v === true,

@@ -15,36 +15,39 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import {
+  FileType,
+  PathSpec,
+  type CopyFn,
+  type FindFn,
+  type FileStat,
+  type MoveFn,
+  type ReadBytesFn,
+  type ReadStreamFn,
+  type ReaddirFn,
+  type StatFn,
+} from '../../../types.ts'
 import { eisdir } from '../../../utils/errors.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
-export type ReaddirOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<string[]>
+export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<
+  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+>
 
-type ReadBytesOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<Uint8Array>
+type ReadBytesOp<A extends Accessor = Accessor> = ReadBytesFn<
+  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+>
 
-type ReadStreamOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => AsyncIterable<Uint8Array>
+type ReadStreamOp<A extends Accessor = Accessor> = ReadStreamFn<
+  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+>
 
-export type StatOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<FileStat>
+export type StatOp<A extends Accessor = Accessor> = StatFn<
+  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+>
 
 type WriteOp<A extends Accessor = Accessor> = (
   accessor: A,
@@ -62,23 +65,13 @@ type MkdirOp<A extends Accessor = Accessor> = (
   parents?: boolean,
 ) => Promise<void>
 
-type RenameOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  src: PathSpec,
-  dst: PathSpec,
-) => Promise<void>
+type RenameOp<A extends Accessor = Accessor> = MoveFn<[accessor: A, src: PathSpec, dst: PathSpec]>
 
-type CopyOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  src: PathSpec,
-  dst: PathSpec,
-) => Promise<void>
+type CopyOp<A extends Accessor = Accessor> = CopyFn<[accessor: A, src: PathSpec, dst: PathSpec]>
 
-type FindOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  options: FindOptions,
-) => Promise<string[]>
+type FindOp<A extends Accessor = Accessor> = FindFn<
+  [accessor: A, path: PathSpec, options: FindOptions]
+>
 
 type IsDirNameOp<A extends Accessor = Accessor> = (accessor: A, child: string) => boolean | null
 

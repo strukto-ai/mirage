@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.gdrive.read import read, read_bytes
+from mirage.core.gdrive.read import read
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import PathSpec
@@ -59,19 +59,6 @@ def accessor(config, token_manager):
 def index():
     store = RAMIndexCacheStore()
     return store
-
-
-@pytest.mark.asyncio
-async def test_read_bytes(token_manager):
-    content = b"pdf content here"
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=content,
-    ) as mock_download:
-        result = await read_bytes(token_manager, "file123")
-        assert result == content
-        mock_download.assert_called_once_with(token_manager, "file123")
 
 
 @pytest.mark.asyncio

@@ -12,17 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.github._client import github_get, github_get_sync
+from mirage.core.github._client import github_get_sync
 from mirage.core.github.config import GitHubConfig
-
-
-async def fetch_default_branch(config: GitHubConfig, owner: str,
-                               repo: str) -> str:
-    data = await github_get(config.token,
-                            "/repos/{owner}/{repo}",
-                            owner=owner,
-                            repo=repo)
-    return data["default_branch"]
 
 
 def fetch_default_branch_sync(config: GitHubConfig, owner: str,

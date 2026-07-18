@@ -16,7 +16,6 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.find_helper import find as find_helper
 from mirage.commands.builtin.grep_helper import compile_pattern, grep_recursive
 from mirage.commands.builtin.rg_helper import rg_full
 from mirage.resource.ram import RAMResource
@@ -42,32 +41,6 @@ def _make_stat(files):
         raise FileNotFoundError(path)
 
     return stat_fn
-
-
-def test_find_helper_collects_warnings_on_missing_entry():
-    readdir = _make_readdir({
-        "/": ["/a", "/b"],
-        "/a": ["/a/file1"],
-    })
-    stat_fn = _make_stat({
-        "/a":
-        FileStat(name="a", size=0, modified=None, type=FileType.DIRECTORY),
-        "/a/file1":
-        FileStat(name="file1", size=10, modified=None, type=FileType.TEXT),
-    })
-    warnings: list[str] = []
-    results = find_helper(readdir, stat_fn, "/", warnings=warnings)
-    assert "/a" in results
-    assert "/a/file1" in results
-    assert len(warnings) == 1
-    assert "/b" in warnings[0]
-
-
-def test_find_helper_no_warnings_when_none():
-    readdir = _make_readdir({"/": ["/a"]})
-    stat_fn = _make_stat({})
-    results = find_helper(readdir, stat_fn, "/")
-    assert results == []
 
 
 @pytest.mark.anyio

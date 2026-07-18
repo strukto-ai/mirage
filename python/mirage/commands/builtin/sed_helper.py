@@ -13,10 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from functools import partial
 from typing import Any
-
-from mirage.commands.builtin.utils.types import _ReadBytes, _WriteBytes
 
 _SIMPLE_CMDS = frozenset("dDpPhHgGxNq")
 
@@ -580,21 +577,3 @@ def _execute_program(text: str,
             output.extend(deferred)
 
     return "".join(output)
-
-
-def sed(
-    read_bytes: _ReadBytes,
-    write_bytes: _WriteBytes,
-    path: str,
-    pattern: str,
-    replacement: str,
-    flags: int = 0,
-    count: int = 0,
-) -> None:
-    data = read_bytes(path).decode(errors="replace")
-    new_data = re.sub(pattern,
-                      partial(_apply_repl, repl=replacement),
-                      data,
-                      flags=flags,
-                      count=count)
-    write_bytes(path, new_data.encode())

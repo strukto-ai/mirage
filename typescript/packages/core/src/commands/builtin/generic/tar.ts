@@ -20,10 +20,10 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readTar, writeTar, type TarEntry } from '../tar_helper.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
+import { COMPRESSION_SIGNATURES } from './tar/constants.ts'
+import type { Compression, CompressionKind } from './tar/types.ts'
 
 const ENC = new TextEncoder()
-
-type Compression = 'gzip' | 'bzip2' | 'xz' | null
 
 function makePathSpec(virtual: string, prefix: string): PathSpec {
   return new PathSpec({
@@ -35,19 +35,14 @@ function makePathSpec(virtual: string, prefix: string): PathSpec {
 }
 
 function detectCompression(data: Uint8Array): Compression {
-  if (data.byteLength >= 2 && data[0] === 0x1f && data[1] === 0x8b) return 'gzip'
-  if (data.byteLength >= 3 && data[0] === 0x42 && data[1] === 0x5a && data[2] === 0x68)
-    return 'bzip2'
-  if (
-    data.byteLength >= 6 &&
-    data[0] === 0xfd &&
-    data[1] === 0x37 &&
-    data[2] === 0x7a &&
-    data[3] === 0x58 &&
-    data[4] === 0x5a &&
-    data[5] === 0x00
-  ) {
-    return 'xz'
+  for (const kind of Object.keys(COMPRESSION_SIGNATURES) as CompressionKind[]) {
+    const signature = COMPRESSION_SIGNATURES[kind]
+    if (
+      data.byteLength >= signature.length &&
+      signature.every((byte, index) => data[index] === byte)
+    ) {
+      return kind
+    }
   }
   return null
 }

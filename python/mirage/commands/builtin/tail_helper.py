@@ -14,8 +14,6 @@
 
 import re
 
-from mirage.commands.builtin.utils.types import _ReadBytes
-
 _NUMBER_RE = re.compile(r"^[+-]?\d+$")
 
 
@@ -34,33 +32,3 @@ def _parse_n(n: str | None) -> tuple[int, bool]:
     if n.startswith("+"):
         return int(n[1:]), True
     return int(n), False
-
-
-def tail_bytes(data: bytes,
-               lines: int = 10,
-               bytes_mode: int | None = None,
-               plus_mode: bool = False) -> bytes:
-    if bytes_mode is not None:
-        return data[-bytes_mode:] if bytes_mode else b""
-    all_lines = data.split(b"\n")
-    if all_lines and all_lines[-1] == b"":
-        all_lines = all_lines[:-1]
-    if plus_mode:
-        selected = all_lines[lines - 1:]
-    else:
-        selected = all_lines[-lines:]
-    result = b"\n".join(selected)
-    if data.endswith(b"\n") and selected:
-        result += b"\n"
-    return result
-
-
-def tail(
-    read_bytes: _ReadBytes,
-    path: str,
-    lines: int = 10,
-    bytes_mode: int | None = None,
-    plus_mode: bool = False,
-) -> bytes:
-    data = read_bytes(path)
-    return tail_bytes(data, lines, bytes_mode, plus_mode=plus_mode)

@@ -13,23 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../accessor/base.ts'
-import { PathSpec } from '../types.ts'
+import { PathSpec, type ReadBytesFn, type ReadStreamFn } from '../types.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import { type CacheInvalidator, activeCacheManager } from './context.ts'
 
-type OpStream<A extends Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => AsyncIterable<Uint8Array>
+type OpStream<A extends Accessor> = ReadStreamFn<
+  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+>
 
-type OpBytes<A extends Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<Uint8Array>
+type OpBytes<A extends Accessor> = ReadBytesFn<
+  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+>
 
-type PathStream = (path: PathSpec) => AsyncIterable<Uint8Array>
+type PathStream = ReadStreamFn
 
 async function* serveStream(
   manager: CacheInvalidator | null,

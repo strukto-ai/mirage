@@ -68,9 +68,8 @@ async function run(
   const { stat, copy, find } = makeBackend(files, dirs)
   const result = await cpGeneric(
     paths.map(spec),
-    copy,
-    find,
     stat,
+    { copy, find },
     flags.recursive === true,
     flags.n === true,
     flags.v === true,

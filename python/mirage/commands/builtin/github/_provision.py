@@ -12,34 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.provision.types import Precision, ProvisionResult
-from mirage.types import PathSpec
-
-
-async def file_read_provision(
-    accessor: GitHubAccessor,
-    index: IndexCacheStore,
-    paths: list[PathSpec],
-    command: str,
-) -> ProvisionResult:
-    if not paths:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
-    total = 0
-    ops = 0
-    for p in paths:
-        result = await index.get(p if isinstance(p, str) else p.virtual)
-        if result.entry and result.entry.size:
-            total += result.entry.size
-            ops += 1
-    return ProvisionResult(
-        command=command,
-        network_read_low=total,
-        network_read_high=total,
-        read_ops=ops,
-        precision=Precision.EXACT,
-    )
 
 
 async def metadata_provision(command: str) -> ProvisionResult:

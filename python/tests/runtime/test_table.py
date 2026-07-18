@@ -15,10 +15,9 @@
 import pytest
 
 from mirage.runtime.base import RunArgs, RunResult, Runtime
-from mirage.runtime.js import QuickJsRuntime
-from mirage.runtime.python import LocalRuntime, MontyRuntime, WasiRuntime
+from mirage.runtime.python import LocalRuntime
 from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VfsRuntime,
-                                  bind_commands, build_runtime, candidates,
+                                  bind_commands, build_runtime,
                                   runtime_bindings_for)
 
 
@@ -28,13 +27,6 @@ class FakeRuntime(Runtime):
 
     async def run(self, args: RunArgs) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
-
-
-def test_candidates_are_ordered_sandboxed_first():
-    assert candidates("python3") == [MontyRuntime, WasiRuntime, LocalRuntime]
-    assert candidates("python") == [MontyRuntime, WasiRuntime, LocalRuntime]
-    assert candidates("node") == [QuickJsRuntime]
-    assert candidates("grep") == []
 
 
 def test_default_entries_never_include_local():

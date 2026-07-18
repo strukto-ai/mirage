@@ -15,8 +15,6 @@
 from pathlib import Path
 from typing import Any
 
-import asyncssh
-
 from mirage.core.ssh.config import SSHConfig
 
 
@@ -48,7 +46,3 @@ def _connect_kwargs(config: SSHConfig) -> dict[str, Any]:
         kwargs["known_hosts"] = None
     kwargs["login_timeout"] = config.timeout
     return kwargs
-
-
-async def connect(config: SSHConfig) -> asyncssh.SSHClientConnection:
-    return await asyncssh.connect(**_connect_kwargs(config))

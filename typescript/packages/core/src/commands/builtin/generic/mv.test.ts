@@ -61,7 +61,7 @@ async function run(
   flags: { n?: boolean; v?: boolean } = {},
 ): Promise<[ByteSource | null, IOResult]> {
   const { stat, rename } = makeBackend(files, dirs)
-  return mvGeneric(paths.map(spec), rename, stat, flags.n === true, flags.v === true)
+  return mvGeneric(paths.map(spec), stat, { rename }, flags.n === true, flags.v === true)
 }
 
 describe('mvGeneric guards', () => {

@@ -102,7 +102,7 @@ async def checkout(store: VersionStore,
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:
     # File-level diff/status stay content-only: the control-plane
     # subtree changes on every command (history) and is surfaced by the
-    # structured cross-plane diff instead.
+    # structured state_diff instead.
     return {
         kind: [p for p in paths if not p.startswith(CONTROL_PREFIX)]
         for kind, paths in changes.items()
@@ -134,12 +134,6 @@ async def diff_live_vs_ref(store: VersionStore, state: dict[str, Any],
     version = await resolve_ref(store, ref)
     ref_tree = (await store.read_commit(version)).tree
     return _strip_meta(await store.diff(ref_tree, live_tree))
-
-
-async def status(store: VersionStore,
-                 ws,
-                 branch: str = "main") -> dict[str, list[str]]:
-    return await status_state(store, await to_state_dict(ws), branch)
 
 
 async def status_state(store: VersionStore,
