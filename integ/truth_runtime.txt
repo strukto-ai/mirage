@@ -63,6 +63,8 @@ vfs-open
 fine
 === lockdown_deny ===
 exit_code=126
+=== ctx_command_pipeline ===
+came-through-pipe
 === vfs_captures_allow ===
 vfs-captured
 === vfs_captures_deny ===

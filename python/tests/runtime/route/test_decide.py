@@ -124,3 +124,19 @@ async def test_decide_vfs_entry_script_gates_vfs():
     denied = await decide_line([vfs], None, ctx_for("cat /secret/x"), {}, None)
     assert allowed.vfs_allowed
     assert not denied.vfs_allowed
+
+
+@pytest.mark.asyncio
+async def test_scripts_see_their_own_stage_on_pipelines():
+    alpha = AlphaRuntime()
+    seen: list[str] = []
+    alpha.script = lambda c: seen.append(c.command) or True
+    await decide_line([alpha, VfsRuntime()], None,
+                      ctx_for("cat /a.txt | python3 x"), {}, None)
+    assert seen == ["python3"]
+
+
+def test_for_runtime_keeps_first_stage_for_the_catch_all():
+    ctx = ctx_for("cat /a.txt | python3 x")
+    assert ctx.for_runtime(VfsRuntime()).command == "cat"
+    assert ctx.for_runtime(AlphaRuntime()).command == "python3"

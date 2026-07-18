@@ -46,7 +46,8 @@ class VfsRuntime(Runtime):
             same contract as any runtime's script.
         captures (Sequence[str] | None): restrict the workspace to
             exactly these commands, the same field every runtime uses.
-            None (the default) keeps the catch-all behavior.
+            An empty sequence serves nothing (full lockdown). None
+            (the default) keeps the catch-all behavior.
     """
 
     name = "vfs"
@@ -56,6 +57,9 @@ class VfsRuntime(Runtime):
                  script: "Callable[..., Any] | str | None" = None,
                  captures: Sequence[str] | None = None) -> None:
         self.script = script
+        # Declaring captures (even empty) turns the catch-all off; the
+        # dispatcher reads this bit, not the tuple's length.
+        self.restricted = captures is not None
         if captures is not None:
             self.captures = tuple(captures)
 

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import {
   buildResource,
@@ -49,8 +50,13 @@ const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPo
  * Docker-style route-by-path: the client embeds the file's content,
  * the wire carries content.
  */
+/** True for the docker-style single-line `.py` path form. */
+function isScriptPath(value: string): boolean {
+  return !value.includes('\n') && value.trim().endsWith('.py')
+}
+
 function loadScriptSource(value: string): string {
-  if (!value.includes('\n') && value.trim().endsWith('.py')) {
+  if (isScriptPath(value)) {
     return readFileSync(value.trim(), 'utf-8')
   }
   return value
@@ -312,6 +318,28 @@ export function loadWorkspaceConfig(
   return normalized as unknown as WorkspaceConfigRaw
 }
 
+/**
+ * Resolve relative script paths against the config file's directory.
+ *
+ * A path-form `script`/`route` in a config file means "next to the
+ * file" (the docker build-context model), never "wherever the server
+ * happens to run". In-memory object configs are untouched.
+ */
+function absolutizeScripts(raw: WorkspaceConfigRaw, base: string): void {
+  const route = raw.route
+  if (typeof route === 'string' && isScriptPath(route) && !isAbsolute(route.trim())) {
+    raw.route = join(base, route.trim())
+  }
+  if (!Array.isArray(raw.runtimes)) return
+  for (const entry of raw.runtimes) {
+    if (typeof entry === 'string') continue
+    const script = entry.script
+    if (typeof script === 'string' && isScriptPath(script) && !isAbsolute(script.trim())) {
+      entry.script = join(base, script.trim())
+    }
+  }
+}
+
 export function loadWorkspaceConfigFile(
   path: string,
   env?: Record<string, string>,
@@ -321,7 +349,9 @@ export function loadWorkspaceConfigFile(
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`config source must be a mapping`)
   }
-  return loadWorkspaceConfig(parsed as Record<string, unknown>, env)
+  const config = loadWorkspaceConfig(parsed as Record<string, unknown>, env)
+  absolutizeScripts(config, dirname(resolve(path)))
+  return config
 }
 
 export interface WorkspaceArgs {

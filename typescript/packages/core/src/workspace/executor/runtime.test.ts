@@ -48,7 +48,7 @@ describe('runtime table', () => {
     expect(candidates('grep')).toEqual([])
   })
 
-  it('default entries end with the vfs marker', () => {
+  it('default entries end with the vfs runtime', () => {
     expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('vfs')
   })
 
@@ -111,7 +111,7 @@ describe('runtimeBindingsFor', () => {
     expect(bindings).toEqual({ python3: fake, 'made-up': fake })
   })
 
-  it('rejects the vfs marker', () => {
+  it('rejects the vfs name', () => {
     expect(() => runtimeBindingsFor([new FakeRuntime(), new VfsRuntime()], 'vfs')).toThrow(
       /not a runtime you can select/,
     )

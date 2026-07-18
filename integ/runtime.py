@@ -398,6 +398,20 @@ async def main() -> None:
         print(await result.stdout_str(), end="")
         await ws_vfs.close()
 
+        # Per-runtime context: monty's script sees its own stage, so
+        # a pipeline led by cat still routes python3 onto monty.
+        ctx_monty = MontyRuntime()
+        ctx_monty.script = "ctx['command'] == 'python3'"
+        ws_ctx = Workspace({"/ram": RAMResource()},
+                           mode=MountMode.EXEC,
+                           runtimes=[ctx_monty, "vfs"])
+        await ws_ctx.execute(
+            "printf \"print('came-through-pipe')\" > /ram/pipe.py")
+        result = await ws_ctx.execute("cat /ram/pipe.py | python3")
+        print("=== ctx_command_pipeline ===")
+        print(await result.stdout_str(), end="")
+        await ws_ctx.close()
+
         # Overriding the vfs runtime with a script: lockdown, the same
         # per-line contract every runtime uses.
         ws_lock = Workspace(

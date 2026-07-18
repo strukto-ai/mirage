@@ -19,8 +19,16 @@ import {
   RedisNamespaceStore,
   RedisWorkspaceStateStore,
 } from '@struktoai/mirage-node'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { interpolateEnv, loadWorkspaceConfig, configToWorkspaceArgs } from './config.ts'
+import {
+  interpolateEnv,
+  loadWorkspaceConfig,
+  loadWorkspaceConfigFile,
+  configToWorkspaceArgs,
+} from './config.ts'
 
 describe('interpolateEnv', () => {
   it('substitutes ${VAR} from env', () => {
@@ -115,6 +123,16 @@ describe('configToWorkspaceArgs', () => {
       runtimes: [{ name: 'vfs', home: '/x' }],
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown vfs runtime option 'home'/)
+  })
+
+  it('resolves script paths against the config file dir', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'route.py'), "'quickjs'")
+    writeFileSync(join(dir, 'ws.yaml'), 'mounts:\n  /data:\n    resource: ram\nroute: route.py\n')
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.route).toBe("'quickjs'")
+    rmSync(dir, { recursive: true, force: true })
   })
 
   it('carries vfs captures through', async () => {

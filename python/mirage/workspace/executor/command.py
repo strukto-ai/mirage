@@ -33,6 +33,7 @@ from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.route import RoutingDecision
+from mirage.runtime.table import VfsRuntime
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -159,13 +160,12 @@ def _line_runtime(
 
     With no decision, the workspace's static bindings apply. With one,
     the line's bindings win; an unbound command whose capturers all
-    refused, or any unbound command when the vfs rung was refused, is
-    an admission failure: exit 126, "no runtime accepted this line",
-    like a shell refusing to exec. A command bound to the vfs runtime
-    is served by the executor itself (the vfs runtime has no
-    interpreter door), and when the vfs runtime declares explicit
-    captures the catch-all is off: unclaimed commands are admission
-    failures too.
+    refused, or any unbound command when the vfs runtime refused the
+    line, is an admission failure: exit 126, "no runtime accepted this
+    line", like a shell refusing to exec. A command bound to the vfs
+    runtime is served by the executor itself (the vfs runtime has no
+    interpreter door), and when the vfs runtime declares captures the
+    catch-all is off: unclaimed commands are admission failures too.
 
     Args:
         cmd_name (str): the command being dispatched.
@@ -174,7 +174,7 @@ def _line_runtime(
         routing (RoutingDecision | None): the typed line's decision.
     """
     vfs = registry.vfs_runtime
-    restricted = vfs is not None and len(vfs.captures) > 0
+    restricted = isinstance(vfs, VfsRuntime) and vfs.restricted
     if routing is None:
         runtime = registry.runtime_bindings.get(cmd_name)
         if runtime is vfs and vfs is not None:

@@ -31,7 +31,7 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
-import type { Runtime } from './runtime.ts'
+import { VfsRuntime, type Runtime } from './runtime.ts'
 import type { RoutingDecision } from './route/index.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -77,11 +77,11 @@ function admissionDenial(cmdName: string): IOResult {
  * Resolve a command against the line's routing decision. With no
  * decision, the static bindings apply. With one, the line's bindings
  * win; an unbound command whose capturers all refused, or any unbound
- * command when the vfs rung was refused, is an admission failure:
+ * command when the vfs runtime refused the line, is an admission failure:
  * exit 126, "no runtime accepted this line". A command bound to the
  * vfs runtime is served by the executor itself, and when the vfs
- * runtime declares explicit captures the catch-all is off: unclaimed
- * commands are admission failures too.
+ * runtime declares captures the catch-all is off: unclaimed commands
+ * are admission failures too.
  */
 function lineRuntimeFor(
   cmdName: string,
@@ -89,7 +89,7 @@ function lineRuntimeFor(
   vfs: Runtime | null,
   routingDecision: RoutingDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
-  const restricted = vfs !== null && vfs.captures.length > 0
+  const restricted = vfs instanceof VfsRuntime && vfs.restricted
   if (routingDecision === undefined) {
     const runtime = runtimeBindings?.[cmdName]
     if (runtime !== undefined && runtime === vfs) return [undefined, null]

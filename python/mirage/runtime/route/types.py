@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mirage.runtime.base import Runtime
@@ -44,8 +44,11 @@ class RouteContext:
         line (str): the raw command line.
         commands (tuple[CommandFacts, ...]): parsed commands, empty on
             a syntax error.
-        command (str): the first command name, "" when unparsable.
-        known (bool): whether the first command has a builtin spec.
+        command (str): the stage addressed to the consulted party: an
+            entry script sees its runtime's first captured stage (see
+            for_runtime), the global route sees the line's first
+            command. "" when unparsable.
+        known (bool): whether ``command`` has a builtin spec.
         cwd (str): session working directory.
         env (dict[str, str]): session environment.
         session_id (str): session hosting the line.
@@ -62,6 +65,23 @@ class RouteContext:
     session_id: str
     agent_id: str
     mounts: tuple[str, ...]
+
+    def for_runtime(self, runtime: Runtime) -> "RouteContext":
+        """The context as one runtime's script sees it.
+
+        ``command``/``known`` become the first stage the runtime
+        captures, so `ctx.command == 'python3'` means what it reads as
+        even on `cat x | python3`. A runtime with no captured stage on
+        the line (including the catch-all vfs) keeps the line's first
+        stage.
+
+        Args:
+            runtime (Runtime): the runtime being consulted.
+        """
+        for fact in self.commands:
+            if fact.command in runtime.captures:
+                return replace(self, command=fact.command, known=fact.known)
+        return self
 
     def to_dict(self, runtime: Runtime | None = None) -> dict[str, Any]:
         """The monty-facing ctx payload.

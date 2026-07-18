@@ -22,7 +22,12 @@ export interface CommandFacts {
   paths: readonly string[]
 }
 
-/** Facts about the line being routed, parse-before-route. */
+/**
+ * Facts about the line being routed, parse-before-route. `command` /
+ * `known` name the stage addressed to the consulted party: an entry
+ * script sees its runtime's first captured stage (see ctxForRuntime),
+ * the global route sees the line's first command.
+ */
 export interface RouteContext {
   line: string
   commands: readonly CommandFacts[]

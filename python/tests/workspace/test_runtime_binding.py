@@ -256,6 +256,36 @@ def test_config_vfs_entry_carries_captures():
 
 
 @pytest.mark.asyncio
+async def test_empty_captures_serve_nothing():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(),
+                             VfsRuntime(captures=())])
+    try:
+        io = await ws.execute("ls /")
+        assert io.exit_code == 126
+        io = await ws.execute("python3 -c 'x'")
+        assert await materialize(io.stdout) == b"ran-alpha\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_script_sees_its_own_stage_on_pipelines():
+    alpha = AlphaRuntime()
+    alpha.script = lambda ctx: ctx.command == "python3"
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[alpha, "vfs"])
+    try:
+        io = await ws.execute("echo lead | python3 -c 'x'")
+        assert io.exit_code == 0
+        assert await materialize(io.stdout) == b"ran-alpha\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_vfs_explicit_captures_restrict_under_routing():
     alpha = AlphaRuntime()
     alpha.script = lambda ctx: True

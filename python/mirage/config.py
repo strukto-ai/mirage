@@ -238,6 +238,15 @@ class MountBlock(BaseModel):
         return _coerce_mount_mode(v)
 
 
+def _is_script_path(value: str) -> bool:
+    """True for the docker-style single-line ``.py`` path form.
+
+    Args:
+        value (str): a yaml ``script``/``route`` value.
+    """
+    return "\n" not in value and value.strip().endswith(".py")
+
+
 def _load_script_source(value: str) -> str:
     """Resolve a config script value: a .py path loads, else inline.
 
@@ -252,9 +261,37 @@ def _load_script_source(value: str) -> str:
     Raises:
         FileNotFoundError: a path-form value that does not exist.
     """
-    if "\n" not in value and value.strip().endswith(".py"):
+    if _is_script_path(value):
         return Path(value.strip()).read_text()
     return value
+
+
+def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
+    """Resolve relative script paths against the config file's dir.
+
+    A path-form ``script``/``route`` in a config file means "next to
+    the file" (the docker build-context model), never "wherever the
+    server happens to run". Mutates the parsed mapping in place;
+    in-memory dict configs are untouched by the loader.
+
+    Args:
+        raw (dict[str, Any]): the parsed config mapping.
+        base (Path): directory containing the config file.
+    """
+    route = raw.get("route")
+    if isinstance(route, str) and _is_script_path(route) \
+            and not Path(route.strip()).is_absolute():
+        raw["route"] = str(base / route.strip())
+    runtimes = raw.get("runtimes")
+    if not isinstance(runtimes, list):
+        return
+    for entry in runtimes:
+        if not isinstance(entry, dict):
+            continue
+        script = entry.get("script")
+        if isinstance(script, str) and _is_script_path(script) \
+                and not Path(script.strip()).is_absolute():
+            entry["script"] = str(base / script.strip())
 
 
 def _build_runtime_entries(
@@ -459,9 +496,11 @@ def load_config(source: str | Path | dict[str, Any],
     Returns:
         WorkspaceConfig: validated config object.
     """
+    base: Path | None = None
     if isinstance(source, (str, Path)):
         text = Path(source).read_text(encoding="utf-8")
         raw = yaml.safe_load(text)
+        base = Path(source).resolve().parent
     else:
         raw = dict(source)
     if not isinstance(raw, dict):
@@ -469,4 +508,6 @@ def load_config(source: str | Path | dict[str, Any],
             f"config source must be a mapping, got {type(raw).__name__}")
     use_env = env if env is not None else dict(os.environ)
     interpolated = _interpolate_env(raw, use_env)
+    if base is not None:
+        _absolutize_scripts(interpolated, base)
     return WorkspaceConfig.model_validate(interpolated)

@@ -85,6 +85,9 @@ export type RuntimeEntry = Runtime | string
 export class VfsRuntime implements Runtime {
   readonly name = 'vfs'
   readonly captures: readonly string[] = []
+  // Declaring captures (even empty) turns the catch-all off; the
+  // dispatcher reads this bit, not the array's length.
+  readonly restricted: boolean = false
   script?: RouteScript
 
   // The record form exists for the shared buildRuntime path, which
@@ -101,6 +104,7 @@ export class VfsRuntime implements Runtime {
     }
     if (Array.isArray(options.captures)) {
       this.captures = (options.captures as string[]).slice()
+      this.restricted = true
     }
   }
 

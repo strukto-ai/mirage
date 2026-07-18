@@ -303,6 +303,18 @@ async function main(): Promise<void> {
   await runError(wsLock, "lockdown_deny", "cat /ram/secret.txt");
   await wsLock.close();
 
+  // Per-runtime context: monty's script sees its own stage, so a
+  // pipeline led by cat still routes python3 onto monty.
+  const ctxMonty = buildRuntime("monty");
+  ctxMonty.script = "ctx['command'] == 'python3'";
+  const wsCtx = new Workspace(
+    { "/ram": new RAMResource() },
+    { mode: MountMode.EXEC, runtimes: [ctxMonty, "vfs"] },
+  );
+  await wsCtx.execute("printf \"print('came-through-pipe')\" > /ram/pipe.py");
+  await run(wsCtx, "ctx_command_pipeline", "cat /ram/pipe.py | python3");
+  await wsCtx.close();
+
   // Overriding the vfs runtime: explicit captures restrict the
   // workspace to those commands; interpreter bindings untouched.
   const wsCap = new Workspace(

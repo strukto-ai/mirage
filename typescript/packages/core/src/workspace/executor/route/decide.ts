@@ -55,6 +55,22 @@ async function evalMonty(
   }
 }
 
+/**
+ * The context as one runtime's script sees it: command/known become
+ * the first stage the runtime captures, so `ctx.command === 'python3'`
+ * means what it reads as even on `cat x | python3`. A runtime with no
+ * captured stage on the line (including the catch-all vfs) keeps the
+ * line's first stage.
+ */
+function ctxForRuntime(ctx: RouteContext, runtime: Runtime): RouteContext {
+  for (const fact of ctx.commands) {
+    if (runtime.captures.includes(fact.command)) {
+      return { ...ctx, command: fact.command, known: fact.known }
+    }
+  }
+  return ctx
+}
+
 /** Ask one runtime's script whether it wants the line. */
 async function evaluateScript(
   script: RouteScript,
@@ -62,10 +78,11 @@ async function evaluateScript(
   runtime: Runtime,
   bridge: BridgeDispatchFn | null,
 ): Promise<boolean> {
+  const view = ctxForRuntime(ctx, runtime)
   if (typeof script === 'string') {
-    return Boolean(await evalMonty(script, ctxPayload(ctx, runtime), bridge))
+    return Boolean(await evalMonty(script, ctxPayload(view, runtime), bridge))
   }
-  return await script(ctx)
+  return await script(view)
 }
 
 /** Run the global route, returning a runtime name or null to pass. */

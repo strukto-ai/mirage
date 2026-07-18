@@ -87,7 +87,7 @@ describe('per-line runtime argument', () => {
     }
   })
 
-  it('fails loud on unknown runtimes and the vfs marker', async () => {
+  it('fails loud on unknown runtimes and the vfs name', async () => {
     const ws = await runtimeArgWorkspace()
     try {
       await expect(ws.execute('python3 -c "x"', { runtime: 'nope' })).rejects.toThrow(
@@ -299,6 +299,45 @@ describe('vfs runtime overrides', () => {
       expect(DEC.decode(ok.stdout)).toBe('routed-ok\n')
       const denied = await ws.execute('ls /')
       expect(denied.exitCode).toBe(126)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('script context', () => {
+  it('a script sees its own stage on pipelines', async () => {
+    const parser = await getTestParser()
+    const alpha = new NamedFakeRuntime('alpha')
+    alpha.script = (ctx) => ctx.command === 'python3'
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, 'vfs'] },
+    )
+    try {
+      const io = await ws.execute('echo lead | python3 -c "x"')
+      expect(io.exitCode).toBe(0)
+      expect(DEC.decode(io.stdout)).toBe('ran-alpha\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('empty declared captures serve nothing', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), new VfsRuntime({ captures: [] })],
+      },
+    )
+    try {
+      const denied = await ws.execute('ls /')
+      expect(denied.exitCode).toBe(126)
+      const py = await ws.execute('python3 -c "x"')
+      expect(DEC.decode(py.stdout)).toBe('ran-alpha\n')
     } finally {
       await ws.close()
     }

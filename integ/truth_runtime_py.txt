@@ -86,6 +86,8 @@ exit_code=126
 mirage: ls: no runtime accepted this line
 === vfs_captures_python3 ===
 42
+=== ctx_command_pipeline ===
+came-through-pipe
 === vfs_script_allow ===
 fine
 === vfs_script_deny ===

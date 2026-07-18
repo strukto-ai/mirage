@@ -64,6 +64,10 @@ async def evaluate_script(script: RouteScript, ctx: RouteContext,
                           dispatch: Callable[..., Any] | None) -> bool:
     """Ask one runtime's script whether it wants the line.
 
+    The script sees the runtime's own view of the context
+    (RouteContext.for_runtime): ``command`` is its first captured
+    stage, plus ``runtime`` identity in the monty payload.
+
     Args:
         script (RouteScript): a callable taking the RouteContext, or
             monty source whose last expression is the verdict.
@@ -71,10 +75,11 @@ async def evaluate_script(script: RouteScript, ctx: RouteContext,
         runtime (Runtime): the runtime being asked (ctx.runtime).
         dispatch (Callable | None): workspace dispatch for file reads.
     """
+    view = ctx.for_runtime(runtime)
     if isinstance(script, str):
-        verdict = await _eval_monty(script, ctx.to_dict(runtime), dispatch)
+        verdict = await _eval_monty(script, view.to_dict(runtime), dispatch)
     else:
-        verdict = script(ctx)
+        verdict = script(view)
         if inspect.isawaitable(verdict):
             verdict = await verdict
     return bool(verdict)

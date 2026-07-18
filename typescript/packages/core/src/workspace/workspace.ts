@@ -144,7 +144,7 @@ export interface WorkspaceOptions {
   }
   /**
    * The workspace's ordered runtime world: instances and name
-   * shorthands plus the vfs marker; the first capturer binds each
+   * shorthands including 'vfs'; the first capturer binds each
    * command. Unset = the default world (pyodide, quickjs, vfs).
    */
   runtimes?: RuntimeEntry[]
