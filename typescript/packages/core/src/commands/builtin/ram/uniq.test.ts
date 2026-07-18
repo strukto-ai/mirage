@@ -124,4 +124,18 @@ describe('uniq', () => {
     const r = await runUniq(resource, [], {}, ENC.encode('a\na\nb\n'))
     expect(r.lines).toEqual(['a', 'b'])
   })
+
+  it('missing stdin and no path uses empty standard input', async () => {
+    const resource = new RAMResource()
+    const r = await runUniq(resource, [])
+    expect(r.exitCode).toBe(0)
+    expect(r.lines).toEqual([])
+  })
+
+  it('rejects trailing text in numeric options', async () => {
+    const resource = new RAMResource()
+    await expect(runUniq(resource, [], { f: '2junk' })).rejects.toThrow(
+      "uniq: invalid count: '2junk'",
+    )
+  })
 })

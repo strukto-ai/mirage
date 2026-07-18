@@ -37,10 +37,7 @@ export async function sortGeneric(
     }
   } else {
     const raw = await readStdinAsync(opts.stdin)
-    if (raw === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('sort: missing operand\n') })]
-    }
-    allLines = splitSortLines(DEC.decode(raw))
+    allLines = splitSortLines(DEC.decode(raw ?? new Uint8Array(0)))
   }
   const sorted = sortAndDedupe(allLines, keyOpts, reverse, unique)
   const out: ByteSource =

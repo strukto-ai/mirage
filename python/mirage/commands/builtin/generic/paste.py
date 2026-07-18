@@ -26,22 +26,20 @@ async def paste(
             data = (await read_bytes(p)).decode(errors="replace")
         file_lines.append(split_lines(data))
 
-    if not file_lines and remaining_stdin is not None:
-        raw = await _read_stdin_async(remaining_stdin)
-        if raw:
-            file_lines.append(split_lines(raw.decode(errors="replace")))
-
     if not file_lines:
-        raise ValueError("paste: missing operand")
+        raw = await _read_stdin_async(remaining_stdin)
+        data = raw.decode(errors="replace") if raw is not None else ""
+        file_lines.append(split_lines(data))
 
     if serial:
-        out_lines = [delimiter.join(lines) for lines in file_lines]
+        out_lines = [delimiter.join(lines) for lines in file_lines if lines]
     else:
         out_lines = [
             delimiter.join(row)
             for row in zip_longest(*file_lines, fillvalue="")
         ]
-    return ("\n".join(out_lines) + "\n").encode(), IOResult()
+    output = ("\n".join(out_lines) + "\n").encode() if out_lines else b""
+    return output, IOResult()
 
 
 __all__ = ["paste"]

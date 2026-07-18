@@ -115,5 +115,11 @@ export async function commGeneric(
   const merged = commMerge(lines1, lines2)
   const output = formatComm(merged, suppress1, suppress2, suppress3)
   const result: ByteSource = ENC.encode(output)
-  return [result, new IOResult({ stderr: stderr !== '' ? ENC.encode(stderr) : null })]
+  return [
+    result,
+    new IOResult({
+      stderr: stderr !== '' ? ENC.encode(stderr) : null,
+      exitCode: stderr !== '' ? 1 : 0,
+    }),
+  ]
 }
