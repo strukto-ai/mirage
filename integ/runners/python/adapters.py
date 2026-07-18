@@ -112,16 +112,17 @@ def _load_module(path: Path) -> ModuleType:
 
 def _load_onedrive_server() -> ModuleType:
     return _load_module(
-        Path(__file__).resolve().parents[2] / "onedrive_server.py")
+        Path(__file__).resolve().parents[2] / "server" / "onedrive_server.py")
 
 
 def _load_hf_server() -> ModuleType:
-    return _load_module(Path(__file__).resolve().parents[2] / "hf_server.py")
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" / "hf_server.py")
 
 
 def _load_ssh_server() -> ModuleType:
     return _load_module(
-        Path(__file__).resolve().parents[1] / "tools" / "ssh_server.py")
+        Path(__file__).resolve().parents[2] / "server" / "ssh_server.py")
 
 
 async def _admin_exec(ws: Workspace, command: str) -> None:
