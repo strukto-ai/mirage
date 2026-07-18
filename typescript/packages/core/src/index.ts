@@ -21,6 +21,7 @@ export {
   FileStat,
   type FileStatInit,
   FileType,
+  MOUNT_MODE_RANK,
   MountMode,
   OnExceed,
   PathSpec,

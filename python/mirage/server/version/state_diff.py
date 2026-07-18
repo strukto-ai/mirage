@@ -17,11 +17,12 @@ from typing import Any
 from mirage.server.version.api import read_version, resolve_ref, version_diff
 from mirage.server.version.state_tree import to_state
 from mirage.server.version.store import VersionStore
-from mirage.types import SessionKey, StateKey
+from mirage.types import MOUNT_MODE_RANK, SessionKey, StateKey
 
-# Mount modes ordered by how much they allow; a transition that moves
-# UP this ladder is a widening and must be surfaced, never silent.
-MODE_RANK = {"read": 0, "write": 1, "exec": 2}
+# String-keyed view of the canonical READ < WRITE < EXEC lattice; a
+# transition that moves UP it is a widening and must be surfaced,
+# never silent. Unknown modes rank below READ.
+_MODE_RANK = {mode.value: rank for mode, rank in MOUNT_MODE_RANK.items()}
 
 
 def _dict_delta(before: dict[str, Any], after: dict[str,
@@ -101,8 +102,8 @@ def grant_widenings(sessions_diff: dict[str, Any]) -> list[dict[str, Any]]:
         if not grants:
             continue
         for mount, change in grants["modified"].items():
-            before_rank = MODE_RANK.get(change["from"], 0)
-            after_rank = MODE_RANK.get(change["to"], 0)
+            before_rank = _MODE_RANK.get(change["from"], 0)
+            after_rank = _MODE_RANK.get(change["to"], 0)
             if after_rank > before_rank:
                 out.append({
                     "session_id": sid,

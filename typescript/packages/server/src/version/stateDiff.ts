@@ -12,15 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MOUNT_MODE_RANK } from '@struktoai/mirage-core'
 import { readVersion, resolveRef, versionDiff } from './api.ts'
 import { toState } from './stateTree.ts'
 import type { VersionStore } from './store.ts'
 
 type AnyDict = Record<string, unknown>
 
-// Mount modes ordered by how much they allow; a transition that moves
-// UP this ladder is a widening and must be surfaced, never silent.
-const MODE_RANK: Record<string, number> = { read: 0, write: 1, exec: 2 }
+// String-keyed view of the canonical READ < WRITE < EXEC lattice; a
+// transition that moves UP it is a widening and must be surfaced,
+// never silent. Unknown modes rank below READ.
+const MODE_RANK: Readonly<Record<string, number>> = MOUNT_MODE_RANK
 
 interface DictDelta {
   added: AnyDict

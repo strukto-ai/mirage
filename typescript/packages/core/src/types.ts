@@ -22,7 +22,7 @@ export const MountMode = Object.freeze({
 
 export type MountMode = (typeof MountMode)[keyof typeof MountMode]
 
-const MOUNT_MODE_RANK: Readonly<Record<MountMode, number>> = Object.freeze({
+export const MOUNT_MODE_RANK: Readonly<Record<MountMode, number>> = Object.freeze({
   [MountMode.READ]: 1,
   [MountMode.WRITE]: 2,
   [MountMode.EXEC]: 3,
