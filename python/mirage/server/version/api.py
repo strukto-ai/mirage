@@ -20,7 +20,8 @@ from mirage.server.version.state_tree import (CONTROL_PREFIX, META_PATH,
                                               to_state, tree_inputs_from_state)
 from mirage.server.version.store import VersionStore
 from mirage.types import DriftPolicy, StateKey
-from mirage.workspace.snapshot import apply_state_dict, install_fingerprints
+from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
+                                       to_state_dict)
 
 
 async def snapshot_tree_from_state(store: VersionStore,
@@ -31,6 +32,13 @@ async def snapshot_tree_from_state(store: VersionStore,
         tree_entries[path] = await store.write_blob(data)
     tree_entries[META_PATH] = await store.write_blob(meta_to_blob(meta))
     return await store.write_tree(tree_entries)
+
+
+async def commit(store: VersionStore,
+                 ws,
+                 branch: str = "main",
+                 message: str = "") -> bytes:
+    return await commit_state(store, await to_state_dict(ws), branch, message)
 
 
 async def commit_state(store: VersionStore,
