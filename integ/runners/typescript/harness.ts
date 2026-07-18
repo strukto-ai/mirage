@@ -27,6 +27,7 @@ export interface Mount {
   fixture?: string
   bucket?: string
   prefix?: string
+  root?: string
 }
 
 export interface Target {

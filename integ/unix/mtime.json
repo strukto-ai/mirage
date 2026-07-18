@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "base64",
-      "seq": 56,
+      "id": "mtime_seed",
+      "seq": 400000,
       "targets": [
         "ram",
         "disk",
@@ -15,16 +15,16 @@
         "ssh",
         "nextcloud"
       ],
-      "command": "base64 /data/a.txt",
+      "command": "mkdir -p /data/mtimecheck && printf x | tee /data/mtimecheck/probe.txt > /dev/null && echo seeded",
       "expect": {
         "exit": 0,
-        "stdout": "aGVsbG8Kd29ybGQKZm9vCmJhcgpiYXoK\n",
+        "stdout": "seeded\n",
         "stderr": ""
       }
     },
     {
-      "id": "base64_roundtrip",
-      "seq": 96,
+      "id": "mtime_file_listing_present",
+      "seq": 400001,
       "targets": [
         "ram",
         "disk",
@@ -37,16 +37,17 @@
         "ssh",
         "nextcloud"
       ],
-      "command": "cat /data/a.txt | base64 | base64 -d",
+      "clear_cache": true,
+      "command": "ls -l /data/mtimecheck/probe.txt | wc -l",
       "expect": {
         "exit": 0,
-        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stdout": "1\n",
         "stderr": ""
       }
     },
     {
-      "id": "base64_stdin",
-      "seq": 161,
+      "id": "mtime_file_not_epoch",
+      "seq": 400002,
       "targets": [
         "ram",
         "disk",
@@ -59,16 +60,17 @@
         "ssh",
         "nextcloud"
       ],
-      "command": "echo hello | base64",
+      "clear_cache": true,
+      "command": "ls -l /data/mtimecheck/probe.txt | grep -c \"Jan  1 00:00\"",
       "expect": {
-        "exit": 0,
-        "stdout": "aGVsbG8K\n",
+        "exit": 1,
+        "stdout": "0\n",
         "stderr": ""
       }
     },
     {
-      "id": "base64_stdin_d",
-      "seq": 370,
+      "id": "mtime_dir_not_epoch",
+      "seq": 400003,
       "targets": [
         "ram",
         "disk",
@@ -81,16 +83,17 @@
         "ssh",
         "nextcloud"
       ],
-      "command": "echo aGVsbG8= | base64 -d",
+      "clear_cache": true,
+      "command": "ls -l /data | grep mtimecheck | grep -c \"Jan  1 00:00\"",
       "expect": {
-        "exit": 0,
-        "stdout": "hello",
+        "exit": 1,
+        "stdout": "0\n",
         "stderr": ""
       }
     },
     {
-      "id": "base64_no_input",
-      "seq": 552,
+      "id": "mtime_cleanup",
+      "seq": 400004,
       "targets": [
         "ram",
         "disk",
@@ -103,10 +106,10 @@
         "ssh",
         "nextcloud"
       ],
-      "command": "base64",
+      "command": "rm -rf /data/mtimecheck && echo cleaned",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "cleaned\n",
         "stderr": ""
       }
     }

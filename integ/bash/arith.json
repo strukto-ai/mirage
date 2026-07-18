@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "(( 2 > 1 )); echo code=$?",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "(( 0 )); echo code=$?",
       "expect": {
@@ -51,7 +55,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "i=0; (( i++ )); echo code=$? i=$i; (( i++ )); echo code=$? i=$i; unset i",
       "expect": {
@@ -71,7 +77,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "x=$(( y = 3, y + 2 )); echo $x $y; unset x y",
       "expect": {
@@ -91,7 +99,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "echo $(( -7 / 2 )) $(( -7 % 2 )) $(( 2 ** 10 )) $(( 0x10 )) $(( 010 ))",
       "expect": {
@@ -111,7 +121,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n",
       "expect": {
@@ -131,7 +143,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "if (( 2 > 1 )); then echo yes; fi",
       "expect": {
@@ -151,7 +165,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "(( 1 / 0 )) 2>&1; echo code=$?",
       "expect": {
@@ -171,7 +187,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "(( 0 && (q = 7) )); echo q=${q:-unset}",
       "expect": {

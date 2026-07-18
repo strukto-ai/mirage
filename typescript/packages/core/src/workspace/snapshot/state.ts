@@ -212,8 +212,12 @@ async function restoreNodes(ws: Workspace, state: WorkspaceStateDict): Promise<v
 
 async function restoreSessions(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
   // The snapshot's default session identity wins over the live one,
-  // and the discovery record's pointer follows it.
-  await ws.adoptDefaultSession(state.default_session_id)
+  // and the discovery record's pointer follows it. A state without the
+  // pointer (older commit metas) keeps the live default, mirroring the
+  // Python None-guard.
+  if (state.default_session_id != null) {
+    await ws.adoptDefaultSession(state.default_session_id)
+  }
   const restored: Session[] = []
   for (const s of state.sessions) {
     const exists = ws.sessionManager.list().some((x) => x.sessionId === s.session_id)

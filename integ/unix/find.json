@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -name \"*.txt\"",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -type f",
       "expect": {
@@ -51,7 +55,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -mindepth 1 -type f",
       "expect": {
@@ -71,7 +77,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -maxdepth 1 -type f",
       "expect": {
@@ -91,7 +99,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -name \"*.txt\" -o -name \"*.json\"",
       "expect": {
@@ -111,7 +121,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -name \"*.txt\" | wc -l",
       "expect": {
@@ -131,7 +143,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -name \"*.txt\" | sort | head -n 2",
       "expect": {
@@ -151,7 +165,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -type d",
       "expect": {
@@ -171,7 +187,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -iname \"*.TXT\"",
       "expect": {
@@ -191,7 +209,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -size +10c",
       "expect": {
@@ -211,7 +231,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -name \"*.txt\"",
       "expect": {
@@ -231,7 +253,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -path \"*sub*\"",
       "expect": {
@@ -251,7 +275,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/sub -type f",
       "expect": {
@@ -271,7 +297,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -empty",
       "expect": {
@@ -291,7 +319,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -not -name \"*.txt\"",
       "expect": {
@@ -311,7 +341,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -name data",
       "expect": {
@@ -331,7 +363,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -maxdepth 0",
       "expect": {
@@ -351,7 +385,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -mindepth 0 -type d",
       "expect": {
@@ -371,7 +407,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -size -5c",
       "expect": {
@@ -391,7 +429,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -depth -type f",
       "expect": {
@@ -411,7 +451,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -mtime +0 -o -mtime -1",
       "expect": {
@@ -431,7 +473,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin && printf x > /data/fs/small.bin && find /data/fs -size +4c",
       "expect": {
@@ -451,7 +495,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/fs -size -4c",
       "expect": {
@@ -471,7 +517,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c",
       "expect": {
@@ -491,7 +539,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/fs -size -4c",
       "expect": {
@@ -511,7 +561,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/fs -size 4c",
       "expect": {
@@ -531,7 +583,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/fs -size -1k",
       "expect": {
@@ -551,7 +605,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/fs -path '*data/fs/sub*'",
       "expect": {
@@ -571,7 +627,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/fs -path '/data/fs/sub'",
       "expect": {
@@ -591,7 +649,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data/fs -path '*sub*' -o -name small.bin",
       "expect": {
@@ -611,7 +671,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -maxdepth abc",
       "expect": {
@@ -631,7 +693,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -mindepth xx",
       "expect": {
@@ -651,7 +715,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -size abc",
       "expect": {
@@ -671,7 +737,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -size ''",
       "expect": {
@@ -691,7 +759,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -mtime abc",
       "expect": {
@@ -711,7 +781,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -regex '.*deep.*'",
       "expect": {
@@ -731,7 +803,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "find /data -boguspredicate",
       "expect": {

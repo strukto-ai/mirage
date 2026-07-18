@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "cat /data/a.txt | fold -w 3",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "fold -s -w 6 /data/a.txt",
       "expect": {
@@ -51,7 +55,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "fold -w 3 /data/a.txt",
       "expect": {
@@ -71,7 +77,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "fold -w 4 /data/a.txt /data/b.txt",
       "expect": {
@@ -91,7 +99,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "fold /data/c.txt",
       "expect": {
@@ -111,7 +121,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "fold -s -w 8 /data/mixed.txt",
       "expect": {
@@ -131,7 +143,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "echo foldemptyf=$(fold /data/empty.txt | wc -c)",
       "expect": {
@@ -151,7 +165,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "echo foldblankin=$(echo | fold | wc -c)",
       "expect": {

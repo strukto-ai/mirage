@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "cat /data/a.txt | iconv -f utf-8 -t utf-8",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "iconv",
       "expect": {

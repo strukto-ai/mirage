@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "mkdir -p /data/g11/sub && cd /data/g11 && printf 'one\\ntwo\\n' | tee sub/README > /dev/null",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "cat sub/README && wc -l sub/README && head -1 sub/README",
       "expect": {

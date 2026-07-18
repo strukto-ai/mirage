@@ -21,14 +21,29 @@ export async function read(accessor: SSHAccessor, p: PathSpec): Promise<Uint8Arr
   const sftp = await accessor.sftp()
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
-  return new Promise<Uint8Array>((resolveFn, rejectFn) => {
-    sftp.readFile(remote, (err, buf) => {
-      if (err !== undefined) {
-        if (isNoSuchFile(err)) rejectFn(enoent(p))
-        else rejectFn(err)
-        return
-      }
-      resolveFn(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
-    })
-  })
+  // ssh2's readFile stats the file and issues a single READ for the whole
+  // size; servers that honor large reads (asyncssh) reply with a packet over
+  // ssh2's 256 KiB cap, a fatal protocol error that strands the pending
+  // callback. Stream in bounded chunks instead.
+  const rs = sftp.createReadStream(remote)
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for await (const chunk of rs) {
+      const buf = chunk as Buffer
+      const u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      chunks.push(u8)
+      total += u8.byteLength
+    }
+  } catch (err) {
+    if (isNoSuchFile(err)) throw enoent(p)
+    throw err
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
 }

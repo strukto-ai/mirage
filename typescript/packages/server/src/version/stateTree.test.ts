@@ -48,21 +48,45 @@ function makeState(): WorkspaceStateDict {
         { key: 'k', data: enc('CACHE'), fingerprint: null, ttl: null, cached_at: 0, size: 5 },
       ],
     },
-    history: [],
+    sessions: [
+      {
+        session_id: 'agent_a',
+        cwd: '/sub',
+        env: { API_KEY: '@aws:prod-key' },
+        mount_modes: { '/m': 'read' },
+      },
+    ],
+    nodes: { '/link.txt': { target: '/m/a.txt' } },
+    history: [
+      { type: 'COMMAND', command: 'echo hi', timestamp: 123, session: 'agent_a' },
+      { type: 'COMMAND', command: 'cat /a.txt', timestamp: 456, session: 'agent_b' },
+    ],
+    default_session_id: 'agent_a',
   } as unknown as WorkspaceStateDict
 }
 
 describe('stateTree', () => {
-  it('pulls only mount files into tree entries (content-pure, no cache)', () => {
+  it('splits mount files from the .mirage/ control-plane subtree', () => {
     const { entries, meta } = treeInputsFromState(makeState())
-    expect(Object.keys(entries).sort()).toEqual(['m/a.txt', 'm/sub/b.txt'])
+    // One history file per session, mirroring the live ObserverStore.
+    expect(Object.keys(entries).sort()).toEqual([
+      '.mirage/history/agent_a.jsonl',
+      '.mirage/history/agent_b.jsonl',
+      '.mirage/namespace.json',
+      '.mirage/sessions.json',
+      'm/a.txt',
+      'm/sub/b.txt',
+    ])
     expect(entries['m/a.txt']).toEqual(enc('hi'))
     expect(meta.mounts[0]?.resourceState).not.toHaveProperty('files')
-    expect(Object.keys(entries).every((k) => !k.startsWith('.mirage-cache'))).toBe(true)
+    // Cache is the one exclusion: derived and rebuildable.
     expect(meta.cache.entries).toEqual([])
+    for (const data of Object.values(entries)) {
+      expect(new TextDecoder().decode(data)).not.toContain('CACHE')
+    }
   })
 
-  it('round-trips files through tree inputs; cache and sessions are dropped', () => {
+  it('round-trips the whole world: files, sessions, nodes, history', () => {
     const { entries, meta } = treeInputsFromState(makeState())
     const back = toState(entries, blobToMeta(metaToBlob(meta)))
     const mounts = back.mounts as unknown as {
@@ -71,10 +95,17 @@ describe('stateTree', () => {
     const rs = mounts[0]?.resource_state
     expect(rs?.files['/a.txt']).toEqual(enc('hi'))
     expect(rs?.files['/sub/b.txt']).toEqual(enc('bee'))
-    // Cache is derived, sessions are control-plane: neither enters the
-    // commit tree (content-pure commits).
+    expect(Object.keys(rs?.files ?? {}).every((p) => !p.startsWith('/.mirage'))).toBe(true)
+    const session = back.sessions[0] as unknown as Record<string, unknown>
+    expect(session.cwd).toBe('/sub')
+    expect(session.env).toEqual({ API_KEY: '@aws:prod-key' })
+    expect(session.mount_modes).toEqual({ '/m': 'read' })
+    expect(back.nodes).toEqual({ '/link.txt': { target: '/m/a.txt' } })
+    expect((back.history as unknown as Record<string, unknown>[]).map((e) => e.command)).toEqual([
+      'echo hi',
+      'cat /a.txt',
+    ])
+    expect(back.default_session_id).toBe('agent_a')
     expect(back.cache.entries).toEqual([])
-    expect(back.sessions).toEqual([])
-    expect(back.history).toEqual([])
   })
 })

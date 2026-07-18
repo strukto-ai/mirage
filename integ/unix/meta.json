@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "mkdir -p /data/metad && echo alpha > /data/metad/f.txt && touch -t 202601021530 /data/metad/f.txt",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "ls -l /data/metad",
       "expect": {
@@ -51,7 +55,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chmod 601 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -71,7 +77,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -91,7 +99,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chown 500:dev /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -111,7 +121,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chown alice /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -131,7 +143,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "touch -t 202601021530 /data/metad/new.txt && ls -l /data/metad",
       "expect": {
@@ -151,7 +165,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "touch -c /data/metad/ghost.txt && ls /data/metad",
       "expect": {
@@ -171,7 +187,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -191,7 +209,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -211,7 +231,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -231,7 +253,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad",
       "expect": {
@@ -251,7 +275,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "touch -h -t 202601021530 /data/metad/ln.txt && readlink /data/metad/ln.txt",
       "expect": {
@@ -271,7 +297,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chmod 999 /data/metad/g.txt 2>&1",
       "expect": {
@@ -291,7 +319,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chmod u+q /data/metad/g.txt 2>&1",
       "expect": {
@@ -311,7 +341,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chmod 644 /data/metad/missing.txt 2>&1",
       "expect": {
@@ -331,7 +363,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "chown alice /data/metad/missing.txt 2>&1",
       "expect": {
@@ -351,7 +385,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "touch -t 99 /data/metad/g.txt 2>&1",
       "expect": {
@@ -371,7 +407,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "rm /data/metad/ln.txt && rm -r /data/metad",
       "expect": {

@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "printf 'a\\nb\\nc\\n' | tee /data/xc1.txt > /dev/null && printf 'b\\nc\\nd\\n' | tee /data2/xc2.txt > /dev/null && comm /data/xc1.txt /data2/xc2.txt",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "comm -12 /data/xc1.txt /data2/xc2.txt",
       "expect": {

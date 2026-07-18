@@ -97,7 +97,10 @@ async def test_to_state_is_tar_loadable():
 
 
 @pytest.mark.asyncio
-async def test_content_pure_tree_keeps_files_and_fingerprints():
+async def test_whole_world_round_trip_sessions_nodes_history():
+    """A commit is the whole world: sessions, namespace nodes, and the
+    command history round-trip through the .mirage/ control-plane
+    subtree. Cache stays out (derived, rebuildable)."""
     ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.execute("echo hi > /a.txt")
@@ -120,8 +123,23 @@ async def test_content_pure_tree_keeps_files_and_fingerprints():
         SessionKey.SESSION_ID: "agent_a",
         SessionKey.CWD: "/sub",
         SessionKey.ENV: {
-            "FOO": "bar"
+            "API_KEY": "@aws:prod-key"
         },
+        "mount_modes": {
+            "/": "read"
+        },
+    }]
+    state[StateKey.NODES] = {"/link.txt": {"target": "/a.txt"}}
+    state[StateKey.HISTORY] = [{
+        "type": "COMMAND",
+        "command": "echo hi > /a.txt",
+        "timestamp": 123.0,
+        "session": "agent_a",
+    }, {
+        "type": "COMMAND",
+        "command": "cat /a.txt",
+        "timestamp": 456.0,
+        "session": "agent_b",
     }]
 
     entries, meta = tree_inputs_from_state(state)
@@ -132,16 +150,29 @@ async def test_content_pure_tree_keeps_files_and_fingerprints():
     assert files["/a.txt"] == b"hi\n"
     assert restored[StateKey.FINGERPRINTS][0][FingerprintKey.REVISION] == "v1"
 
-    # Cache is derived and sessions are control-plane state: neither
-    # enters the commit tree (content-pure commits). They travel via
-    # snapshots (tar) and the session store instead.
+    session = restored[StateKey.SESSIONS][0]
+    assert session[SessionKey.CWD] == "/sub"
+    assert session[SessionKey.ENV] == {"API_KEY": "@aws:prod-key"}
+    assert session["mount_modes"] == {"/": "read"}
+    assert restored[StateKey.NODES] == {"/link.txt": {"target": "/a.txt"}}
+    assert [e["command"] for e in restored[StateKey.HISTORY]
+            ] == ["echo hi > /a.txt", "cat /a.txt"]
+
+    # Cache is the one exclusion: derived and rebuildable.
     assert restored[StateKey.CACHE][CacheKey.ENTRIES] == []
-    assert restored[StateKey.SESSIONS] == []
-    assert all(not k.startswith(".mirage-cache") for k in entries)
+    assert all(b"cached-bytes" not in data for data in entries.values())
+
+    # Control-plane state lives under .mirage/, never in mount files.
+    assert ".mirage/sessions.json" in entries
+    assert ".mirage/namespace.json" in entries
+    # One history file per session, mirroring the live ObserverStore.
+    assert ".mirage/history/agent_a.jsonl" in entries
+    assert ".mirage/history/agent_b.jsonl" in entries
+    assert all(not p.startswith(".mirage/") for p in files)
 
 
 @pytest.mark.asyncio
-async def test_commit_tree_excludes_session_env_secrets():
+async def test_control_plane_files_never_leak_into_mount_files():
     ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.execute("echo hi > /a.txt")
@@ -149,19 +180,15 @@ async def test_commit_tree_excludes_session_env_secrets():
     state[StateKey.SESSIONS] = [{
         SessionKey.SESSION_ID: "agent_a",
         SessionKey.ENV: {
-            "API_KEY": "sk-SECRET-LEAK-TOKEN"
+            "API_KEY": "@aws:prod-key"
         },
     }]
 
     entries, meta = tree_inputs_from_state(state)
-    meta_blob = meta_to_blob(meta)
+    restored = to_state(entries, blob_to_meta(meta_to_blob(meta)))
 
-    # No session env byte may be reachable from the commit tree: this is
-    # the precondition for pushing commits to real remotes (V2).
-    assert b"sk-SECRET-LEAK-TOKEN" not in meta_blob
-    assert all(b"sk-SECRET-LEAK-TOKEN" not in data
-               for data in entries.values())
-    assert "sessions" not in blob_to_meta(meta_blob)
+    files = _mount_files(restored, "/")
+    assert list(files) == ["/a.txt"]
 
 
 def test_meta_blob_round_trip():

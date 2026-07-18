@@ -25,15 +25,21 @@ export async function rename(accessor: SSHAccessor, src: PathSpec, dst: PathSpec
   const dstVirtual = stripPrefix(dst)
   const remoteSrc = joinRoot(root, srcVirtual)
   const remoteDst = joinRoot(root, dstVirtual)
+  // POSIX rename semantics (replace an existing destination); plain SFTP
+  // rename refuses to overwrite, so prefer posix-rename@openssh.com. ssh2
+  // throws synchronously when the server lacks the extension — only then
+  // fall back to the plain rename.
   await new Promise<void>((resolveFn, rejectFn) => {
-    sftp.rename(remoteSrc, remoteDst, (err) => {
-      if (!err) {
-        resolveFn()
-        return
-      }
-      if (isNoSuchFile(err)) rejectFn(enoent(src))
-      else rejectFn(err)
-    })
+    const done = (err: unknown): void => {
+      if (!err) resolveFn()
+      else if (isNoSuchFile(err)) rejectFn(enoent(src))
+      else rejectFn(err as Error)
+    }
+    try {
+      sftp.ext_openssh_rename(remoteSrc, remoteDst, done)
+    } catch {
+      sftp.rename(remoteSrc, remoteDst, done)
+    }
   })
   await invalidateAfterWrite(dst)
   await invalidateAfterUnlink(src)

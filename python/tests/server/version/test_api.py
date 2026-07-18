@@ -28,6 +28,42 @@ from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
 
 
+@pytest.mark.asyncio
+async def test_checkout_restores_the_whole_world(tmp_path):
+    """Rollback = the whole system state: files, sessions (cwd, env
+    refs, mount grants), namespace symlinks, and the command history all
+    return to what the commit captured."""
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.EXEC)
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
+    await ws.execute("echo original > /m/a.txt")
+    await ws.execute("ln -s /m/a.txt /m/l.txt")
+    narrow = ws.create_session("narrow", mounts={"/m": "read"})
+    narrow.env["API_KEY"] = "@aws:prod-key"
+    await ws.flush_sessions()
+    await commit(store, ws, branch="main", message="v1")
+
+    await ws.execute("echo mutated > /m/a.txt")
+    await ws.execute("rm /m/l.txt")
+    narrow.env["API_KEY"] = "@aws:other-key"
+    narrow.mount_modes = {"/m": MountMode.WRITE}
+
+    await checkout(store, ws, "main")
+
+    result = await ws.execute("cat /m/a.txt")
+    assert (await result.stdout_str()) == "original\n"
+    result = await ws.execute("readlink /m/l.txt")
+    assert (await result.stdout_str()).strip() == "/m/a.txt"
+    restored = ws.get_session("narrow")
+    assert restored.env["API_KEY"] == "@aws:prod-key"
+    assert restored.mount_modes is not None
+    assert restored.mount_modes["/m"] == MountMode.READ
+    result = await ws.execute("history")
+    history = (await result.stdout_str())
+    assert "echo original > /m/a.txt" in history
+    assert "echo mutated > /m/a.txt" not in history
+
+
 def _cache_entry(data: bytes) -> dict:
     return {
         CacheKey.KEY: "k",

@@ -166,6 +166,9 @@ class MockSFTPClient:
         else:
             raise asyncssh.SFTPNoSuchFile("not found")
 
+    async def posix_rename(self, src, dst):
+        await self.rename(src, dst)
+
     async def truncate(self, path, length):
         if path in self.files:
             self.files[path] = self.files[path][:length]

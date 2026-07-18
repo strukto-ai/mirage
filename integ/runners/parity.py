@@ -22,6 +22,7 @@ from pathlib import Path
 INTEG = Path(__file__).resolve().parents[1]
 SHARED_TARGETS = ["ram", "disk", "redis"]
 S3_TARGETS = ["s3", "s3-prefix"]
+SSH_TARGETS = ["ssh"]
 
 
 def load(path: str) -> dict[tuple[str, str], dict]:
@@ -62,6 +63,8 @@ def main() -> None:
     default_targets = list(SHARED_TARGETS)
     if os.environ.get("S3_ENDPOINT"):
         default_targets += S3_TARGETS
+    if os.environ.get("SSH_HOST"):
+        default_targets += SSH_TARGETS
     targets = sys.argv[1:] or default_targets
     target_args: list[str] = []
     for t in targets:

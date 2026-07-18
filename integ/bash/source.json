@@ -11,7 +11,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "mkdir -p /data/g10 && cd /data/g10 && printf 'echo sourced-ok\\n' | tee lib.sh > /dev/null",
       "expect": {
@@ -31,7 +33,9 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "ssh",
+        "nextcloud"
       ],
       "command": "source lib.sh && . /data/g10/lib.sh && cd / && rm -r /data/g10",
       "expect": {

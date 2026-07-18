@@ -20,11 +20,49 @@ from mirage.workspace.snapshot.state import to_state_dict
 from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
-META_PATH = ".mirage-meta.json"
+# The control-plane subtree: everything about the workspace that is
+# not file content lives under one reserved directory, so a commit is
+# the WHOLE world (files + sessions + namespace + history) while file
+# paths stay clean. Cache stays out: it is derived and rebuildable.
+CONTROL_PREFIX = ".mirage/"
+META_PATH = ".mirage/meta.json"
+SESSIONS_PATH = ".mirage/sessions.json"
+NAMESPACE_PATH = ".mirage/namespace.json"
+# History mirrors the live ObserverStore layout: one append-only jsonl
+# per session, merged on read by stable timestamp sort (the events()
+# contract). A session that ran nothing since the last commit keeps an
+# identical blob, so it dedups in the content-addressed store.
+HISTORY_PREFIX = ".mirage/history/"
 
 
 def _is_reserved(tree_path: str) -> bool:
-    return tree_path == META_PATH
+    return tree_path.startswith(CONTROL_PREFIX)
+
+
+def _history_entries(events: list[dict]) -> dict[str, bytes]:
+    by_session: dict[str, list[str]] = {}
+    for e in events:
+        session = e.get("session") or "default"
+        by_session.setdefault(session,
+                              []).append(json.dumps(e, default=_json_default))
+    return {
+        f"{HISTORY_PREFIX}{session}.jsonl":
+        ("\n".join(lines) + "\n").encode("utf-8")
+        for session, lines in by_session.items()
+    }
+
+
+def _history_from_entries(entries: dict[str, bytes]) -> list[dict]:
+    events: list[dict] = []
+    for tree_path in sorted(entries):
+        if not tree_path.startswith(HISTORY_PREFIX):
+            continue
+        events.extend(
+            json.loads(line)
+            for line in entries[tree_path].decode("utf-8").splitlines()
+            if line)
+    events.sort(key=lambda e: e.get("timestamp", 0))
+    return events
 
 
 def _tree_path(prefix: str, rel: str) -> str:
@@ -90,6 +128,14 @@ def tree_inputs_from_state(
         CacheKey.LIMIT: cache[CacheKey.LIMIT],
         CacheKey.MAX_DRAIN_BYTES: cache[CacheKey.MAX_DRAIN_BYTES],
     }
+    entries[SESSIONS_PATH] = meta_to_blob({
+        "sessions":
+        state.get(StateKey.SESSIONS) or [],
+    })
+    entries[NAMESPACE_PATH] = meta_to_blob({
+        "nodes": state.get(StateKey.NODES) or {},
+    })
+    entries.update(_history_entries(state.get(StateKey.HISTORY) or []))
     meta = {
         "mounts": mounts_meta,
         "config": config,
@@ -121,12 +167,19 @@ def to_state(entries: dict[str, bytes], meta: dict[str,
             MountKey.RESOURCE_STATE: resource_state,
         })
     config = meta.get("config", {})
+    sessions_blob = entries.get(SESSIONS_PATH)
+    sessions = (blob_to_meta(sessions_blob).get("sessions", [])
+                if sessions_blob is not None else [])
+    namespace_blob = entries.get(NAMESPACE_PATH)
+    nodes = (blob_to_meta(namespace_blob).get("nodes", {})
+             if namespace_blob is not None else {})
+    history = _history_from_entries(entries)
     return {
         StateKey.VERSION: FORMAT_VERSION,
         StateKey.MIRAGE_VERSION: config.get(StateKey.MIRAGE_VERSION,
                                             "unknown"),
         StateKey.MOUNTS: mounts,
-        StateKey.SESSIONS: [],
+        StateKey.SESSIONS: sessions,
         StateKey.DEFAULT_SESSION_ID: config.get(StateKey.DEFAULT_SESSION_ID),
         StateKey.DEFAULT_AGENT_ID: config.get(StateKey.DEFAULT_AGENT_ID),
         StateKey.CURRENT_AGENT_ID: config.get(StateKey.CURRENT_AGENT_ID),
@@ -135,8 +188,9 @@ def to_state(entries: dict[str, bytes], meta: dict[str,
             CacheKey.MAX_DRAIN_BYTES: config.get(CacheKey.MAX_DRAIN_BYTES),
             CacheKey.ENTRIES: [],
         },
-        StateKey.HISTORY: None,
+        StateKey.HISTORY: history,
         StateKey.JOBS: [],
         StateKey.FINGERPRINTS: meta.get("fingerprints", []),
+        StateKey.NODES: nodes,
         StateKey.LIVE_ONLY_MOUNTS: [],
     }

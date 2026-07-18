@@ -1131,7 +1131,7 @@ export class Workspace {
       resources[prefix] = [resource, mode]
     }
     const mergedOptions: WorkspaceOptions = {
-      sessionId: args.defaultSessionId,
+      ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...options,
     }
