@@ -24,10 +24,6 @@ from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
                                        to_state_dict)
 
 
-async def snapshot_tree(store: VersionStore, ws) -> bytes:
-    return await snapshot_tree_from_state(store, await to_state_dict(ws))
-
-
 async def snapshot_tree_from_state(store: VersionStore,
                                    state: dict[str, Any]) -> bytes:
     entries, meta = tree_inputs_from_state(state)

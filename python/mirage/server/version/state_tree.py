@@ -16,7 +16,6 @@ import json
 from typing import Any
 
 from mirage.types import CacheKey, MountKey, ResourceStateKey, StateKey
-from mirage.workspace.snapshot.state import to_state_dict
 from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
@@ -89,10 +88,6 @@ def meta_to_blob(meta: dict[str, Any]) -> bytes:
 
 def blob_to_meta(data: bytes) -> dict[str, Any]:
     return json.loads(data.decode("utf-8"))
-
-
-async def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict[str, Any]]:
-    return tree_inputs_from_state(await to_state_dict(ws))
 
 
 def tree_inputs_from_state(

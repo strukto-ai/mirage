@@ -17,8 +17,8 @@ import pytest
 from mirage.resource.ram import RAMResource
 from mirage.server.version.api import (branch, checkout, commit, commit_state,
                                        diff_live_vs_ref, read_version,
-                                       resolve_ref, snapshot_tree, status,
-                                       status_state, version_diff, version_log)
+                                       resolve_ref, status, status_state,
+                                       version_diff, version_log)
 from mirage.server.version.backend import LocalBackend
 from mirage.server.version.errors import NoSuchBranchError
 from mirage.server.version.state_tree import META_PATH
@@ -73,20 +73,6 @@ def _cache_entry(data: bytes) -> dict:
         CacheKey.CACHED_AT: 0.0,
         CacheKey.SIZE: len(data),
     }
-
-
-@pytest.mark.asyncio
-async def test_snapshot_tree_contains_files_and_meta(tmp_path):
-    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                   mode=MountMode.WRITE)
-    await ws.execute("echo hello > /m/a.txt")
-    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
-
-    tree = await snapshot_tree(store, ws)
-    contents = await store.read_tree(tree)
-
-    assert META_PATH in contents
-    assert await store.read_blob(contents["m/a.txt"]) == b"hello\n"
 
 
 @pytest.mark.asyncio
