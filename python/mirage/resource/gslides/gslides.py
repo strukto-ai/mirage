@@ -16,7 +16,6 @@ from typing import Any
 
 from mirage.accessor.gslides import GSlidesAccessor
 from mirage.commands.builtin.gslides import COMMANDS
-from mirage.commands.builtin.gws.dispatch import gws as gws_dispatch
 from mirage.core.google._client import TokenManager
 from mirage.core.gslides.readdir import readdir
 from mirage.ops.gslides import OPS as GSLIDES_VFS_OPS
@@ -45,9 +44,6 @@ class GSlidesResource(BaseResource):
 
         for fn in COMMANDS:
             self.register(fn)
-        # The gws command routes across all four google command packages,
-        # so it registers here, not in any package COMMANDS list.
-        self.register(gws_dispatch)
         for fn in GSLIDES_VFS_OPS:
             self.register_op(fn)
 

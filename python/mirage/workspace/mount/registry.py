@@ -262,6 +262,28 @@ class MountRegistry:
                 return m
         return None
 
+    def match_command_prefix(self, words: list[str]) -> int:
+        """How many leading words form a registered command name.
+
+        Command names may span several words (``gws docs documents
+        get``), git-style. A nested name resolves from anywhere its
+        owning mount is reachable, so this scans every mount (mirroring
+        ``mount_for_command``) and returns the longest prefix any mount
+        recognises, or 1 (bare first token) when none does.
+
+        Args:
+            words (list[str]): expanded leading words of a command line.
+        """
+        if not words:
+            return 0
+        best = 1
+        candidates = list(self._mounts)
+        if self._root is not None:
+            candidates.append(self._root)
+        for mount in candidates:
+            best = max(best, mount.longest_command_match(words))
+        return best
+
     async def resolve_mount(
         self,
         cmd_name: str,

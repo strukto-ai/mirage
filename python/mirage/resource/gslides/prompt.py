@@ -68,9 +68,9 @@ PROMPT = """\
 
 WRITE_PROMPT = """\
   Write commands:
-    gws-slides-presentations-create --json '{"title": "My Deck"}'
+    gws slides presentations create --json '{"title": "My Deck"}'
 
-    gws-slides-presentations-batchUpdate \\
+    gws slides presentations batchUpdate \\
       --params '{"presentationId": "<id>"}' \\
       --json   '{"requests": [{"createSlide": {"insertionIndex": 1, "slideLayoutReference": {"predefinedLayout": "BLANK"}}}]}'
 

@@ -28,10 +28,10 @@ def test_prompt_includes_buckets_and_structure():
 
 
 def test_write_prompt_examples_match_actual_signatures():
-    assert "gws-slides-presentations-create" in WRITE_PROMPT
+    assert "gws slides presentations create" in WRITE_PROMPT
     assert "--json" in WRITE_PROMPT
     assert '{"title":' in WRITE_PROMPT
-    assert "gws-slides-presentations-batchUpdate" in WRITE_PROMPT
+    assert "gws slides presentations batchUpdate" in WRITE_PROMPT
     assert "presentationId" in WRITE_PROMPT
 
 

@@ -88,7 +88,7 @@ async function gwsSheetsWriteCommand(
 }
 
 export const GSHEETS_GWS_WRITE = command({
-  name: 'gws-sheets-write',
+  name: 'gws sheets +write',
   resource: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsSheetsWriteCommand,

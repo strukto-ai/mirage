@@ -352,3 +352,37 @@ describe('MountRegistry.resolveMount: path-bound dispatch', () => {
     expect(mount?.prefix).toBe('/')
   })
 })
+
+describe('MountRegistry.matchCommandPrefix', () => {
+  function regWith(names: string[]): MountRegistry {
+    const reg = new MountRegistry({ '/data': new RAMStubResource() }, MountMode.WRITE)
+    const mount = reg.mountForPrefix('/data')
+    if (mount === null) throw new Error('missing /data mount')
+    for (const name of names) {
+      const [rc] = command({ name, resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
+      if (rc === undefined) throw new Error(`missing cmd ${name}`)
+      mount.register(rc)
+    }
+    return reg
+  }
+
+  it('returns 1 for a single-token command', () => {
+    expect(regWith(['cat']).matchCommandPrefix(['cat', 'a.txt'])).toBe(1)
+  })
+
+  it('returns the longest nested command name', () => {
+    const reg = regWith(['gws docs documents get', 'gws docs +write'])
+    expect(reg.matchCommandPrefix(['gws', 'docs', 'documents', 'get', '--params', '{}'])).toBe(4)
+    expect(reg.matchCommandPrefix(['gws', 'docs', '+write', '--text', 'hi'])).toBe(3)
+  })
+
+  it('does not match a partial (unregistered) prefix', () => {
+    expect(regWith(['gws docs documents get']).matchCommandPrefix(['gws', 'docs'])).toBe(1)
+  })
+
+  it('falls back to 1 for unknown and 0 for empty', () => {
+    const reg = regWith([])
+    expect(reg.matchCommandPrefix(['nope', 'x'])).toBe(1)
+    expect(reg.matchCommandPrefix([])).toBe(0)
+  })
+})

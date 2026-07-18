@@ -49,7 +49,7 @@ async function gwsSheetsReadCommand(
 }
 
 export const GSHEETS_GWS_READ = command({
-  name: 'gws-sheets-read',
+  name: 'gws sheets +read',
   resource: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsSheetsReadCommand,

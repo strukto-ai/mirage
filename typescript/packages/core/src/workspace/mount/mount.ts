@@ -90,6 +90,10 @@ export class MountEntry {
   private readonly ops = new Map<OpKey, RegisteredOp>()
   private readonly generalOps = new Map<string, RegisteredOp>()
   private readonly crossCmds = new Map<string, RegisteredCommand>()
+  // first token -> descending token counts of multi-word command names
+  // (e.g. "gws docs documents get"); backs longest-prefix command
+  // resolution. null until first built; invalidated on register.
+  private prefixIndex: Map<string, number[]> | null = null
 
   constructor(init: MountInit) {
     const prefix = init.prefix
@@ -121,11 +125,13 @@ export class MountEntry {
   register(cmd: RegisteredCommand): void {
     this.cmds.set(cmdKey(cmd.name, cmd.filetype), cmd)
     this.cmdSpecs.set(cmd.name, cmd.spec)
+    this.prefixIndex = null
   }
 
   registerGeneral(cmd: RegisteredCommand): void {
     this.generalCmds.set(cmd.name, cmd)
     this.cmdSpecs.set(cmd.name, cmd.spec)
+    this.prefixIndex = null
   }
 
   resolveCommand(cmdName: string, extension: string | null = null): RegisteredCommand | null {
@@ -143,6 +149,45 @@ export class MountEntry {
       if (rc.name === cmdName) return rc
     }
     return null
+  }
+
+  /**
+   * How many leading words form a registered command name here. Command
+   * names may span several words ("gws docs documents get"), git-style.
+   * Returns the length of the longest registered name that is a prefix of
+   * `words`, or 1 (the bare first token) if no multi-word name matches; 0
+   * for no words.
+   */
+  longestCommandMatch(words: string[]): number {
+    if (words.length === 0) return 0
+    if (this.prefixIndex === null) {
+      const index = new Map<string, Set<number>>()
+      const names = new Set<string>([
+        ...this.cmdSpecs.keys(),
+        ...[...this.cmds.values()].map((rc) => rc.name),
+        ...this.generalCmds.keys(),
+      ])
+      for (const name of names) {
+        const tokens = name.split(' ')
+        const [first] = tokens
+        if (first === undefined || tokens.length <= 1) continue
+        const lengths = index.get(first) ?? new Set<number>()
+        lengths.add(tokens.length)
+        index.set(first, lengths)
+      }
+      this.prefixIndex = new Map([...index].map(([k, v]) => [k, [...v].sort((a, b) => b - a)]))
+    }
+    const [first] = words
+    if (first === undefined) return 1
+    for (const length of this.prefixIndex.get(first) ?? []) {
+      if (
+        length <= words.length &&
+        this.resolveCommand(words.slice(0, length).join(' ')) !== null
+      ) {
+        return length
+      }
+    }
+    return 1
   }
 
   isGeneralCommand(cmdName: string): boolean {

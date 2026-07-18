@@ -20,7 +20,6 @@ import { GSLIDES_CMD_OPS } from './ops.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GSLIDES_RM } from './rm.ts'
 import { GWS_SLIDES_API_COMMANDS } from '../gws/index.ts'
-import { GWS_DISPATCH } from '../gws/dispatch.ts'
 
 export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSlidesAccessor>(ResourceName.GSLIDES, GSLIDES_CMD_OPS, {
@@ -33,5 +32,4 @@ export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
   }),
   ...GSLIDES_RM,
   ...GWS_SLIDES_API_COMMANDS,
-  ...GWS_DISPATCH.filter((c) => c.resource === ResourceName.GSLIDES),
 ]

@@ -29,13 +29,13 @@ describe('GDOCS_PROMPT', () => {
 
 describe('GDOCS_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GDOCS_WRITE_PROMPT).toContain('gws-docs-write')
+    expect(GDOCS_WRITE_PROMPT).toContain('gws docs +write')
     expect(GDOCS_WRITE_PROMPT).toContain('--document')
     expect(GDOCS_WRITE_PROMPT).toContain('--text')
-    expect(GDOCS_WRITE_PROMPT).toContain('gws-docs-documents-create')
+    expect(GDOCS_WRITE_PROMPT).toContain('gws docs documents create')
     expect(GDOCS_WRITE_PROMPT).toContain('--json')
     expect(GDOCS_WRITE_PROMPT).toContain('{"title":')
-    expect(GDOCS_WRITE_PROMPT).toContain('gws-docs-documents-batchUpdate')
+    expect(GDOCS_WRITE_PROMPT).toContain('gws docs documents batchUpdate')
     expect(GDOCS_WRITE_PROMPT).toContain('documentId')
   })
 

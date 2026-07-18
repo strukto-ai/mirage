@@ -40,15 +40,10 @@ class GSheetsResource(BaseResource):
         self._token_manager = TokenManager(config)
         self.accessor = GSheetsAccessor(self.config, self._token_manager)
         from mirage.commands.builtin.gsheets import COMMANDS
-        from mirage.commands.builtin.gws.dispatch import gws as gws_dispatch
         from mirage.ops.gsheets import OPS as GSHEETS_VFS_OPS
 
         for fn in COMMANDS:
             self.register(fn)
-        # The gws command routes across all four google command
-        # packages, so it registers here, not in any package COMMANDS list
-        # (which would be an import cycle).
-        self.register(gws_dispatch)
         for fn in GSHEETS_VFS_OPS:
             self.register_op(fn)
 

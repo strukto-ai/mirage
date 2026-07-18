@@ -23,7 +23,6 @@ import { GSHEETS_CMD_OPS } from './ops.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GSHEETS_RM } from './rm.ts'
 import { GWS_SHEETS_API_COMMANDS } from '../gws/index.ts'
-import { GWS_DISPATCH } from '../gws/dispatch.ts'
 
 export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSheetsAccessor>(ResourceName.GSHEETS, GSHEETS_CMD_OPS, {
@@ -39,5 +38,4 @@ export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
   ...GSHEETS_GWS_WRITE,
   ...GSHEETS_GWS_APPEND,
   ...GWS_SHEETS_API_COMMANDS,
-  ...GWS_DISPATCH.filter((c) => c.resource === ResourceName.GSHEETS),
 ]

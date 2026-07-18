@@ -33,7 +33,7 @@ class GwsMethod:
 
     @property
     def command_name(self) -> str:
-        return f"gws-{self.service}-{self.resource}-{self.method}"
+        return f"gws {self.service} {self.resource} {self.method}"
 
 
 GWS_METHODS: tuple[GwsMethod, ...] = (

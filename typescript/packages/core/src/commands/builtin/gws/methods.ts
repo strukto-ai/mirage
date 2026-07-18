@@ -31,7 +31,7 @@ export interface GwsMethod {
 }
 
 export function gwsCommandName(m: GwsMethod): string {
-  return `gws-${m.service}-${m.resource}-${m.method}`
+  return `gws ${m.service} ${m.resource} ${m.method}`
 }
 
 export const GWS_METHODS: readonly GwsMethod[] = [

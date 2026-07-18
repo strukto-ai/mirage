@@ -28,7 +28,10 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("gws-docs-write", resource=["gdocs", "gdrive"], spec=SPEC, write=True)
+@command("gws docs +write",
+         resource=["gdocs", "gdrive"],
+         spec=SPEC,
+         write=True)
 async def gws_docs_write(
     accessor: GDocsAccessor,
     paths: list[PathSpec],
