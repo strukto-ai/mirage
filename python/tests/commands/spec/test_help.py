@@ -28,9 +28,9 @@ def test_renders_name_description_usage_and_flags():
                    description="Show help"),
         ),
     )
-    out = render_help("gws-thing-send", spec)
-    assert "gws-thing-send: Send a thing." in out
-    assert "Usage: gws-thing-send [flags]" in out
+    out = render_help("gws thing send", spec)
+    assert "gws thing send: Send a thing." in out
+    assert "Usage: gws thing send [flags]" in out
     assert "--to <text>" in out
     assert "Recipient" in out
     assert "--help" in out

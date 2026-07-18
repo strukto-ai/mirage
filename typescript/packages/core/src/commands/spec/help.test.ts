@@ -25,9 +25,9 @@ describe('renderHelp', () => {
         new Option({ long: '--help', valueKind: OperandKind.NONE, description: 'Show help' }),
       ],
     })
-    const out = renderHelp('gws-thing-send', spec)
-    expect(out).toContain('gws-thing-send: Send a thing.')
-    expect(out).toContain('Usage: gws-thing-send [flags]')
+    const out = renderHelp('gws thing send', spec)
+    expect(out).toContain('gws thing send: Send a thing.')
+    expect(out).toContain('Usage: gws thing send [flags]')
     expect(out).toContain('--to <text>')
     expect(out).toContain('Recipient')
     expect(out).toContain('--help')
