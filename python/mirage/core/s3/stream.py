@@ -86,12 +86,11 @@ async def range_read(accessor: S3Accessor, path_spec: PathSpec, start: int,
 
     Args:
         accessor (S3Accessor): S3 accessor.
-        path_spec (PathSpec | str): Object path_spec.
+        path_spec (PathSpec): Object path_spec.
         start (int): Start byte offset.
         end (int): End byte offset (exclusive).
     """
-    virtual = path_spec.virtual if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    virtual = path_spec.virtual
     path = path_spec.mount_path
     config = accessor.config
     start_ms = int(time.monotonic() * 1000)

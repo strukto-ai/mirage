@@ -16,10 +16,12 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.cache.index import IndexConfig
 from mirage.core.github.config import GitHubConfig
+from mirage.core.github.stat import stat
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.resource.github.github import GitHubResource
-from mirage.types import ResourceName
+from mirage.types import PathSpec, ResourceName
 
 CONFIG = GitHubConfig(token="test-token")
 OWNER = "test-owner"
@@ -111,32 +113,37 @@ def test_is_default_branch_false() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fingerprint_returns_sha() -> None:
+async def test_stat_returns_sha_fingerprint() -> None:
     tree = {
         "src/main.py":
         TreeEntry(path="src/main.py", type="blob", sha="abc123", size=100),
     }
     resource = _make_resource(tree=tree)
-    result = await resource.fingerprint("src/main.py")
-    assert result == "abc123"
+    result = await stat(resource.accessor,
+                        PathSpec.from_str_path("/src/main.py"), resource.index)
+    assert result.fingerprint == "abc123"
 
 
 @pytest.mark.asyncio
-async def test_fingerprint_strips_slash() -> None:
+async def test_replacing_index_preserves_preloaded_tree() -> None:
     tree = {
         "src/main.py":
         TreeEntry(path="src/main.py", type="blob", sha="abc123", size=100),
     }
     resource = _make_resource(tree=tree)
-    result = await resource.fingerprint("/src/main.py")
-    assert result == "abc123"
+    resource.set_index(IndexConfig())
+
+    result = await stat(resource.accessor,
+                        PathSpec.from_str_path("/src/main.py"), resource.index)
+    assert result.fingerprint == "abc123"
 
 
 @pytest.mark.asyncio
-async def test_fingerprint_returns_none_when_path_not_in_tree() -> None:
+async def test_stat_raises_when_path_not_in_tree() -> None:
     resource = _make_resource()
-    result = await resource.fingerprint("nonexistent.py")
-    assert result is None
+    with pytest.raises(FileNotFoundError):
+        await stat(resource.accessor,
+                   PathSpec.from_str_path("/nonexistent.py"), resource.index)
 
 
 @patch("mirage.resource.github.github.fetch_tree_sync")

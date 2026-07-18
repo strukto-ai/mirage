@@ -16,6 +16,7 @@ from enum import StrEnum
 
 import tree_sitter
 
+from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
 
@@ -468,7 +469,7 @@ def get_function_name(node: tree_sitter.Node) -> str:
     return get_text(node.named_children[0])
 
 
-def get_function_body(node: tree_sitter.Node) -> list[tree_sitter.Node] | None:
+def get_function_body(node: tree_sitter.Node) -> FunctionBody:
     """Get function body commands.
 
     Returns the compound_statement's children list so
@@ -477,4 +478,4 @@ def get_function_body(node: tree_sitter.Node) -> list[tree_sitter.Node] | None:
     for c in node.named_children:
         if c.type == NT.COMPOUND_STATEMENT:
             return list(c.named_children)
-    return None
+    raise ValueError("function definition has no compound body")

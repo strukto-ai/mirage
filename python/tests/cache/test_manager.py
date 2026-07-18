@@ -41,7 +41,7 @@ async def _write_case() -> tuple[bool, bool]:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_after_write("/arch/h.txt")
+    await manager.invalidate_after_write(PathSpec.from_str_path("/arch/h.txt"))
     cached = await cache.exists("/data/arch/h.txt")
     listing = await index.list_dir("/data/arch")
     return cached, listing.entries is not None
@@ -57,7 +57,8 @@ async def _unlink_case() -> tuple[bool, bool, object]:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_after_unlink("/arch/h.txt")
+    await manager.invalidate_after_unlink(PathSpec.from_str_path("/arch/h.txt")
+                                          )
     cached = await cache.exists("/data/arch/h.txt")
     listing = await index.list_dir("/data/arch")
     entry = await index.get("/data/arch/h.txt")
@@ -75,7 +76,7 @@ async def _local_case() -> tuple[bool, bool]:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", False)
-    await manager.invalidate_after_write("/arch/h.txt")
+    await manager.invalidate_after_write(PathSpec.from_str_path("/arch/h.txt"))
     cached = await cache.exists("/data/arch/h.txt")
     listing = await index.list_dir("/data/arch")
     return cached, listing.entries is not None
@@ -147,7 +148,7 @@ async def _no_index_case() -> bool:
     cache, _ = _stores()
     await cache.set("/data/a.txt", b"x")
     manager = CacheManager(cache, None, "/data/", True)
-    await manager.invalidate_after_write("/a.txt")
+    await manager.invalidate_after_write(PathSpec.from_str_path("/a.txt"))
     return await cache.exists("/data/a.txt")
 
 

@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.gunzip import gunzip as generic_gunzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -40,8 +41,8 @@ async def gunzip(
         paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_gunzip(paths,
                                 read_bytes=with_index(ops.read_bytes, index),
-                                write_bytes=ops.require("write"),
-                                unlink=ops.require("unlink"),
+                                write_bytes=ops.require(Operation.WRITE),
+                                unlink=ops.require(Operation.UNLINK),
                                 accessor=accessor,
                                 stdin=stdin,
                                 keep=k,
@@ -50,4 +51,7 @@ async def gunzip(
                                 test_only=t)
 
 
-BUILDER = Builder('gunzip', gunzip, None, True, None)
+BUILDER = Builder('gunzip',
+                  gunzip,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE, Operation.UNLINK}))

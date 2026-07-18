@@ -15,7 +15,8 @@
 import pytest
 
 from mirage.commands.builtin.generic.cp import cp
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import (FileStat, FileType, NativeCopy, PathSpec,
+                          PrimitiveCopy)
 
 
 def _spec(path: str) -> PathSpec:
@@ -51,8 +52,7 @@ def _make_backend(files: dict[str, bytes], dirs: set[str]):
 async def _run(files, dirs, paths, **kw):
     stat, copy, find = _make_backend(files, dirs)
     return await cp([_spec(p) for p in paths],
-                    copy=copy,
-                    find=find,
+                    strategy=NativeCopy(copy=copy, find=find),
                     find_type="f",
                     stat=stat,
                     recursive=kw.get("recursive", False),
@@ -193,8 +193,10 @@ async def test_primitive_copy_records_source_reads():
 
     _, io = await cp([_spec("/a.txt"), _spec("/copy.txt")],
                      stat=stat,
-                     read_bytes=read_bytes,
-                     write=write,
+                     strategy=PrimitiveCopy(read_bytes=read_bytes,
+                                            write=write,
+                                            mkdir=write,
+                                            readdir=write),
                      recursive=False,
                      n=False,
                      v=False)

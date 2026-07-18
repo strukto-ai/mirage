@@ -168,18 +168,6 @@ export class SSHResource extends BaseResource implements Resource {
     return findCore(this.accessor, p, options as SshFindOptions)
   }
 
-  async fingerprint(p: PathSpec): Promise<string | null> {
-    try {
-      const remote = await statCore(this.accessor, p)
-      const mtime = remote.modified ?? ''
-      const size = String(remote.size ?? 0)
-      return `${mtime}:${size}`
-    } catch (err) {
-      if ((err as { code?: string }).code === 'ENOENT') return null
-      throw err
-    }
-  }
-
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>

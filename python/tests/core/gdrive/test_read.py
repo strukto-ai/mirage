@@ -25,6 +25,14 @@ from mirage.core.google.config import GoogleConfig
 from mirage.types import PathSpec
 
 
+async def fail_list_files(_tm, folder_id, drive_id=None):
+    raise RuntimeError("drive unavailable")
+
+
+async def empty_list_files(_tm, folder_id, drive_id=None):
+    return []
+
+
 @pytest.fixture
 def config():
     return GoogleConfig(
@@ -120,12 +128,13 @@ async def test_read_shared_drive_raises_is_a_directory(accessor, index):
 
 @pytest.mark.asyncio
 async def test_read_not_found(accessor, index):
-    with pytest.raises(FileNotFoundError):
-        await read(
-            accessor,
-            PathSpec(resource_path="missing/file.txt",
-                     virtual="/missing/file.txt",
-                     directory="/missing/file.txt"), index)
+    with patch("mirage.core.gdrive.readdir.list_files", new=empty_list_files):
+        with pytest.raises(FileNotFoundError):
+            await read(
+                accessor,
+                PathSpec(resource_path="missing/file.txt",
+                         virtual="/missing/file.txt",
+                         directory="/missing/file.txt"), index)
 
 
 @pytest.mark.asyncio
@@ -191,6 +200,19 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             ),
     ):
         with pytest.raises(FileNotFoundError):
+            await read(
+                accessor,
+                PathSpec(resource_path="missing.txt",
+                         virtual="/missing.txt",
+                         directory="/missing.txt"),
+                index,
+            )
+
+
+@pytest.mark.asyncio
+async def test_read_propagates_parent_refresh_failure(accessor, index):
+    with patch("mirage.core.gdrive.readdir.list_files", new=fail_list_files):
+        with pytest.raises(RuntimeError, match="drive unavailable"):
             await read(
                 accessor,
                 PathSpec(resource_path="missing.txt",

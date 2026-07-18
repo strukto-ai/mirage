@@ -16,14 +16,14 @@ import asyncio
 import gzip as gzip_lib
 
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 
 def _ws(**files):
     mem = RAMResource()
     for path, data in files.items():
-        asyncio.run(mem.write(path, data=data))
+        asyncio.run(mem.write(PathSpec.from_str_path(path), data=data))
     return Workspace(
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,

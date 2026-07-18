@@ -90,11 +90,6 @@ export class GSheetsResource implements Resource {
     return gsheetsStat(this.accessor, p, this.index)
   }
 
-  async fingerprint(p: PathSpec): Promise<string | null> {
-    const lookup = await this.index.get(p.virtual)
-    return lookup.entry?.remoteTime ?? null
-  }
-
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''

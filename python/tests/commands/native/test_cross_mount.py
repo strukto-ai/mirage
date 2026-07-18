@@ -24,7 +24,7 @@ from mirage.provision import Precision
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from tests.commands.native.conftest import (_CORE_MODULES, BUCKET, REGION,
                                             MockAsyncSession)
@@ -77,10 +77,11 @@ def _write_file(ptype,
             d = "/" + "/".join(parts[:i])
             if d not in mem_accessor.store.dirs:
                 try:
-                    asyncio.run(mkdir(mem_accessor, d))
+                    asyncio.run(mkdir(mem_accessor, PathSpec.from_str_path(d)))
                 except (FileExistsError, ValueError):
                     pass
-        asyncio.run(mem_write(mem_accessor, path, content))
+        asyncio.run(
+            mem_write(mem_accessor, PathSpec.from_str_path(path), content))
     elif ptype == "disk":
         file_path = disk_root / name
         file_path.parent.mkdir(parents=True, exist_ok=True)

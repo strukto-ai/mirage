@@ -50,8 +50,7 @@ async def stat(accessor,
                          resource_path=mount_key(parent_path, prefix)),
                 index=index,
             )
-        except Exception as exc:
-            # best-effort cache populate; canonical ENOENT raised below
+        except FileNotFoundError as exc:
             logger.debug("stat populate failed for %s: %s", key, exc)
         result = await index.get(key)
     if result.entry is not None:

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from typing import Awaitable, cast
+from typing import Any, Awaitable, cast
 
 import redis.asyncio as aioredis
 
@@ -45,8 +45,13 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     def __init__(self,
                  url: str = "redis://localhost:6379/0",
                  key_prefix: str = "mirage:",
-                 **overrides: "WorkspaceStateStore | None") -> None:
-        super().__init__(**overrides)
+                 *,
+                 namespace: WorkspaceStateStore | None = None,
+                 observer: WorkspaceStateStore | None = None,
+                 workspace: WorkspaceStateStore | None = None) -> None:
+        super().__init__(namespace=namespace,
+                         observer=observer,
+                         workspace=workspace)
         self._url = url
         self._prefix = key_prefix
         self._meta_client = aioredis.from_url(url)
@@ -79,14 +84,14 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         return self._sessions[workspace_id]
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
-        raw = await cast(Awaitable,
+        raw = await cast(Awaitable[Any],
                          self._meta_client.hget(self._meta_key, workspace_id))
         return json.loads(raw) if raw is not None else None
 
     async def _set_meta(self, workspace_id: str,
                         fields: WorkspaceFields) -> None:
         await cast(
-            Awaitable,
+            Awaitable[Any],
             self._meta_client.hset(self._meta_key, workspace_id,
                                    json.dumps(fields)))
 

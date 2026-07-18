@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Literal, TypeAlias
 
 from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import PathSpec
@@ -26,14 +27,41 @@ class ScopeLevel(str, Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass
-class QdrantScope:
-    level: ScopeLevel
-    table: str | None = None
-    filters: dict[str, str] = field(default_factory=dict)
-    row_id: str | None = None
-    kind: str | None = None
+@dataclass(frozen=True)
+class QdrantRootScope:
     resource_path: str = "/"
+    level: Literal[ScopeLevel.ROOT] = field(default=ScopeLevel.ROOT,
+                                            init=False)
+
+
+@dataclass(frozen=True)
+class QdrantGroupScope:
+    table: str
+    filters: dict[str, str] = field(default_factory=dict)
+    resource_path: str = "/"
+    level: Literal[ScopeLevel.GROUP_DIR] = field(default=ScopeLevel.GROUP_DIR,
+                                                 init=False)
+
+
+@dataclass(frozen=True)
+class QdrantRowScope:
+    table: str
+    row_id: str
+    kind: str
+    filters: dict[str, str] = field(default_factory=dict)
+    resource_path: str = "/"
+    level: Literal[ScopeLevel.ROW] = field(default=ScopeLevel.ROW, init=False)
+
+
+@dataclass(frozen=True)
+class QdrantUnknownScope:
+    resource_path: str = "/"
+    level: Literal[ScopeLevel.UNKNOWN] = field(default=ScopeLevel.UNKNOWN,
+                                               init=False)
+
+
+QdrantScope: TypeAlias = (QdrantRootScope | QdrantGroupScope | QdrantRowScope
+                          | QdrantUnknownScope)
 
 
 def _parse_row_file(name: str, config: QdrantConfig) -> tuple[str, str] | None:
@@ -48,8 +76,8 @@ def _parse_row_file(name: str, config: QdrantConfig) -> tuple[str, str] | None:
     return None
 
 
-def detect_scope(path, config: QdrantConfig) -> QdrantScope:
-    raw = path.mount_path if isinstance(path, PathSpec) else path
+def detect_scope(path: PathSpec, config: QdrantConfig) -> QdrantScope:
+    raw = path.mount_path
     key = raw.strip("/")
     segs = key.split("/") if key else []
 
@@ -58,7 +86,7 @@ def detect_scope(path, config: QdrantConfig) -> QdrantScope:
         rest = segs
     else:
         if not segs:
-            return QdrantScope(level=ScopeLevel.ROOT, resource_path=raw)
+            return QdrantRootScope(resource_path=raw)
         table = segs[0]
         rest = segs[1:]
 
@@ -67,20 +95,18 @@ def detect_scope(path, config: QdrantConfig) -> QdrantScope:
 
     if len(rest) <= n:
         filters = {gb[i]: rest[i] for i in range(len(rest))}
-        return QdrantScope(level=ScopeLevel.GROUP_DIR,
-                           table=table,
-                           filters=filters,
-                           resource_path=raw)
+        return QdrantGroupScope(table=table,
+                                filters=filters,
+                                resource_path=raw)
 
     if len(rest) == n + 1:
         filters = {gb[i]: rest[i] for i in range(n)}
         parsed = _parse_row_file(rest[n], config)
         if parsed is not None:
-            return QdrantScope(level=ScopeLevel.ROW,
-                               table=table,
-                               filters=filters,
-                               row_id=parsed[0],
-                               kind=parsed[1],
-                               resource_path=raw)
+            return QdrantRowScope(table=table,
+                                  filters=filters,
+                                  row_id=parsed[0],
+                                  kind=parsed[1],
+                                  resource_path=raw)
 
-    return QdrantScope(level=ScopeLevel.UNKNOWN, resource_path=raw)
+    return QdrantUnknownScope(resource_path=raw)

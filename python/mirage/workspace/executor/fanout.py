@@ -31,10 +31,21 @@ def _path_segments(path: str) -> list[str]:
     return [s for s in path.strip("/").split("/") if s]
 
 
+def _depth_flag_value(raw: object) -> int | None:
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def _should_fan_out(
     cmd_name: str,
     paths: list[PathSpec],
-    flag_kwargs: dict,
+    flag_kwargs: dict[str, object],
     registry: MountRegistry,
 ) -> bool:
     """Whether `cmd` on this path should run across multiple mounts.
@@ -60,10 +71,10 @@ def _should_fan_out(
 
 
 def _adjust_depth_flags(
-    flag_kwargs: dict,
+    flag_kwargs: dict[str, object],
     parent_path: str,
     mount_prefix: str,
-) -> dict | None:
+) -> dict[str, object] | None:
     """Adjust find's -maxdepth/-mindepth for a fan-out into a child mount.
 
     Returns the new kwargs dict, or None if the child mount falls
@@ -74,27 +85,17 @@ def _adjust_depth_flags(
     delta = mount_depth - parent_depth
     new = dict(flag_kwargs)
     if "maxdepth" in new:
-        raw_md = new["maxdepth"]
-        if isinstance(raw_md, list):
-            raw_md = raw_md[0] if raw_md else None
-        try:
-            md = int(raw_md) - delta
-        except (TypeError, ValueError):
-            md = None
+        raw_md = _depth_flag_value(new["maxdepth"])
+        md = raw_md - delta if raw_md is not None else None
         if md is not None:
             if md < 0:
                 return None
             new["maxdepth"] = str(md)
     if "mindepth" in new:
-        raw_mn = new["mindepth"]
-        if isinstance(raw_mn, list):
-            raw_mn = raw_mn[0] if raw_mn else None
-        try:
-            mn = max(0, int(raw_mn) - delta)
+        raw_mn = _depth_flag_value(new["mindepth"])
+        if raw_mn is not None:
+            mn = max(0, raw_mn - delta)
             new["mindepth"] = str(mn)
-        except (TypeError, ValueError):
-            # non-numeric mindepth is validated later by the command itself
-            pass
     return new
 
 
@@ -141,7 +142,7 @@ def _adjust_depth_texts(
 
 def _synthesize_find_mount_entries(
     target_path: str,
-    descendants: list,
+    descendants: list[MountEntry],
     texts: list[str],
 ) -> str:
     """Return synthetic find lines for descendant mount roots.
@@ -240,7 +241,7 @@ async def _fan_out_traversal(
     cmd_name: str,
     paths: list[PathSpec],
     texts: list[str],
-    flag_kwargs: dict,
+    flag_kwargs: dict[str, object],
     registry: MountRegistry,
     primary_mount: MountEntry,
     cwd: str,
@@ -267,7 +268,6 @@ async def _fan_out_traversal(
     merged_io = IOResult()
     final_exit = 0
     success_seen = False
-
     for mount in [primary_mount] + list(descendants):
         if mount is primary_mount:
             sub_paths = list(paths)
@@ -287,20 +287,12 @@ async def _fan_out_traversal(
                          resource_path="",
                          resolved=True)
             ]
-        try:
-            stdout, io = await mount.execute_cmd(cmd_name,
-                                                 sub_paths,
-                                                 sub_texts,
-                                                 sub_flags,
-                                                 stdin=stdin,
-                                                 cwd=cwd)
-        except FindParseError:
-            # A bad numeric/size/mtime argument is a usage error that
-            # applies to every mount identically; fail the whole command
-            # instead of silently skipping mounts and exiting 0.
-            raise
-        except Exception:
-            continue
+        stdout, io = await mount.execute_cmd(cmd_name,
+                                             sub_paths,
+                                             sub_texts,
+                                             sub_flags,
+                                             stdin=stdin,
+                                             cwd=cwd)
 
         if mount is primary_mount and descendant_prefixes and stdout:
             stdout = await _filter_under_prefixes(stdout, descendant_prefixes)
@@ -313,7 +305,7 @@ async def _fan_out_traversal(
                 all_stdout.append(data)
         if io.exit_code == 0:
             success_seen = True
-        elif io.exit_code != 0 and final_exit == 0:
+        elif final_exit == 0:
             final_exit = io.exit_code
         merged_io = await merged_io.merge(io)
 
@@ -328,7 +320,12 @@ async def _fan_out_traversal(
         combined = b"\n".join(b.rstrip(b"\n") for b in all_stdout) + b"\n"
     else:
         combined = None
-    final_io_exit = 0 if success_seen else final_exit
+    # grep exits 0 when ANY mount matched (GNU: "any line was selected");
+    # traversal commands (find/du/tree) keep the first per-mount failure.
+    if cmd_name in ("grep", "rg") and success_seen:
+        final_io_exit = 0
+    else:
+        final_io_exit = final_exit
 
     if cmd_name == "find":
         combined, action_err = await _apply_find_actions(

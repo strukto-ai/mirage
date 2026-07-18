@@ -38,7 +38,7 @@ async def _cached_stat_result(manager, stat: Callable, accessor: Accessor,
                               path: PathSpec, *args, **kwargs):
     result = await stat(accessor, path, *args, **kwargs)
     if (result is not None and getattr(result, "size", None) is None
-            and manager is not None and isinstance(path, PathSpec)):
+            and manager is not None):
         cached = await manager.cached_bytes(path)
         if cached is not None:
             result = result.model_copy(update={"size": len(cached)})
@@ -114,7 +114,7 @@ def make_generic_commands(
         # A read-only backend (no write op) can't run the byte-mutation
         # commands (cp/mv/tee/gunzip/...), so don't register a command that
         # would crash when invoked.
-        if b.write and ops.write is None:
+        if not ops.supports(b.requirements):
             continue
         if b.read:
             cmd_ops = with_read_cache(ops)

@@ -14,7 +14,11 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypeAlias
+
+import tree_sitter
+
+FunctionBody: TypeAlias = list[tree_sitter.Node]
 
 
 class NodeType(StrEnum):

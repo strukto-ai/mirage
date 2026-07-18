@@ -28,10 +28,9 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def truncate(accessor: DiskAccessor, path_spec: str | PathSpec,
+async def truncate(accessor: DiskAccessor, path_spec: PathSpec,
                    length: int) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     p = _resolve(accessor.root, path)
     try:
         async with aiofiles.open(p, "rb") as f:
@@ -41,4 +40,4 @@ async def truncate(accessor: DiskAccessor, path_spec: str | PathSpec,
     result = data[:length].ljust(length, b"\0")
     async with aiofiles.open(p, "wb") as f:
         await f.write(result)
-    await invalidate_after_write(path)
+    await invalidate_after_write(path_spec)

@@ -217,3 +217,17 @@ async def test_stat_real_label_via_api(accessor, index):
                      directory="/gmail/STARRED"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "STARRED"
+
+
+@pytest.mark.asyncio
+async def test_stat_propagates_parent_refresh_failure(accessor, index):
+    failure = RuntimeError("gmail unavailable")
+    with patch("mirage.core.gmail.stat._readdir",
+               new_callable=AsyncMock,
+               side_effect=failure):
+        with pytest.raises(RuntimeError, match="gmail unavailable"):
+            await stat(
+                accessor,
+                PathSpec.from_str_path("/INBOX/missing.gmail.json"),
+                index,
+            )

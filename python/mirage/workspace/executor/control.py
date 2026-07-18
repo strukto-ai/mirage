@@ -90,14 +90,14 @@ class BreakSignal(Exception):
 
     def __init__(self, stdout=None, io=None):
         self.stdout = stdout
-        self.io = io or IOResult()
+        self.io = io if io is not None else IOResult()
 
 
 class ContinueSignal(Exception):
 
     def __init__(self, stdout=None, io=None):
         self.stdout = stdout
-        self.io = io or IOResult()
+        self.io = io if io is not None else IOResult()
 
 
 class ReturnSignal(Exception):

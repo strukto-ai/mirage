@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.zip_cmd import zip_cmd as generic_zip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -40,11 +41,14 @@ async def zip_cmd(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_zip(paths,
                              read_bytes=with_index(ops.read_bytes, index),
-                             write_bytes=ops.require("write"),
+                             write_bytes=ops.require(Operation.WRITE),
                              accessor=accessor,
                              r=r,
                              j=j,
                              q=q)
 
 
-BUILDER = Builder('zip', zip_cmd, None, True, None)
+BUILDER = Builder('zip',
+                  zip_cmd,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE}))

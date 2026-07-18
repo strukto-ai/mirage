@@ -31,12 +31,11 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def rm_r(accessor: DiskAccessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     p = _resolve(accessor.root, path)
     if await aio_path.isdir(p):
         await asyncio.to_thread(shutil.rmtree, p)
     elif await aio_path.exists(p):
         await aiofiles.os.remove(p)
-    await invalidate_after_unlink(path)
+    await invalidate_after_unlink(path_spec)

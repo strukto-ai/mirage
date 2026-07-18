@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from mirage.accessor.dify import DifyAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dify._client import dify_post
 from mirage.core.dify.path import resolve_path
@@ -22,7 +23,7 @@ METHODS = {
 
 
 async def search_segments(
-    accessor,
+    accessor: DifyAccessor,
     query: str,
     paths: list[PathSpec],
     index: IndexCacheStore = NULL_INDEX,
@@ -60,9 +61,8 @@ async def search_segments(
             "retrieval_model": retrieval_model
         },
     )
-    output = records_to_bytes(
-        response.get("records") or [], accessor.config.slug_metadata_name,
-        mount_prefix)
+    output = records_to_bytes(response_records(response.get("records")),
+                              accessor.config.slug_metadata_name, mount_prefix)
     if paths and has_name_based_target and output == b"":
         logger.debug(
             "Dify scoped search returned no records for name-based documents; "
@@ -88,10 +88,10 @@ def validate_args(query: str, method: str, top_k: int,
 
 
 async def metadata_conditions(
-    accessor,
+    accessor: DifyAccessor,
     paths: list[PathSpec],
     index: IndexCacheStore = NULL_INDEX,
-) -> tuple[list[dict], bool]:
+) -> tuple[list[dict[str, Any]], bool]:
     targets = await target_entries(accessor, paths, index)
     slug_values: list[str] = []
     name_values: list[str] = []
@@ -100,7 +100,7 @@ async def metadata_conditions(
             slug_values.append(str(entry.extra["raw_slug"]))
         else:
             name_values.append(entry.name)
-    conditions: list[dict] = []
+    conditions: list[dict[str, Any]] = []
     if slug_values:
         conditions.append({
             "name": accessor.config.slug_metadata_name,
@@ -117,14 +117,14 @@ async def metadata_conditions(
 
 
 async def target_entries(
-    accessor,
+    accessor: DifyAccessor,
     paths: list[PathSpec],
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, IndexEntry]:
     targets: dict[str, IndexEntry] = {}
     for path in paths:
         resolved = await resolve_path(accessor, path, index)
-        if resolved.entry is not None and not resolved.is_dir:
+        if not resolved.is_dir:
             targets[resolved.entry.id] = resolved.entry
             continue
         if resolved.is_dir:
@@ -138,10 +138,20 @@ async def target_entries(
                     child, rekey(path.virtual, path.resource_path, child))
                 child_resolved = await resolve_path(accessor, child_spec,
                                                     index)
-                if (child_resolved.entry is not None
-                        and not child_resolved.is_dir):
+                if not child_resolved.is_dir:
                     targets[child_resolved.entry.id] = child_resolved.entry
     return targets
+
+
+def response_records(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("Dify search response records must be a list")
+    records: list[dict[str, Any]] = []
+    for record in value:
+        if not isinstance(record, dict):
+            raise ValueError("Dify search response records must be objects")
+        records.append(record)
+    return records
 
 
 def records_to_bytes(
@@ -193,7 +203,7 @@ def record_path(
     if raw_path is None:
         return None
     try:
-        normalized = normalize_slug(raw_path)
+        normalized: str = normalize_slug(raw_path)
     except ValueError:
         logger.debug("Skipping Dify record with invalid slug/name: %r",
                      raw_path)

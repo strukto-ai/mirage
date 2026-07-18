@@ -58,31 +58,37 @@ class WorkspaceStateStore(ABC):
         self._namespace_override = namespace
         self._observer_override = observer
         self._workspace_override = workspace
+        self._closed = False
 
     def namespace(self, workspace_id: str) -> NamespaceStore:
         """The namespace plane (nodes) for one workspace."""
-        target = self._namespace_override or self
+        target = (self._namespace_override
+                  if self._namespace_override is not None else self)
         return target._make_namespace(workspace_id)
 
     def observer(self, workspace_id: str) -> ObserverStore:
         """The observer plane (history events) for one workspace."""
-        target = self._observer_override or self
+        target = (self._observer_override
+                  if self._observer_override is not None else self)
         return target._make_observer(workspace_id)
 
     def sessions(self, workspace_id: str) -> SessionStore:
         """The session table for one workspace."""
-        target = self._workspace_override or self
+        target = (self._workspace_override
+                  if self._workspace_override is not None else self)
         return target._make_sessions(workspace_id)
 
     async def load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         """Read one workspace's metadata record; None when never written."""
-        target = self._workspace_override or self
+        target = (self._workspace_override
+                  if self._workspace_override is not None else self)
         return await target._load_meta(workspace_id)
 
     async def set_meta(self, workspace_id: str,
                        fields: WorkspaceFields) -> None:
         """Insert or update one workspace's metadata record."""
-        target = self._workspace_override or self
+        target = (self._workspace_override
+                  if self._workspace_override is not None else self)
         await target._set_meta(workspace_id, fields)
 
     async def cas_set_meta(self, workspace_id: str, fields: WorkspaceFields,
@@ -125,6 +131,9 @@ class WorkspaceStateStore(ABC):
 
     async def close(self) -> None:
         """Release connections held by this provider and its overrides."""
+        if self._closed:
+            return
+        self._closed = True
         for override in (self._namespace_override, self._observer_override,
                          self._workspace_override):
             if override is not None:

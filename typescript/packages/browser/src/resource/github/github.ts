@@ -48,6 +48,9 @@ export interface GitHubResourceState {
 export class GitHubResource implements Resource {
   readonly kind: string = ResourceName.GITHUB
   readonly cachesReads: boolean = true
+  // Blob shas are stable per-path markers, so cached reads can be
+  // probe-verified under ALWAYS and snapshots carry drift fingerprints.
+  readonly supportsSnapshot: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = GITHUB_PROMPT
   readonly config: GitHubConfig
@@ -108,11 +111,6 @@ export class GitHubResource implements Resource {
 
   stat(p: PathSpec): Promise<FileStat> {
     return githubStat(this.accessor, p, this.index)
-  }
-
-  async fingerprint(p: PathSpec): Promise<string | null> {
-    const lookup = await this.index.get(p.virtual)
-    return lookup.entry?.id ?? null
   }
 
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {

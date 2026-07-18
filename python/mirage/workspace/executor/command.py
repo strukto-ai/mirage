@@ -460,8 +460,7 @@ async def handle_command(
     # Shell functions
     if cmd_name in session.functions:
         func_body = session.functions[cmd_name]
-        assert isinstance(func_body, list)
-        cs = call_stack or CallStack()
+        cs = call_stack if call_stack is not None else CallStack()
         # Positional args carry the word as typed ($1 stays sub/a.txt).
         text_args = [word_text(p) for p in parts[1:]]
         cs.push(text_args, function_name=cmd_name)

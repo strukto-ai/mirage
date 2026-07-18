@@ -37,7 +37,7 @@ async def cache():
     await c.clear()
     yield c
     await c.clear()
-    await c._store.close()
+    await c.close()
 
 
 @pytest.mark.asyncio
@@ -125,8 +125,8 @@ async def test_key_prefix_isolation():
     assert await c1.get("/shared") == b"from-c1"
     await c1.clear()
     await c2.clear()
-    await c1._store.close()
-    await c2._store.close()
+    await c1.close()
+    await c2.close()
 
 
 @pytest.mark.asyncio

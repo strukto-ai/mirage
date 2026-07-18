@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import shlex
 
 from deepagents.backends.protocol import (EditResult, ExecuteResponse,
@@ -23,6 +22,7 @@ from deepagents.backends.protocol import (EditResult, ExecuteResponse,
 from mirage.agents.langchain._convert import (io_to_execute_response,
                                               io_to_file_infos,
                                               io_to_grep_matches)
+from mirage.bridge.sync import run_async_from_sync
 from mirage.io.types import IOResult
 from mirage.workspace.workspace import Workspace
 
@@ -46,7 +46,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         self._session_id = session_id
 
     def _run(self, coro):
-        return asyncio.run(coro)
+        return run_async_from_sync(coro)
 
     @property
     def id(self) -> str:

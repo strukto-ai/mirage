@@ -16,6 +16,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Callable
 
+from mirage.accessor.base import Accessor
 from mirage.types import PathSpec
 
 
@@ -107,7 +108,7 @@ class OpsRegistry:
         self,
         name: str,
         resource: str,
-        accessor: object,
+        accessor: Accessor,
         path: PathSpec,
         *args,
         filetype: str | None = None,

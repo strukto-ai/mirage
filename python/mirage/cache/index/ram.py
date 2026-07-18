@@ -31,8 +31,22 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._children: dict[str, list[str]] = {}
         self._expiry: dict[str, datetime] = {}
 
-    def all_entries(self) -> dict[str, IndexEntry]:
-        return self._entries
+    def seed(self, entries: dict[str, IndexEntry],
+             children: dict[str, list[str]], expires_at: datetime) -> None:
+        now_iso = to_iso_z(datetime.now(timezone.utc))
+        self._entries.update({
+            path: (entry if entry.index_time else entry.model_copy(
+                update={"index_time": now_iso}))
+            for path, entry in entries.items()
+        })
+        self._children.update({
+            path: list(keys)
+            for path, keys in children.items()
+        })
+        self._expiry.update({path: expires_at for path in children})
+
+    async def entries(self) -> dict[str, IndexEntry]:
+        return dict(self._entries)
 
     async def get(self, resource_path: str) -> LookupResult:
         entry = self._entries.get(resource_path)

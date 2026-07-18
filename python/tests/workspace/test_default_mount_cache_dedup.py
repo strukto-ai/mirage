@@ -15,13 +15,14 @@
 import pytest
 
 from mirage.resource.ram import RAMResource
+from mirage.types import PathSpec
 from mirage.workspace import Workspace
 
 
 @pytest.mark.asyncio
 async def test_cache_hit_does_not_double_store():
     ram = RAMResource()
-    await ram.write("/big.bin", b"x" * 4096)
+    await ram.write(PathSpec.from_str_path("/big.bin"), b"x" * 4096)
     ws = Workspace(resources={"/r": ram})
     try:
         await ws.execute("cat /r/big.bin > /dev/null")

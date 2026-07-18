@@ -17,15 +17,14 @@ from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.types import PathSpec
 
 
-async def du(accessor: S3Accessor, path_spec: str | PathSpec) -> int:
+async def du(accessor: S3Accessor, path_spec: PathSpec) -> int:
     """Total size in bytes under a prefix.
 
     Args:
         accessor (S3Accessor): S3 accessor.
-        path_spec (PathSpec | str): Prefix path_spec.
+        path_spec (PathSpec): Prefix path_spec.
     """
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     config = accessor.config
     key = _key(path, config)
     stem = key.rstrip("/")
@@ -44,15 +43,14 @@ async def du(accessor: S3Accessor, path_spec: str | PathSpec) -> int:
 
 
 async def du_all(accessor: S3Accessor,
-                 path_spec: str | PathSpec) -> list[tuple[str, int]]:
+                 path_spec: PathSpec) -> list[tuple[str, int]]:
     """List of (path_spec, size) tuples plus a total entry.
 
     Args:
         accessor (S3Accessor): S3 accessor.
-        path_spec (PathSpec | str): Prefix path_spec.
+        path_spec (PathSpec): Prefix path_spec.
     """
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     config = accessor.config
     key = _key(path, config)
     stem = key.rstrip("/")

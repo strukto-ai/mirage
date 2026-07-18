@@ -25,7 +25,7 @@ except ImportError as _err:
                       "Install with: pip install mirage-ai[redis]") from _err
 
 
-def _purge_client(clients_dict: dict, loop_id: int) -> None:
+def _purge_client(clients_dict: dict[int, Redis], loop_id: int) -> None:
     clients_dict.pop(loop_id, None)
 
 
@@ -76,7 +76,8 @@ class RedisStore:
         return f"{self._prefix}attrs:{path}"
 
     async def get_file(self, path: str) -> bytes | None:
-        return await self._client.get(self._fk(path))
+        return await cast("Awaitable[bytes | None]",
+                          self._client.get(self._fk(path)))
 
     async def set_file(self, path: str, data: bytes) -> None:
         await self._client.set(self._fk(path), data)
@@ -98,8 +99,8 @@ class RedisStore:
         return sorted(result)
 
     async def file_len(self, path: str) -> int:
-        length = await self._client.strlen(self._fk(path))
-        return length
+        return await cast("Awaitable[int]",
+                          self._client.strlen(self._fk(path)))
 
     async def has_dir(self, path: str) -> bool:
         return bool(await cast("Awaitable[int]",
@@ -151,7 +152,7 @@ class RedisStore:
             f"{self._prefix}attrs:*",
         ]
         for pattern in prefixes:
-            keys: list = []
+            keys: list[str | bytes] = []
             async for k in self._client.scan_iter(pattern):
                 keys.append(k)
             if keys:
@@ -160,7 +161,6 @@ class RedisStore:
 
     async def close(self) -> None:
         if self._explicit_client is not None:
-            await self._explicit_client.aclose()
             return
         for client in self._clients.values():
             await client.aclose()

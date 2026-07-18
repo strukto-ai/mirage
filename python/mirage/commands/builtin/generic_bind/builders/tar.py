@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tar import tar as generic_tar
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -48,8 +49,8 @@ async def tar(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_tar(paths,
                              read_bytes=with_index(ops.read_bytes, index),
-                             write_bytes=ops.require("write"),
-                             mkdir_fn=ops.require("mkdir"),
+                             write_bytes=ops.require(Operation.WRITE),
+                             mkdir_fn=ops.require(Operation.MKDIR),
                              accessor=accessor,
                              c=c,
                              x=x,
@@ -64,4 +65,7 @@ async def tar(
                              exclude=exclude)
 
 
-BUILDER = Builder('tar', tar, None, True, None)
+BUILDER = Builder('tar',
+                  tar,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE, Operation.MKDIR}))

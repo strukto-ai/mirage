@@ -12,15 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Awaitable, Callable
-
 from mirage.cache.index import IndexCacheStore
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileType, PathSpec, StatFn
 from mirage.utils.key_prefix import rekey
 
 _SWALLOW = (FileNotFoundError, ValueError)
-
-StatFn = Callable[..., Awaitable[FileStat]]
 
 
 def child_path(parent: PathSpec, name: str) -> PathSpec:
@@ -61,7 +57,7 @@ def copy_targets(sources: list[PathSpec], dst: PathSpec,
     return pairs
 
 
-async def path_exists(stat: StatFn, path: PathSpec | str) -> bool:
+async def path_exists(stat: StatFn, path: PathSpec) -> bool:
     # No index: a no-clobber probe must see targets written earlier in the
     # same command (duplicate basenames), which the cache does not reflect.
     try:
@@ -72,7 +68,7 @@ async def path_exists(stat: StatFn, path: PathSpec | str) -> bool:
 
 
 async def is_directory(stat: StatFn,
-                       path: PathSpec | str,
+                       path: PathSpec,
                        index: IndexCacheStore | None = None) -> bool:
     try:
         info = await stat(path, index)

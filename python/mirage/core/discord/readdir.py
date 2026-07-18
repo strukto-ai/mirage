@@ -336,11 +336,11 @@ async def readdir(
 
     Args:
         accessor (DiscordAccessor): discord accessor.
-        path (PathSpec | str): resource-relative path.
+        path (PathSpec): resource-relative path.
         index (IndexCacheStore | None): index cache.
     """
     prefix, key, virtual_key = _normalize_path(path)
-    raw_path = path.virtual if isinstance(path, PathSpec) else path
+    raw_path = path.virtual
 
     if not key:
         return await _readdir_root(accessor, prefix, virtual_key, index)

@@ -65,3 +65,10 @@ async def test_find_maxdepth(make_acc):
     })
     out = await find(acc, PathSpec.from_str_path("/"), maxdepth=1)
     assert out == ["/", "/a.json", "/data"]
+
+
+@pytest.mark.asyncio
+async def test_find_empty_matches_zero_length_file(make_acc):
+    acc = make_acc({"empty.txt": b"", "full.txt": b"x"})
+    out = await find(acc, PathSpec.from_str_path("/"), empty=True)
+    assert out == ["/empty.txt"]

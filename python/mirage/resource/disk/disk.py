@@ -83,15 +83,6 @@ class DiskResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    async def fingerprint(self, path: str) -> str | None:
-        try:
-            remote = await disk_stat(self.accessor,
-                                     PathSpec.from_str_path(path),
-                                     index=self._index)
-            return remote.modified
-        except FileNotFoundError:
-            return None
-
     def get_state(self) -> dict:
         files: dict[str, bytes] = {}
         modes: dict[str, int] = {}

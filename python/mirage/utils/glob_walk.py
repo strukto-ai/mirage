@@ -127,7 +127,7 @@ async def expand_pattern(
     # A typed word (raw differs from virtual) spells its matches; the
     # dir-shaped specs internal expansions build (PathSpec.dir) have no
     # typed form and keep the resolved virtual.
-    if path.raw_path is None or path.raw_path == path.virtual:
+    if path.raw_path == path.virtual:
         return matches
     walked = len(segments) - first
     return [

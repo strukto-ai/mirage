@@ -1,11 +1,44 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
+from mirage.io import IOResult
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.executor.fanout import (_adjust_depth_texts,
+                                              _fan_out_traversal,
                                               _synthesize_find_mount_entries)
+
+
+class TraversalMount:
+
+    def __init__(self,
+                 prefix: str,
+                 output: bytes = b"",
+                 exit_code: int = 0,
+                 error: Exception | None = None) -> None:
+        self.prefix = prefix
+        self.output = output
+        self.exit_code = exit_code
+        self.error = error
+        self.command_safeguards = {}
+
+    async def execute_cmd(self, *args, **kwargs):
+        if self.error is not None:
+            raise self.error
+        stderr = b"backend failed\n" if self.exit_code else None
+        return self.output, IOResult(exit_code=self.exit_code, stderr=stderr)
+
+
+class TraversalRegistry:
+
+    def __init__(self, descendants: list[TraversalMount]) -> None:
+        self._descendants = descendants
+
+    def descendant_mounts(self, path: str) -> list[TraversalMount]:
+        return self._descendants
 
 
 def _mounts(*prefixes):
@@ -87,3 +120,25 @@ def test_maxdepth_applies_to_child_mount_depth_end_to_end():
     out = (io.stdout if isinstance(io.stdout, bytes) else b"").decode()
     assert "/data/a" in out
     assert "/data/a/b.txt" not in out
+
+
+def test_fanout_preserves_partial_failure_exit_code():
+    primary = TraversalMount("/", output=b"root\n")
+    child = TraversalMount("/data/", exit_code=1)
+    path = PathSpec.from_str_path("/")
+    _, io, _ = asyncio.run(
+        _fan_out_traversal("tree", [path], [], {}, TraversalRegistry([child]),
+                           primary, "/", "tree /", None))
+    assert io.exit_code == 1
+    assert io.stderr == b"backend failed\n"
+
+
+def test_fanout_propagates_unexpected_backend_error():
+    primary = TraversalMount("/", output=b"root\n")
+    child = TraversalMount("/data/", error=RuntimeError("backend exploded"))
+    path = PathSpec.from_str_path("/")
+    with pytest.raises(RuntimeError, match="backend exploded"):
+        asyncio.run(
+            _fan_out_traversal("tree", [path], [], {},
+                               TraversalRegistry([child]), primary, "/",
+                               "tree /", None))

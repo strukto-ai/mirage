@@ -14,11 +14,10 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
-
 from mirage.accessor.ssh import SSHAccessor
 from mirage.commands.builtin.ssh import COMMANDS as SSH_COMMANDS
 from mirage.core.ssh.append import append_bytes
+from mirage.core.ssh.config import SSHConfig
 from mirage.core.ssh.copy import copy
 from mirage.core.ssh.create import create
 from mirage.core.ssh.du import du, du_all
@@ -39,7 +38,7 @@ from mirage.core.ssh.write import write_bytes
 from mirage.ops.ssh import OPS as SSH_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.ssh.prompt import PROMPT
-from mirage.types import PathSpec, ResourceName
+from mirage.types import ResourceName
 
 _SSH_OPS = {
     "read_bytes": read_bytes,
@@ -64,19 +63,6 @@ _SSH_OPS = {
 }
 
 
-class SSHConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    host: str
-    hostname: str | None = None
-    port: int | None = None
-    username: str | None = None
-    identity_file: str | None = None
-    root: str = "/"
-    timeout: int = 30
-    known_hosts: str | None = None
-
-
 class SSHResource(BaseResource):
 
     accessor: SSHAccessor
@@ -96,17 +82,6 @@ class SSHResource(BaseResource):
 
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, self._index)
-
-    async def fingerprint(self, path: str) -> str | None:
-        try:
-            remote = await ssh_stat(self.accessor,
-                                    PathSpec.from_str_path(path),
-                                    index=self._index)
-            size = remote.size or 0
-            mtime = remote.modified or ""
-            return f"{mtime}:{size}"
-        except FileNotFoundError:
-            return None
 
     def get_state(self) -> dict:
         return self.config_state(self.config)

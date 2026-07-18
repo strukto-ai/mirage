@@ -15,8 +15,10 @@
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.drive_ops import stat_item
-from mirage.core.onedrive._client import drive_loc, split_path
+from mirage.core.onedrive._client import (GraphError, drive_loc, graph_get,
+                                          split_path)
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import enoent
 
 
 async def stat(accessor: OneDriveAccessor,
@@ -25,7 +27,20 @@ async def stat(accessor: OneDriveAccessor,
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     if not stripped:
-        return FileStat(name="/", type=FileType.DIRECTORY)
+        # The mount root is a real Graph item (`/drive/root` or the
+        # key_prefix folder); fetch it so size/modified are populated
+        # instead of synthesizing a bare directory stat.
+        try:
+            item = await graph_get(accessor.config,
+                                   drive_loc(accessor.config, "").item())
+        except GraphError as exc:
+            if exc.status == 404:
+                raise enoent(virtual)
+            raise
+        return FileStat(name="/",
+                        type=FileType.DIRECTORY,
+                        size=item.get("size"),
+                        modified=item.get("lastModifiedDateTime"))
     virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
     return await stat_item(accessor.config, drive_loc(accessor.config,
                                                       stripped), virtual,

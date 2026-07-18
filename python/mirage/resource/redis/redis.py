@@ -177,3 +177,9 @@ class RedisResource(BaseResource):
             pipe.execute()
         finally:
             client.close()
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        await self._store.close()
+        await super().close()

@@ -16,8 +16,11 @@ import asyncio
 
 import pytest
 
+from mirage.types import PathSpec
+
 
 def test_presign_not_implemented_on_memory(backend):
-    asyncio.run(backend.write("/tmp/test.txt", data=b"data"))
+    asyncio.run(
+        backend.write(PathSpec.from_str_path("/tmp/test.txt"), data=b"data"))
     with pytest.raises(AttributeError):
         backend.presign("/tmp/test.txt")

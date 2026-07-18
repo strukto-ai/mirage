@@ -43,7 +43,8 @@ async def find(
                                                     path_pattern=path_pattern,
                                                     type=type,
                                                     name_exclude=name_exclude,
-                                                    or_names=or_names)
+                                                    or_names=or_names,
+                                                    empty=empty)
     try:
         async for entry in await op.scan(scan_path):
             rel = entry.path
@@ -110,7 +111,7 @@ async def find(
                         base,
                         start_name,
                         kind="d",
-                        is_empty=False,
+                        is_empty=not saw_descendant,
                         exists=True,
                         tree=tree,
                         maxdepth=maxdepth,

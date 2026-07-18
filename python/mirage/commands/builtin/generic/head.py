@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.cache.read_through import cache_aware_read
 from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
@@ -74,7 +75,7 @@ def head_multi(
     *,
     read: Callable[..., Any],
     accessor: Accessor | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     n: int | None = None,
     c: int | None = None,
     show_headers: bool = False,
@@ -101,7 +102,8 @@ def head_multi(
             iterator.
         accessor (Accessor | None): Backend accessor passed through to
             ``read``.
-        index (object): Index cache store passed through to ``read``.
+        index (IndexCacheStore | None): Index cache store passed through to
+            ``read``.
         n (int | None): Line count (negative = all-but-last-N, per head).
         c (int | None): Byte count.
         show_headers (bool): Emit ``==> path <==`` banners between files.
@@ -120,7 +122,7 @@ async def _head_multi(
     *,
     read: Callable[..., Any],
     accessor: Accessor | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     n: int | None = None,
     c: int | None = None,
     show_headers: bool = False,

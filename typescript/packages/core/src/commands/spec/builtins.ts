@@ -698,7 +698,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
   mktemp: new CommandSpec({
     options: [
       new Option({ short: '-d' }),
-      new Option({ short: '-p', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-p', valueKind: OperandKind.PATH }),
       new Option({ short: '-t' }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT })],

@@ -92,9 +92,9 @@ class Dispatcher:
             result = merge_overlay_stat(self._namespace.meta_for(path.virtual),
                                         result)
         if op in _DISPATCH_WRITE_OPS:
-            await self.invalidate_after_write(mount, path.virtual)
+            await self.invalidate_after_write(mount, path)
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-                await self.invalidate_after_write(mount, kwargs["dst"].virtual)
+                await self.invalidate_after_write(mount, kwargs["dst"])
         return result, IOResult()
 
     async def stat(self, path: str) -> FileStat:
@@ -145,11 +145,13 @@ class Dispatcher:
             mount = self._namespace.mount_for(path)
         except ValueError:
             return
-        await self.invalidate_after_write(mount, path)
+        spec = PathSpec.from_str_path(
+            path, mount_key(path, mount.prefix.rstrip("/")))
+        await self.invalidate_after_write(mount, spec)
 
     async def invalidate_after_write(self, mount: MountEntry,
-                                     path: str) -> None:
-        await self._namespace.clear_times(path)
+                                     path: PathSpec) -> None:
+        await self._namespace.clear_times(path.virtual)
         manager = mount.cache_manager
         if manager is None:
             manager = CacheManager(self._cache,

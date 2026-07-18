@@ -18,9 +18,8 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def unlink(accessor: RedisAccessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def unlink(accessor: RedisAccessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     if not await store.has_file(p):
@@ -28,4 +27,4 @@ async def unlink(accessor: RedisAccessor, path_spec: str | PathSpec) -> None:
     await store.del_file(p)
     await store.del_modified(p)
     await store.del_attrs(p)
-    await invalidate_after_unlink(path)
+    await invalidate_after_unlink(path_spec)

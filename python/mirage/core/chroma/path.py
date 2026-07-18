@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
+from mirage.accessor.chroma import ChromaAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.chroma.tree import ensure_tree
 from mirage.types import PathSpec
@@ -8,15 +10,25 @@ from mirage.utils.key_prefix import mount_prefix_of
 
 
 @dataclass(frozen=True)
-class ResolvedChromaPath:
+class ResolvedChromaDirectory:
     virtual_key: str
     mount_prefix: str
-    is_dir: bool
-    entry: IndexEntry | None = None
+    is_dir: Literal[True] = True
+
+
+@dataclass(frozen=True)
+class ResolvedChromaFile:
+    virtual_key: str
+    mount_prefix: str
+    entry: IndexEntry
+    is_dir: Literal[False] = False
+
+
+ResolvedChromaPath: TypeAlias = ResolvedChromaDirectory | ResolvedChromaFile
 
 
 async def resolve_path(
-        accessor,
+        accessor: ChromaAccessor,
         path: PathSpec,
         index: IndexCacheStore = NULL_INDEX) -> ResolvedChromaPath:
     mount_prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
@@ -24,17 +36,18 @@ async def resolve_path(
     virtual_key = virtual_key_for(path)
     result = await index.get(virtual_key)
     if result.entry is not None:
-        return ResolvedChromaPath(
+        if result.entry.resource_type == "folder":
+            return ResolvedChromaDirectory(virtual_key=virtual_key,
+                                           mount_prefix=mount_prefix)
+        return ResolvedChromaFile(
             virtual_key=virtual_key,
             mount_prefix=mount_prefix,
-            is_dir=result.entry.resource_type == "folder",
             entry=result.entry,
         )
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
-        return ResolvedChromaPath(virtual_key=virtual_key,
-                                  mount_prefix=mount_prefix,
-                                  is_dir=True)
+        return ResolvedChromaDirectory(virtual_key=virtual_key,
+                                       mount_prefix=mount_prefix)
     raise enoent(path)
 
 

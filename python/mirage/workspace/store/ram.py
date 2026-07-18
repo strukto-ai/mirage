@@ -27,8 +27,16 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
     instead and survive restarts / share state across processes.
     """
 
-    def __init__(self, **overrides: "WorkspaceStateStore | None") -> None:
-        super().__init__(**overrides)
+    def __init__(
+        self,
+        *,
+        namespace: WorkspaceStateStore | None = None,
+        observer: WorkspaceStateStore | None = None,
+        workspace: WorkspaceStateStore | None = None,
+    ) -> None:
+        super().__init__(namespace=namespace,
+                         observer=observer,
+                         workspace=workspace)
         self._namespaces: dict[str, RAMNamespaceStore] = {}
         self._observers: dict[str, RAMObserverStore] = {}
         self._sessions: dict[str, RAMSessionStore] = {}

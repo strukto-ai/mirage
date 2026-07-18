@@ -185,15 +185,6 @@ export class DiskResource extends BaseResource implements Resource {
     return findCore(this.accessor, p, options as DiskFindOptions)
   }
 
-  async fingerprint(p: PathSpec): Promise<string | null> {
-    try {
-      const remote = await statCore(this.accessor, p)
-      return remote.modified ?? null
-    } catch {
-      return null
-    }
-  }
-
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>

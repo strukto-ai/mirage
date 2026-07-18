@@ -19,14 +19,14 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def copy(accessor: RAMAccessor, src_spec: str | PathSpec,
-               dst_spec: str | PathSpec) -> None:
-    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
-    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
+async def copy(accessor: RAMAccessor, src_spec: PathSpec,
+               dst_spec: PathSpec) -> None:
+    src = src_spec.mount_path
+    dst = dst_spec.mount_path
     store = accessor.store
     s, d = norm(src), norm(dst)
     if s not in store.files:
         raise FileNotFoundError(s)
     store.files[d] = store.files[s]
     store.modified[d] = now_iso()
-    await invalidate_after_write(dst)
+    await invalidate_after_write(dst_spec)

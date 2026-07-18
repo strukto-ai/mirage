@@ -134,16 +134,6 @@ export abstract class HfResource extends BaseResource implements Resource {
     return globCore(this.accessor, effective, this.index)
   }
 
-  async fingerprint(p: PathSpec): Promise<string | null> {
-    try {
-      const s = await statCore(this.accessor, p)
-      return s.fingerprint
-    } catch (err) {
-      if ((err as { code?: string } | null)?.code === 'ENOENT') return null
-      throw err
-    }
-  }
-
   loadState(_state: unknown): Promise<void> {
     return Promise.resolve()
   }

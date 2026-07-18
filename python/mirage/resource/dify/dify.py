@@ -40,9 +40,6 @@ class DifyResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)
 
-    async def fingerprint(self, path: str) -> str | None:
-        return None
-
     def get_state(self) -> dict:
         redacted = ["api_key"]
         config = self.config.model_dump()

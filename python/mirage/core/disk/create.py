@@ -29,11 +29,10 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def create(accessor: DiskAccessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def create(accessor: DiskAccessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     p = _resolve(accessor.root, path)
     await aiofiles.os.makedirs(p.parent, exist_ok=True)
     async with aiofiles.open(p, "wb") as f:
         await f.write(b"")
-    await invalidate_after_write(path)
+    await invalidate_after_write(path_spec)

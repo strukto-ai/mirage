@@ -18,12 +18,11 @@ from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.types import PathSpec
 
 
-async def unlink(accessor: S3Accessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def unlink(accessor: S3Accessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     config = accessor.config
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         await client.delete_object(Bucket=config.bucket,
                                    Key=_key(path, config))
-    await invalidate_after_unlink(path)
+    await invalidate_after_unlink(path_spec)

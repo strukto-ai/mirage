@@ -17,7 +17,6 @@ from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.databricks_volume._helpers import ensure_path_spec
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read_bytes
 from mirage.core.databricks_volume.stat import stat
@@ -81,8 +80,6 @@ async def copy(
     index: IndexCacheStore = NULL_INDEX,
     recursive: bool = False,
 ) -> None:
-    src = ensure_path_spec(src)
-    dst = ensure_path_spec(dst)
     src_stat = await stat(accessor, src, index)
     # Same-path guard runs after stat (and the non-recursive directory check)
     # so a missing source or `cp` of a directory still raises.

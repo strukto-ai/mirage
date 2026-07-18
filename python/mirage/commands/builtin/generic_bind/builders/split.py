@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.split import split as generic_split
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
@@ -42,7 +43,7 @@ async def split(
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_split(paths,
                                read_stream=with_index(ops.read_stream, index),
-                               write_bytes=ops.require("write"),
+                               write_bytes=ops.require(Operation.WRITE),
                                accessor=accessor,
                                stdin=stdin,
                                lines_per_file=int(args_l) if args_l else 0,
@@ -52,4 +53,7 @@ async def split(
                                numeric_suffix=d)
 
 
-BUILDER = Builder('split', split, None, True, None)
+BUILDER = Builder('split',
+                  split,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE}))

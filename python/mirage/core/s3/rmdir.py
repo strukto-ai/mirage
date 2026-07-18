@@ -18,9 +18,8 @@ from mirage.core.s3._client import _client_kwargs, _prefix, async_session
 from mirage.types import PathSpec
 
 
-async def rmdir(accessor: S3Accessor, path_spec: str | PathSpec) -> None:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def rmdir(accessor: S3Accessor, path_spec: PathSpec) -> None:
+    path = path_spec.mount_path
     config = accessor.config
     pfx = _prefix(path, config)
     session = async_session(config)
@@ -31,4 +30,4 @@ async def rmdir(accessor: S3Accessor, path_spec: str | PathSpec) -> None:
             if keys:
                 await client.delete_objects(Bucket=config.bucket,
                                             Delete={"Objects": keys})
-    await invalidate_after_unlink(path)
+    await invalidate_after_unlink(path_spec)

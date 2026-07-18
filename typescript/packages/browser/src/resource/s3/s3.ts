@@ -185,17 +185,6 @@ export class S3Resource implements Resource {
     return globCore(this.accessor, effective, this.index)
   }
 
-  async fingerprint(p: PathSpec): Promise<string | null> {
-    try {
-      const s = await statCore(this.accessor, p, this.index)
-      const etag = (s.extra as { etag?: unknown }).etag
-      return typeof etag === 'string' && etag !== '' ? etag : null
-    } catch (err) {
-      if ((err as { code?: string } | null)?.code === 'ENOENT') return null
-      throw err
-    }
-  }
-
   getState(): Promise<S3ResourceState> {
     return Promise.resolve({
       type: this.kind,

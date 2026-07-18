@@ -38,11 +38,10 @@ async def test_resolve_path_finds_files_and_directories(
 
     assert file_result.virtual_key == "/knowledge/README.md"
     assert file_result.is_dir is False
-    assert file_result.entry is not None
+    assert isinstance(file_result, path.ResolvedDifyFile)
     assert dir_result.virtual_key == "/knowledge/guides"
     assert dir_result.is_dir is True
-    assert dir_result.entry is not None
-    assert dir_result.entry.resource_type == "folder"
+    assert isinstance(dir_result, path.ResolvedDifyDirectory)
 
 
 @pytest.mark.asyncio

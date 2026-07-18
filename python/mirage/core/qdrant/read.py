@@ -18,7 +18,7 @@ from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.qdrant.query import row_record
 from mirage.core.qdrant.render import render_json, render_text
-from mirage.core.qdrant.scope import ScopeLevel, detect_scope
+from mirage.core.qdrant.scope import QdrantRowScope, detect_scope
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -47,7 +47,7 @@ async def read(
 ) -> bytes:
     config = accessor.config
     scope = detect_scope(path, config)
-    if scope.level != ScopeLevel.ROW:
+    if not isinstance(scope, QdrantRowScope):
         raise enoent(path)
     row = await _resolve_row(accessor, scope, config, path.virtual)
     if scope.kind == "blob":

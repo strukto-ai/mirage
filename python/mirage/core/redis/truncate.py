@@ -19,10 +19,10 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def truncate(accessor: RedisAccessor, path: str | PathSpec,
+async def truncate(accessor: RedisAccessor, path: PathSpec,
                    length: int) -> None:
     store = accessor.store
-    p = norm(path.mount_path if isinstance(path, PathSpec) else path)
+    p = norm(path.mount_path)
     data = await store.get_file(p)
     if data is None:
         data = b""

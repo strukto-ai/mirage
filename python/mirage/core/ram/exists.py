@@ -17,9 +17,8 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def exists(accessor: RAMAccessor, path_spec: str | PathSpec) -> bool:
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def exists(accessor: RAMAccessor, path_spec: PathSpec) -> bool:
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     return p in store.files or p in store.dirs

@@ -13,28 +13,37 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from functools import partial
-from typing import Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
+                                                          OperationFn)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import NativeCopy, PathSpec
+from mirage.utils.key_prefix import rekey
 
 
-async def _walk_find(readdir, stat, index, src, type=None) -> list[str]:
-    return await walk_find(src,
-                           readdir=readdir,
-                           stat=stat,
-                           is_dir_name=lambda _name: None,
-                           index=index,
-                           args=parse_find_args((), type=type))
+async def _walk_find(readdir: OperationFn,
+                     stat: OperationFn,
+                     index: IndexCacheStore | None,
+                     src: PathSpec,
+                     type: str | None = None) -> list[str]:
+    results = await walk_find(src,
+                              readdir=readdir,
+                              stat=stat,
+                              is_dir_name=lambda _name: None,
+                              index=index,
+                              args=parse_find_args((), type=type))
+    return [
+        "/" + rekey(src.virtual, src.resource_path, path) for path in results
+    ]
 
 
 def _make_find(ops: CommandIO, accessor: Accessor,
-               index: IndexCacheStore | None) -> Callable:
+               index: IndexCacheStore | None) -> OperationFn:
     if ops.find is not None:
         return partial(ops.find, accessor)
     return partial(_walk_find, partial(ops.readdir, accessor),
@@ -54,22 +63,26 @@ async def cp(
     n: bool = False,
     v: bool = False,
     index: IndexCacheStore | None = None,
-    **kwargs,
+    **kwargs: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:
         raise ValueError("cp: requires src and dst")
     paths = await ops.resolve_glob(accessor, paths, index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
+    strategy = NativeCopy(copy=partial(ops.require(Operation.COPY), accessor),
+                          find=_make_find(ops, accessor, index),
+                          dir_copy=dir_copy)
     return await generic_cp(paths,
-                            copy=partial(ops.require("copy"), accessor),
-                            find=_make_find(ops, accessor, index),
+                            strategy=strategy,
                             find_type="f",
                             stat=partial(ops.stat, accessor),
                             recursive=r or R or a,
                             n=n,
                             v=v,
-                            index=index,
-                            dir_copy=dir_copy)
+                            index=index)
 
 
-BUILDER = Builder('cp', cp, None, True, None)
+BUILDER = Builder('cp',
+                  cp,
+                  write=True,
+                  requirements=frozenset({Operation.COPY}))

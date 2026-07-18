@@ -37,11 +37,8 @@ def configured_root(config: DatabricksVolumeConfig) -> str:
     return posixpath.normpath(volume_root(config))
 
 
-def backend_path(config: DatabricksVolumeConfig, path: PathSpec | str) -> str:
-    if isinstance(path, PathSpec):
-        raw = path.mount_path
-    else:
-        raw = path
+def backend_path(config: DatabricksVolumeConfig, path: PathSpec) -> str:
+    raw = path.mount_path
     relative = raw.strip("/")
     root = configured_root(config)
     parts = [root]

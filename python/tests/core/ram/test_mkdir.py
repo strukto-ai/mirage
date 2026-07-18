@@ -81,7 +81,7 @@ async def test_mkdir_p():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await mkdir_p(a, "/x/y/z")
+    await mkdir_p(a, PathSpec.from_str_path("/x/y/z"))
     assert "/x" in s.dirs
     assert "/x/y" in s.dirs
     assert "/x/y/z" in s.dirs
@@ -93,7 +93,7 @@ async def test_mkdir_p_existing_parent():
 
     a = RAMAccessor(s)
     s.dirs.add("/existing")
-    await mkdir_p(a, "/existing/child/grandchild")
+    await mkdir_p(a, PathSpec.from_str_path("/existing/child/grandchild"))
     assert "/existing/child" in s.dirs
     assert "/existing/child/grandchild" in s.dirs
 
@@ -103,7 +103,7 @@ async def test_mkdir_p_does_not_overwrite_modified():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await mkdir_p(a, "/a")
+    await mkdir_p(a, PathSpec.from_str_path("/a"))
     original_modified = s.modified["/a"]
-    await mkdir_p(a, "/a/b")
+    await mkdir_p(a, PathSpec.from_str_path("/a/b"))
     assert s.modified["/a"] == original_modified

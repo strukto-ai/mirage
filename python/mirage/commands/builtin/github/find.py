@@ -22,6 +22,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.find import find as find_core
 from mirage.core.github.glob import resolve_glob
+from mirage.core.github.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -68,6 +69,7 @@ async def find(
                               find_core=partial(find_core,
                                                 accessor,
                                                 index=index),
+                              stat=partial(stat_core, accessor, index=index),
                               name=name,
                               type=type,
                               size=size,

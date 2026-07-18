@@ -14,16 +14,7 @@
 
 import functools
 import posixpath
-from typing import Callable
-
-try:
-    import wasmtime
-    from wasmtime import Func, FuncType, ValType
-except ImportError:
-    wasmtime = None  # type: ignore[assignment]
-    Func = None  # type: ignore[misc, assignment]
-    FuncType = None  # type: ignore[misc, assignment]
-    ValType = None  # type: ignore[misc, assignment]
+from typing import Any, Callable
 
 # yapf: disable
 from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
@@ -37,6 +28,26 @@ from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
                                      unpack_iovs)
 # yapf: enable
 from mirage.runtime.wasm.fs import GuestFs
+
+wasmtime: Any
+Func: Any
+FuncType: Any
+ValType: Any
+try:
+    import wasmtime as _wasmtime
+    from wasmtime import Func as _Func
+    from wasmtime import FuncType as _FuncType
+    from wasmtime import ValType as _ValType
+except ImportError:
+    wasmtime = None
+    Func = None
+    FuncType = None
+    ValType = None
+else:
+    wasmtime = _wasmtime
+    Func = _Func
+    FuncType = _FuncType
+    ValType = _ValType
 
 
 def _call_guarded(fn: Callable, caller: "wasmtime.Caller", *args: int) -> int:

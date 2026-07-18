@@ -16,7 +16,6 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.databricks_volume._helpers import ensure_path_spec
 from mirage.core.databricks_volume.copy import copy
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.rm import rm_recursive
@@ -33,8 +32,6 @@ async def rename(
 ) -> None:
     # Non-atomic: the Databricks Files API has no native rename, so this is
     # implemented as copy + delete and can leave partial state on failure.
-    src = ensure_path_spec(src)
-    dst = ensure_path_spec(dst)
     src_stat = await stat(accessor, src, index)
     remote_src = backend_path(accessor.config, src)
     remote_dst = backend_path(accessor.config, dst)

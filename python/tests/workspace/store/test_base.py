@@ -55,3 +55,19 @@ async def test_close_closes_overrides_too():
     base = RAMWorkspaceStateStore(observer=_Probe())
     await base.close()
     assert closed == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_close_is_idempotent_and_deduplicates_overrides():
+    closed: list[str] = []
+
+    class _Probe(RAMWorkspaceStateStore):
+
+        async def _close(self) -> None:
+            closed.append("probe")
+
+    probe = _Probe()
+    base = RAMWorkspaceStateStore(namespace=probe, observer=probe)
+    await base.close()
+    await base.close()
+    assert closed == ["probe"]

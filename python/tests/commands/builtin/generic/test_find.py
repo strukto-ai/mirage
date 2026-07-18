@@ -135,6 +135,26 @@ async def test_apply_mtime_filter_keeps_within_window():
 
 
 @pytest.mark.asyncio
+async def test_apply_mtime_filter_stats_the_mounted_virtual_path():
+    now = datetime.now(tz=timezone.utc)
+    stat = AsyncMock(return_value=FileStat(
+        name="a.txt", size=1, modified=now.isoformat(), type=FileType.TEXT))
+
+    out = await apply_mtime_filter(
+        ["/a.txt"],
+        mtime_min=now.timestamp() - 60,
+        mtime_max=now.timestamp() + 60,
+        stat=stat,
+        mount_prefix="/mnt",
+    )
+
+    assert out == ["/a.txt"]
+    spec = stat.await_args.args[0]
+    assert spec.virtual == "/mnt/a.txt"
+    assert spec.resource_path == "a.txt"
+
+
+@pytest.mark.asyncio
 async def test_apply_mtime_filter_drops_outside_window():
     old = datetime(2020, 1, 1, tzinfo=timezone.utc)
 

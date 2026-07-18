@@ -23,11 +23,13 @@ def _tree(m):
                       "id": "1",
                       "name": "a.txt",
                       "size": 3,
+                      "lastModifiedDateTime": "2026-07-15T12:00:00Z",
                       "file": {}
                   },
                   {
                       "id": "2",
                       "name": "sub",
+                      "lastModifiedDateTime": "2026-07-14T12:00:00Z",
                       "folder": {
                           "childCount": 1
                       }
@@ -40,14 +42,28 @@ def _tree(m):
                   "id": "3",
                   "name": "b.txt",
                   "size": 5,
+                  "lastModifiedDateTime": "2026-07-13T12:00:00Z",
                   "file": {}
               }]
+          })
+
+
+def _root(m):
+    m.get(_BASE + "/root",
+          payload={
+              "id": "root",
+              "name": "root",
+              "lastModifiedDateTime": "2026-07-14T12:00:00Z",
+              "folder": {
+                  "childCount": 2
+              }
           })
 
 
 @pytest.mark.asyncio
 async def test_du_sums_all_files_recursively():
     with aioresponses() as m:
+        _root(m)
         _tree(m)
         total = await du(_accessor(), PathSpec.from_str_path("/"))
     assert total == 8
@@ -56,6 +72,7 @@ async def test_du_sums_all_files_recursively():
 @pytest.mark.asyncio
 async def test_du_all_lists_files_plus_total():
     with aioresponses() as m:
+        _root(m)
         _tree(m)
         rows = await du_all(_accessor(), PathSpec.from_str_path("/"))
     assert ("/a.txt", 3) in rows

@@ -19,6 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as generic_gzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          Operation,
                                                           with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -42,8 +43,8 @@ async def gzip(
         paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_gzip(paths,
                               read_bytes=with_index(ops.read_bytes, index),
-                              write_bytes=ops.require("write"),
-                              unlink=ops.require("unlink"),
+                              write_bytes=ops.require(Operation.WRITE),
+                              unlink=ops.require(Operation.UNLINK),
                               accessor=accessor,
                               stdin=stdin,
                               decompress=d,
@@ -53,4 +54,7 @@ async def gzip(
                               level=level)
 
 
-BUILDER = Builder('gzip', gzip, None, True, None)
+BUILDER = Builder('gzip',
+                  gzip,
+                  write=True,
+                  requirements=frozenset({Operation.WRITE, Operation.UNLINK}))

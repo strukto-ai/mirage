@@ -22,12 +22,9 @@ from mirage.utils.errors import enoent
 from mirage.utils.path import norm
 
 
-async def read_bytes(accessor: RAMAccessor,
-                     path_spec: str | PathSpec) -> bytes:
-    virtual = path_spec.virtual if isinstance(path_spec,
-                                              PathSpec) else path_spec
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+async def read_bytes(accessor: RAMAccessor, path_spec: PathSpec) -> bytes:
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     store = accessor.store
     start_ms = int(time.monotonic() * 1000)
     key = norm(path)
@@ -39,10 +36,9 @@ async def read_bytes(accessor: RAMAccessor,
 
 
 async def read(accessor: RAMAccessor,
-               path: str | PathSpec,
+               path: PathSpec,
                index: IndexCacheStore = NULL_INDEX) -> bytes:
     try:
         return await read_bytes(accessor, path)
     except FileNotFoundError as exc:
-        raise enoent(
-            path.virtual if isinstance(path, PathSpec) else path) from exc
+        raise enoent(path.virtual) from exc

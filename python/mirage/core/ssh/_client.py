@@ -13,15 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from pathlib import Path
+from typing import Any
 
 import asyncssh
+
+from mirage.core.ssh.config import SSHConfig
 
 
 def _key(path: str) -> str:
     return path.lstrip("/")
 
 
-def _abs(config, path: str) -> str:
+def _abs(config: SSHConfig, path: str) -> str:
     root = config.root.rstrip("/")
     rel = _key(path)
     if not rel:
@@ -29,8 +32,8 @@ def _abs(config, path: str) -> str:
     return f"{root}/{rel}"
 
 
-def _connect_kwargs(config) -> dict:
-    kwargs: dict = {"host": config.host}
+def _connect_kwargs(config: SSHConfig) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"host": config.host}
     if config.hostname:
         kwargs["host"] = config.hostname
     if config.port:
@@ -47,5 +50,5 @@ def _connect_kwargs(config) -> dict:
     return kwargs
 
 
-async def connect(config) -> asyncssh.SSHClientConnection:
+async def connect(config: SSHConfig) -> asyncssh.SSHClientConnection:
     return await asyncssh.connect(**_connect_kwargs(config))

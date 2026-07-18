@@ -21,12 +21,10 @@ from mirage.utils.path import norm
 
 
 async def stat(accessor: RAMAccessor,
-               path_spec: str | PathSpec,
+               path_spec: PathSpec,
                index: IndexCacheStore = NULL_INDEX) -> FileStat:
-    virtual = path_spec.virtual if isinstance(path_spec,
-                                              PathSpec) else path_spec
-    path = path_spec.mount_path if isinstance(path_spec,
-                                              PathSpec) else path_spec
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     attrs = store.attrs.get(p, {})

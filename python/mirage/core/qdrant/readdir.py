@@ -16,7 +16,7 @@ from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.qdrant.query import (distinct_values, list_tables,
                                       rows_matching)
-from mirage.core.qdrant.scope import ScopeLevel, detect_scope
+from mirage.core.qdrant.scope import QdrantGroupScope, ScopeLevel, detect_scope
 from mirage.types import PathSpec
 
 
@@ -58,8 +58,7 @@ async def readdir(
         names = await list_tables(accessor)
         return [f"{base}/{name}" for name in names]
 
-    if scope.level == ScopeLevel.GROUP_DIR:
-        assert scope.table is not None
+    if isinstance(scope, QdrantGroupScope):
         depth = len(scope.filters)
         total = len(config.group_by)
         if depth < total:

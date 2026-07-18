@@ -43,10 +43,6 @@ class EmailResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)
 
-    async def fingerprint(self, path: str) -> str | None:
-        lookup = await self._index.get(path)
-        return lookup.entry.remote_time if lookup.entry else None
-
     def get_state(self) -> dict:
         return self.config_state(self.config)
 

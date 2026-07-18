@@ -67,7 +67,7 @@ async def du(
     if not paths:
         raise ValueError("du: missing operand")
     depth = int(max_depth) if max_depth is not None else None
-    if ops.du_total is None:
+    if ops.du_total is None or ops.du_all is None:
         out = await du_multi(paths,
                              compute_total=partial(_du_walk, ops, accessor,
                                                    index),
@@ -80,7 +80,7 @@ async def du(
     text = await generic_du(
         paths,
         compute_total=partial(ops.du_total, accessor),
-        compute_all=partial(ops.require("du_all"), accessor),
+        compute_all=partial(ops.du_all, accessor),
         s=s,
         a=a,
         h=h,

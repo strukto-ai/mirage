@@ -30,12 +30,14 @@ from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 BUCKET = "test-bucket"
 REGION = "us-east-1"
-LAST_MODIFIED = datetime(2026, 3, 31, tzinfo=timezone.utc)
+# A current timestamp: -mtime -N filters are now honored by the s3 core,
+# so a fixed past date would wrongly exclude freshly "written" objects.
+LAST_MODIFIED = datetime.now(timezone.utc)
 
 _CORE_MODULES = [
     "mirage.core.s3.read",
@@ -332,10 +334,10 @@ class NativeTestEnv:
             d = "/" + "/".join(parts[:i])
             if d not in accessor.store.dirs:
                 try:
-                    asyncio.run(mkdir(accessor, d))
+                    asyncio.run(mkdir(accessor, PathSpec.from_str_path(d)))
                 except (FileExistsError, ValueError):
                     pass
-        asyncio.run(mem_write(accessor, path, content))
+        asyncio.run(mem_write(accessor, PathSpec.from_str_path(path), content))
 
     def native(self, cmd: str, stdin: bytes | None = None) -> str:
         native_cwd = self.disk_root if self.disk_root else self.tmp_path

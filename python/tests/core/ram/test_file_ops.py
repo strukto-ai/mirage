@@ -184,13 +184,13 @@ async def test_unlink_not_found():
 
 @pytest.mark.asyncio
 async def test_truncate_shorter(store):
-    await truncate(store, "/file.txt", 3)
+    await truncate(store, PathSpec.from_str_path("/file.txt"), 3)
     assert store.store.files["/file.txt"] == b"hel"
 
 
 @pytest.mark.asyncio
 async def test_truncate_longer(store):
-    await truncate(store, "/file.txt", 8)
+    await truncate(store, PathSpec.from_str_path("/file.txt"), 8)
     assert store.store.files["/file.txt"] == b"hello\x00\x00\x00"
     assert len(store.store.files["/file.txt"]) == 8
 
@@ -200,13 +200,13 @@ async def test_truncate_nonexistent():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await truncate(a, "/new.txt", 5)
+    await truncate(a, PathSpec.from_str_path("/new.txt"), 5)
     assert s.files["/new.txt"] == b"\x00\x00\x00\x00\x00"
 
 
 @pytest.mark.asyncio
 async def test_truncate_to_zero(store):
-    await truncate(store, "/file.txt", 0)
+    await truncate(store, PathSpec.from_str_path("/file.txt"), 0)
     assert store.store.files["/file.txt"] == b""
 
 
