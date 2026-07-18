@@ -80,11 +80,8 @@ async def stat(
     }:
         if parts[2] == "team.json":
             team_key = "/" + "/".join(parts[:2])
-            if index is not None:
-                result = await index.get(team_key)
-                team_id = result.entry.id if result.entry else None
-            else:
-                team_id = None
+            result = await index.get(team_key)
+            team_id = result.entry.id if result.entry else None
             return FileStat(
                 name="team.json",
                 type=FileType.JSON,
@@ -123,11 +120,8 @@ async def stat(
     if len(parts) == 5 and parts[0] == "teams" and parts[2] == "issues":
         if parts[4] == "issue.json":
             issue_key = "/" + "/".join(parts[:4])
-            if index is not None:
-                result = await index.get(issue_key)
-                issue_id = result.entry.id if result.entry else None
-            else:
-                issue_id = None
+            result = await index.get(issue_key)
+            issue_id = result.entry.id if result.entry else None
             return FileStat(
                 name="issue.json",
                 type=FileType.JSON,
@@ -135,11 +129,8 @@ async def stat(
             )
         if parts[4] == "comments.jsonl":
             issue_key = "/" + "/".join(parts[:4])
-            if index is not None:
-                result = await index.get(issue_key)
-                issue_id = result.entry.id if result.entry else None
-            else:
-                issue_id = None
+            result = await index.get(issue_key)
+            issue_id = result.entry.id if result.entry else None
             return FileStat(
                 name="comments.jsonl",
                 type=FileType.TEXT,

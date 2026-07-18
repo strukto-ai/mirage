@@ -61,8 +61,6 @@ async def du(
     index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if index is None:
-        raise ValueError("du: no tree loaded")
     paths = await resolve_glob(accessor, paths, index)
     out = await du_multi(
         paths,

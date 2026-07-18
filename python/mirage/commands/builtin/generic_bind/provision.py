@@ -16,7 +16,7 @@ import logging
 from collections.abc import Callable
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.grep_helper import BINARY_EXTENSIONS
 from mirage.commands.resolve import get_extension
 from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
@@ -35,7 +35,7 @@ async def _expand_globs(
     resolve_glob: Callable | None,
     accessor: Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[PathSpec]:
     """Expand glob operands the way the executor would.
 
@@ -59,7 +59,7 @@ async def _walk_files(
     stat: Callable,
     accessor: Accessor,
     roots: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[list[tuple[str, int]], bool]:
     """Walk directories the way grep -r does, collecting file sizes.
 
@@ -110,17 +110,16 @@ async def _resolve_sizes(
     stat: Callable,
     accessor: Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[list[tuple[str, int]], int]:
     resolved: list[tuple[str, int]] = []
     missing = 0
     for p in paths:
         path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
-        if index is not None:
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                size = lookup.entry.size
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            size = lookup.entry.size
         if size is None:
             # A provision estimate must degrade, never fail: any stat
             # error (missing file, transient backend error) leaves the
@@ -146,7 +145,7 @@ def make_file_read_provision(stat: Callable,
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         if not paths:
@@ -191,7 +190,7 @@ def make_head_tail_provision(stat: Callable,
         command: str = "",
         n: str | int | None = None,
         c: str | int | None = None,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         if not paths:
@@ -240,7 +239,7 @@ async def metadata_provision(
     paths: list[PathSpec],
     *_args: str,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find)."""
@@ -277,7 +276,7 @@ async def index_hit_read_provision(
     accessor: Accessor,
     paths: list[PathSpec],
     command: str,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> ProvisionResult:
     """Charge one read op per index-cached operand, zero network bytes.
 
@@ -290,17 +289,16 @@ async def index_hit_read_provision(
             provision call shape.
         paths (list[PathSpec]): operand paths as parsed.
         command (str): the shell line being estimated, for display.
-        index (IndexCacheStore | None): the per-call cache index.
+        index (IndexCacheStore): the per-call cache index.
     """
     if not paths:
         return ProvisionResult(command=command, precision=Precision.UNKNOWN)
     ops = 0
-    if index is not None:
-        for p in paths:
-            path_str = p.virtual if isinstance(p, PathSpec) else p
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                ops += 1
+    for p in paths:
+        path_str = p.virtual if isinstance(p, PathSpec) else p
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            ops += 1
     return ProvisionResult(
         command=command,
         network_read_low=0,
@@ -317,7 +315,7 @@ def make_jq_provision(stat: Callable) -> Callable:
         accessor: Accessor,
         paths: list[PathSpec] | None = None,
         *texts: str,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         if not paths:
@@ -371,7 +369,7 @@ def make_sed_provision(stat: Callable) -> Callable:
         *_args: str,
         command: str = "",
         i: bool = False,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         result = await base(accessor, paths, command=command, index=index)
@@ -398,7 +396,7 @@ def make_search_provision(stat: Callable,
         paths: list[PathSpec],
         *texts: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         r: bool = False,
         R: bool = False,
         **kwargs,
@@ -445,7 +443,7 @@ def make_transform_provision(stat: Callable,
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         result = await base(accessor, paths, command=command, index=index)
@@ -473,7 +471,7 @@ def make_copy_provision(stat: Callable,
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         paths = await _expand_globs(resolve_glob, accessor, paths, index)
@@ -506,7 +504,7 @@ async def write_metadata_provision(
     command: str = "",
     r: bool = False,
     R: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> ProvisionResult:
     """Provision for metadata-only writes (rm, mkdir, touch, ln).

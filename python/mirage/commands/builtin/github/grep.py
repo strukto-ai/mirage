@@ -55,7 +55,7 @@ async def grep_provision(
     index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
-    if not paths or index is None:
+    if not paths:
         return ProvisionResult(command="grep " + " ".join(texts))
     recursive = r or R
     total = 0
@@ -102,7 +102,7 @@ async def grep(
     recursive = fl.as_bool("r") or fl.as_bool("R")
 
     resolved: list[PathSpec] = []
-    if paths and index is not None:
+    if paths:
         resolved, file_count, used_search = await narrow_scope(
             accessor,
             index,

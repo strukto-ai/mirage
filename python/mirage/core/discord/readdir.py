@@ -64,10 +64,9 @@ async def _readdir_root(
     virtual_key: str,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     guilds = await list_guilds(accessor.config)
     entries = []
     names = []
@@ -75,8 +74,7 @@ async def _readdir_root(
         entry = guild_entry(g)
         entries.append((entry.vfs_name, entry))
         names.append(f"{prefix}/{entry.vfs_name}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 
@@ -113,10 +111,9 @@ async def _readdir_channels(
     index: IndexCacheStore,
     raw_path: str,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     guild_id = await _ensure_guild_id(accessor, prefix, parts[0], index,
                                       raw_path)
     channels = await list_channels(accessor.config, guild_id)
@@ -126,8 +123,7 @@ async def _readdir_channels(
         entry = channel_entry(c)
         entries.append((entry.vfs_name, entry))
         names.append(f"{prefix}/{key}/{entry.vfs_name}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 
@@ -140,10 +136,9 @@ async def _readdir_members(
     index: IndexCacheStore,
     raw_path: str,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     guild_id = await _ensure_guild_id(accessor, prefix, parts[0], index,
                                       raw_path)
     members = await list_members(accessor.config, guild_id)
@@ -153,8 +148,7 @@ async def _readdir_members(
         entry = member_entry(m)
         entries.append((entry.vfs_name, entry))
         names.append(f"{prefix}/{key}/{entry.vfs_name}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 
@@ -205,8 +199,7 @@ async def _readdir_channel_dates(
         entry.vfs_name = d
         entries.append((d, entry))
         names.append(f"{prefix}/{key}/{d}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 
@@ -337,7 +330,7 @@ async def readdir(
     Args:
         accessor (DiscordAccessor): discord accessor.
         path (PathSpec): resource-relative path.
-        index (IndexCacheStore | None): index cache.
+        index (IndexCacheStore): index cache.
     """
     prefix, key, virtual_key = _normalize_path(path)
     raw_path = path.virtual
@@ -348,10 +341,9 @@ async def readdir(
     parts = key.split("/")
 
     if len(parts) == 1:
-        if index is not None:
-            lookup = await index.get(virtual_key)
-            if lookup.entry is None:
-                raise enoent(raw_path)
+        lookup = await index.get(virtual_key)
+        if lookup.entry is None:
+            raise enoent(raw_path)
         return await _readdir_guild_top(prefix, key)
 
     if len(parts) == 2 and parts[1] == "channels":

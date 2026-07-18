@@ -98,10 +98,9 @@ async def _readdir_channels(
     virtual_key: str,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     channels = await list_channels(accessor.config)
     entries: list[tuple[str, IndexEntry]] = []
     names: list[str] = []
@@ -116,8 +115,7 @@ async def _readdir_channels(
         )
         entries.append((dirname, entry))
         names.append(f"{prefix}/channels/{dirname}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 
@@ -127,10 +125,9 @@ async def _readdir_dms(
     virtual_key: str,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     dms = await list_dms(accessor.config)
     users = await list_users(accessor.config)
     user_map = {u["id"]: u.get("name", u["id"]) for u in users}
@@ -148,8 +145,7 @@ async def _readdir_dms(
         )
         entries.append((dirname, entry))
         names.append(f"{prefix}/dms/{dirname}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 
@@ -159,10 +155,9 @@ async def _readdir_users(
     virtual_key: str,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     users = await list_users(accessor.config)
     entries: list[tuple[str, IndexEntry]] = []
     names: list[str] = []
@@ -176,8 +171,7 @@ async def _readdir_users(
         )
         entries.append((filename, entry))
         names.append(f"{prefix}/users/{filename}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 

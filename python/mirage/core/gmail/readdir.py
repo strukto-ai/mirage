@@ -133,9 +133,9 @@ async def _build_date_groups(
                     )
                     att_entries.append((att_name, att_entry))
                 att_vkey = virtual_key + "/" + date_str + "/" + att_dir
-                if index is not None and write_dates:
+                if write_dates:
                     await index.set_dir(att_vkey, att_entries)
-        if index is not None and write_dates:
+        if write_dates:
             await index.set_dir(virtual_key + "/" + date_str, date_children)
     return date_entries
 
@@ -154,10 +154,9 @@ async def readdir(
     depth = len(parts)
 
     if depth == 0:
-        if index is not None:
-            cached = await index.list_dir(virtual_key)
-            if cached.entries is not None:
-                return cached.entries
+        cached = await index.list_dir(virtual_key)
+        if cached.entries is not None:
+            return cached.entries
         labels = await list_labels(accessor.token_manager)
         entries = []
         for lb in labels:
@@ -172,16 +171,14 @@ async def readdir(
                 vfs_name=name,
             )
             entries.append((name, entry))
-        if index is not None:
-            await index.set_dir(virtual_key, entries)
+        await index.set_dir(virtual_key, entries)
         return [f"{prefix}/{name}" for name, _ in entries]
 
     if depth == 1:
         label_name = parts[0]
-        if index is not None:
-            cached = await index.list_dir(virtual_key)
-            if cached.entries is not None:
-                return cached.entries
+        cached = await index.list_dir(virtual_key)
+        if cached.entries is not None:
+            return cached.entries
         label_key = prefix + "/" + label_name if prefix else "/" + label_name
         result = await index.get(label_key)
         if result.entry is None:
@@ -215,8 +212,7 @@ async def readdir(
             virtual_key,
             write_dates=True,
         )
-        if index is not None:
-            await index.set_dir(virtual_key, date_entries)
+        await index.set_dir(virtual_key, date_entries)
         return [f"{prefix}/{key}/{name}" for name, _ in date_entries]
 
     if depth == 2:

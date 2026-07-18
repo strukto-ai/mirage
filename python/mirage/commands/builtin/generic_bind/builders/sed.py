@@ -16,7 +16,7 @@ import posixpath
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.sed import sed as generic_sed
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
@@ -56,14 +56,14 @@ def _positional_as_paths(texts: tuple[str, ...],
 
 
 async def _scripts_from_files(ops: CommandIO, accessor: Accessor,
-                              index: IndexCacheStore | None,
+                              index: IndexCacheStore,
                               f_files: list[PathSpec]) -> list[str]:
     """Read each -f script file through the backend reader.
 
     Args:
         ops (CommandIO): Backend I/O bundle providing ``read_bytes``.
         accessor (Accessor): backend accessor.
-        index (IndexCacheStore | None): optional cache index.
+        index (IndexCacheStore): optional cache index.
         f_files (list[PathSpec]): -f script-file paths.
     """
     reader = bound_op(ops.read_bytes, accessor, index)
@@ -90,7 +90,7 @@ async def sed(
     E: bool = False,
     r: bool = False,
     cwd: PathSpec | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     # The script comes from -e expressions and -f script files (joined

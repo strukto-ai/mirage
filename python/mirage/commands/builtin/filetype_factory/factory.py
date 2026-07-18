@@ -25,7 +25,7 @@ from mirage.types import PathSpec
 
 
 async def _drop_index(read_bytes: Callable, accessor: Accessor, path: PathSpec,
-                      index: IndexCacheStore | None) -> bytes:
+                      index: IndexCacheStore) -> bytes:
     return await read_bytes(accessor, path)
 
 

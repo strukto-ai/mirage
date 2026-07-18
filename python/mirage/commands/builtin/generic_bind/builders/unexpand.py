@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.unexpand import \
     unexpand as generic_unexpand
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
@@ -32,7 +32,7 @@ async def unexpand(
     stdin: ByteSource | None = None,
     t: str | None = None,
     a: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     paths, err = await resolve_readable(ops, accessor, paths, index,

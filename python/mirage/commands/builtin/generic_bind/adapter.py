@@ -28,8 +28,7 @@ OperationFn = Callable[..., Any]
 
 
 async def overlaid_stat(stat: OperationFn, overlay: StatOverlay,
-                        path: PathSpec,
-                        index: IndexCacheStore | None) -> FileStat:
+                        path: PathSpec, index: IndexCacheStore) -> FileStat:
     """Stat through the backend, then merge the namespace attr overlay.
 
     Bound via ``partial(overlaid_stat, stat_fn, overlay)`` so stat-
@@ -40,25 +39,24 @@ async def overlaid_stat(stat: OperationFn, overlay: StatOverlay,
         stat (OperationFn): backend stat ``(path, index) -> FileStat``.
         overlay (StatOverlay): namespace merge ``(virtual, stat) -> stat``.
         path (PathSpec): entry being statted.
-        index (IndexCacheStore | None): cache index threaded through.
+        index (IndexCacheStore): cache index threaded through.
     """
     return overlay(path.virtual, await stat(path, index))
 
 
 @overload
 def bound_op(fn: OperationFn, accessor: Accessor,
-             index: IndexCacheStore | None) -> OperationFn:
+             index: IndexCacheStore) -> OperationFn:
     ...
 
 
 @overload
-def bound_op(fn: None, accessor: Accessor,
-             index: IndexCacheStore | None) -> None:
+def bound_op(fn: None, accessor: Accessor, index: IndexCacheStore) -> None:
     ...
 
 
 def bound_op(fn: OperationFn | None, accessor: Accessor,
-             index: IndexCacheStore | None) -> OperationFn | None:
+             index: IndexCacheStore) -> OperationFn | None:
     """Bind the backend accessor and cache index into an op for the generics.
 
     A generic command calls its injected ops as ``op(path)``: backend
@@ -72,7 +70,7 @@ def bound_op(fn: OperationFn | None, accessor: Accessor,
         fn (OperationFn | None): backend op ``(accessor, path, *, index)``,
             or None to opt out of streaming.
         accessor (Accessor): backend handle bound into the op.
-        index (IndexCacheStore | None): the per-call cache index.
+        index (IndexCacheStore): the per-call cache index.
     """
     if fn is None:
         return None
@@ -110,7 +108,7 @@ def make_resolve_glob(readdir: OperationFn,
     """
 
     async def resolve_glob(accessor: Accessor, paths: list[PathSpec],
-                           index: IndexCacheStore | None) -> list[PathSpec]:
+                           index: IndexCacheStore) -> list[PathSpec]:
         return await resolve_glob_with(readdir, accessor, paths, index,
                                        max_glob_matches)
 

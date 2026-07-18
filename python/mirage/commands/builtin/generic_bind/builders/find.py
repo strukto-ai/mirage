@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
@@ -39,7 +39,7 @@ async def find(
     path: str | None = None,
     mindepth: str | None = None,
     empty: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -83,7 +83,7 @@ async def _find_walk(
     path: str | None,
     mindepth: str | None,
     empty: bool,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[ByteSource | None, IOResult]:
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")

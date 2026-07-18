@@ -53,13 +53,12 @@ async def readdir(
     key = path.strip("/")
     virtual_key = prefix + "/" + key if key else prefix or "/"
 
-    if index is not None:
-        cached = await index.list_dir(virtual_key)
-        # Cached entries are slash-less, while the cold path below marks
-        # folders with a trailing slash. Callers must not infer dir-ness
-        # from the slash alone (see find's stat fallback).
-        if cached.entries is not None:
-            return cached.entries
+    cached = await index.list_dir(virtual_key)
+    # Cached entries are slash-less, while the cold path below marks
+    # folders with a trailing slash. Callers must not infer dir-ness
+    # from the slash alone (see find's stat fallback).
+    if cached.entries is not None:
+        return cached.entries
 
     if not key:
         folder_id = "root"
@@ -147,8 +146,7 @@ async def readdir(
             )
             entries.append((filename, entry, True))
 
-    if index is not None:
-        await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
+    await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
     path_prefix = f"/{key}/" if key else "/"
     result_paths = []
     for name, _, is_folder in entries:

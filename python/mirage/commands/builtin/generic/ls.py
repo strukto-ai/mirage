@@ -1,6 +1,6 @@
 from collections.abc import Awaitable, Callable
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.formatting import format_ls_long
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
@@ -31,7 +31,7 @@ def format_simple(entries: list[FileStat],
 async def _file_entry(
     path: PathSpec,
     stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> FileStat | None:
     try:
         s = await stat(path, index)
@@ -55,7 +55,7 @@ async def walk(
     reverse: bool = False,
     recursive: bool = False,
     list_dir: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[FileStat], list[str]]:
     warnings: list[str] = []
     if list_dir:
@@ -144,7 +144,7 @@ async def walk_grouped(
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[tuple[PathSpec, list[FileStat]]], list[str]]:
     """Recursive walk that returns one (dir, entries) group per directory
     visited, in pre-order. Mirrors GNU `ls -R` output structure.
@@ -213,7 +213,7 @@ async def ls(
     recursive: bool = False,
     list_dir: bool = False,
     classify: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[str] = []

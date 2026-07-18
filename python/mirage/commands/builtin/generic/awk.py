@@ -2,7 +2,7 @@ import re
 from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
                              Sequence)
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.awk_types import (  # yapf: disable
     CMP_OP_PATTERN, FIELD_PREFIX, PRINT_STMT, USAGE, AwkBlock, AwkBoolOp,
     AwkBuiltin, AwkCmpOp, AwkFlags)
@@ -240,7 +240,7 @@ async def awk(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the mini-awk program over backend paths or stdin.
 

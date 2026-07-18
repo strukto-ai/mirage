@@ -73,7 +73,7 @@ async def expand_pattern(
     readdir: Callable,
     accessor: Accessor,
     path: PathSpec,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[PathSpec]:
     """Expand a glob PathSpec segment-by-segment via readdir.
 
@@ -91,7 +91,7 @@ async def expand_pattern(
         accessor (Accessor): backend handle passed through to readdir.
         path (PathSpec): unresolved spec whose ``resource_path`` still
             contains the pattern.
-        index (IndexCacheStore | None): the per-call cache index.
+        index (IndexCacheStore): the per-call cache index.
     """
     prefix = path.virtual[:len(path.virtual.rstrip("/")) -
                           len(path.resource_path)]
@@ -141,7 +141,7 @@ async def resolve_glob_with(
     readdir: Callable,
     accessor: Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     cap: int | None = None,
 ) -> list[PathSpec]:
     """Shared resolve_glob loop over a backend's readdir.
@@ -157,7 +157,7 @@ async def resolve_glob_with(
             returning absolute virtual paths.
         accessor (Accessor): backend handle passed through to readdir.
         paths (list[PathSpec]): specs to resolve.
-        index (IndexCacheStore | None): the per-call cache index.
+        index (IndexCacheStore): the per-call cache index.
         cap (int | None): cap on matches per pattern before truncation.
     """
     result: list[PathSpec] = []

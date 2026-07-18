@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -33,7 +33,7 @@ async def tree(
     args_I: str | None = None,
     d: bool = False,
     P: str | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):

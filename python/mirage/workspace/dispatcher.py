@@ -154,7 +154,6 @@ class Dispatcher:
         await self._namespace.clear_times(path.virtual)
         manager = mount.cache_manager
         if manager is None:
-            manager = CacheManager(self._cache,
-                                   getattr(mount.resource, "index", None),
+            manager = CacheManager(self._cache, mount.resource.index,
                                    mount.prefix, mount.resource.caches_reads)
         await manager.invalidate_after_write(path)

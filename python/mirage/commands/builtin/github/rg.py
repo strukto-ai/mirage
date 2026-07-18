@@ -48,8 +48,6 @@ async def rg(
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
 
-    if paths and index is None:
-        return b"", IOResult(exit_code=1)
     if paths:
         scope = paths[0]
         paths, file_count, used_search = await narrow_scope(

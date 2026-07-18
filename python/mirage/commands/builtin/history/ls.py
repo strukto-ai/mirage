@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
@@ -46,7 +46,7 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME

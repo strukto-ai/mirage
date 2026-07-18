@@ -15,7 +15,7 @@
 from collections.abc import Awaitable, Callable
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -49,7 +49,7 @@ def make_rm(
         *texts: str,
         f: bool = False,
         v: bool = False,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **_extra: object,
     ) -> tuple[ByteSource | None, IOResult]:
         if not paths:

@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
@@ -44,7 +44,7 @@ async def find(
     path: str | None = None,
     mindepth: str | None = None,
     empty: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_find(

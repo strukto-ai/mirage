@@ -79,11 +79,8 @@ async def stat(
     if len(parts) == 3 and parts[0] == "workspaces":
         if parts[2] == "workspace.json":
             ws_key = "/" + "/".join(parts[:2])
-            if index is not None:
-                result = await index.get(ws_key)
-                ws_id = result.entry.id if result.entry else None
-            else:
-                ws_id = None
+            result = await index.get(ws_key)
+            ws_id = result.entry.id if result.entry else None
             return FileStat(
                 name="workspace.json",
                 type=FileType.JSON,
@@ -106,11 +103,8 @@ async def stat(
     if (len(parts) == 5 and parts[0] == "workspaces" and parts[2] == "boards"):
         if parts[4] == "board.json":
             board_key = "/" + "/".join(parts[:4])
-            if index is not None:
-                result = await index.get(board_key)
-                board_id = result.entry.id if result.entry else None
-            else:
-                board_id = None
+            result = await index.get(board_key)
+            board_id = result.entry.id if result.entry else None
             return FileStat(
                 name="board.json",
                 type=FileType.JSON,
@@ -159,11 +153,8 @@ async def stat(
             and parts[4] == "lists"):
         if parts[6] == "list.json":
             list_key = "/" + "/".join(parts[:6])
-            if index is not None:
-                result = await index.get(list_key)
-                list_id = result.entry.id if result.entry else None
-            else:
-                list_id = None
+            result = await index.get(list_key)
+            list_id = result.entry.id if result.entry else None
             return FileStat(
                 name="list.json",
                 type=FileType.JSON,
@@ -188,11 +179,8 @@ async def stat(
             and parts[4] == "lists" and parts[6] == "cards"):
         if parts[8] == "card.json":
             card_key = "/" + "/".join(parts[:8])
-            if index is not None:
-                result = await index.get(card_key)
-                card_id = result.entry.id if result.entry else None
-            else:
-                card_id = None
+            result = await index.get(card_key)
+            card_id = result.entry.id if result.entry else None
             return FileStat(
                 name="card.json",
                 type=FileType.JSON,
@@ -200,11 +188,8 @@ async def stat(
             )
         if parts[8] == "comments.jsonl":
             card_key = "/" + "/".join(parts[:8])
-            if index is not None:
-                result = await index.get(card_key)
-                card_id = result.entry.id if result.entry else None
-            else:
-                card_id = None
+            result = await index.get(card_key)
+            card_id = result.entry.id if result.entry else None
             return FileStat(
                 name="comments.jsonl",
                 type=FileType.TEXT,

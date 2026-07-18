@@ -61,8 +61,6 @@ async def find(
     index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if index is None:
-        raise ValueError("find: no tree loaded")
     paths = await resolve_glob(accessor, paths, index)
     return await generic_find(paths,
                               texts,

@@ -15,6 +15,7 @@
 import asyncio
 
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
@@ -147,10 +148,10 @@ def test_cached_bytes_local_mount_returns_none():
 async def _no_index_case() -> bool:
     cache, _ = _stores()
     await cache.set("/data/a.txt", b"x")
-    manager = CacheManager(cache, None, "/data/", True)
+    manager = CacheManager(cache, NULL_INDEX, "/data/", True)
     await manager.invalidate_after_write(PathSpec.from_str_path("/a.txt"))
     return await cache.exists("/data/a.txt")
 
 
-def test_missing_index_is_tolerated():
+def test_null_index_is_tolerated():
     assert _run(_no_index_case()) is False

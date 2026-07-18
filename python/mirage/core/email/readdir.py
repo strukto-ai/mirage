@@ -64,10 +64,9 @@ async def readdir(
     depth = len(parts)
 
     if depth == 0:
-        if index is not None:
-            cached = await index.list_dir(virtual_key)
-            if cached.entries is not None:
-                return cached.entries
+        cached = await index.list_dir(virtual_key)
+        if cached.entries is not None:
+            return cached.entries
         folders = await list_folders(accessor)
         entries = []
         for folder_name in folders:
@@ -78,16 +77,14 @@ async def readdir(
                 vfs_name=folder_name,
             )
             entries.append((folder_name, entry))
-        if index is not None:
-            await index.set_dir(virtual_key, entries)
+        await index.set_dir(virtual_key, entries)
         return [f"{prefix}/{name}" for name, _ in entries]
 
     if depth == 1:
         folder_name = parts[0]
-        if index is not None:
-            cached = await index.list_dir(virtual_key)
-            if cached.entries is not None:
-                return cached.entries
+        cached = await index.list_dir(virtual_key)
+        if cached.entries is not None:
+            return cached.entries
         max_msgs = accessor.config.max_messages
         uids = await list_message_uids(accessor,
                                        folder_name,

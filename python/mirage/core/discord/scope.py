@@ -224,10 +224,9 @@ async def _resolve_ids(
 ) -> tuple[str | None, str | None]:
     guild_id = await _resolve_guild_id(guild_name, index, prefix)
     channel_id = None
-    if index is not None:
-        virtual_key = (prefix + "/" + channel_path if prefix else "/" +
-                       channel_path)
-        lookup = await index.get(virtual_key)
-        if lookup.entry is not None:
-            channel_id = lookup.entry.id
+    virtual_key = (prefix + "/" + channel_path if prefix else "/" +
+                   channel_path)
+    lookup = await index.get(virtual_key)
+    if lookup.entry is not None:
+        channel_id = lookup.entry.id
     return guild_id, channel_id

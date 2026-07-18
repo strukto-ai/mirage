@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as generic_gzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
@@ -34,7 +34,7 @@ async def gzip(
     k: bool = False,
     f: bool = False,
     c: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     level = extract_level(flags)

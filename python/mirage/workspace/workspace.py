@@ -17,12 +17,11 @@ import builtins
 import logging
 import sys
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from functools import partial
 from types import TracebackType
 from typing import Any, Literal, TypeAlias, cast, overload
 
-from mirage.io.types import ByteSource
 from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
@@ -32,6 +31,7 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
 from mirage.commands.errors import FindParseError, UsageError
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
+from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
@@ -207,8 +207,7 @@ class Workspace:
             else:
                 prov = value
                 mount_mode = mode
-            if index is not None:
-                prov.set_index(index)
+            prov.set_index(index)
             mount_obj = self._registry.mount(prefix, prov, mount_mode)
             if mount_safeguards:
                 mount_obj.command_safeguards.update(mount_safeguards)

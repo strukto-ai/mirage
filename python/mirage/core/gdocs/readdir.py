@@ -53,7 +53,7 @@ async def readdir(
     if key not in ("owned", "shared"):
         raise enoent(virtual)
 
-    if index is not None and not modified_range:
+    if not modified_range:
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
@@ -87,10 +87,9 @@ async def readdir(
         )
         entries.append((filename, entry))
 
-    if index is not None:
-        if modified_range:
-            for name, entry in entries:
-                await index.put(f"{virtual_key}/{name}", entry)
-        else:
-            await index.set_dir(virtual_key, entries)
+    if modified_range:
+        for name, entry in entries:
+            await index.put(f"{virtual_key}/{name}", entry)
+    else:
+        await index.set_dir(virtual_key, entries)
     return [f"{prefix}/{key}/{name}" for name, _ in entries]

@@ -31,7 +31,7 @@ async def stat(
     Args:
         accessor (LangfuseAccessor): langfuse accessor.
         path (str): resource-relative path.
-        index (IndexCacheStore | None): index cache.
+        index (IndexCacheStore): index cache.
         prefix (str): mount prefix for virtual index keys.
     """
     virtual = path.virtual
