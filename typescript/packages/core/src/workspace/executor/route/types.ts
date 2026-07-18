@@ -65,19 +65,25 @@ export interface RouteContext {
 export type RouteScript = ((ctx: RouteContext) => boolean | Promise<boolean>) | string
 export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | null>) | string
 
-/** The one-line placement decision the dispatcher consults. */
+/**
+ * The one-line placement decision the dispatcher consults.
+ *
+ * Both fields hold runtimes: the decision IS "which runtime runs which
+ * command". The vfs runtime is a legal value in either; a command
+ * placed on it is served by the workspace executor itself.
+ */
 export interface RoutingDecision {
-  /** Command -> runtime for this line. */
-  bindings: Record<string, Runtime>
   /**
-   * Whether unbound commands may run on the vfs executor; false turns
-   * them into admission failures.
+   * Every command some entry captures, resolved for this line: the
+   * runtime it runs on, or null when its capturers all refused
+   * (admission failure, exit 126, never a silent fallback to the
+   * workspace).
    */
-  vfsAllowed: boolean
+  bindings: Record<string, Runtime | null>
   /**
-   * Commands captured by some entry; an unbound captured command is an
-   * admission failure (its capturers all refused), never a silent
-   * fallback.
+   * Where commands no entry captures run: the catch-all vfs runtime,
+   * or null when the vfs runtime refused the line or declares
+   * captures; unbound commands then exit 126.
    */
-  captured: ReadonlySet<string>
+  fallback: Runtime | null
 }

@@ -48,7 +48,8 @@ from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
 from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
-                                  build_runtime, runtime_bindings_for)
+                                  build_runtime, catch_all,
+                                  runtime_bindings_for)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -487,7 +488,8 @@ class Workspace:
             return RoutingDecision(bindings={
                 **self._registry.runtime_bindings,
                 **overlay
-            })
+            },
+                                   fallback=catch_all(self._runtime_entries))
         if provision:
             return None
         has_scripts = any(entry.script is not None

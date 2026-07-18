@@ -75,13 +75,12 @@ function admissionDenial(cmdName: string): IOResult {
 
 /**
  * Resolve a command against the line's routing decision. With no
- * decision, the static bindings apply. With one, the line's bindings
- * win; an unbound command whose capturers all refused, or any unbound
- * command when the vfs runtime refused the line, is an admission failure:
- * exit 126, "no runtime accepted this line". A command bound to the
- * vfs runtime is served by the executor itself, and when the vfs
- * runtime declares captures the catch-all is off: unclaimed commands
- * are admission failures too.
+ * decision, the static bindings apply. With one, the command's runtime
+ * is looked up in the decision: its binding, or the decision's
+ * fallback when no entry captures it. A resolved VfsRuntime means the
+ * executor serves the command itself (the vfs runtime has no
+ * interpreter door); null means no runtime accepted it: exit 126,
+ * "no runtime accepted this line", like a shell refusing to exec.
  */
 function lineRuntimeFor(
   cmdName: string,
@@ -89,20 +88,19 @@ function lineRuntimeFor(
   vfs: Runtime | null,
   routingDecision: RoutingDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
-  const restricted = vfs instanceof VfsRuntime && vfs.restricted
   if (routingDecision === undefined) {
+    const restricted = vfs instanceof VfsRuntime && vfs.restricted
     const runtime = runtimeBindings?.[cmdName]
     if (runtime !== undefined && runtime === vfs) return [undefined, null]
     if (runtime === undefined && restricted) return [undefined, admissionDenial(cmdName)]
     return [runtime, null]
   }
-  const runtime = routingDecision.bindings[cmdName]
-  if (runtime !== undefined && runtime === vfs) return [undefined, null]
-  if (runtime !== undefined) return [runtime, null]
-  if (routingDecision.captured.has(cmdName) || !routingDecision.vfsAllowed || restricted) {
-    return [undefined, admissionDenial(cmdName)]
-  }
-  return [undefined, null]
+  const runtime = Object.hasOwn(routingDecision.bindings, cmdName)
+    ? routingDecision.bindings[cmdName]
+    : routingDecision.fallback
+  if (runtime === null || runtime === undefined) return [undefined, admissionDenial(cmdName)]
+  if (runtime instanceof VfsRuntime) return [undefined, null]
+  return [runtime, null]
 }
 
 interface RunOnMountOpts {

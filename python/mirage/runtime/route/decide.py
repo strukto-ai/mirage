@@ -21,8 +21,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.python.monty import _MirageOS, pydantic_monty
 from mirage.runtime.route.types import (RouteContext, RouteFn, RouteScript,
                                         RoutingDecision)
-from mirage.runtime.table import (VfsRuntime, bind_commands,
-                                  runtime_bindings_for)
+from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 
 
 async def _eval_monty(source: str, ctx_payload: dict[str, Any],
@@ -140,17 +139,19 @@ async def decide_line(entries: list[Runtime], route: RouteFn | None,
                 **static_bindings,
                 **overlay
             },
-                                   vfs_allowed=True,
-                                   captured=frozenset())
+                                   fallback=catch_all(entries))
     willing: list[Runtime] = []
-    captured: set[str] = set()
     for entry in entries:
-        captured.update(entry.captures)
         wants = (True if entry.script is None else await evaluate_script(
             entry.script, ctx, entry, dispatch))
         if wants:
             willing.append(entry)
-    return RoutingDecision(
-        bindings=bind_commands(willing),
-        vfs_allowed=any(isinstance(entry, VfsRuntime) for entry in willing),
-        captured=frozenset(captured))
+    # Every captured command resolves: to its first willing capturer,
+    # or to None (all capturers refused -> admission failure).
+    bindings: dict[str, Runtime | None] = {
+        command: None
+        for entry in entries
+        for command in entry.captures
+    }
+    bindings.update(bind_commands(willing))
+    return RoutingDecision(bindings=bindings, fallback=catch_all(willing))

@@ -173,10 +173,11 @@ export function runtimeBindingsFor(
 /**
  * Resolve the ordered world into a command -> runtime binding map.
  *
- * A command binds to the FIRST entry that captures it; the vfs runtime
- * captures nothing, so it never appears in the map. Duplicate names are
- * rejected: a second entry under the same name could never bind
- * anything and always signals a config mistake.
+ * A command binds to the FIRST entry that captures it; a default vfs
+ * runtime captures nothing, so only a vfs with declared captures
+ * appears in the map. Duplicate names are rejected: a second entry
+ * under the same name could never bind anything and always signals a
+ * config mistake.
  */
 export function bindCommands(entries: readonly Runtime[]): Record<string, Runtime> {
   const bindings: Record<string, Runtime> = {}
@@ -191,4 +192,18 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
     }
   }
   return bindings
+}
+
+/**
+ * The runtime that serves commands no entry captures, if any.
+ *
+ * That is the world's VfsRuntime, unless it declares captures (then it
+ * is an ordinary capturer and nothing is catch-all) or it is not among
+ * the given entries (refused the line / omitted).
+ */
+export function catchAll(entries: readonly Runtime[]): Runtime | null {
+  for (const entry of entries) {
+    if (entry instanceof VfsRuntime && !entry.restricted) return entry
+  }
+  return null
 }

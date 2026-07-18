@@ -161,16 +161,20 @@ RouteFn = Callable[[RouteContext], str | None | Awaitable[str | None]] | str
 class RoutingDecision:
     """The one-line placement decision the dispatcher consults.
 
+    Both fields hold runtimes: the decision IS "which runtime runs
+    which command". The vfs runtime is a legal value in either; a
+    command placed on it is served by the workspace executor itself.
+
     Args:
-        bindings (dict[str, Runtime]): command -> runtime for this
-            line.
-        vfs_allowed (bool): whether unbound commands may run on the
-            vfs executor; False turns them into admission failures.
-        captured (frozenset[str]): commands captured by some entry;
-            an unbound captured command is an admission failure (its
-            capturers all refused), never a silent fallback.
+        bindings (dict[str, Runtime | None]): every command some entry
+            captures, resolved for this line: the runtime it runs on,
+            or None when its capturers all refused (admission failure,
+            exit 126, never a silent fallback to the workspace).
+        fallback (Runtime | None): where commands no entry captures
+            run: the catch-all vfs runtime, or None when the vfs
+            runtime refused the line or declares captures; unbound
+            commands then exit 126.
     """
 
-    bindings: dict[str, Runtime] = field(default_factory=dict)
-    vfs_allowed: bool = True
-    captured: frozenset[str] = frozenset()
+    bindings: dict[str, Runtime | None] = field(default_factory=dict)
+    fallback: Runtime | None = None

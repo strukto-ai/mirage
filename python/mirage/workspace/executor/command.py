@@ -159,13 +159,11 @@ def _line_runtime(
     """Resolve a command against the line's routing decision.
 
     With no decision, the workspace's static bindings apply. With one,
-    the line's bindings win; an unbound command whose capturers all
-    refused, or any unbound command when the vfs runtime refused the
-    line, is an admission failure: exit 126, "no runtime accepted this
-    line", like a shell refusing to exec. A command bound to the vfs
-    runtime is served by the executor itself (the vfs runtime has no
-    interpreter door), and when the vfs runtime declares captures the
-    catch-all is off: unclaimed commands are admission failures too.
+    the command's runtime is looked up in the decision: its binding,
+    or the decision's fallback when no entry captures it. A resolved
+    VfsRuntime means the executor serves the command itself (the vfs
+    runtime has no interpreter door); None means no runtime accepted
+    it: exit 126, like a shell refusing to exec.
 
     Args:
         cmd_name (str): the command being dispatched.
@@ -173,23 +171,21 @@ def _line_runtime(
             the world's vfs runtime.
         routing (RoutingDecision | None): the typed line's decision.
     """
-    vfs = registry.vfs_runtime
-    restricted = isinstance(vfs, VfsRuntime) and vfs.restricted
     if routing is None:
+        vfs = registry.vfs_runtime
+        restricted = isinstance(vfs, VfsRuntime) and vfs.restricted
         runtime = registry.runtime_bindings.get(cmd_name)
         if runtime is vfs and vfs is not None:
             return None, None
         if runtime is None and restricted:
             return None, _admission_denial(cmd_name)
         return runtime, None
-    runtime = routing.bindings.get(cmd_name)
-    if runtime is vfs and vfs is not None:
-        return None, None
-    if runtime is not None:
-        return runtime, None
-    if (cmd_name in routing.captured or not routing.vfs_allowed or restricted):
+    runtime = routing.bindings.get(cmd_name, routing.fallback)
+    if runtime is None:
         return None, _admission_denial(cmd_name)
-    return None, None
+    if isinstance(runtime, VfsRuntime):
+        return None, None
+    return runtime, None
 
 
 def _scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, Any]:

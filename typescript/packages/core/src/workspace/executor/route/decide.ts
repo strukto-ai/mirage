@@ -14,7 +14,7 @@
 
 import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
 import { evalMontyValue } from '../python/runtimes/monty.ts'
-import { bindCommands, runtimeBindingsFor, VfsRuntime, type Runtime } from '../runtime.ts'
+import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../runtime.ts'
 import { RoutingDecisionError } from './errors.ts'
 import type { RoutingDecision, RouteContext, RouteFn, RouteScript } from './types.ts'
 
@@ -130,22 +130,22 @@ export async function decideLine(
       }
       return {
         bindings: { ...staticBindings, ...overlay },
-        vfsAllowed: true,
-        captured: new Set(),
+        fallback: catchAll(entries),
       }
     }
   }
   const willing: Runtime[] = []
-  const captured = new Set<string>()
   for (const entry of entries) {
-    for (const command of entry.captures) captured.add(command)
     const wants =
       entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, bridge)
     if (wants) willing.push(entry)
   }
-  return {
-    bindings: bindCommands(willing),
-    vfsAllowed: willing.some((entry) => entry instanceof VfsRuntime),
-    captured,
+  // Every captured command resolves: to its first willing capturer, or
+  // to null (all capturers refused -> admission failure).
+  const bindings: Record<string, Runtime | null> = {}
+  for (const entry of entries) {
+    for (const command of entry.captures) bindings[command] = null
   }
+  Object.assign(bindings, bindCommands(willing))
+  return { bindings, fallback: catchAll(willing) }
 }

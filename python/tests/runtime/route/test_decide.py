@@ -93,7 +93,7 @@ async def test_decide_route_overlays_static_bindings():
     routing = await decide_line([alpha, beta, VfsRuntime()], lambda c: "beta",
                                 ctx_for("python3 x"), {"python3": alpha}, None)
     assert routing.bindings["python3"] is beta
-    assert routing.vfs_allowed
+    assert isinstance(routing.fallback, VfsRuntime)
 
 
 @pytest.mark.asyncio
@@ -103,18 +103,16 @@ async def test_decide_scripts_filter_in_list_order():
     routing = await decide_line([alpha, beta, VfsRuntime()], None,
                                 ctx_for("python3 x"), {}, None)
     assert routing.bindings["python3"] is beta
-    assert "python3" in routing.captured
 
 
 @pytest.mark.asyncio
-async def test_decide_all_refuse_leaves_command_unbound_but_captured():
+async def test_decide_all_refuse_resolves_command_to_none():
     alpha = AlphaRuntime()
     alpha.script = lambda c: False
     routing = await decide_line([alpha, VfsRuntime()], None,
                                 ctx_for("python3 x"), {}, None)
-    assert "python3" not in routing.bindings
-    assert "python3" in routing.captured
-    assert routing.vfs_allowed
+    assert routing.bindings["python3"] is None
+    assert isinstance(routing.fallback, VfsRuntime)
 
 
 @pytest.mark.asyncio
@@ -122,8 +120,16 @@ async def test_decide_vfs_entry_script_gates_vfs():
     vfs = VfsRuntime(script=lambda c: "/secret" not in c.line)
     allowed = await decide_line([vfs], None, ctx_for("cat /notes"), {}, None)
     denied = await decide_line([vfs], None, ctx_for("cat /secret/x"), {}, None)
-    assert allowed.vfs_allowed
-    assert not denied.vfs_allowed
+    assert allowed.fallback is vfs
+    assert denied.fallback is None
+
+
+@pytest.mark.asyncio
+async def test_decide_declared_captures_turn_the_catch_all_off():
+    vfs = VfsRuntime(captures=["grep"])
+    routing = await decide_line([vfs], None, ctx_for("grep x /a"), {}, None)
+    assert routing.bindings["grep"] is vfs
+    assert routing.fallback is None
 
 
 @pytest.mark.asyncio

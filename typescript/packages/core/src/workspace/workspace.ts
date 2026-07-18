@@ -71,6 +71,7 @@ import {
 } from './executor/route/index.ts'
 import {
   bindCommands,
+  catchAll,
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
   VfsRuntime,
@@ -475,8 +476,7 @@ export class Workspace {
       }
       return {
         bindings: { ...this.runtimeBindings, ...overlay },
-        vfsAllowed: true,
-        captured: new Set(),
+        fallback: catchAll(this.runtimeEntries),
       }
     }
     const hasScripts = this.runtimeEntries.some((entry) => entry.script !== undefined)

@@ -140,10 +140,11 @@ def runtime_bindings_for(entries: list[Runtime],
 def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
     """Resolve the ordered world into a command -> runtime binding map.
 
-    A command binds to the FIRST entry that captures it; the vfs
-    runtime captures nothing, so it never appears in the map. Duplicate
-    names are rejected: a second entry under the same name could never
-    bind anything and always signals a config mistake.
+    A command binds to the FIRST entry that captures it; a default vfs
+    runtime captures nothing, so only a vfs with declared captures
+    appears in the map. Duplicate names are rejected: a second entry
+    under the same name could never bind anything and always signals a
+    config mistake.
 
     Args:
         entries (list[Runtime]): runtime instances in precedence order.
@@ -161,3 +162,19 @@ def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
             if command not in bindings:
                 bindings[command] = entry
     return bindings
+
+
+def catch_all(entries: list[Runtime]) -> Runtime | None:
+    """The runtime that serves commands no entry captures, if any.
+
+    That is the world's VfsRuntime, unless it declares captures (then
+    it is an ordinary capturer and nothing is catch-all) or it is not
+    among the given entries (refused the line / omitted).
+
+    Args:
+        entries (list[Runtime]): runtime instances to search.
+    """
+    for entry in entries:
+        if isinstance(entry, VfsRuntime) and not entry.restricted:
+            return entry
+    return None
