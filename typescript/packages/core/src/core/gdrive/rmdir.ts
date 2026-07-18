@@ -17,9 +17,9 @@ import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotdir } from '../../utils/errors.ts'
 import { deleteFile } from '../google/drive.ts'
-import { isFolder, resolveKey } from './resolve.ts'
+import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
 
-export async function rmdir(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
+async function rmdirImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
   const key = path.resourcePath
   if (key === '') return
   const node = await resolveKey(accessor, key)
@@ -28,3 +28,5 @@ export async function rmdir(accessor: GDriveAccessor, path: PathSpec): Promise<v
   await deleteFile(accessor.tokenManager, node.id)
   await invalidateAfterUnlink(path)
 }
+
+export const rmdir = eaccesOnDenied(rmdirImpl)

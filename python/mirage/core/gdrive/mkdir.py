@@ -16,13 +16,14 @@ import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.gdrive.resolve import (node_from_item, resolve_key,
-                                        resolve_parent, resolve_segment,
-                                        root_folder)
+from mirage.core.gdrive.resolve import (eacces_on_denied, node_from_item,
+                                        resolve_key, resolve_parent,
+                                        resolve_segment, root_context)
 from mirage.core.google.drive import create_folder
 from mirage.types import PathSpec
 
 
+@eacces_on_denied
 async def mkdir(accessor: GDriveAccessor,
                 path: PathSpec,
                 parents: bool = False) -> None:
@@ -41,8 +42,7 @@ async def mkdir(accessor: GDriveAccessor,
         await create_folder(token_manager, posixpath.basename(key), parent_id)
         await invalidate_after_write(path)
         return
-    parent_id = root_folder(token_manager)
-    drive_id: str | None = None
+    parent_id, drive_id = await root_context(accessor)
     segments = [s for s in key.split("/") if s]
     mount_prefix = virtual[:-len(key)].rstrip("/") if virtual.endswith(
         key) else ""

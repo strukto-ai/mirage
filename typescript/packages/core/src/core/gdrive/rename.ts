@@ -17,13 +17,9 @@ import { invalidateAfterUnlink, invalidateAfterWrite } from '../../cache/context
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../utils/errors.ts'
 import { deleteFile, listFiles, patchFile } from '../google/drive.ts'
-import { driveTargetName, isFolder, resolveKey, resolveParent } from './resolve.ts'
+import { driveTargetName, eaccesOnDenied, isFolder, resolveKey, resolveParent } from './resolve.ts'
 
-export async function rename(
-  accessor: GDriveAccessor,
-  src: PathSpec,
-  dst: PathSpec,
-): Promise<void> {
+async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
   const srcNode = await resolveKey(accessor, src.resourcePath)
   if (srcNode === null) throw enoent(src)
@@ -55,3 +51,5 @@ export async function rename(
   await invalidateAfterWrite(dst)
   await invalidateAfterUnlink(src)
 }
+
+export const rename = eaccesOnDenied(renameImpl)

@@ -249,14 +249,23 @@ class GwsService:
     async def create(cls, run_id: str, target: dict) -> "GwsService":
         url = os.environ["GWS_URL"].rstrip("/")
         folder_ids: dict[str, str] = {}
+        drive_ids: dict[str, str] = {}
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{url}/reset") as resp:
                 resp.raise_for_status()
             for mount in target["mounts"]:
-                parent = "root"
+                # A mount may live inside a Shared Drive: the drive is
+                # created once per name and its id is the walk's start.
+                drive = mount.get("drive")
+                if drive and drive not in drive_ids:
+                    async with session.post(f"{url}/drive/v3/drives",
+                                            json={"name": drive}) as resp:
+                        resp.raise_for_status()
+                        drive_ids[drive] = (await resp.json())["id"]
+                parent = drive_ids[drive] if drive else "root"
                 for segment in str(mount["root"]).split("/"):
                     parent = await cls._folder(session, url, segment, parent)
-                folder_ids[mount["root"]] = parent
+                folder_ids[mount["path"]] = parent
         return cls(url, folder_ids)
 
     @staticmethod
@@ -284,7 +293,7 @@ class GwsService:
             GoogleDriveConfig(client_id="integ",
                               refresh_token="integ",
                               api_base=self.url,
-                              folder_id=self.folder_ids[mount["root"]]))
+                              folder_id=self.folder_ids[mount["path"]]))
 
     async def teardown(self) -> None:
         return None

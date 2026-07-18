@@ -18,19 +18,16 @@ import { PathSpec } from '../../types.ts'
 import { eexist, enotdir } from '../../utils/errors.ts'
 import { createFolder } from '../google/drive.ts'
 import {
+  eaccesOnDenied,
   isFolder,
   nodeFromItem,
   resolveKey,
   resolveParent,
   resolveSegment,
-  rootFolder,
+  rootContext,
 } from './resolve.ts'
 
-export async function mkdir(
-  accessor: GDriveAccessor,
-  path: PathSpec,
-  parents = false,
-): Promise<void> {
+async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = false): Promise<void> {
   const key = path.resourcePath
   const tm = accessor.tokenManager
   if (key === '') {
@@ -46,8 +43,7 @@ export async function mkdir(
     await invalidateAfterWrite(path)
     return
   }
-  let parentId = rootFolder(tm)
-  let driveId: string | null = null
+  let [parentId, driveId] = await rootContext(accessor)
   const segments = key.split('/').filter((s) => s !== '')
   const mountPrefix = path.virtual.endsWith(key)
     ? path.virtual.slice(0, path.virtual.length - key.length).replace(/\/$/, '')
@@ -72,3 +68,5 @@ export async function mkdir(
   }
   await invalidateAfterWrite(path)
 }
+
+export const mkdir = eaccesOnDenied(mkdirImpl)

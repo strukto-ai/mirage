@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.resolve import resolve_key
+from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
 from mirage.core.gdrive.write import write_bytes
 from mirage.core.google.drive import download_file
 from mirage.types import PathSpec
 from mirage.utils.errors import eisdir
 
 
+@eacces_on_denied
 async def truncate(accessor: GDriveAccessor, path: PathSpec,
                    length: int) -> None:
     node = await resolve_key(accessor, path.resource_path)

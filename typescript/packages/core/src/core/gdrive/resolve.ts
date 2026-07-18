@@ -14,10 +14,10 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent, enotdir } from '../../utils/errors.ts'
+import { eacces, enoent, enotdir } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import type { TokenManager } from '../google/_client.ts'
-import { FOLDER_MIME, MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
+import { GoogleApiError, type TokenManager } from '../google/_client.ts'
+import { FOLDER_MIME, MIME_TO_EXT, getFile, listFiles, listSharedDrives } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
 
 const SUFFIX_TO_MIME: Readonly<Record<string, string>> = Object.freeze(
@@ -32,9 +32,43 @@ export interface DriveNode {
   driveId: string | null
 }
 
-// The mount's root folder ID: the configured scope or Drive's root.
-export function rootFolder(tm: TokenManager): string {
-  return tm.config.folderId ?? 'root'
+const ROOT_DRIVE_IDS = new WeakMap<GDriveAccessor, string | null>()
+
+// The mount root's [folder id, shared drive id]. An unscoped mount roots at
+// My Drive. A folderId scope may point inside a Shared Drive (or be a Shared
+// Drive id itself); its driveId is fetched once via files.get and memoized
+// per accessor, so every listing and resolution under the root queries the
+// right corpus.
+export async function rootContext(accessor: GDriveAccessor): Promise<[string, string | null]> {
+  const folderId = accessor.tokenManager.config.folderId
+  if (folderId === undefined || folderId === '') return ['root', null]
+  if (!ROOT_DRIVE_IDS.has(accessor)) {
+    const item = await getFile(accessor.tokenManager, folderId)
+    ROOT_DRIVE_IDS.set(accessor, item.driveId ?? null)
+  }
+  return [folderId, ROOT_DRIVE_IDS.get(accessor) ?? null]
+}
+
+// Map a Drive HTTP 403 during a mutation to EACCES. Drive access is per-item
+// (shared-drive roles, folder-level grants), so a write-mode mount can still
+// hold items the user may not edit; a denied mutation surfaces as Permission
+// denied on the operand, like a real filesystem.
+export function eaccesOnDenied<A extends unknown[], R>(
+  fn: (...args: A) => Promise<R>,
+): (...args: A) => Promise<R> {
+  return async (...args: A): Promise<R> => {
+    try {
+      return await fn(...args)
+    } catch (err) {
+      if (err instanceof GoogleApiError && err.status === 403) {
+        const spec = args.find(
+          (a): a is PathSpec => typeof a === 'object' && a !== null && 'virtual' in a,
+        )
+        throw eacces(spec ?? '')
+      }
+      throw err
+    }
+  }
 }
 
 export function isFolder(node: DriveNode): boolean {
@@ -122,8 +156,7 @@ export async function resolveSegment(
 // item, or null.
 export async function resolveKey(accessor: GDriveAccessor, key: string): Promise<DriveNode | null> {
   const tm = accessor.tokenManager
-  let parentId = rootFolder(tm)
-  let driveId: string | null = null
+  let [parentId, driveId] = await rootContext(accessor)
   let node: DriveNode | null = null
   const segments = key.split('/').filter((s) => s !== '')
   for (const [i, segment] of segments.entries()) {
@@ -147,7 +180,7 @@ export async function resolveDir(
   key: string,
   virtual: string,
 ): Promise<[string, string | null]> {
-  if (key === '') return [rootFolder(accessor.tokenManager), null]
+  if (key === '') return rootContext(accessor)
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(virtual)
   if (!isFolder(node)) throw enotdir(virtual)

@@ -17,10 +17,10 @@ import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { deleteFile } from '../google/drive.ts'
-import { resolveKey } from './resolve.ts'
+import { eaccesOnDenied, resolveKey } from './resolve.ts'
 
 // A Drive folder delete removes its subtree in one call.
-export async function rmR(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
+async function rmRImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
   const key = path.resourcePath
   if (key === '') return
   const node = await resolveKey(accessor, key)
@@ -28,3 +28,5 @@ export async function rmR(accessor: GDriveAccessor, path: PathSpec): Promise<voi
   await deleteFile(accessor.tokenManager, node.id)
   await invalidateAfterUnlink(path)
 }
+
+export const rmR = eaccesOnDenied(rmRImpl)

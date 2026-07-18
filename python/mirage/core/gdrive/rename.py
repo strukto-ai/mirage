@@ -19,13 +19,14 @@ import posixpath
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
-from mirage.core.gdrive.resolve import (drive_target_name, resolve_key,
-                                        resolve_parent)
+from mirage.core.gdrive.resolve import (drive_target_name, eacces_on_denied,
+                                        resolve_key, resolve_parent)
 from mirage.core.google.drive import delete_file, list_files, patch_file
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
+@eacces_on_denied
 async def rename(accessor: GDriveAccessor, src: PathSpec,
                  dst: PathSpec) -> None:
     token_manager = accessor.token_manager

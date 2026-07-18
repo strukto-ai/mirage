@@ -17,9 +17,9 @@ import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eacces, eisdir } from '../../utils/errors.ts'
 import { updateFileContent, uploadFile } from '../google/drive.ts'
-import { isFolder, isNative, resolveKey, resolveParent } from './resolve.ts'
+import { eaccesOnDenied, isFolder, isNative, resolveKey, resolveParent } from './resolve.ts'
 
-export async function write(
+async function writeImpl(
   accessor: GDriveAccessor,
   path: PathSpec,
   data: Uint8Array,
@@ -40,3 +40,5 @@ export async function write(
   }
   await invalidateAfterWrite(path)
 }
+
+export const write = eaccesOnDenied(writeImpl)

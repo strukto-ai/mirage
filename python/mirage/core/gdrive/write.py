@@ -17,13 +17,15 @@ import time
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.gdrive.resolve import resolve_key, resolve_parent
+from mirage.core.gdrive.resolve import (eacces_on_denied, resolve_key,
+                                        resolve_parent)
 from mirage.core.google.drive import update_file_content, upload_file
 from mirage.observe.context import record
 from mirage.types import PathSpec
 from mirage.utils.errors import eisdir
 
 
+@eacces_on_denied
 async def write_bytes(accessor: GDriveAccessor, path: PathSpec,
                       data: bytes) -> None:
     virtual = path.virtual

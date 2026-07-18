@@ -14,12 +14,13 @@
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_after_unlink
-from mirage.core.gdrive.resolve import resolve_key
+from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
 from mirage.core.google.drive import delete_file
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent, enotdir
 
 
+@eacces_on_denied
 async def rmdir(accessor: GDriveAccessor, path: PathSpec) -> None:
     virtual = path.virtual
     key = path.resource_path

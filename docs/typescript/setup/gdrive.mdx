@@ -55,7 +55,7 @@ The browser examples in `examples/typescript/browser/src/gdrive_pkce.ts` show a 
 | `clientSecret` | required | Google OAuth client secret. Redacted in snapshots. |
 | `refreshToken` | required | User's refresh token. Redacted in snapshots. |
 | `refreshFn` | built-in | Optional override for the access-token refresh callback. |
-| `folderId` | unset | Mount a single folder as the root instead of the whole Drive. Shared drives are not surfaced on scoped mounts. |
+| `folderId` | unset | Mount a single folder as the root instead of the whole Drive. The folder may live in My Drive or inside a Shared Drive (drive scope resolves automatically); other shared drives are not surfaced on scoped mounts. |
 
 ## Mount mode
 

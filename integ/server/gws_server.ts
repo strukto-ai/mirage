@@ -56,6 +56,7 @@ interface DriveItem {
   name: string
   mimeType: string
   parents: string[]
+  driveId?: string
   trashed: boolean
   createdTime: string
   modifiedTime: string
@@ -88,6 +89,7 @@ interface Presentation {
 
 class GwsState {
   files = new Map<string, DriveItem>()
+  drives = new Map<string, { id: string; name: string }>()
   docs = new Map<string, { title: string; text: string }>()
   sheets = new Map<string, Spreadsheet>()
   presentations = new Map<string, Presentation>()
@@ -141,6 +143,7 @@ function fmtFile(item: DriveItem): Record<string, unknown> {
     owners: [OWNER],
     capabilities: { canEdit: true },
   }
+  if (item.driveId !== undefined) out.driveId = item.driveId
   if (!isNativeMime(item.mimeType) && item.mimeType !== FOLDER_MIME) {
     out.size = String(item.content.length)
     out.md5Checksum = md5(item.content)
@@ -180,6 +183,8 @@ function createDriveItem(
     permissions: [],
   }
   item.modifiedTime = item.createdTime
+  const parentDrive = state.files.get(item.parents[0] ?? '')?.driveId
+  if (parentDrive !== undefined) item.driveId = parentDrive
   if (!isNativeMime(mimeType) && mimeType !== FOLDER_MIME) pushRevision(item)
   state.files.set(item.id, item)
   autoLink(item)
@@ -302,6 +307,14 @@ function matchClause(item: DriveItem, clause: QueryClause): boolean {
 function listFiles(query: URLSearchParams): [number, object] {
   const q = query.get('q')
   let items = [...state.files.values()]
+  // Real files.list hides shared-drive items unless the caller opts in, and
+  // corpora=drive&driveId scopes to one drive.
+  const driveId = query.get('driveId')
+  if (driveId !== null) {
+    items = items.filter((item) => item.driveId === driveId)
+  } else if (query.get('includeItemsFromAllDrives') !== 'true') {
+    items = items.filter((item) => item.driveId === undefined)
+  }
   if (q !== null && q.trim() !== '') {
     let clauses: QueryClause[]
     try {
@@ -794,8 +807,24 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
     )
     return [200, fmtFile(item)]
   }
+  if (path === '/drive/v3/drives' && method === 'POST') {
+    const body = json(ctx) as { name?: string }
+    const id = state.nextId('drive')
+    state.drives.set(id, { id, name: body.name ?? 'Untitled drive' })
+    // The drive itself acts as its root folder.
+    const root = createDriveItem(body.name ?? 'Untitled drive', FOLDER_MIME, [], Buffer.alloc(0), id)
+    root.parents = []
+    root.driveId = id
+    return [200, { kind: 'drive#drive', id, name: body.name ?? 'Untitled drive' }]
+  }
   if (path === '/drive/v3/drives' && method === 'GET') {
-    return [200, { kind: 'drive#driveList', drives: [] }]
+    return [
+      200,
+      {
+        kind: 'drive#driveList',
+        drives: [...state.drives.values()].map((d) => ({ kind: 'drive#drive', ...d })),
+      },
+    ]
   }
 
   m = /^\/drive\/v3\/files\/([^/:]+)$/.exec(path)

@@ -238,8 +238,20 @@ async function openGws(target: Target): Promise<Open> {
   if (base === '') throw new Error('gdrive target requires GWS_URL')
   await gwsJson(`${base}/reset`, { method: 'POST' })
   const mounts: Record<string, GDriveResource> = {}
+  const driveIds: Record<string, string> = {}
   for (const m of target.mounts) {
-    let parent = 'root'
+    // A mount may live inside a Shared Drive: the drive is created once
+    // per name and its id is the walk's start.
+    const drive = m.drive
+    if (drive !== undefined && !(drive in driveIds)) {
+      const created = (await gwsJson(`${base}/drive/v3/drives`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: drive }),
+      })) as { id: string }
+      driveIds[drive] = created.id
+    }
+    let parent = drive !== undefined ? (driveIds[drive] as string) : 'root'
     for (const segment of String(m.root).split('/')) {
       parent = await gwsFolder(base, segment, parent)
     }

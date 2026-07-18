@@ -17,8 +17,8 @@ import posixpath
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.gdrive.resolve import (DriveNode, drive_target_name,
-                                        node_from_item, resolve_key,
-                                        resolve_parent)
+                                        eacces_on_denied, node_from_item,
+                                        resolve_key, resolve_parent)
 from mirage.core.google._client import TokenManager
 from mirage.core.google.drive import (FOLDER_MIME, copy_file, create_folder,
                                       delete_file, list_files)
@@ -48,6 +48,7 @@ async def copy_children(token_manager: TokenManager, src: DriveNode,
             await copy_file(token_manager, child.id, child.name, dst_folder_id)
 
 
+@eacces_on_denied
 async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
     token_manager = accessor.token_manager
     src_node = await resolve_key(accessor, src.resource_path)

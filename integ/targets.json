@@ -406,6 +406,30 @@
           "fixture": "columnar/v1"
         }
       ]
+    },
+    {
+      "id": "gdrive-shared",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "drive": "eng",
+          "root": "team/data"
+        },
+        {
+          "path": "/data2",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "drive": "eng",
+          "root": "team/data2"
+        }
+      ]
     }
   ]
 }

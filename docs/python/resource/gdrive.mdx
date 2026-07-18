@@ -26,8 +26,10 @@ ws = Workspace({"/gdrive": resource}, mode=MountMode.WRITE)
 ```
 
 To mount a subfolder instead of the whole Drive, set `folder_id`.
-The mount root becomes that folder, and shared drives are not
-surfaced:
+The mount root becomes that folder. The folder may live in My Drive,
+be shared with you, sit inside a Shared Drive, or be a Shared Drive
+id itself; the drive scope is resolved automatically. Scoped mounts
+do not surface other shared drives:
 
 ```python
 config = GoogleDriveConfig(
@@ -107,6 +109,11 @@ fails with `ENOTEMPTY`, `cp -r` merges).
 Google-native files (`.gdoc.json`, `.gsheet.json`, `.gslide.json`)
 are read-only as bytes; writing to them fails with `EACCES`. Mutate
 them through the `gws` commands below instead.
+
+Drive access is per-item (shared-drive roles, folder-level grants), so
+a write mount can still hold items you may not edit. A mutation the
+API denies fails with `EACCES` (Permission denied) on that operand,
+like a real filesystem; the rest of the mount keeps working.
 
 ## Snapshots
 

@@ -27,6 +27,7 @@ export interface FakeItem {
   parents: string[]
   modifiedTime: string
   content: Uint8Array
+  driveId?: string
 }
 
 // In-memory Drive: id-addressed items with parent links. Test files mock
@@ -40,6 +41,7 @@ export class FakeDrive {
     parent = 'root',
     mime = FILE_MIME,
     content: Uint8Array = new Uint8Array(0),
+    driveId?: string,
   ): string {
     this.counter += 1
     const id = `id${String(this.counter)}`
@@ -50,6 +52,7 @@ export class FakeDrive {
       parents: [parent],
       modifiedTime: '2026-01-01T00:00:00Z',
       content,
+      ...(driveId === undefined ? {} : { driveId }),
     })
     return id
   }
@@ -73,6 +76,7 @@ export class FakeDrive {
       modifiedTime: item.modifiedTime,
       parents: [...item.parents],
       size: String(item.content.length),
+      ...(item.driveId === undefined ? {} : { driveId: item.driveId }),
     }
   }
 

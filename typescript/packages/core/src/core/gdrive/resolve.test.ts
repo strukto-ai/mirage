@@ -28,7 +28,17 @@ import {
   makeScopedGDriveAccessor,
   resetFakeDrive,
 } from './_test_util.ts'
-import { driveTargetName, queryCandidates, resolveDir, resolveKey } from './resolve.ts'
+import { PathSpec } from '../../types.ts'
+import { GoogleApiError } from '../google/_client.ts'
+import {
+  driveTargetName,
+  eaccesOnDenied,
+  queryCandidates,
+  resolveDir,
+  resolveKey,
+} from './resolve.ts'
+
+const FOLDER_MIME_TEST = 'application/vnd.google-apps.folder'
 
 const ENC = new TextEncoder()
 let fake: FakeDrive
@@ -106,5 +116,37 @@ describe('gdrive resolve with a folder scope', () => {
     const node = await resolveKey(scoped, 'f.txt')
     expect(node?.id).toBe(inner)
     expect(await resolveDir(scoped, '', '/')).toEqual([scope, null])
+  })
+})
+
+describe('gdrive resolve with a shared-drive scope', () => {
+  it('threads the root driveId and memoizes the lookup', async () => {
+    const scope = fake.add('team', 'root', FOLDER_MIME_TEST, new Uint8Array(0), 'd1')
+    const inner = fake.add('f.txt', scope, undefined, ENC.encode('in'), 'd1')
+    const scoped = makeScopedGDriveAccessor(scope)
+    expect(await resolveDir(scoped, '', '/')).toEqual([scope, 'd1'])
+    expect(await resolveDir(scoped, '', '/')).toEqual([scope, 'd1'])
+    const node = await resolveKey(scoped, 'f.txt')
+    expect(node?.id).toBe(inner)
+    expect(node?.driveId).toBe('d1')
+  })
+})
+
+describe('eaccesOnDenied', () => {
+  it('maps a 403 to EACCES on the operand, passes other errors through', async () => {
+    const spec = PathSpec.fromStrPath('/gd/a.txt')
+    const denied = eaccesOnDenied(async (_a: unknown, _p: PathSpec) => {
+      await Promise.resolve()
+      throw new GoogleApiError('denied', 403)
+    })
+    const serverError = eaccesOnDenied(async (_a: unknown, _p: PathSpec) => {
+      await Promise.resolve()
+      throw new GoogleApiError('boom', 500)
+    })
+    await expect(denied(null, spec)).rejects.toMatchObject({
+      code: 'EACCES',
+      message: expect.stringContaining('/gd/a.txt') as string,
+    })
+    await expect(serverError(null, spec)).rejects.toBeInstanceOf(GoogleApiError)
   })
 })

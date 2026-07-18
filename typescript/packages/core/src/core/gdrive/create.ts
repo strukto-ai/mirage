@@ -13,9 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { eaccesOnDenied } from './resolve.ts'
 import type { PathSpec } from '../../types.ts'
 import { write } from './write.ts'
 
-export async function create(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
+async function createImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
   await write(accessor, path, new Uint8Array(0))
 }
+
+export const create = eaccesOnDenied(createImpl)

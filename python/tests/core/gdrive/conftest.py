@@ -47,7 +47,8 @@ class FakeDrive:
             name: str,
             parent: str = "root",
             mime: str = FILE_MIME,
-            content: bytes = b"") -> str:
+            content: bytes = b"",
+            drive_id: str | None = None) -> str:
         item_id = f"id{next(self._ids)}"
         self.items[item_id] = {
             "id": item_id,
@@ -57,6 +58,8 @@ class FakeDrive:
             "modifiedTime": "2026-01-01T00:00:00Z",
             "content": content,
         }
+        if drive_id is not None:
+            self.items[item_id]["driveId"] = drive_id
         return item_id
 
     def folder(self, name: str, parent: str = "root") -> str:
@@ -161,7 +164,7 @@ class FakeDrive:
 
 
 _PATCH_TARGETS = {
-    resolve_mod: ("list_files", "list_shared_drives"),
+    resolve_mod: ("list_files", "list_shared_drives", "get_file"),
     readdir_mod: ("list_files", "list_shared_drives"),
     write_mod: ("update_file_content", "upload_file"),
     mkdir_mod: ("create_folder", ),

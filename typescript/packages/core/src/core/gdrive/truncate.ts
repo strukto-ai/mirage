@@ -16,10 +16,10 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir } from '../../utils/errors.ts'
 import { downloadFile } from '../google/drive.ts'
-import { isFolder, isNative, resolveKey } from './resolve.ts'
+import { eaccesOnDenied, isFolder, isNative, resolveKey } from './resolve.ts'
 import { write } from './write.ts'
 
-export async function truncate(
+async function truncateImpl(
   accessor: GDriveAccessor,
   path: PathSpec,
   length: number,
@@ -41,3 +41,5 @@ export async function truncate(
   }
   await write(accessor, path, out)
 }
+
+export const truncate = eaccesOnDenied(truncateImpl)

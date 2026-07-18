@@ -28,6 +28,7 @@ export interface Mount {
   bucket?: string
   prefix?: string
   root?: string
+  drive?: string
 }
 
 export interface Target {

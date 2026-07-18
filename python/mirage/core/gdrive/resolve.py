@@ -12,15 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 import logging
 import posixpath
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
+
+import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.google._client import TokenManager
-from mirage.core.google.drive import (FOLDER_MIME, MIME_TO_EXT, list_files,
-                                      list_shared_drives)
+from mirage.core.google.drive import (FOLDER_MIME, MIME_TO_EXT, get_file,
+                                      list_files, list_shared_drives)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -28,14 +32,56 @@ logger = logging.getLogger(__name__)
 
 SUFFIX_TO_MIME = {ext: mime for mime, ext in MIME_TO_EXT.items()}
 
+P = ParamSpec("P")
+T = TypeVar("T")
 
-def root_folder(token_manager: TokenManager) -> str:
-    """The mount's root folder ID: the configured scope or Drive's root.
+
+def eacces_on_denied(
+        fn: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
+    """Map a Drive HTTP 403 during a mutation to EACCES.
+
+    Drive access is per-item (shared-drive roles, folder-level grants),
+    so a write-mode mount can still hold items the user may not edit.
+    A denied mutation surfaces as Permission denied on the operand,
+    like a real filesystem, instead of a raw HTTP error.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        try:
+            return await fn(*args, **kwargs)
+        except aiohttp.ClientResponseError as exc:
+            if exc.status == 403:
+                spec = next((a for a in args if isinstance(a, PathSpec)), None)
+                raise PermissionError(
+                    spec.virtual if spec is not None else "") from exc
+            raise
+
+    return wrapper
+
+
+async def root_context(accessor: GDriveAccessor) -> tuple[str, str | None]:
+    """The mount root's (folder id, shared drive id).
+
+    An unscoped mount roots at My Drive. A ``folder_id`` scope may point
+    inside a Shared Drive (or be a Shared Drive id itself); its ``driveId``
+    is fetched once via ``files.get`` and memoized on the accessor, so every
+    listing and resolution under the root queries the right corpus.
 
     Args:
-        token_manager (TokenManager): OAuth2 token manager.
+        accessor (GDriveAccessor): backend accessor.
+
+    Returns:
+        tuple[str, str | None]: (root folder id, shared drive id or None).
     """
-    return token_manager.config.folder_id or "root"
+    token_manager = accessor.token_manager
+    folder_id = token_manager.config.folder_id
+    if not folder_id:
+        return "root", None
+    if not hasattr(accessor, "root_drive_id"):
+        item = await get_file(token_manager, folder_id)
+        accessor.root_drive_id = item.get("driveId")
+    return folder_id, accessor.root_drive_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,8 +202,7 @@ async def resolve_key(accessor: GDriveAccessor, key: str) -> DriveNode | None:
         key (str): mount-relative path ("a/b/c"); "" is the mount root.
     """
     token_manager = accessor.token_manager
-    parent_id = root_folder(token_manager)
-    drive_id: str | None = None
+    parent_id, drive_id = await root_context(accessor)
     node: DriveNode | None = None
     segments = [s for s in key.split("/") if s]
     for i, segment in enumerate(segments):
@@ -191,7 +236,7 @@ async def resolve_dir(accessor: GDriveAccessor, key: str,
         tuple[str, str | None]: (folder id, shared drive id or None).
     """
     if not key:
-        return root_folder(accessor.token_manager), None
+        return await root_context(accessor)
     node = await resolve_key(accessor, key)
     if node is None:
         raise enoent(virtual)

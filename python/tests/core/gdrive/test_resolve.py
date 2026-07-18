@@ -12,12 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import aiohttp
 import pytest
+from multidict import CIMultiDict, CIMultiDictProxy
+from yarl import URL
 
+import mirage.core.gdrive.resolve as resolve_mod
 from mirage.core.gdrive.resolve import (DriveNode, drive_target_name,
-                                        query_candidates, resolve_dir,
-                                        resolve_key, resolve_parent)
+                                        eacces_on_denied, query_candidates,
+                                        resolve_dir, resolve_key,
+                                        resolve_parent)
 from mirage.types import PathSpec
+
+FOLDER_MIME = "application/vnd.google-apps.folder"
 
 DOC_MIME = "application/vnd.google-apps.document"
 
@@ -113,3 +120,55 @@ async def test_resolve_scoped_to_folder(fake_drive, scoped_accessor):
     assert node is not None
     assert node.id == inner
     assert await resolve_dir(accessor, "", "/") == (scope, None)
+
+
+@pytest.mark.asyncio
+async def test_root_context_shared_drive_scope(fake_drive, scoped_accessor):
+    scope = fake_drive.add("team", mime=FOLDER_MIME, drive_id="d1")
+    inner = fake_drive.add("f.txt", parent=scope, drive_id="d1")
+    accessor = scoped_accessor(scope)
+    assert await resolve_dir(accessor, "", "/") == (scope, "d1")
+    node = await resolve_key(accessor, "f.txt")
+    assert node is not None
+    assert node.id == inner
+    assert node.drive_id == "d1"
+
+
+@pytest.mark.asyncio
+async def test_root_context_memoizes_drive_lookup(fake_drive, scoped_accessor,
+                                                  monkeypatch):
+    scope = fake_drive.add("team", mime=FOLDER_MIME, drive_id="d1")
+    accessor = scoped_accessor(scope)
+    calls = 0
+
+    async def counting_get_file(token_manager, file_id):
+        nonlocal calls
+        calls += 1
+        return await fake_drive.get_file(token_manager, file_id)
+
+    monkeypatch.setattr(resolve_mod, "get_file", counting_get_file)
+    assert await resolve_dir(accessor, "", "/") == (scope, "d1")
+    assert await resolve_dir(accessor, "", "/") == (scope, "d1")
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_eacces_on_denied_maps_403():
+    request_info = aiohttp.RequestInfo(url=URL("https://x"),
+                                       method="POST",
+                                       headers=CIMultiDictProxy(CIMultiDict()),
+                                       real_url=URL("https://x"))
+
+    @eacces_on_denied
+    async def denied(accessor, path: PathSpec) -> None:
+        raise aiohttp.ClientResponseError(request_info, (), status=403)
+
+    @eacces_on_denied
+    async def server_error(accessor, path: PathSpec) -> None:
+        raise aiohttp.ClientResponseError(request_info, (), status=500)
+
+    spec = PathSpec.from_str_path("/gd/a.txt", "a.txt")
+    with pytest.raises(PermissionError, match="/gd/a.txt"):
+        await denied(None, spec)
+    with pytest.raises(aiohttp.ClientResponseError):
+        await server_error(None, spec)

@@ -19,7 +19,14 @@ import { eisdir, enoent, enotdir } from '../../utils/errors.ts'
 import type { TokenManager } from '../google/_client.ts'
 import { FOLDER_MIME, copyFile, createFolder, deleteFile, listFiles } from '../google/drive.ts'
 import type { DriveNode } from './resolve.ts'
-import { driveTargetName, isFolder, nodeFromItem, resolveKey, resolveParent } from './resolve.ts'
+import {
+  driveTargetName,
+  eaccesOnDenied,
+  isFolder,
+  nodeFromItem,
+  resolveKey,
+  resolveParent,
+} from './resolve.ts'
 
 async function copyChildren(tm: TokenManager, src: DriveNode, dstFolderId: string): Promise<void> {
   const children = await listFiles(tm, { folderId: src.id, driveId: src.driveId })
@@ -34,7 +41,7 @@ async function copyChildren(tm: TokenManager, src: DriveNode, dstFolderId: strin
   }
 }
 
-export async function copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+async function copyImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
   const srcNode = await resolveKey(accessor, src.resourcePath)
   if (srcNode === null) throw enoent(src)
@@ -64,3 +71,5 @@ export async function copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpe
   }
   await invalidateAfterWrite(dst)
 }
+
+export const copy = eaccesOnDenied(copyImpl)

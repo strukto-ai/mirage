@@ -18,7 +18,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
-import { rootFolder } from './resolve.ts'
+import { rootContext } from './resolve.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export const DIRECTORY_RESOURCE_TYPES: ReadonlySet<string> = new Set([
@@ -76,7 +76,7 @@ export async function readdir(
   let folderId: string
   let driveId: string | null = null
   if (key === '') {
-    folderId = rootFolder(accessor.tokenManager)
+    ;[folderId, driveId] = await rootContext(accessor)
   } else {
     if (index === undefined) {
       const e = new Error(`ENOENT: ${path.virtual}`) as Error & { code: string }

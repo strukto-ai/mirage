@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.gdrive.write import write_bytes
 from mirage.types import PathSpec
 
 
+@eacces_on_denied
 async def create(accessor: GDriveAccessor, path: PathSpec) -> None:
     await write_bytes(accessor, path, b"")
