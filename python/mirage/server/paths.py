@@ -18,7 +18,7 @@ from pathlib import Path
 
 from mirage.server.daemon_config import read_daemon_table
 from mirage.server.env import (ENV_HOME, ENV_PID_FILE, ENV_SNAPSHOT_ROOT,
-                               ENV_VERSION_ROOT)
+                               ENV_STATE_ROOT, ENV_VERSION_ROOT)
 
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -90,6 +90,31 @@ def version_root_path(explicit: str | Path | None = None) -> Path:
     if from_config:
         return _absolute(from_config)
     return home / "repos"
+
+
+def state_root_path(explicit: str | Path | None = None) -> Path:
+    """Resolve the live-state (disk store) root.
+
+    Priority: ``explicit`` argument, then ``$MIRAGE_STATE_ROOT``, then the
+    ``state_root`` key in ``config.toml`` ``[daemon]``, then ``state``
+    under :func:`mirage_home`.
+
+    Args:
+        explicit (str | Path | None): caller-supplied override.
+
+    Returns:
+        Path: the resolved absolute state root.
+    """
+    if explicit is not None:
+        return _absolute(explicit)
+    override = os.environ.get(ENV_STATE_ROOT)
+    if override:
+        return _absolute(override)
+    home = mirage_home()
+    from_config = read_daemon_table(home).get("state_root")
+    if from_config:
+        return _absolute(from_config)
+    return home / "state"
 
 
 def snapshot_root_path(explicit: str | Path | None = None) -> Path:

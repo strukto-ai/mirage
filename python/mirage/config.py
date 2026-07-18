@@ -29,7 +29,10 @@ from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
                                           validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 from mirage.workspace.mount.spec import Mount
-from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
+from mirage.workspace.store import (DEFAULT_STATE_ROOT,
+                                    DiskWorkspaceStateStore,
+                                    RAMWorkspaceStateStore,
+                                    WorkspaceStateStore)
 
 try:
     from mirage.workspace.store import RedisWorkspaceStateStore
@@ -158,6 +161,13 @@ class RamStoreBlock(BaseModel):
     type: Literal["ram"] = "ram"
 
 
+class DiskStoreBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["disk"]
+    root: str = DEFAULT_STATE_ROOT
+
+
 class RedisStoreBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,7 +188,7 @@ class S3StoreBlock(S3Config):
 
 
 StoreGroupBlock = Annotated[
-    RamStoreBlock | RedisStoreBlock | S3StoreBlock,
+    RamStoreBlock | DiskStoreBlock | RedisStoreBlock | S3StoreBlock,
     Field(discriminator="type"),
 ]
 
@@ -195,14 +205,17 @@ class StoreBlock(BaseModel):
     the session table it points into), so there is one `workspace`
     override, not two. An ``s3`` group hosts only the sessions+meta
     group (conditional-PUT CAS), so it is valid as the ``workspace``
-    override, never as the top-level default.
+    override, never as the top-level default. A ``disk`` store hosts
+    all planes under ``root`` (lockfile CAS, machine-local); ``root``
+    is only read when a disk store is selected.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["ram", "redis"] = "ram"
+    type: Literal["ram", "disk", "redis"] = "ram"
     url: str = "redis://localhost:6379/0"
     key_prefix: str = "mirage:"
+    root: str = DEFAULT_STATE_ROOT
     namespace: StoreGroupBlock | None = None
     observer: StoreGroupBlock | None = None
     workspace: StoreGroupBlock | None = None
@@ -382,8 +395,10 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
 
 
 def _build_store_group(
-    block: RamStoreBlock | RedisStoreBlock | S3StoreBlock
+    block: RamStoreBlock | DiskStoreBlock | RedisStoreBlock | S3StoreBlock
 ) -> WorkspaceStateStore:
+    if isinstance(block, DiskStoreBlock):
+        return DiskWorkspaceStateStore(root=block.root)
     if isinstance(block, RedisStoreBlock):
         if RedisWorkspaceStateStore is None:
             raise ImportError("A redis store requires the 'redis' extra. "
@@ -414,6 +429,11 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
                                         namespace=namespace,
                                         observer=observer,
                                         workspace=workspace)
+    if block.type == "disk":
+        return DiskWorkspaceStateStore(root=block.root,
+                                       namespace=namespace,
+                                       observer=observer,
+                                       workspace=workspace)
     return RAMWorkspaceStateStore(namespace=namespace,
                                   observer=observer,
                                   workspace=workspace)

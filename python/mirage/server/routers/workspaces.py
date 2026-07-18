@@ -23,6 +23,7 @@ from mirage.server.paths import PathOutsideRootError, resolve_within_root
 from mirage.server.summary import make_brief, make_detail
 from mirage.utils.ids import new_workspace_id
 from mirage.workspace.snapshot.utils import norm_mount_prefix
+from mirage.workspace.store import DiskWorkspaceStateStore
 
 from mirage.server.schemas import (  # isort: skip
     CloneWorkspaceRequest, CreateWorkspaceRequest, DeleteWorkspaceResponse,
@@ -45,6 +46,13 @@ async def create_workspace(req: CreateWorkspaceRequest,
     # config's workspace_id, then a fresh mint.
     wid = req.id or kwargs.get("workspace_id") or new_workspace_id()
     kwargs["workspace_id"] = wid
+    # Daemon default is disk (a created workspace survives restart with
+    # zero infrastructure, like git init); the library default stays ram.
+    # A config with an explicit store: block always wins.
+    if "store" not in kwargs:
+        kwargs["store"] = DiskWorkspaceStateStore(
+            str(request.app.state.state_root))
+        kwargs["owns_store"] = True
     try:
         ws = Workspace(**kwargs)
     except (FileNotFoundError, ImportError, ValueError) as e:
