@@ -16,25 +16,20 @@ import type { GoogleApiAccessor } from '../../../accessor/google_api.ts'
 import { invalidateAfterWrite } from '../../../cache/context.ts'
 import type { TokenManager } from '../../../core/google/_client.ts'
 import {
-  docsBase,
-  driveBase,
   googleDelete,
   googleGet,
   googleGetBytes,
   googlePatch,
   googlePost,
-  sheetsBase,
-  slidesBase,
 } from '../../../core/google/_client.ts'
 import { IOResult } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import {
   command,
   type CommandFnResult,
   type CommandOpts,
   type RegisteredCommand,
 } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
 import type { GwsMethod, GwsService } from './methods.ts'
 import {
   GWS_API_SPEC,
