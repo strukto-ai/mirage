@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
-from mirage.runtime.route import LineRouting
+from mirage.runtime.route import RoutingDecision
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError
@@ -112,7 +112,7 @@ async def execute_node(
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    line_routing: LineRouting | None = None,
+    routing_decision: RoutingDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
@@ -141,7 +141,7 @@ async def execute_node(
                       execute_fn,
                       agent_id,
                       cancel=cancel,
-                      line_routing=line_routing)
+                      routing_decision=routing_decision)
 
     kind = node_kind(node)
 
@@ -166,7 +166,7 @@ async def execute_node(
                                      cs,
                                      job_table,
                                      cancel=cancel,
-                                     line_routing=line_routing)
+                                     routing_decision=routing_decision)
 
     # ── pipeline ────────────────────────────────
     if kind == NodeKind.PIPELINE:

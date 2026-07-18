@@ -14,9 +14,9 @@
 
 
 class RoutingDecisionError(ValueError):
-    """A pin, route, or script could not decide the line.
+    """The runtime argument, route, or a script could not decide the line.
 
-    Raised for caller-fixable routing mistakes (unknown pin name, a
+    Raised for caller-fixable routing mistakes (unknown runtime name, a
     script that does not parse, a missing monty extra) so execute()
     propagates them loud instead of folding them into the line's
     IOResult like a command failure.

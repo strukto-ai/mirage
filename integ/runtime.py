@@ -290,26 +290,27 @@ async def main() -> None:
         print(await result.stdout_str(), end="")
         await ws_monty.close()
 
-        # Per-line pin: the world binds python3 to monty (first
-        # capturer), a pinned line reroutes its captured stages to
-        # local for that line only. `import sys` fails on monty, so
-        # the pinned output proves the rebind; the follow-up line
-        # proves the pin does not leak past its line.
-        ws_pin = Workspace({"/ram": RAMResource()},
+        # Explicit runtime argument: the world binds python3 to monty
+        # (first capturer), a line run with runtime="local" reroutes
+        # its captured stages to local for that line only. `import sys`
+        # fails on monty, so the routed output proves the rebind; the
+        # follow-up line proves the argument does not leak past its
+        # line.
+        ws_arg = Workspace({"/ram": RAMResource()},
                            mode=MountMode.EXEC,
                            runtimes=["monty", "local", "vfs"])
-        result = await ws_pin.execute('python3 -c "print(argv[0])"')
-        print("=== pin_static_monty ===")
+        result = await ws_arg.execute('python3 -c "print(argv[0])"')
+        print("=== runtime_arg_static_monty ===")
         print(await result.stdout_str(), end="")
-        result = await ws_pin.execute(
-            "python3 -c \"import sys; print('pinned-to-local')\"",
+        result = await ws_arg.execute(
+            "python3 -c \"import sys; print('routed-to-local')\"",
             runtime="local")
-        print("=== pin_line_local ===")
+        print("=== runtime_arg_line_local ===")
         print(await result.stdout_str(), end="")
-        result = await ws_pin.execute('python3 -c "print(argv[0])"')
-        print("=== pin_does_not_leak ===")
+        result = await ws_arg.execute('python3 -c "print(argv[0])"')
+        print("=== runtime_arg_does_not_leak ===")
         print(await result.stdout_str(), end="")
-        await ws_pin.close()
+        await ws_arg.close()
 
         # Routing ladder: monty's entry script refuses lines carrying a
         # use-local marker, so those fall to the next capturer (local,
@@ -361,20 +362,20 @@ async def main() -> None:
         print(await result.stdout_str(), end="")
         await ws_groute.close()
 
-        # add_runtime: a pin can only name a workspace entry, so it
-        # fails loud until the entry is added at runtime.
+        # add_runtime: the runtime argument can only name a workspace
+        # entry, so it fails loud until the entry is added at runtime.
         ws_add = Workspace({"/ram": RAMResource()},
                            mode=MountMode.EXEC,
                            runtimes=["monty", "vfs"])
         try:
             await ws_add.execute('python3 -c "x"', runtime="local")
         except ValueError:
-            print("=== add_runtime_pin_before ===")
-            print("unknown-pin-rejected")
+            print("=== add_runtime_arg_before ===")
+            print("unknown-runtime-rejected")
         ws_add.add_runtime("local")
         result = await ws_add.execute(
             "python3 -c \"import sys; print('added-local')\"", runtime="local")
-        print("=== add_runtime_pin_after ===")
+        print("=== add_runtime_arg_after ===")
         print(await result.stdout_str(), end="")
         await ws_add.close()
 

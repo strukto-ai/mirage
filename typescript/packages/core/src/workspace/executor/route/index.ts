@@ -15,4 +15,4 @@
 export { decideLine } from './decide.ts'
 export { RoutingDecisionError } from './errors.ts'
 export { commandFacts } from './facts.ts'
-export type { CommandFacts, LineRouting, RouteContext, RouteFn, RouteScript } from './types.ts'
+export type { CommandFacts, RoutingDecision, RouteContext, RouteFn, RouteScript } from './types.ts'

@@ -124,18 +124,18 @@ export const PYTHON_ONLY_HINTS: Record<string, string> = {
 }
 
 /**
- * Resolve a per-line pin name into a binding override map.
+ * Resolve an explicit runtime name into a binding override map.
  *
- * A pin places a line's captured stages on the named runtime without
+ * Naming a runtime places a line's captured stages on it without
  * touching capability: only commands the runtime captures rebind,
  * everything else keeps its normal binding.
  */
-export function pinBindings(
+export function runtimeBindingsFor(
   entries: readonly RuntimeEntry[],
   name: string,
 ): Record<string, Runtime> {
   if (name === VFS_ENTRY) {
-    throw new Error(`'${VFS_ENTRY}' is the default executor, not a pinnable runtime`)
+    throw new Error(`'${VFS_ENTRY}' is the default executor, not a runtime you can select`)
   }
   for (const entry of entries) {
     if (typeof entry !== 'string' && entry.name === name) {
@@ -145,7 +145,7 @@ export function pinBindings(
     }
   }
   const known = entries.map((e) => `'${typeof e === 'string' ? e : e.name}'`).join(', ')
-  throw new Error(`unknown runtime pin: '${name}' (workspace runtimes: ${known})`)
+  throw new Error(`unknown runtime: '${name}' (workspace runtimes: ${known})`)
 }
 
 /**

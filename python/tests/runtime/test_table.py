@@ -19,7 +19,7 @@ from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.python import LocalRuntime, MontyRuntime, WasiRuntime
 from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VFS_ENTRY,
                                   bind_commands, build_runtime, candidates,
-                                  pin_bindings)
+                                  runtime_bindings_for)
 
 
 class FakeRuntime(Runtime):
@@ -80,17 +80,17 @@ def test_every_runtime_declares_captures():
         assert cls.captures
 
 
-def test_pin_bindings_maps_only_the_pinned_captures():
+def test_runtime_bindings_for_maps_only_the_named_captures():
     fake = FakeRuntime()
-    bindings = pin_bindings([fake, VFS_ENTRY], "fake")
+    bindings = runtime_bindings_for([fake, VFS_ENTRY], "fake")
     assert bindings == {"python3": fake, "made-up": fake}
 
 
-def test_pin_bindings_rejects_vfs():
-    with pytest.raises(ValueError, match="not a pinnable runtime"):
-        pin_bindings([FakeRuntime(), VFS_ENTRY], VFS_ENTRY)
+def test_runtime_bindings_for_rejects_vfs():
+    with pytest.raises(ValueError, match="not a runtime you can select"):
+        runtime_bindings_for([FakeRuntime(), VFS_ENTRY], VFS_ENTRY)
 
 
-def test_pin_bindings_unknown_name_lists_entries():
+def test_runtime_bindings_for_unknown_name_lists_entries():
     with pytest.raises(ValueError, match="'fake', 'vfs'"):
-        pin_bindings([FakeRuntime(), VFS_ENTRY], "nope")
+        runtime_bindings_for([FakeRuntime(), VFS_ENTRY], "nope")

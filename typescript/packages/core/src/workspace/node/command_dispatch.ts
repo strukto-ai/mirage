@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../executor/runtime.ts'
-import type { LineRouting } from '../executor/route/index.ts'
+import type { RoutingDecision } from '../executor/route/index.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -141,7 +141,7 @@ export async function executeCommand(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  lineRouting?: LineRouting,
+  routingDecision?: RoutingDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -202,7 +202,7 @@ export async function executeCommand(
       ensureOpen,
       unmount,
       runtimeBindings,
-      lineRouting,
+      routingDecision,
       signal,
     )
   } finally {
@@ -238,7 +238,7 @@ async function runCommandBody(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  lineRouting?: LineRouting,
+  routingDecision?: RoutingDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
@@ -312,7 +312,7 @@ async function runCommandBody(
       ensureOpen,
       unmount,
       runtimeBindings,
-      lineRouting,
+      routingDecision,
       signal,
     ),
     timeout,
@@ -339,7 +339,7 @@ async function runArgv(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  lineRouting?: LineRouting,
+  routingDecision?: RoutingDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
@@ -592,7 +592,7 @@ async function runArgv(
     unmount,
     runtimeBindings,
     namespace,
-    lineRouting,
+    routingDecision,
   )
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {

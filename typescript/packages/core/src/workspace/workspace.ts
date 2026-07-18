@@ -65,13 +65,13 @@ import {
   commandFacts,
   decideLine,
   RoutingDecisionError,
-  type LineRouting,
+  type RoutingDecision,
   type RouteContext,
   type RouteFn,
 } from './executor/route/index.ts'
 import {
   bindCommands,
-  pinBindings,
+  runtimeBindingsFor,
   DEFAULT_ENTRIES,
   VFS_ENTRY,
   type Runtime,
@@ -152,8 +152,8 @@ export interface WorkspaceOptions {
    * Global route script for the routing ladder: a function taking the
    * RouteContext (or monty source whose last expression is the
    * verdict) naming the runtime for a line, or null to fall to the
-   * entries' own scripts. Ladder: pin > route > scripts by list order
-   * > admission failure (exit 126).
+   * entries' own scripts. Ladder: the runtime argument > route >
+   * scripts by list order > admission failure (exit 126).
    */
   route?: RouteFn
 }
@@ -218,18 +218,18 @@ export interface ExecuteOptions {
    */
   env?: Record<string, string>
   /**
-   * Per-line runtime pin, naming a workspace runtime entry. Stages the
-   * pinned runtime captures rebind to it for this line only (nested
-   * evals inherit the pin); everything else keeps its normal binding,
-   * so a pin overrides policy, never capability. Throws for a name
-   * that is not a workspace entry.
+   * Explicit runtime for this line, naming a workspace runtime entry.
+   * Stages the named runtime captures rebind to it for this line only
+   * (nested evals inherit it); everything else keeps its normal
+   * binding, so the argument overrides policy, never capability.
+   * Throws for a name that is not a workspace entry.
    */
   runtime?: string
   /**
    * @internal The typed line's routing decision, forwarded to nested
    * evals so inner lines never re-route.
    */
-  lineRouting?: LineRouting
+  routingDecision?: RoutingDecision
 }
 
 export class Workspace {
@@ -456,21 +456,22 @@ export class Workspace {
   }
 
   /**
-   * The routing ladder for one typed line: pin, route, scripts.
-   * Returns null when nothing decides (no pin, no policy configured)
+   * The routing ladder for one typed line: runtime, route, scripts.
+   * Returns null when nothing decides (no runtime argument, no policy
+   * configured)
    * so dispatch falls to the static bindings; a nested eval inherits
    * the typed line's decision and never re-routes.
    */
-  private async resolveLineRouting(
+  private async resolveRoutingDecision(
     root: TSNodeLike,
     command: string,
     options: ExecuteOptions,
-  ): Promise<LineRouting | null> {
-    if (options.lineRouting !== undefined) return options.lineRouting
+  ): Promise<RoutingDecision | null> {
+    if (options.routingDecision !== undefined) return options.routingDecision
     if (options.runtime !== undefined) {
       let overlay: Record<string, Runtime>
       try {
-        overlay = pinBindings(this.runtimeEntries, options.runtime)
+        overlay = runtimeBindingsFor(this.runtimeEntries, options.runtime)
       } catch (caught) {
         throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
           cause: caught,
@@ -1052,7 +1053,7 @@ export class Workspace {
       return new ExecuteResult(new Uint8Array(), err, 2)
     }
     const rootNode = root as unknown as TSNodeLike
-    const lineRouting = await this.resolveLineRouting(rootNode, command, options)
+    const routingDecision = await this.resolveRoutingDecision(rootNode, command, options)
 
     const dispatch: DispatchFn = this.dispatcher.dispatch
 
@@ -1064,8 +1065,8 @@ export class Workspace {
       const innerOpts: ExecuteOptions & { provision?: false } = { record: false }
       if (options.signal !== undefined) innerOpts.signal = options.signal
       // Nested lines never re-route: the evaluator's inner lines keep
-      // the typed line's decision (pin, route, or scripts).
-      if (lineRouting !== null) innerOpts.lineRouting = lineRouting
+      // the typed line's decision (runtime argument, route, or scripts).
+      if (routingDecision !== null) innerOpts.routingDecision = routingDecision
       const res = await this.execute(cmd, innerOpts)
       return new IOResult({
         exitCode: res.exitCode,
@@ -1096,7 +1097,7 @@ export class Workspace {
       ensureOpen,
       unmount: (prefix: string) => this.unmount(prefix),
       runtimeBindings: this.runtimeBindings,
-      ...(lineRouting !== null ? { lineRouting } : {}),
+      ...(routingDecision !== null ? { routingDecision } : {}),
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     }
     const targetSessionId = options.sessionId ?? this.sessionManager.defaultId

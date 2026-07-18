@@ -104,18 +104,18 @@ def build_runtime(name: str, **options: Any) -> Runtime:
     return cls(**options)
 
 
-def pin_bindings(entries: list[Runtime | str],
-                 name: str) -> dict[str, Runtime]:
-    """Resolve a per-line pin name into a binding override map.
+def runtime_bindings_for(entries: list[Runtime | str],
+                         name: str) -> dict[str, Runtime]:
+    """Resolve an explicit runtime name into a binding override map.
 
-    A pin places a line's captured stages on the named runtime without
+    Naming a runtime places a line's captured stages on it without
     touching capability: only commands the runtime captures rebind,
     everything else keeps its normal binding.
 
     Args:
         entries (list[Runtime | str]): the workspace's ordered runtime
             world.
-        name (str): the runtime entry name to pin.
+        name (str): the workspace runtime entry to bind to.
 
     Raises:
         ValueError: the name is the vfs marker or not a workspace
@@ -123,13 +123,13 @@ def pin_bindings(entries: list[Runtime | str],
     """
     if name == VFS_ENTRY:
         raise ValueError(
-            "'vfs' is the default executor, not a pinnable runtime")
+            "'vfs' is the default executor, not a runtime you can select")
     for entry in entries:
         if not isinstance(entry, str) and entry.name == name:
             return {command: entry for command in entry.captures}
     known = ", ".join(
         repr(e if isinstance(e, str) else e.name) for e in entries)
-    raise ValueError(f"unknown runtime pin: {name!r} "
+    raise ValueError(f"unknown runtime: {name!r} "
                      f"(workspace runtimes: {known})")
 
 

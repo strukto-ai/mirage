@@ -54,11 +54,11 @@ written-by-open
 ['alpha', 'beta']
 === py3_monty_runtime_argv ===
 ['alpha', 'beta']
-=== pin_static_monty ===
+=== runtime_arg_static_monty ===
 main.py
-=== pin_line_local ===
-pinned-to-local
-=== pin_does_not_leak ===
+=== runtime_arg_line_local ===
+routed-to-local
+=== runtime_arg_does_not_leak ===
 main.py
 === route_script_monty ===
 main.py
@@ -75,9 +75,9 @@ main.py
 === global_route_named ===
 went-local
 go-local
-=== add_runtime_pin_before ===
-unknown-pin-rejected
-=== add_runtime_pin_after ===
+=== add_runtime_arg_before ===
+unknown-runtime-rejected
+=== add_runtime_arg_after ===
 added-local
 === py3_safeguard_timeout ===
 exit_code=124

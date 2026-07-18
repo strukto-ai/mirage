@@ -44,11 +44,11 @@ from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
-from mirage.runtime.route import (LineRouting, RouteContext, RouteFn,
+from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
 from mirage.runtime.table import (DEFAULT_ENTRIES, VFS_ENTRY, bind_commands,
-                                  build_runtime, pin_bindings)
+                                  build_runtime, runtime_bindings_for)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -458,21 +458,22 @@ class Workspace:
         self._registry.runtime_bindings = bindings
         return entry
 
-    async def _resolve_line_routing(
-            self, ast: Any, command: str, pin: str | None, provision: bool,
+    async def _resolve_routing_decision(
+            self, ast: Any, command: str, runtime: str | None, provision: bool,
             session: Session, session_id: str,
-            inherited: LineRouting | None) -> LineRouting | None:
-        """The routing ladder for one typed line: pin, route, scripts.
+            inherited: RoutingDecision | None) -> RoutingDecision | None:
+        """The routing ladder for one typed line: runtime, route, scripts.
 
-        Returns None when nothing decides (no pin, no policy
-        configured) so dispatch falls to the static bindings. A nested
-        eval passes its typed line's decision as ``inherited`` and
-        keeps it: nested lines never re-route. Provision never routes.
+        Returns None when nothing decides (no runtime argument, no
+        policy configured) so dispatch falls to the static bindings. A
+        nested eval passes its typed line's decision as ``inherited``
+        and keeps it: nested lines never re-route. Provision never
+        routes.
 
         Args:
             ast: the parsed tree-sitter root node.
             command: the raw command line.
-            pin: the execute() runtime pin, top of the ladder.
+            runtime: the execute() runtime argument, top of the ladder.
             provision: whether this is a provision run.
             session: the effective session (cwd, env).
             session_id: session hosting the line.
@@ -480,12 +481,12 @@ class Workspace:
         """
         if inherited is not None:
             return inherited
-        if pin is not None:
+        if runtime is not None:
             try:
-                overlay = pin_bindings(self._runtime_entries, pin)
+                overlay = runtime_bindings_for(self._runtime_entries, runtime)
             except ValueError as exc:
                 raise RoutingDecisionError(str(exc)) from exc
-            return LineRouting(bindings={
+            return RoutingDecision(bindings={
                 **self._registry.runtime_bindings,
                 **overlay
             })
@@ -964,8 +965,8 @@ class Workspace:
         return IOResult()
 
     async def _exec_recursion(self, cancel: asyncio.Event | None,
-                              line_routing: "LineRouting | None", cmd: str,
-                              **opts: Any) -> Any:
+                              routing_decision: "RoutingDecision | None",
+                              cmd: str, **opts: Any) -> Any:
         # The executor's internal eval ($(), source, eval, xargs, ...):
         # never a typed line, so it must not record a history entry or
         # open its own recording context (GNU: history is appended by
@@ -975,22 +976,23 @@ class Workspace:
         return await self.execute(cmd,
                                   cancel=cancel,
                                   record=False,
-                                  line_routing=line_routing,
+                                  routing_decision=routing_decision,
                                   **opts)
 
     @overload
-    async def execute(self,
-                      command: str,
-                      session_id: str | None = ...,
-                      stdin: ByteSource | None = ...,
-                      provision: Literal[False] = ...,
-                      agent_id: str | None = ...,
-                      cwd: str | None = ...,
-                      env: dict[str, str] | None = ...,
-                      cancel: asyncio.Event | None = ...,
-                      record: bool = ...,
-                      runtime: str | None = ...,
-                      line_routing: "LineRouting | None" = ...) -> IOResult:
+    async def execute(
+            self,
+            command: str,
+            session_id: str | None = ...,
+            stdin: ByteSource | None = ...,
+            provision: Literal[False] = ...,
+            agent_id: str | None = ...,
+            cwd: str | None = ...,
+            env: dict[str, str] | None = ...,
+            cancel: asyncio.Event | None = ...,
+            record: bool = ...,
+            runtime: str | None = ...,
+            routing_decision: "RoutingDecision | None" = ...) -> IOResult:
         ...
 
     @overload
@@ -1007,7 +1009,8 @@ class Workspace:
             cancel: asyncio.Event | None = ...,
             record: bool = ...,
             runtime: str | None = ...,
-            line_routing: "LineRouting | None" = ...) -> ProvisionResult:
+            routing_decision: "RoutingDecision | None" = ...
+    ) -> ProvisionResult:
         ...
 
     async def execute(
@@ -1022,7 +1025,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        line_routing: LineRouting | None = None,
+        routing_decision: RoutingDecision | None = None,
     ) -> IOResult | ProvisionResult:
         """Execute a shell command in the workspace.
 
@@ -1050,13 +1053,13 @@ class Workspace:
                 internal evaluations and available to SDK callers that
                 need an unrecorded run. Nested lines inherit the typed
                 line's routing decision and never re-route.
-            runtime: Per-line runtime pin, naming a workspace runtime
-                entry. Stages the pinned runtime captures rebind to it
-                for this line only (nested evals inherit the pin);
-                everything else keeps its normal binding, so a pin
-                overrides policy, never capability. Raises ValueError
-                for a name that is not a workspace entry.
-            line_routing: Internal. The typed line's routing decision,
+            runtime: Explicit runtime for this line, naming a workspace
+                runtime entry. Stages the named runtime captures rebind
+                to it for this line only (nested evals inherit it);
+                everything else keeps its normal binding, so the
+                argument overrides policy, never capability. Raises
+                ValueError for a name that is not a workspace entry.
+            routing_decision: Internal. The typed line's routing decision,
                 forwarded by the executor's nested evals so inner
                 lines never re-route.
         """
@@ -1093,12 +1096,10 @@ class Workspace:
         session_token = set_current_session(effective_session)
         try:
             ast = parse(command)
-            routing = await self._resolve_line_routing(ast, command, runtime,
-                                                       provision,
-                                                       effective_session,
-                                                       session_id,
-                                                       line_routing)
-            exec_recursion = partial(self._exec_recursion, cancel, routing)
+            decision = await self._resolve_routing_decision(
+                ast, command, runtime, provision, effective_session,
+                session_id, routing_decision)
+            exec_recursion = partial(self._exec_recursion, cancel, decision)
             offending = find_syntax_error(ast)
             if offending is not None:
                 snippet = offending.strip()[:40]
@@ -1129,7 +1130,7 @@ class Workspace:
                 effective_session,
                 stdin,
                 cancel,
-                line_routing=routing,
+                routing_decision=decision,
             )
             session.last_exit_code = io.exit_code
             await self.apply_io(io, records=scope.records)

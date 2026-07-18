@@ -39,7 +39,7 @@ export type RouteScript = ((ctx: RouteContext) => boolean | Promise<boolean>) | 
 export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | null>) | string
 
 /** The one-line placement decision the dispatcher consults. */
-export interface LineRouting {
+export interface RoutingDecision {
   /** Command -> runtime for this line. */
   bindings: Record<string, Runtime>
   /**

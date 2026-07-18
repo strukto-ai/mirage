@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * A pin, route, or script could not decide the line. Caller-fixable
- * routing mistakes (unknown pin name, a script that does not parse, a
+ * The runtime argument, route, or a script could not decide the line.
+ * Caller-fixable routing mistakes (unknown runtime name, a script that does not parse, a
  * missing monty package) propagate loud instead of folding into the
  * line's IOResult like a command failure.
  */

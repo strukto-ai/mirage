@@ -113,7 +113,7 @@ RouteFn = Callable[[RouteContext], str | None | Awaitable[str | None]] | str
 
 
 @dataclass(frozen=True, slots=True)
-class LineRouting:
+class RoutingDecision:
     """The one-line placement decision the dispatcher consults.
 
     Args:

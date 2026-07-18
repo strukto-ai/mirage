@@ -32,7 +32,7 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
-from mirage.runtime.route import LineRouting
+from mirage.runtime.route import RoutingDecision
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -143,8 +143,8 @@ def _check_mount_root_guard_raw(
 
 
 def _line_runtime(
-        cmd_name: str, registry: MountRegistry,
-        routing: LineRouting | None) -> tuple[Runtime | None, IOResult | None]:
+        cmd_name: str, registry: MountRegistry, routing: RoutingDecision | None
+) -> tuple[Runtime | None, IOResult | None]:
     """Resolve a command against the line's routing decision.
 
     With no decision, the workspace's static bindings apply. With one,
@@ -156,7 +156,7 @@ def _line_runtime(
     Args:
         cmd_name (str): the command being dispatched.
         registry (MountRegistry): registry holding static bindings.
-        routing (LineRouting | None): the typed line's decision.
+        routing (RoutingDecision | None): the typed line's decision.
     """
     if routing is None:
         return registry.runtime_bindings.get(cmd_name), None
@@ -203,7 +203,7 @@ async def run_on_mount(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
-    line_routing: LineRouting | None = None,
+    routing_decision: RoutingDecision | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
@@ -258,7 +258,7 @@ async def run_on_mount(
     stat_overlay = (functools.partial(_namespace_stat_overlay, namespace)
                     if cmd_name == "ls" and namespace is not None else None)
 
-    line_runtime, denial = _line_runtime(cmd_name, registry, line_routing)
+    line_runtime, denial = _line_runtime(cmd_name, registry, routing_decision)
     if denial is not None:
         return None, denial
 
@@ -463,7 +463,7 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
-    line_routing: LineRouting | None = None,
+    routing_decision: RoutingDecision | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
@@ -595,7 +595,7 @@ async def handle_command(
                                        session,
                                        dispatch,
                                        namespace,
-                                       line_routing=line_routing)
+                                       routing_decision=routing_decision)
         stdout, io = await handle_cross_mount(cmd_name,
                                               path_scopes,
                                               cross_texts,
@@ -713,7 +713,7 @@ async def handle_command(
                                     flag_kwargs,
                                     stdin=stdin,
                                     mount=mount,
-                                    line_routing=line_routing)
+                                    routing_decision=routing_decision)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""

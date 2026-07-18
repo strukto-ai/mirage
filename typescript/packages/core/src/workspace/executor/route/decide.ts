@@ -14,9 +14,15 @@
 
 import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
 import { evalMontyValue } from '../python/runtimes/monty.ts'
-import { bindCommands, pinBindings, VfsEntry, type Runtime, type RuntimeEntry } from '../runtime.ts'
+import {
+  bindCommands,
+  runtimeBindingsFor,
+  VfsEntry,
+  type Runtime,
+  type RuntimeEntry,
+} from '../runtime.ts'
 import { RoutingDecisionError } from './errors.ts'
-import type { LineRouting, RouteContext, RouteFn, RouteScript } from './types.ts'
+import type { RoutingDecision, RouteContext, RouteFn, RouteScript } from './types.ts'
 
 function ctxPayload(ctx: RouteContext, runtime?: Runtime): Record<string, unknown> {
   const payload: Record<string, unknown> = {
@@ -100,13 +106,13 @@ export async function decideLine(
   ctx: RouteContext,
   staticBindings: Record<string, Runtime>,
   bridge: BridgeDispatchFn | null,
-): Promise<LineRouting> {
+): Promise<RoutingDecision> {
   if (route !== null) {
     const name = await evaluateRoute(route, ctx, bridge)
     if (name !== null) {
       let overlay: Record<string, Runtime>
       try {
-        overlay = pinBindings(entries, name)
+        overlay = runtimeBindingsFor(entries, name)
       } catch (caught) {
         throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
           cause: caught,

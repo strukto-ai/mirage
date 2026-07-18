@@ -63,7 +63,7 @@ vfs-open
 fine
 === lockdown_deny ===
 exit_code=126
-=== add_runtime_pin_before ===
-unknown-pin-rejected
-=== add_runtime_pin_after ===
+=== add_runtime_arg_before ===
+unknown-runtime-rejected
+=== add_runtime_arg_after ===
 42

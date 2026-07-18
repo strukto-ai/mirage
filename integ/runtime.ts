@@ -303,8 +303,8 @@ async function main(): Promise<void> {
   await runError(wsLock, "lockdown_deny", "cat /ram/secret.txt");
   await wsLock.close();
 
-  // addRuntime: a pin can only name a workspace entry, so it fails
-  // loud until the entry is added at runtime.
+  // addRuntime: the runtime argument can only name a workspace entry,
+  // so it fails loud until the entry is added at runtime.
   const wsAdd = new Workspace(
     { "/ram": new RAMResource() },
     { mode: MountMode.EXEC, runtimes: ["quickjs", "vfs"] },
@@ -312,12 +312,12 @@ async function main(): Promise<void> {
   try {
     await wsAdd.execute('python3 -c "x"', { runtime: "monty" });
   } catch {
-    console.log("=== add_runtime_pin_before ===");
-    console.log("unknown-pin-rejected");
+    console.log("=== add_runtime_arg_before ===");
+    console.log("unknown-runtime-rejected");
   }
   wsAdd.addRuntime("monty");
   const added = await wsAdd.execute('python3 -c "print(40 + 2)"', { runtime: "monty" });
-  console.log("=== add_runtime_pin_after ===");
+  console.log("=== add_runtime_arg_after ===");
   process.stdout.write(DEC.decode(added.stdout));
   await wsAdd.close();
   await ws.close();

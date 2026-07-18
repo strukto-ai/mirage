@@ -19,9 +19,9 @@ from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.monty import _MirageOS, pydantic_monty
-from mirage.runtime.route.types import (LineRouting, RouteContext, RouteFn,
-                                        RouteScript)
-from mirage.runtime.table import VfsEntry, bind_commands, pin_bindings
+from mirage.runtime.route.types import (RouteContext, RouteFn, RouteScript,
+                                        RoutingDecision)
+from mirage.runtime.table import VfsEntry, bind_commands, runtime_bindings_for
 
 
 async def _eval_monty(source: str, ctx_payload: dict[str, Any],
@@ -107,7 +107,7 @@ async def evaluate_route(route: RouteFn, ctx: RouteContext,
 
 async def decide_line(entries: list[Runtime | str], route: RouteFn | None,
                       ctx: RouteContext, static_bindings: dict[str, Runtime],
-                      dispatch: Callable[..., Any] | None) -> LineRouting:
+                      dispatch: Callable[..., Any] | None) -> RoutingDecision:
     """Resolve the routing ladder for one line: route, then scripts.
 
     A route verdict overlays the named runtime's captures on the
@@ -129,13 +129,13 @@ async def decide_line(entries: list[Runtime | str], route: RouteFn | None,
     if route is not None:
         name = await evaluate_route(route, ctx, dispatch)
         if name is not None:
-            overlay = pin_bindings(entries, name)
-            return LineRouting(bindings={
+            overlay = runtime_bindings_for(entries, name)
+            return RoutingDecision(bindings={
                 **static_bindings,
                 **overlay
             },
-                               vfs_allowed=True,
-                               captured=frozenset())
+                                   vfs_allowed=True,
+                                   captured=frozenset())
     willing: list[Runtime | str] = []
     captured: set[str] = set()
     vfs_allowed = False
@@ -152,6 +152,6 @@ async def decide_line(entries: list[Runtime | str], route: RouteFn | None,
         if isinstance(entry, VfsEntry):
             vfs_allowed = True
         willing.append(entry)
-    return LineRouting(bindings=bind_commands(willing),
-                       vfs_allowed=vfs_allowed,
-                       captured=frozenset(captured))
+    return RoutingDecision(bindings=bind_commands(willing),
+                           vfs_allowed=vfs_allowed,
+                           captured=frozenset(captured))

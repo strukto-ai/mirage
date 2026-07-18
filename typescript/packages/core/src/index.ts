@@ -436,7 +436,7 @@ export {
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
 export {
   bindCommands,
-  pinBindings,
+  runtimeBindingsFor,
   DEFAULT_ENTRIES,
   VFS_ENTRY,
   VfsEntry,
@@ -450,7 +450,7 @@ export {
   decideLine,
   RoutingDecisionError,
   type CommandFacts,
-  type LineRouting,
+  type RoutingDecision,
   type RouteContext,
   type RouteFn,
   type RouteScript,

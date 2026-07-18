@@ -42,7 +42,7 @@ class NamedFakeRuntime implements Runtime {
   }
 }
 
-async function pinWorkspace(): Promise<Workspace> {
+async function runtimeArgWorkspace(): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
     { '/': new RAMResource() },
@@ -54,12 +54,12 @@ async function pinWorkspace(): Promise<Workspace> {
   )
 }
 
-describe('per-line runtime pin', () => {
-  it('rebinds captured stages for the pinned line only', async () => {
-    const ws = await pinWorkspace()
+describe('per-line runtime argument', () => {
+  it('rebinds captured stages for the routed line only', async () => {
+    const ws = await runtimeArgWorkspace()
     try {
-      const pinned = await ws.execute('python3 -c "x"', { runtime: 'beta' })
-      expect(DEC.decode(pinned.stdout)).toBe('ran-beta\n')
+      const routed = await ws.execute('python3 -c "x"', { runtime: 'beta' })
+      expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
       const after = await ws.execute('python3 -c "x"')
       expect(DEC.decode(after.stdout)).toBe('ran-alpha\n')
     } finally {
@@ -67,8 +67,8 @@ describe('per-line runtime pin', () => {
     }
   })
 
-  it('nested evals inherit the pin', async () => {
-    const ws = await pinWorkspace()
+  it('nested evals inherit the runtime argument', async () => {
+    const ws = await runtimeArgWorkspace()
     try {
       const io = await ws.execute('echo $(python3 -c "x")', { runtime: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
@@ -78,7 +78,7 @@ describe('per-line runtime pin', () => {
   })
 
   it('never touches uncaptured stages', async () => {
-    const ws = await pinWorkspace()
+    const ws = await runtimeArgWorkspace()
     try {
       const io = await ws.execute('echo plain-vfs', { runtime: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('plain-vfs\n')
@@ -87,14 +87,14 @@ describe('per-line runtime pin', () => {
     }
   })
 
-  it('fails loud on unknown pins and the vfs marker', async () => {
-    const ws = await pinWorkspace()
+  it('fails loud on unknown runtimes and the vfs marker', async () => {
+    const ws = await runtimeArgWorkspace()
     try {
       await expect(ws.execute('python3 -c "x"', { runtime: 'nope' })).rejects.toThrow(
-        /unknown runtime pin/,
+        /unknown runtime:/,
       )
       await expect(ws.execute('python3 -c "x"', { runtime: 'vfs' })).rejects.toThrow(
-        /not a pinnable runtime/,
+        /not a runtime you can select/,
       )
     } finally {
       await ws.close()
@@ -129,7 +129,7 @@ describe('routing ladder', () => {
     }
   })
 
-  it('pin beats scripts', async () => {
+  it('runtime argument beats scripts', async () => {
     const ws = await routedWorkspace()
     try {
       const io = await ws.execute('python3 -c "big job"', { runtime: 'alpha' })
@@ -249,8 +249,8 @@ not big
       ws.addRuntime(new NamedFakeRuntime('beta'))
       const first = await ws.execute('python3 -c "x"')
       expect(DEC.decode(first.stdout)).toBe('ran-alpha\n')
-      const pinned = await ws.execute('python3 -c "x"', { runtime: 'beta' })
-      expect(DEC.decode(pinned.stdout)).toBe('ran-beta\n')
+      const routed = await ws.execute('python3 -c "x"', { runtime: 'beta' })
+      expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
       expect(() => ws.addRuntime(new NamedFakeRuntime('beta'))).toThrow(/duplicate runtime entry/)
     } finally {
       await ws.close()

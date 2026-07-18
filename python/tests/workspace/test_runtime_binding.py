@@ -123,7 +123,7 @@ class BetaRuntime(Runtime):
 
 
 @pytest_asyncio.fixture
-async def pin_ws():
+async def runtime_arg_ws():
     workspace = Workspace({"/": RAMResource()},
                           mode=MountMode.EXEC,
                           runtimes=[AlphaRuntime(),
@@ -133,40 +133,40 @@ async def pin_ws():
 
 
 @pytest.mark.asyncio
-async def test_pin_rebinds_captured_stage(pin_ws):
-    io = await pin_ws.execute("python3 -c 'x'", runtime="beta")
+async def test_runtime_arg_rebinds_captured_stage(runtime_arg_ws):
+    io = await runtime_arg_ws.execute("python3 -c 'x'", runtime="beta")
     assert await materialize(io.stdout) == b"ran-beta\n"
 
 
 @pytest.mark.asyncio
-async def test_pin_only_lasts_the_line(pin_ws):
-    await pin_ws.execute("python3 -c 'x'", runtime="beta")
-    io = await pin_ws.execute("python3 -c 'x'")
+async def test_runtime_arg_only_lasts_the_line(runtime_arg_ws):
+    await runtime_arg_ws.execute("python3 -c 'x'", runtime="beta")
+    io = await runtime_arg_ws.execute("python3 -c 'x'")
     assert await materialize(io.stdout) == b"ran-alpha\n"
 
 
 @pytest.mark.asyncio
-async def test_pin_inherited_by_nested_eval(pin_ws):
-    io = await pin_ws.execute("echo $(python3 -c 'x')", runtime="beta")
+async def test_runtime_arg_inherited_by_nested_eval(runtime_arg_ws):
+    io = await runtime_arg_ws.execute("echo $(python3 -c 'x')", runtime="beta")
     assert await materialize(io.stdout) == b"ran-beta\n"
 
 
 @pytest.mark.asyncio
-async def test_pin_never_touches_uncaptured_stages(pin_ws):
-    io = await pin_ws.execute("echo plain-vfs", runtime="beta")
+async def test_runtime_arg_never_touches_uncaptured_stages(runtime_arg_ws):
+    io = await runtime_arg_ws.execute("echo plain-vfs", runtime="beta")
     assert await materialize(io.stdout) == b"plain-vfs\n"
 
 
 @pytest.mark.asyncio
-async def test_pin_unknown_name_fails_loud(pin_ws):
-    with pytest.raises(ValueError, match="unknown runtime pin"):
-        await pin_ws.execute("python3 -c 'x'", runtime="nope")
+async def test_runtime_arg_unknown_name_fails_loud(runtime_arg_ws):
+    with pytest.raises(ValueError, match="unknown runtime:"):
+        await runtime_arg_ws.execute("python3 -c 'x'", runtime="nope")
 
 
 @pytest.mark.asyncio
-async def test_pin_vfs_fails_loud(pin_ws):
-    with pytest.raises(ValueError, match="not a pinnable runtime"):
-        await pin_ws.execute("python3 -c 'x'", runtime=VFS_ENTRY)
+async def test_runtime_arg_vfs_fails_loud(runtime_arg_ws):
+    with pytest.raises(ValueError, match="not a runtime you can select"):
+        await runtime_arg_ws.execute("python3 -c 'x'", runtime=VFS_ENTRY)
 
 
 @pytest_asyncio.fixture
@@ -189,7 +189,7 @@ async def test_scripts_route_between_capturers(routed_ws):
 
 
 @pytest.mark.asyncio
-async def test_pin_beats_scripts(routed_ws):
+async def test_runtime_arg_beats_scripts(routed_ws):
     io = await routed_ws.execute("python3 -c 'big job'", runtime="alpha")
     assert await materialize(io.stdout) == b"ran-alpha\n"
 
