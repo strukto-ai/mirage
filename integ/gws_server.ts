@@ -1077,8 +1077,9 @@ export function startServer(port: number): Promise<http.Server> {
           contentType: req.headers['content-type'] ?? '',
         })
       } catch (err) {
+        console.error('gws_server: unhandled route error', err)
         status = 500
-        body = { error: { code: 500, message: err instanceof Error ? err.message : String(err), status: 'INTERNAL' } }
+        body = { error: { code: 500, message: 'internal error', status: 'INTERNAL' } }
       }
       if (body === null) {
         res.writeHead(status)
