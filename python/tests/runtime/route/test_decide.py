@@ -50,19 +50,6 @@ def ctx_for(line: str) -> RouteContext:
                         mounts=("/data", ))
 
 
-def test_command_facts_parse_pipes_and_lists():
-    facts = command_facts(parse("cat /a/big.csv | python3 /r/x.py 1 && nope"))
-    assert [f.command for f in facts] == ["cat", "python3", "nope"]
-    assert facts[0].paths == ("/a/big.csv", )
-    assert facts[1].words == ("python3", "/r/x.py", "1")
-    assert facts[0].known and facts[1].known
-    assert not facts[2].known
-
-
-def test_command_facts_empty_on_unparsable():
-    assert command_facts(parse("")) == ()
-
-
 @pytest.mark.asyncio
 async def test_script_callable_and_awaitable():
     runtime = AlphaRuntime()

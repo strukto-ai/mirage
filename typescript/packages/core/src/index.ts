@@ -454,7 +454,7 @@ export {
   type RouteContext,
   type RouteFn,
   type RouteScript,
-} from './workspace/executor/route.ts'
+} from './workspace/executor/route/index.ts'
 export { buildRuntime, candidates, RUNTIMES } from './workspace/executor/runtime_table.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'

@@ -44,8 +44,6 @@ from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
-from mirage.runtime.pin import (current_line_routing, push_line_routing,
-                                reset_line_routing)
 from mirage.runtime.route import (LineRouting, RouteContext, RouteFn,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
@@ -460,16 +458,16 @@ class Workspace:
         self._registry.runtime_bindings = bindings
         return entry
 
-    async def _resolve_line_routing(self, ast: Any, command: str,
-                                    pin: str | None, provision: bool,
-                                    session: Session,
-                                    session_id: str) -> LineRouting | None:
+    async def _resolve_line_routing(
+            self, ast: Any, command: str, pin: str | None, provision: bool,
+            session: Session, session_id: str,
+            inherited: LineRouting | None) -> LineRouting | None:
         """The routing ladder for one typed line: pin, route, scripts.
 
         Returns None when nothing decides (no pin, no policy
-        configured, or the line is a nested eval inheriting its typed
-        line's decision) so dispatch falls to the static bindings.
-        Provision never routes.
+        configured) so dispatch falls to the static bindings. A nested
+        eval passes its typed line's decision as ``inherited`` and
+        keeps it: nested lines never re-route. Provision never routes.
 
         Args:
             ast: the parsed tree-sitter root node.
@@ -478,7 +476,10 @@ class Workspace:
             provision: whether this is a provision run.
             session: the effective session (cwd, env).
             session_id: session hosting the line.
+            inherited: the calling line's decision, for nested evals.
         """
+        if inherited is not None:
+            return inherited
         if pin is not None:
             try:
                 overlay = pin_bindings(self._runtime_entries, pin)
@@ -488,7 +489,7 @@ class Workspace:
                 **self._registry.runtime_bindings,
                 **overlay
             })
-        if provision or current_line_routing() is not None:
+        if provision:
             return None
         has_scripts = any(
             isinstance(entry, Runtime) and entry.script is not None
@@ -962,13 +963,20 @@ class Workspace:
         """
         return IOResult()
 
-    async def _exec_recursion(self, cancel: asyncio.Event | None, cmd: str,
+    async def _exec_recursion(self, cancel: asyncio.Event | None,
+                              line_routing: "LineRouting | None", cmd: str,
                               **opts: Any) -> Any:
         # The executor's internal eval ($(), source, eval, xargs, ...):
         # never a typed line, so it must not record a history entry or
         # open its own recording context (GNU: history is appended by
-        # the line reader, the evaluator can't touch it).
-        return await self.execute(cmd, cancel=cancel, record=False, **opts)
+        # the line reader, the evaluator can't touch it). It inherits
+        # the typed line's routing decision: nested lines never
+        # re-route.
+        return await self.execute(cmd,
+                                  cancel=cancel,
+                                  record=False,
+                                  line_routing=line_routing,
+                                  **opts)
 
     @overload
     async def execute(self,
@@ -981,22 +989,25 @@ class Workspace:
                       env: dict[str, str] | None = ...,
                       cancel: asyncio.Event | None = ...,
                       record: bool = ...,
-                      runtime: str | None = ...) -> IOResult:
+                      runtime: str | None = ...,
+                      line_routing: "LineRouting | None" = ...) -> IOResult:
         ...
 
     @overload
-    async def execute(self,
-                      command: str,
-                      session_id: str | None = ...,
-                      stdin: ByteSource | None = ...,
-                      *,
-                      provision: Literal[True],
-                      agent_id: str | None = ...,
-                      cwd: str | None = ...,
-                      env: dict[str, str] | None = ...,
-                      cancel: asyncio.Event | None = ...,
-                      record: bool = ...,
-                      runtime: str | None = ...) -> ProvisionResult:
+    async def execute(
+            self,
+            command: str,
+            session_id: str | None = ...,
+            stdin: ByteSource | None = ...,
+            *,
+            provision: Literal[True],
+            agent_id: str | None = ...,
+            cwd: str | None = ...,
+            env: dict[str, str] | None = ...,
+            cancel: asyncio.Event | None = ...,
+            record: bool = ...,
+            runtime: str | None = ...,
+            line_routing: "LineRouting | None" = ...) -> ProvisionResult:
         ...
 
     async def execute(
@@ -1011,6 +1022,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
+        line_routing: LineRouting | None = None,
     ) -> IOResult | ProvisionResult:
         """Execute a shell command in the workspace.
 
@@ -1044,6 +1056,9 @@ class Workspace:
                 everything else keeps its normal binding, so a pin
                 overrides policy, never capability. Raises ValueError
                 for a name that is not a workspace entry.
+            line_routing: Internal. The typed line's routing decision,
+                forwarded by the executor's nested evals so inner
+                lines never re-route.
         """
         if cancel is not None and cancel.is_set():
             raise MirageAbortError()
@@ -1075,18 +1090,15 @@ class Workspace:
         is_line = record and not provision
         scope = RecordingScope(active=is_line)
 
-        exec_recursion = partial(self._exec_recursion, cancel)
-
-        routing_token = None
         session_token = set_current_session(effective_session)
         try:
             ast = parse(command)
             routing = await self._resolve_line_routing(ast, command, runtime,
                                                        provision,
                                                        effective_session,
-                                                       session_id)
-            if routing is not None:
-                routing_token = push_line_routing(routing)
+                                                       session_id,
+                                                       line_routing)
+            exec_recursion = partial(self._exec_recursion, cancel, routing)
             offending = find_syntax_error(ast)
             if offending is not None:
                 snippet = offending.strip()[:40]
@@ -1117,6 +1129,7 @@ class Workspace:
                 effective_session,
                 stdin,
                 cancel,
+                line_routing=routing,
             )
             session.last_exit_code = io.exit_code
             await self.apply_io(io, records=scope.records)
@@ -1156,8 +1169,6 @@ class Workspace:
             # emitted them succeeded.
             scope.close()
             reset_current_session(session_token)
-            if routing_token is not None:
-                reset_line_routing(routing_token)
             await self._session_mgr.flush()
             self._ops.records.extend(scope.records)
             if is_line:

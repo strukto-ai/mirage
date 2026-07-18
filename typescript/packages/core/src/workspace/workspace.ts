@@ -68,7 +68,7 @@ import {
   type LineRouting,
   type RouteContext,
   type RouteFn,
-} from './executor/route.ts'
+} from './executor/route/index.ts'
 import {
   bindCommands,
   pinBindings,

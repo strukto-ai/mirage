@@ -18,6 +18,7 @@ from typing import Any
 from mirage.commands.builtin.utils.safeguard import run_with_timeout
 from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
+from mirage.runtime.route import LineRouting
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.types import PathSpec
@@ -98,6 +99,7 @@ async def execute_command(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
+    line_routing: LineRouting | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Dispatch a command node by name."""
     name = get_command_name(node)
@@ -143,7 +145,7 @@ async def execute_command(
         return await _dispatch_command_body(recurse, dispatch, registry,
                                             namespace, execute_fn, node, parts,
                                             name, session, stdin, call_stack,
-                                            job_table, cancel)
+                                            job_table, cancel, line_routing)
     finally:
         for k, prev in saved_env_overrides.items():
             if prev is None:
@@ -166,6 +168,7 @@ async def _dispatch_command_body(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
+    line_routing: LineRouting | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     for child in node.named_children:
         if child.type == NT.HERESTRING_REDIRECT:
@@ -204,7 +207,8 @@ async def _dispatch_command_body(
     resolved = resolve_safeguard(argv.name) if argv.name else None
     timeout = (resolved.timeout_seconds if resolved is not None else None)
     body = _run_argv(recurse, dispatch, registry, namespace, execute_fn, argv,
-                     session, stdin, call_stack, job_table, cancel)
+                     session, stdin, call_stack, job_table, cancel,
+                     line_routing)
     return await run_with_timeout(body, timeout, argv.name or "?")
 
 
@@ -220,6 +224,7 @@ async def _run_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
+    line_routing: LineRouting | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler."""
     name = argv.name
@@ -441,7 +446,8 @@ async def _run_argv(
                                                  stdin,
                                                  call_stack,
                                                  job_table=job_table,
-                                                 namespace=namespace)
+                                                 namespace=namespace,
+                                                 line_routing=line_routing)
 
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":

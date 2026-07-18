@@ -12,101 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SPECS } from '../../commands/spec/index.ts'
-import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
-import { evalMontyValue } from './python/runtimes/monty.ts'
-import { bindCommands, pinBindings, VfsEntry, type Runtime, type RuntimeEntry } from './runtime.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
-
-/** Parse facts for one command of the line being routed. */
-export interface CommandFacts {
-  command: string
-  words: readonly string[]
-  known: boolean
-  paths: readonly string[]
-}
-
-/** Facts about the line being routed, parse-before-route. */
-export interface RouteContext {
-  line: string
-  commands: readonly CommandFacts[]
-  command: string
-  known: boolean
-  cwd: string
-  env: Record<string, string>
-  sessionId: string
-  agentId: string
-  mounts: readonly string[]
-}
-
-export type RouteScript = ((ctx: RouteContext) => boolean | Promise<boolean>) | string
-export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | null>) | string
-
-/**
- * A pin, route, or script could not decide the line. Caller-fixable
- * routing mistakes (unknown pin name, a script that does not parse, a
- * missing monty package) propagate loud instead of folding into the
- * line's IOResult like a command failure.
- */
-export class RoutingDecisionError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options)
-    this.name = 'RoutingDecisionError'
-  }
-}
-
-/** The one-line placement decision the dispatcher consults. */
-export interface LineRouting {
-  /** Command -> runtime for this line. */
-  bindings: Record<string, Runtime>
-  /**
-   * Whether unbound commands may run on the vfs executor; false turns
-   * them into admission failures.
-   */
-  vfsAllowed: boolean
-  /**
-   * Commands captured by some entry; an unbound captured command is an
-   * admission failure (its capturers all refused), never a silent
-   * fallback.
-   */
-  captured: ReadonlySet<string>
-}
-
-const WORD_TYPES: ReadonlySet<string> = new Set([
-  'command_name',
-  'word',
-  'string',
-  'raw_string',
-  'number',
-  'concatenation',
-])
-
-/** Extract per-command parse facts from a parsed line. */
-export function commandFacts(root: TSNodeLike): CommandFacts[] {
-  const facts: CommandFacts[] = []
-  const stack: TSNodeLike[] = [root]
-  while (stack.length > 0) {
-    const node = stack.pop()
-    if (node === undefined) break
-    if (node.type === 'command') {
-      const words = node.children.filter((c) => WORD_TYPES.has(c.type)).map((c) => c.text)
-      const [command] = words
-      if (command !== undefined) {
-        facts.push({
-          command,
-          words,
-          known: command in SPECS,
-          paths: words.slice(1).filter((w) => w.startsWith('/')),
-        })
-      }
-    }
-    for (let i = node.children.length - 1; i >= 0; i -= 1) {
-      const child = node.children[i]
-      if (child !== undefined) stack.push(child)
-    }
-  }
-  return facts
-}
+import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
+import { evalMontyValue } from '../python/runtimes/monty.ts'
+import { bindCommands, pinBindings, VfsEntry, type Runtime, type RuntimeEntry } from '../runtime.ts'
+import { RoutingDecisionError } from './errors.ts'
+import type { LineRouting, RouteContext, RouteFn, RouteScript } from './types.ts'
 
 function ctxPayload(ctx: RouteContext, runtime?: Runtime): Record<string, unknown> {
   const payload: Record<string, unknown> = {
