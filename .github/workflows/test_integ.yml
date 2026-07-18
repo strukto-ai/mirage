@@ -31,7 +31,6 @@ jobs:
       ts: ${{ steps.filter.outputs.ts }}
       database: ${{ steps.filter.outputs.database }}
       data: ${{ steps.filter.outputs.data }}
-      ssh: ${{ steps.filter.outputs.ssh }}
       fuse: ${{ steps.filter.outputs.fuse }}
     steps:
       - uses: dorny/paths-filter@v4
@@ -83,22 +82,6 @@ jobs:
               - 'integ/**'
               - 'python/**'
               - '.github/workflows/test_integ.yml'
-            ssh:
-              - 'integ/ssh.py'
-              - 'integ/ssh.ts'
-              - 'integ/truth.txt'
-              - 'integ/cases.py'
-              - 'integ/cases.ts'
-              - 'python/mirage/accessor/ssh.py'
-              - 'python/mirage/core/ssh/**'
-              - 'python/mirage/commands/builtin/ssh/**'
-              - 'python/mirage/resource/ssh/**'
-              - 'typescript/packages/node/src/accessor/ssh.ts'
-              - 'typescript/packages/node/src/core/ssh/**'
-              - 'typescript/packages/node/src/commands/builtin/ssh/**'
-              - 'typescript/packages/node/src/resource/ssh/**'
-              - 'typescript/packages/node/src/ops/ssh/**'
-              - '.github/workflows/test_integ.yml'
             fuse:
               - 'integ/fuse.py'
               - 'integ/fuse.ts'
@@ -145,21 +128,6 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Run RAM backend and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/ram.py > /tmp/ram.out
-          diff integ/truth.txt /tmp/ram.out
-
-      - name: Run Disk backend and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/disk.py > /tmp/disk.out
-          diff integ/truth.txt /tmp/disk.out
-
-      - name: Run Redis backend and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/redis.py > /tmp/redis.out
-          diff integ/truth.txt /tmp/redis.out
-
       - name: Run metadata suite (ram/disk/redis + s3 overlay via moto) and diff against truth
         run: |
           ./python/.venv/bin/python integ/metadata.py > /tmp/metadata.out
@@ -190,20 +158,10 @@ jobs:
           ./python/.venv/bin/python integ/databricks_volume.py > /tmp/databricks-volume.out
           diff integ/truth_databricks_volume.txt /tmp/databricks-volume.out
 
-      - name: Run shared command suite on s3 (moto) and diff against shared truth
-        run: |
-          ./python/.venv/bin/python integ/s3_cases.py > /tmp/s3_cases.out
-          diff integ/truth.txt /tmp/s3_cases.out
-
       - name: Run onedrive integ (fake Graph) and diff against truth
         run: |
           ./python/.venv/bin/python integ/onedrive.py > /tmp/onedrive.out
           diff integ/truth_onedrive.txt /tmp/onedrive.out
-
-      - name: Run shared command suite on onedrive (fake Graph) and diff against shared truth
-        run: |
-          ./python/.venv/bin/python integ/onedrive_cases.py > /tmp/onedrive_cases.out
-          diff integ/truth.txt /tmp/onedrive_cases.out
 
       - name: Run lancedb integ (embedded) and diff against truth
         run: |
@@ -301,29 +259,6 @@ jobs:
           /tmp/mc mb local/mirage-integ-gcs || true
           /tmp/mc mb local/mirage-integ-minio || true
 
-      - name: Run RAM backend and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx ram.ts > /tmp/ts-ram.out
-          diff truth.txt /tmp/ts-ram.out
-
-      - name: Run Disk backend and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx disk.ts > /tmp/ts-disk.out
-          diff truth.txt /tmp/ts-disk.out
-
-      - name: Run OPFS backend and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx opfs.ts > /tmp/ts-opfs.out
-          diff truth.txt /tmp/ts-opfs.out
-
-      - name: Run Redis backend and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx redis.ts > /tmp/ts-redis.out
-          diff truth.txt /tmp/ts-redis.out
 
       - name: Run metadata suite (ram/disk/redis + s3 overlay via MinIO) and diff against truth
         working-directory: integ
@@ -342,12 +277,6 @@ jobs:
         run: |
           pnpm exec tsx session_modes.ts > /tmp/ts-session-modes.out
           diff truth_session_modes.txt /tmp/ts-session-modes.out
-
-      - name: Run shared command suite on S3 (MinIO) and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx s3_cases.ts > /tmp/ts-s3.out
-          diff truth.txt /tmp/ts-s3.out
 
       - name: Run s3-native suite (multi-cloud/MinIO) and diff against truth
         working-directory: integ
@@ -756,74 +685,8 @@ jobs:
           ./python/.venv/bin/python integ/nextcloud.py 2>&1 \
             | bash integ/check_lines.sh integ/truth_nextcloud.txt
 
-      - name: Run shared cases on Nextcloud and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/nextcloud_cases.py > /tmp/nextcloud_cases.out
-          diff integ/truth.txt /tmp/nextcloud_cases.out
-
       - name: Run declarative battery on nextcloud
         run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud
-
-  integ-ssh:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras --no-extra camel
-
-      - name: Run ssh integ (mock sftp server) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/ssh.py > /tmp/ssh.out
-          diff integ/truth.txt /tmp/ssh.out
-
-  integ-ssh-ts:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.32.1
-
-      - name: Install dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
-
-      - name: Build mirage-core
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core build
-
-      - name: Build mirage-node
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-node build
-
-      - name: Run TS ssh integ (mock sftp server) and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx ssh.ts > /tmp/ts-ssh.out
-          diff truth.txt /tmp/ts-ssh.out
 
   integ-fuse:
     needs: changes
@@ -1053,7 +916,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-shared, integ-database, integ-database-ts, integ-data, integ-ssh, integ-ssh-ts, integ-fuse, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared, integ-database, integ-database-ts, integ-data, integ-fuse, runtime-py, runtime-ts]
     if: always()
     steps:
       - name: Check required jobs
