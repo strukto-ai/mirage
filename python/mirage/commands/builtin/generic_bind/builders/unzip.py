@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.unzip import unzip as generic_unzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation,
-                                                          with_index)
+                                                          Operation, bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,30 +28,30 @@ async def unzip(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     o: bool = False,
     args_l: bool = False,
     d: str | None = None,
     q: bool = False,
     p: bool = False,
     t: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("unzip: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_unzip(paths,
-                               read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.require(Operation.WRITE),
-                               mkdir_fn=ops.require(Operation.MKDIR),
-                               accessor=accessor,
-                               o=o,
-                               args_l=args_l,
-                               d=d,
-                               q=q,
-                               p=p,
-                               t=t)
+    return await generic_unzip(
+        paths,
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        write_bytes=partial(ops.require(Operation.WRITE), accessor),
+        mkdir_fn=partial(ops.require(Operation.MKDIR), accessor),
+        o=o,
+        args_l=args_l,
+        d=d,
+        q=q,
+        p=p,
+        t=t)
 
 
 BUILDER = Builder('unzip',

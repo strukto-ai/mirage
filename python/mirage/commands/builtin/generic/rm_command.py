@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -28,11 +29,11 @@ def make_rm(
     resource: str,
     glob_fn: Callable[..., Awaitable[list[PathSpec]]],
     unlink: Callable[..., Awaitable[None]],
-) -> Callable:
+) -> Callable[..., Any]:
     """Build a file-only ``rm`` over an index-threaded unlink.
 
     For backends whose unlink resolves ids through the cache index; the
-    factory rm builder calls ``ops.unlink(accessor, path)`` without an
+    factory rm builder calls ``ops.unlink(path)`` without an
     index, so those backends bind this wrapper instead.
 
     Args:
@@ -49,7 +50,7 @@ def make_rm(
         *texts: str,
         f: bool = False,
         v: bool = False,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **_extra: object,
     ) -> tuple[ByteSource | None, IOResult]:
         if not paths:
@@ -59,7 +60,7 @@ def make_rm(
         removed: dict[str, ByteSource] = {}
         for p in paths:
             try:
-                await unlink(accessor, p, index)
+                await unlink(p)
             except (FileNotFoundError, ValueError):
                 if f:
                     continue

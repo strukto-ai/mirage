@@ -27,13 +27,15 @@ import {
   notionRead,
   notionReaddir,
   notionStat,
-  resolveNotionGlob,
+  makeResolveGlob,
   type FileStat,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactNotionConfig, type NotionConfig, type NotionConfigRedacted } from './config.ts'
+
+const resolveNotionGlob = makeResolveGlob<NotionAccessor>(notionReaddir)
 
 export interface NotionResourceState {
   type: string

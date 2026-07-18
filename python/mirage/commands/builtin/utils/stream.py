@@ -13,10 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Callable
+from typing import Any
+
+from mirage.io.types import ByteSource
 
 
-async def _read_stdin_async(
-        stdin: AsyncIterator[bytes] | bytes | None) -> bytes | None:
+async def _read_stdin_async(stdin: ByteSource | None) -> bytes | None:
     if stdin is None:
         return None
     if isinstance(stdin, bytes):
@@ -32,7 +34,7 @@ async def _wrap_bytes(data: bytes) -> AsyncIterator[bytes]:
 
 
 def _resolve_source(
-    stdin: AsyncIterator[bytes] | bytes | None,
+    stdin: ByteSource | None,
     error_msg: str | None = None,
     error_cls: type[Exception] = ValueError,
 ) -> AsyncIterator[bytes]:
@@ -49,12 +51,12 @@ def _resolve_source(
 
 
 async def resolve_text_input(
-    read_bytes: Callable,
+    read_bytes: Callable[..., Any],
     config: object,
     *,
     inline_text: str | None,
     file_path: str | None,
-    stdin: AsyncIterator[bytes] | bytes | None,
+    stdin: ByteSource | None,
     error_message: str,
 ) -> str:
     """Resolve a platform command's text from flag, file, or stdin.
@@ -64,7 +66,7 @@ async def resolve_text_input(
         config: the backend config passed through to ``read_bytes``.
         inline_text (str | None): text given inline on the command line.
         file_path (str | None): path operand to read the text from.
-        stdin (AsyncIterator[bytes] | bytes | None): piped input.
+        stdin (ByteSource | None): piped input.
         error_message (str): raised when no source provides text.
     """
     if inline_text:

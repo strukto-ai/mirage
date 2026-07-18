@@ -14,6 +14,7 @@
 
 import json
 import time
+from typing import Any
 
 from mirage.io.types import IOResult
 from mirage.observe.log_entry import (EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE,
@@ -23,8 +24,8 @@ from mirage.observe.store import ObserverStore, RAMObserverStore
 from mirage.utils.dates import utc_date_folder
 
 
-def _parse_files(files: dict[str, bytes]) -> list[dict]:
-    out: list[dict] = []
+def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     for key in sorted(files.keys()):
         if not key.endswith(".jsonl"):
             continue
@@ -181,7 +182,7 @@ class Observer:
                 offset=offset,
             ))
 
-    async def events(self) -> list[dict]:
+    async def events(self) -> list[dict[str, Any]]:
         """All recorded events across sessions, in timestamp order.
 
         Timestamps are UTC epoch milliseconds. The sort is stable over
@@ -197,7 +198,7 @@ class Observer:
         out.sort(key=lambda e: e.get("timestamp", 0))
         return out
 
-    async def command_events(self) -> list[dict]:
+    async def command_events(self) -> list[dict[str, Any]]:
         """Command events across all sessions, in append order.
 
         Returns:
@@ -207,7 +208,8 @@ class Observer:
             e for e in await self.events() if e.get("type") == EVENT_COMMAND
         ]
 
-    async def session_command_events(self, session: str) -> list[dict]:
+    async def session_command_events(self,
+                                     session: str) -> list[dict[str, Any]]:
         """One session's visible history listing, append order.
 
         Projects the session's events: commands after the last clear
@@ -227,7 +229,7 @@ class Observer:
         for i, e in enumerate(entries):
             if e.get("type") == EVENT_CLEAR:
                 last_clear = i
-        visible: list[dict] = []
+        visible: list[dict[str, Any]] = []
         for e in entries[last_clear + 1:]:
             kind = e.get("type")
             if kind == EVENT_COMMAND:
@@ -239,7 +241,7 @@ class Observer:
                     visible.pop(idx)
         return visible
 
-    async def load_events(self, events: list[dict]) -> None:
+    async def load_events(self, events: list[dict[str, Any]]) -> None:
         """Rewind the recorder to a snapshot's events.
 
         Clears the store first, mirroring ``ws._cache.clear()`` on the

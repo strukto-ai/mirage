@@ -14,14 +14,14 @@
 
 import importlib
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 _logger = logging.getLogger(__name__)
 
 
 def try_load_command(module: str,
                      attr: str,
-                     extra: str = "") -> Callable | None:
+                     extra: str = "") -> Callable[..., Any] | None:
     """Import an optional format command; skip if its dep is missing.
 
     Returns the imported attribute on success, or None if the underlying

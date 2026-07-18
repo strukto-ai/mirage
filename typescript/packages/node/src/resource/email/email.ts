@@ -16,6 +16,7 @@ import {
   BaseResource,
   PathSpec,
   ResourceName,
+  makeResolveGlob,
   mountKey,
   mountPrefixOf,
   type FileStat,
@@ -25,13 +26,14 @@ import {
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../accessor/email.ts'
 import { EMAIL_COMMANDS } from '../../commands/builtin/email/index.ts'
-import { resolveGlob } from '../../core/email/glob.ts'
 import { read as emailRead } from '../../core/email/read.ts'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
 import { EMAIL_OPS } from '../../ops/email/index.ts'
 import { redactEmailConfig, type EmailConfig, type EmailConfigRedacted } from './config.ts'
 import { EMAIL_PROMPT } from './prompt.ts'
+
+const resolveGlob = makeResolveGlob(emailReaddir)
 
 export interface EmailResourceState {
   type: string

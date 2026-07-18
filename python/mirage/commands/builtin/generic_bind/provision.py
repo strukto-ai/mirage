@@ -14,9 +14,10 @@
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.grep_helper import BINARY_EXTENSIONS
 from mirage.commands.resolve import get_extension
 from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
@@ -32,10 +33,10 @@ MAX_PLAN_WALK = 1000
 
 
 async def _expand_globs(
-    resolve_glob: Callable | None,
+    resolve_glob: Callable[..., Any] | None,
     accessor: Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[PathSpec]:
     """Expand glob operands the way the executor would.
 
@@ -55,11 +56,11 @@ async def _expand_globs(
 
 
 async def _walk_files(
-    readdir: Callable,
-    stat: Callable,
+    readdir: Callable[..., Any],
+    stat: Callable[..., Any],
     accessor: Accessor,
     roots: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[list[tuple[str, int]], bool]:
     """Walk directories the way grep -r does, collecting file sizes.
 
@@ -107,20 +108,19 @@ async def _walk_files(
 
 
 async def _resolve_sizes(
-    stat: Callable,
+    stat: Callable[..., Any],
     accessor: Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[list[tuple[str, int]], int]:
     resolved: list[tuple[str, int]] = []
     missing = 0
     for p in paths:
         path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
-        if index is not None:
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                size = lookup.entry.size
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            size = lookup.entry.size
         if size is None:
             # A provision estimate must degrade, never fail: any stat
             # error (missing file, transient backend error) leaves the
@@ -137,8 +137,9 @@ async def _resolve_sizes(
     return resolved, missing
 
 
-def make_file_read_provision(stat: Callable,
-                             resolve_glob: Callable | None = None) -> Callable:
+def make_file_read_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Cost estimate for full file reads (cat, wc), generic over stat."""
 
     async def file_read_provision(
@@ -146,7 +147,7 @@ def make_file_read_provision(stat: Callable,
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         if not paths:
@@ -180,8 +181,9 @@ def make_file_read_provision(stat: Callable,
     return file_read_provision
 
 
-def make_head_tail_provision(stat: Callable,
-                             resolve_glob: Callable | None = None) -> Callable:
+def make_head_tail_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Cost estimate for partial reads (head, tail), generic over stat."""
 
     async def head_tail_provision(
@@ -191,7 +193,7 @@ def make_head_tail_provision(stat: Callable,
         command: str = "",
         n: str | int | None = None,
         c: str | int | None = None,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         if not paths:
@@ -240,7 +242,7 @@ async def metadata_provision(
     paths: list[PathSpec],
     *_args: str,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find)."""
@@ -277,7 +279,7 @@ async def index_hit_read_provision(
     accessor: Accessor,
     paths: list[PathSpec],
     command: str,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> ProvisionResult:
     """Charge one read op per index-cached operand, zero network bytes.
 
@@ -290,17 +292,16 @@ async def index_hit_read_provision(
             provision call shape.
         paths (list[PathSpec]): operand paths as parsed.
         command (str): the shell line being estimated, for display.
-        index (IndexCacheStore | None): the per-call cache index.
+        index (IndexCacheStore): the per-call cache index.
     """
     if not paths:
         return ProvisionResult(command=command, precision=Precision.UNKNOWN)
     ops = 0
-    if index is not None:
-        for p in paths:
-            path_str = p.virtual if isinstance(p, PathSpec) else p
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                ops += 1
+    for p in paths:
+        path_str = p.virtual if isinstance(p, PathSpec) else p
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            ops += 1
     return ProvisionResult(
         command=command,
         network_read_low=0,
@@ -310,14 +311,14 @@ async def index_hit_read_provision(
     )
 
 
-def make_jq_provision(stat: Callable) -> Callable:
+def make_jq_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
     """Provision for jq: streamable jsonl reads a range, else whole file."""
 
     async def jq_provision(
         accessor: Accessor,
         paths: list[PathSpec] | None = None,
         *texts: str,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         if not paths:
@@ -360,7 +361,7 @@ def make_jq_provision(stat: Callable) -> Callable:
     return jq_provision
 
 
-def make_sed_provision(stat: Callable) -> Callable:
+def make_sed_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
     """Provision for sed: operands are read fully; -i writes back, so
     the output keeps the read total as a floor with UNKNOWN."""
     base = make_file_read_provision(stat)
@@ -371,7 +372,7 @@ def make_sed_provision(stat: Callable) -> Callable:
         *_args: str,
         command: str = "",
         i: bool = False,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         result = await base(accessor, paths, command=command, index=index)
@@ -382,9 +383,10 @@ def make_sed_provision(stat: Callable) -> Callable:
     return sed_provision
 
 
-def make_search_provision(stat: Callable,
-                          resolve_glob: Callable | None = None,
-                          readdir: Callable | None = None) -> Callable:
+def make_search_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None,
+        readdir: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Provision for grep/rg/jq: render pattern then delegate to file_read.
 
     With -r/-R and a readdir, directory operands are walked the way the
@@ -398,7 +400,7 @@ def make_search_provision(stat: Callable,
         paths: list[PathSpec],
         *texts: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         r: bool = False,
         R: bool = False,
         **kwargs,
@@ -430,8 +432,9 @@ def make_search_provision(stat: Callable,
     return search_provision
 
 
-def make_transform_provision(stat: Callable,
-                             resolve_glob: Callable | None = None) -> Callable:
+def make_transform_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Provision for read-transform-write commands (gzip, tar, split).
 
     The operands are read fully, so the read side is a known floor, but
@@ -445,7 +448,7 @@ def make_transform_provision(stat: Callable,
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         result = await base(accessor, paths, command=command, index=index)
@@ -458,8 +461,9 @@ def make_transform_provision(stat: Callable,
     return transform_provision
 
 
-def make_copy_provision(stat: Callable,
-                        resolve_glob: Callable | None = None) -> Callable:
+def make_copy_provision(
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None) -> Callable[..., Any]:
     """Provision for cp: bytes bracket 0 (server-side copy) to the total.
 
     Reads the source sizes and reports both network_read and
@@ -473,7 +477,7 @@ def make_copy_provision(stat: Callable,
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore = NULL_INDEX,
         **kwargs,
     ) -> ProvisionResult:
         paths = await _expand_globs(resolve_glob, accessor, paths, index)
@@ -506,7 +510,7 @@ async def write_metadata_provision(
     command: str = "",
     r: bool = False,
     R: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> ProvisionResult:
     """Provision for metadata-only writes (rm, mkdir, touch, ln).
@@ -527,8 +531,8 @@ async def write_metadata_provision(
 
 
 async def pure_provision(
-    accessor: Accessor | None = None,
-    paths: list[PathSpec] | None = None,
+    accessor: Accessor,
+    paths: list[PathSpec],
     *_args: str,
     command: str = "",
     **kwargs,
@@ -556,10 +560,12 @@ TRANSFORM_COMMANDS = frozenset(
 WRITE_METADATA_COMMANDS = frozenset({"ln", "mkdir", "mktemp", "rm", "touch"})
 
 
-def default_provision(name: str,
-                      stat: Callable,
-                      resolve_glob: Callable | None = None,
-                      readdir: Callable | None = None) -> Callable | None:
+def default_provision(
+        name: str,
+        stat: Callable[..., Any],
+        resolve_glob: Callable[..., Any] | None = None,
+        readdir: Callable[..., Any] | None = None
+) -> Callable[..., Any] | None:
     """Default cost estimator for a factory-built command, by family.
 
     Whole-file readers stat their operands and charge the byte total;

@@ -23,8 +23,11 @@ import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { PathSpec } from '../../types.ts'
 import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
-import { resolveGlob } from './glob.ts'
+import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
+import { POSTGRES_CMD_OPS } from '../../commands/builtin/postgres/ops.ts'
 import { readdir } from './readdir.ts'
+
+const resolveGlob = resolveGlobOf(POSTGRES_CMD_OPS)
 
 const STUB_DRIVER: PgDriver = {
   query: () => Promise.resolve({ rows: [], rowCount: 0 }),

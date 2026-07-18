@@ -14,6 +14,7 @@
 
 from email import policy
 from email.parser import BytesParser
+from typing import Any
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email._parse import parse_rfc822
@@ -79,7 +80,7 @@ async def fetch_message(
     accessor: EmailAccessor,
     folder: str,
     uid: str,
-) -> dict:
+) -> dict[str, Any]:
     imap = await accessor.get_imap()
     await imap.select(folder)
     response = await imap.uid("fetch", uid, "(RFC822 FLAGS)")
@@ -95,12 +96,12 @@ async def fetch_headers(
     accessor: EmailAccessor,
     folder: str,
     uids: list[str],
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     if not uids:
         return []
     imap = await accessor.get_imap()
     await imap.select(folder)
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     batch_size = 25
     for i in range(0, len(uids), batch_size):
         batch = uids[i:i + batch_size]
@@ -127,9 +128,9 @@ async def fetch_attachment(
     return None
 
 
-def _parse_with_payloads(raw: bytes) -> list[dict]:
+def _parse_with_payloads(raw: bytes) -> list[dict[str, Any]]:
     msg = BytesParser(policy=policy.default).parsebytes(raw)
-    attachments: list[dict] = []
+    attachments: list[dict[str, Any]] = []
     if msg.is_multipart():
         for part in msg.walk():
             disposition = str(part.get("Content-Disposition", ""))
@@ -168,8 +169,8 @@ def _extract_flags(response) -> list[str]:
     return []
 
 
-def _parse_multi_fetch(response, uids: list[str]) -> list[dict]:
-    results: list[dict] = []
+def _parse_multi_fetch(response, uids: list[str]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
     current_uid = None
     current_flags: list[str] = []
 

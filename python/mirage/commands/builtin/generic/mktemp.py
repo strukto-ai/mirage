@@ -2,7 +2,6 @@ import random
 import string
 from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
@@ -43,7 +42,6 @@ async def mktemp(
     *texts: str,
     mkdir_fn: Callable[..., Awaitable[None]],
     write_bytes_fn: Callable[..., Awaitable[None]],
-    accessor: Accessor | None = None,
     d: bool = False,
     p: str | PathSpec | None = None,
     t: bool = False,
@@ -51,11 +49,11 @@ async def mktemp(
     if len(texts) > 1:
         raise extra_operand_error(CommandName.MKTEMP, texts[1])
     path, parent = _build_path(p, t, texts)
-    await mkdir_fn(accessor, parent, parents=True)
+    await mkdir_fn(parent, parents=True)
     if d:
-        await mkdir_fn(accessor, path)
+        await mkdir_fn(path)
     else:
-        await write_bytes_fn(accessor, path, b"")
+        await write_bytes_fn(path, b"")
     return (path.virtual + "\n").encode(), IOResult()
 
 

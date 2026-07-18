@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import typer
 
 from mirage.cli.client import make_client
@@ -43,7 +45,7 @@ def provision_cmd(
     Returns a ``ProvisionResult`` shape (network bytes, cache hits,
     estimated cost) instead of actually running the command.
     """
-    payload: dict = {"command": command, "provision": True}
+    payload: dict[str, Any] = {"command": command, "provision": True}
     if session_id:
         payload["session_id"] = session_id
     with make_client() as client:

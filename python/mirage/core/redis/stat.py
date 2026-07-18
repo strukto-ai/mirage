@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
@@ -20,8 +22,8 @@ from mirage.utils.filetype import guess_type
 from mirage.utils.path import norm
 
 
-def _decode_attrs(raw: dict[str, str]) -> dict:
-    out: dict = {}
+def _decode_attrs(raw: dict[str, str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
     if "mode" in raw:
         out["mode"] = int(raw["mode"])
     for key in ("uid", "gid"):

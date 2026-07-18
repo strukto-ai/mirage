@@ -14,7 +14,7 @@
 
 import functools
 from collections.abc import Callable
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from mirage.commands.builtin.find_parse import (FindParseError, find_expr_tail,
                                                 parse_find_expression)
@@ -140,7 +140,7 @@ def _check_mount_root_guard_raw(
     return None
 
 
-def _scalar_find_flags(flag_kwargs: dict) -> dict:
+def _scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, Any]:
     # `repeatable=True` on find value-flags makes parse_to_kwargs emit
     # lists; bespoke backend wrappers read these as scalars. Migrated
     # backends read the expression from `texts` and ignore flag_kwargs.
@@ -165,12 +165,12 @@ def _namespace_stat_overlay(namespace: Namespace, virtual: str,
 async def run_on_mount(
     registry: MountRegistry,
     session: Session,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     namespace: Namespace | None,
     cmd_name: str,
     paths: list[PathSpec],
     texts: list[str],
-    flag_kwargs: dict,
+    flag_kwargs: dict[str, object],
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
@@ -421,8 +421,8 @@ def _option_error(cmd_name: str,
 
 
 async def handle_command(
-    execute_node: Callable,
-    dispatch: Callable,
+    execute_node: Callable[..., Any],
+    dispatch: Callable[..., Any],
     registry: MountRegistry,
     parts: list[str | PathSpec],
     session: Session,
@@ -467,7 +467,7 @@ async def handle_command(
         saved_locals: dict[str, str | None] = {}
         session._local_vars = saved_locals
         try:
-            all_stdout: list = []
+            all_stdout: list[Any] = []
             merged_io = IOResult()
             last_exec = ExecutionNode(command=cmd_name, exit_code=0)
             for cmd in func_body:
@@ -690,7 +690,7 @@ async def _inject_links(
     stdout: ByteSource | None,
     namespace: Namespace,
     paths: list[PathSpec],
-    flag_kwargs: dict,
+    flag_kwargs: dict[str, object],
     cwd: str,
 ) -> ByteSource | None:
     """Append symlink entries living under the listed directory.
@@ -744,7 +744,7 @@ async def _inject_child_mounts(
     stdout: ByteSource | None,
     registry: MountRegistry,
     paths: list[PathSpec],
-    flag_kwargs: dict,
+    flag_kwargs: dict[str, object],
     cwd: str,
 ) -> ByteSource | None:
     if flag_kwargs.get("d") is True or flag_kwargs.get("R") is True:

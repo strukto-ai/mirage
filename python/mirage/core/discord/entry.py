@@ -14,6 +14,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 
 from mirage.cache.index.config import IndexEntry
 from mirage.core.discord.history import DISCORD_EPOCH
@@ -28,15 +29,15 @@ class DiscordResourceType(str, Enum):
     HISTORY = "discord/history"
 
 
-def guild_dirname(g: dict) -> str:
+def guild_dirname(g: dict[str, Any]) -> str:
     return make_id_name(g.get("name", ""), g["id"], path_safe=True)
 
 
-def channel_dirname(c: dict) -> str:
+def channel_dirname(c: dict[str, Any]) -> str:
     return make_id_name(c.get("name", ""), c["id"], path_safe=True)
 
 
-def member_filename(m: dict) -> str:
+def member_filename(m: dict[str, Any]) -> str:
     user = m.get("user", {})
     return (
         f"{make_id_name(user.get('username', ''), user['id'], path_safe=True)}"
@@ -66,7 +67,7 @@ def snowflake_to_iso(snowflake: str) -> str | None:
     return epoch_to_iso(ms // 1000)
 
 
-def guild_entry(g: dict) -> IndexEntry:
+def guild_entry(g: dict[str, Any]) -> IndexEntry:
     return IndexEntry(
         id=g["id"],
         name=g.get("name", ""),
@@ -75,7 +76,7 @@ def guild_entry(g: dict) -> IndexEntry:
     )
 
 
-def channel_entry(c: dict) -> IndexEntry:
+def channel_entry(c: dict[str, Any]) -> IndexEntry:
     return IndexEntry(
         id=c["id"],
         name=c.get("name", ""),
@@ -85,7 +86,7 @@ def channel_entry(c: dict) -> IndexEntry:
     )
 
 
-def member_entry(m: dict) -> IndexEntry:
+def member_entry(m: dict[str, Any]) -> IndexEntry:
     user = m.get("user", {})
     return IndexEntry(
         id=user.get("id", ""),

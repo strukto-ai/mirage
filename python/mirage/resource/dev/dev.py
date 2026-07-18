@@ -72,5 +72,5 @@ class DevResource(BaseResource):
         self.accessor = RAMAccessor(self._store)
         for fn in COMMANDS:
             self.register(fn)
-        for fn in RAM_OPS:
-            self.register_op(fn)
+        for ro in RAM_OPS:
+            self.register_op(ro)

@@ -17,7 +17,7 @@ import pytest
 from mirage.commands.builtin.generic.sort import sort
 
 
-async def _rb(_accessor, _path):
+async def _rb(_path):
     raise AssertionError("stdin-driven tests never read paths")
 
 

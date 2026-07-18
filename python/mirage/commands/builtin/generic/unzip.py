@@ -2,7 +2,6 @@ import io
 import zipfile
 from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -24,7 +23,6 @@ async def unzip(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
-    accessor: Accessor | None = None,
     o: bool = False,
     args_l: bool = False,
     d: str | PathSpec | None = None,
@@ -35,7 +33,7 @@ async def unzip(
     if not paths:
         raise ValueError("unzip: missing operand")
     archive_path = paths[0]
-    data = await read_bytes(accessor, archive_path)
+    data = await read_bytes(archive_path)
     with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
         if args_l:
             lines = ["  Length      Name", "---------  ----"]
@@ -69,11 +67,8 @@ async def unzip(
             out_path = dest.rstrip("/") + "/" + entry_name
             parent = out_path.rsplit("/", 1)[0] or "/"
             if parent != "/":
-                await mkdir_fn(accessor,
-                               PathSpec.from_str_path(parent),
-                               parents=True)
-            await write_bytes(accessor, PathSpec.from_str_path(out_path),
-                              content)
+                await mkdir_fn(PathSpec.from_str_path(parent), parents=True)
+            await write_bytes(PathSpec.from_str_path(out_path), content)
             report_path = (mount_prefix +
                            out_path) if mount_prefix else out_path
             writes[out_path] = content

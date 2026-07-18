@@ -3,10 +3,8 @@ from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
-from mirage.cache.read_through import (cache_aware_read_bytes,
-                                       cache_aware_read_stream)
+from mirage.cache.read_through import (cache_aware_bound_bytes,
+                                       cache_aware_bound_stream)
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_count_has_matches,
                                                  grep_lines, grep_stream,
@@ -95,9 +93,7 @@ async def rg(
     stat: Callable[..., Awaitable[FileStat]],
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run ripgrep-style fallback search over backend paths or stdin.
 
@@ -117,43 +113,24 @@ async def rg(
         read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader.
         read_stream (Callable[..., AsyncIterator[bytes]] | None): Optional
             stream reader.
-        accessor (Accessor | None): Backend accessor passed
-            through wrapper helpers.
-        stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
-            empty.
-        index (IndexCacheStore | None): Optional cache index for wrapped
-            backend calls.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
     """
-    read_bytes = cache_aware_read_bytes(read_bytes)
+    read_bytes = cache_aware_bound_bytes(read_bytes)
     if read_stream is not None:
-        read_stream = cache_aware_read_stream(read_stream)
+        read_stream = cache_aware_bound_stream(read_stream)
     fl = FlagView(flags, spec=SPECS["rg"])
     pattern, never_match = await resolve_pattern(
-        texts, fl, read_bytes, accessor, index,
-        "rg: usage: rg [flags] pattern [path]")
+        texts, fl, read_bytes, "rg: usage: rg [flags] pattern [path]")
     f = parse_flags(fl, never_match)
 
     if paths:
         mount_prefix = mount_prefix_of(paths[0].virtual,
                                        paths[0].resource_path)
-        rd = partial(call_readdir,
-                     readdir,
-                     accessor,
-                     index=index,
-                     prefix=mount_prefix)
-        st = partial(call_stat,
-                     stat,
-                     accessor,
-                     index=index,
-                     prefix=mount_prefix)
-        rb = partial(call_read_bytes,
-                     read_bytes,
-                     accessor,
-                     index=index,
-                     prefix=mount_prefix)
+        rd = partial(call_readdir, readdir, prefix=mount_prefix)
+        st = partial(call_stat, stat, prefix=mount_prefix)
+        rb = partial(call_read_bytes, read_bytes, prefix=mount_prefix)
 
         is_dir = False
         try:
@@ -233,7 +210,7 @@ async def rg(
             return format_records(all_results), IOResult()
 
         if read_stream is not None:
-            source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
+            source: AsyncIterator[bytes] = read_stream(paths[0])
         else:
             raw_bytes = await rb(paths[0].virtual)
             source = _wrap_bytes(raw_bytes)

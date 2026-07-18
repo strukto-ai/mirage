@@ -18,8 +18,18 @@ from mirage import MountMode, Workspace
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.stream import collect_bytes
+from tests.core.databricks_volume.conftest import (accessor, databricks_config,
+                                                   files, index, remote_root)
 from tests.resource.databricks_volume.test_databricks_volume import (
     FakeFiles, make_resource, seed_directory, seed_file)
+
+__all__ = [
+    "accessor",
+    "databricks_config",
+    "files",
+    "index",
+    "remote_root",
+]
 
 
 def seed_text_command_fixture(files: FakeFiles) -> str:

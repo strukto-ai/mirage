@@ -3,8 +3,6 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.errors import UsageError
@@ -35,7 +33,6 @@ def _child_spec(parent: PathSpec, name: str) -> PathSpec:
 
 
 async def _diff_pair(
-    accessor: Accessor | None,
     path1: PathSpec,
     path2: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -43,8 +40,8 @@ async def _diff_pair(
 ) -> bytes:
     name1 = path1.virtual
     name2 = path2.virtual
-    text_a = (await read_bytes(accessor, path1)).decode(errors="replace")
-    text_b = (await read_bytes(accessor, path2)).decode(errors="replace")
+    text_a = (await read_bytes(path1)).decode(errors="replace")
+    text_b = (await read_bytes(path2)).decode(errors="replace")
     if flags.i:
         text_a = text_a.lower()
         text_b = text_b.lower()
@@ -74,17 +71,15 @@ async def _diff_pair(
 
 
 async def _diff_dirs(
-    accessor: Accessor | None,
     dir_a: PathSpec,
     dir_b: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[FileStat]],
-    index: IndexCacheStore | None,
     flags: _DiffFlags,
 ) -> bytes:
-    raw_a = await readdir_fn(accessor, dir_a, index)
-    raw_b = await readdir_fn(accessor, dir_b, index)
+    raw_a = await readdir_fn(dir_a)
+    raw_b = await readdir_fn(dir_b)
     names_a = {gnu_basename(entry) for entry in raw_a}
     names_b = {gnu_basename(entry) for entry in raw_b}
     left = dir_a.virtual.rstrip("/")
@@ -99,17 +94,13 @@ async def _diff_dirs(
             continue
         child_a = _child_spec(dir_a, name)
         child_b = _child_spec(dir_b, name)
-        a_dir = (await stat_fn(accessor, child_a,
-                               index)).type == FileType.DIRECTORY
-        b_dir = (await stat_fn(accessor, child_b,
-                               index)).type == FileType.DIRECTORY
+        a_dir = (await stat_fn(child_a)).type == FileType.DIRECTORY
+        b_dir = (await stat_fn(child_b)).type == FileType.DIRECTORY
         if a_dir and b_dir:
-            parts.append(await
-                         _diff_dirs(accessor, child_a, child_b, read_bytes,
-                                    readdir_fn, stat_fn, index, flags))
+            parts.append(await _diff_dirs(child_a, child_b, read_bytes,
+                                          readdir_fn, stat_fn, flags))
         elif not a_dir and not b_dir:
-            body = await _diff_pair(accessor, child_a, child_b, read_bytes,
-                                    flags)
+            body = await _diff_pair(child_a, child_b, read_bytes, flags)
             if body:
                 if flags.q:
                     parts.append(body)
@@ -132,8 +123,6 @@ async def diff(
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[FileStat]],
-    accessor: Accessor | None = None,
-    index: IndexCacheStore | None = None,
     i: bool = False,
     w: bool = False,
     b: bool = False,
@@ -149,16 +138,13 @@ async def diff(
     flags = _DiffFlags(i=i, w=w, b=b, e=e, u=u, q=q)
     both_dirs = False
     if r:
-        both_dirs = ((await stat_fn(accessor, paths[0],
-                                    index)).type == FileType.DIRECTORY
-                     and (await stat_fn(accessor, paths[1],
-                                        index)).type == FileType.DIRECTORY)
+        both_dirs = ((await stat_fn(paths[0])).type == FileType.DIRECTORY
+                     and (await stat_fn(paths[1])).type == FileType.DIRECTORY)
     if both_dirs:
-        output = await _diff_dirs(accessor, paths[0], paths[1], read_bytes,
-                                  readdir_fn, stat_fn, index, flags)
+        output = await _diff_dirs(paths[0], paths[1], read_bytes, readdir_fn,
+                                  stat_fn, flags)
     else:
-        output = await _diff_pair(accessor, paths[0], paths[1], read_bytes,
-                                  flags)
+        output = await _diff_pair(paths[0], paths[1], read_bytes, flags)
     exit_code = 1 if output else 0
     return output, IOResult(exit_code=exit_code,
                             cache=[paths[0].mount_path, paths[1].mount_path])

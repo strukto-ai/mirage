@@ -12,18 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.mongodb._provision import head_tail_provision
+from mirage.commands.builtin.mongodb.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_tail, watch_stream
@@ -40,7 +39,7 @@ async def tail(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: str | None = None,
     c: str | None = None,
     q: bool = False,
@@ -74,9 +73,7 @@ async def tail(
                                 from_line=None), IOResult()
         show_headers = (v or len(paths) > 1) and not q
         return tail_multi(paths,
-                          read=mongodb_read,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(mongodb_read, accessor, index),
                           n=n_int,
                           c=c_int,
                           from_line=from_line,

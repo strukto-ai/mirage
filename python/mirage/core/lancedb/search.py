@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.lancedb.query import search_rows
 from mirage.core.lancedb.render import render_card
@@ -30,7 +32,7 @@ def _target_table(paths: list[PathSpec], config: LanceDBConfig) -> str | None:
     return None
 
 
-def _canonical_path(row: dict, config: LanceDBConfig, table: str,
+def _canonical_path(row: dict[str, Any], config: LanceDBConfig, table: str,
                     mount_prefix: str) -> str:
     segs: list[str] = []
     if not config.table:
@@ -43,7 +45,7 @@ def _canonical_path(row: dict, config: LanceDBConfig, table: str,
     return prefix + "/" + "/".join(segs)
 
 
-def _block(row: dict, config: LanceDBConfig, table: str,
+def _block(row: dict[str, Any], config: LanceDBConfig, table: str,
            mount_prefix: str) -> str:
     path = _canonical_path(row, config, table, mount_prefix)
     distance = row.get("_distance")

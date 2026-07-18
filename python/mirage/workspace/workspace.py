@@ -17,7 +17,7 @@ import builtins
 import logging
 import sys
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from functools import partial
 from types import TracebackType
 from typing import Any, Literal, TypeAlias, cast, overload
@@ -31,6 +31,7 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
 from mirage.commands.errors import FindParseError, UsageError
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
+from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
@@ -206,8 +207,7 @@ class Workspace:
             else:
                 prov = value
                 mount_mode = mode
-            if index is not None:
-                prov.set_index(index)
+            prov.set_index(index)
             mount_obj = self._registry.mount(prefix, prov, mount_mode)
             if mount_safeguards:
                 mount_obj.command_safeguards.update(mount_safeguards)
@@ -271,7 +271,7 @@ class Workspace:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
             self.add_fuse_mount(prefix, mountpoint)
 
-    async def history(self) -> list[dict]:
+    async def history(self) -> list[dict[str, Any]]:
         """Command events recorded by the hidden recorder.
 
         Returns:
@@ -299,7 +299,7 @@ class Workspace:
     def max_drain_bytes(self, value: int | None) -> None:
         self._cache.max_drain_bytes = value
 
-    def mounts(self) -> list:
+    def mounts(self) -> list[Any]:
         return self._registry.mounts()
 
     @property
@@ -532,7 +532,7 @@ class Workspace:
             cls,
             source,
             *,
-            resources: dict | None = None,
+            resources: dict[str, Any] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -568,9 +568,9 @@ class Workspace:
     @classmethod
     async def from_state(
             cls,
-            state: dict,
+            state: dict[str, Any],
             *,
-            resources: dict | None = None,
+            resources: dict[str, Any] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -622,10 +622,11 @@ class Workspace:
         return await type(self)._from_state(state, resources=resources)
 
     @classmethod
-    async def _from_state(cls,
-                          state: dict,
-                          *,
-                          resources: dict | None = None) -> "Workspace":
+    async def _from_state(
+            cls,
+            state: dict[str, Any],
+            *,
+            resources: dict[str, Any] | None = None) -> "Workspace":
         args = build_mount_args(state, resources)
         ws = cls(args.mount_args,
                  consistency=args.consistency,
@@ -874,7 +875,7 @@ class Workspace:
     async def execute(self,
                       command: str,
                       session_id: str | None = ...,
-                      stdin: AsyncIterator[bytes] | bytes | None = ...,
+                      stdin: ByteSource | None = ...,
                       provision: Literal[False] = ...,
                       agent_id: str | None = ...,
                       cwd: str | None = ...,
@@ -887,7 +888,7 @@ class Workspace:
     async def execute(self,
                       command: str,
                       session_id: str | None = ...,
-                      stdin: AsyncIterator[bytes] | bytes | None = ...,
+                      stdin: ByteSource | None = ...,
                       *,
                       provision: Literal[True],
                       agent_id: str | None = ...,
@@ -901,7 +902,7 @@ class Workspace:
         self,
         command: str,
         session_id: str | None = None,
-        stdin: AsyncIterator[bytes] | bytes | None = None,
+        stdin: ByteSource | None = None,
         provision: bool = False,
         agent_id: str | None = None,
         cwd: str | None = None,

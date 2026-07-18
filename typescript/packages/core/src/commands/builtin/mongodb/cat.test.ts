@@ -15,7 +15,8 @@
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../../core/mongodb/read.ts', () => ({
+vi.mock('../../../core/mongodb/read.ts', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   streamAny: vi.fn(),
 }))
 vi.mock('../../../core/mongodb/stat.ts', () => ({

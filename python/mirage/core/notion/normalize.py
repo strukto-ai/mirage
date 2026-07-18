@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.core.notion.pathing import extract_title
 from mirage.core.notion.render import blocks_to_markdown
 
 
-def normalize_page(page: dict, blocks: list[dict]) -> dict:
+def normalize_page(page: dict[str, Any],
+                   blocks: list[dict[str, Any]]) -> dict[str, Any]:
     parent = page.get("parent", {})
     parent_type = parent.get("type", "")
     parent_id = parent.get(parent_type, "")
@@ -44,7 +46,7 @@ def normalize_page(page: dict, blocks: list[dict]) -> dict:
     }
 
 
-def normalize_database(database: dict) -> dict:
+def normalize_database(database: dict[str, Any]) -> dict[str, Any]:
     title_items = database.get("title", [])
     title = "".join(item.get("plain_text", "") for item in title_items)
     return {
@@ -60,5 +62,5 @@ def normalize_database(database: dict) -> dict:
     }
 
 
-def to_json_bytes(obj: dict | list) -> bytes:
+def to_json_bytes(obj: dict[str, Any] | list[Any]) -> bytes:
     return json.dumps(obj, indent=2, ensure_ascii=False).encode("utf-8")

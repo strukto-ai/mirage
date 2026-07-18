@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import time
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -137,7 +138,7 @@ class DaemonClient:
                 start_new_session=True,
             )
 
-    def _resolve_port(self, table: dict) -> int:
+    def _resolve_port(self, table: dict[str, Any]) -> int:
         """Resolve the listen port for a spawned daemon.
 
         Priority: ``$MIRAGE_DAEMON_PORT``, then the ``port`` key in

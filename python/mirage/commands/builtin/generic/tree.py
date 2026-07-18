@@ -1,7 +1,7 @@
 import fnmatch
 from collections.abc import Awaitable, Callable
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.io.types import IOResult
@@ -28,7 +28,7 @@ async def _walk(
     dirs_only: bool,
     match_pattern: str | None,
     warnings: list[str],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[str]:
     lines: list[str] = []
     try:
@@ -97,7 +97,7 @@ async def tree(
     ignore_pattern: str | None = None,
     dirs_only: bool = False,
     match_pattern: str | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[bytes, IOResult]:
     warnings: list[str] = []
     lines = await _walk(path,

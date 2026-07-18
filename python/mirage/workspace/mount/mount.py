@@ -125,14 +125,14 @@ class MountEntry:
         # Empty during normal runs; populated only by the snapshot
         # loader.
         self.revisions: dict[str, str] = {}
-        self._cmds: dict[tuple, RegisteredCommand] = {}
+        self._cmds: dict[tuple[Any, ...], RegisteredCommand] = {}
         self._general_cmds: dict[str, RegisteredCommand] = {}
         self._cmd_specs: dict[str, CommandSpec] = {}
         self.command_safeguards: dict[str, CommandSafeguard] = {}
-        self._ops: dict[tuple, RegisteredOp] = {}
+        self._ops: dict[tuple[Any, ...], RegisteredOp] = {}
         self._general_ops: dict[str, RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
-        self._cross_cmds: dict[tuple, RegisteredCommand] = {}
+        self._cross_cmds: dict[tuple[Any, ...], RegisteredCommand] = {}
 
     def effective_mode(self) -> MountMode:
         """This mount's mode narrowed by the current session's cap.
@@ -215,7 +215,7 @@ class MountEntry:
     def filetype_handlers(
         self,
         cmd_name: str,
-    ) -> dict[str, Callable]:
+    ) -> dict[str, Callable[..., Any]]:
         """Get filetype-specific command handlers.
 
         Example::
@@ -229,14 +229,14 @@ class MountEntry:
         Args:
             cmd_name (str): command name, e.g. "cat".
         """
-        fns: dict[str, Callable] = {}
+        fns: dict[str, Callable[..., Any]] = {}
         for (name, ft), rc in self._cmds.items():
             if name == cmd_name and ft is not None:
                 if ft not in fns:
                     fns[ft] = rc.fn
         return fns
 
-    def register_fns(self, fns: list) -> None:
+    def register_fns(self, fns: list[Any]) -> None:
         """Register commands and ops from decorated functions.
 
         Args:
@@ -363,9 +363,9 @@ class MountEntry:
         self,
         name: str,
         extension: str | None,
-        table: dict,
-        general: dict,
-    ) -> list:
+        table: dict[tuple[Any, ...], Any],
+        general: dict[str, Any],
+    ) -> list[Any]:
         """Resolve with cascade: try filetype, resource, general.
 
         Returns list of matching entries to try in order.
@@ -391,11 +391,11 @@ class MountEntry:
         cmd_name: str,
         paths: list[PathSpec],
         texts: list[str],
-        flag_kwargs: dict,
+        flag_kwargs: dict[str, object],
         *,
         stdin: ByteSource | None = None,
         cwd: str = "/",
-        dispatch: Callable | None = None,
+        dispatch: Callable[..., Any] | None = None,
         session_id: str | None = None,
         env: dict[str, str] | None = None,
         exec_allowed: bool = True,

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import tree_sitter
 
 from mirage.commands.builtin.utils.safeguard import run_with_timeout
@@ -188,7 +190,7 @@ async def handle_subshell(
     saved_functions = dict(session.functions)
     saved_positional = list(getattr(session, "positional_args", None) or [])
     try:
-        all_stdout: list = []
+        all_stdout: list[Any] = []
         merged_io = IOResult()
         last_exec = ExecutionNode(command="()", exit_code=0)
         for child in body:

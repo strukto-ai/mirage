@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.csplit import csplit as generic_csplit
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation,
-                                                          with_index)
+                                                          Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -31,21 +30,22 @@ async def csplit(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     f: str | PathSpec | None = None,
     n: str | None = None,
     b: str | None = None,
     k: bool = False,
     s: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_csplit(paths,
                                 texts,
-                                read_bytes=with_index(ops.read_bytes, index),
-                                write_bytes=ops.require(Operation.WRITE),
-                                accessor=accessor,
+                                read_bytes=bound_op(ops.read_bytes, accessor,
+                                                    index),
+                                write_bytes=partial(
+                                    ops.require(Operation.WRITE), accessor),
                                 stdin=stdin,
                                 prefix=f or "xx",
                                 digits=int(n) if n else 2,

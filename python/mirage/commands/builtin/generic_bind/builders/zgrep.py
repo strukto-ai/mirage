@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.zgrep import zgrep as generic_zgrep
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -28,9 +26,9 @@ async def zgrep(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = (await ops.resolve_glob(accessor, paths, index)
@@ -39,10 +37,8 @@ async def zgrep(
         resolved,
         texts,
         flags,
-        read_bytes=with_index(ops.read_bytes, index),
-        accessor=accessor,
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
         stdin=stdin,
-        index=index,
     )
 
 

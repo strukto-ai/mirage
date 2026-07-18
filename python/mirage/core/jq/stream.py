@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 import orjson
 
@@ -21,7 +22,7 @@ from mirage.core.jq.format import JQ_EMPTY
 from mirage.io.async_line_iterator import AsyncLineIterator
 
 
-def parse_jsonl(raw: bytes) -> list:
+def parse_jsonl(raw: bytes) -> list[Any]:
     text = raw.decode("utf-8", errors="replace")
     return [orjson.loads(line) for line in text.splitlines() if line.strip()]
 

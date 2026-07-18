@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from typing import Any
 
 from mirage.types import DriftPolicy, FingerprintKey
 
@@ -46,7 +47,7 @@ class ContentDriftError(Exception):
             "since the snapshot was taken")
 
 
-def capture_fingerprints(ws) -> list[dict]:
+def capture_fingerprints(ws) -> list[dict[str, Any]]:
     """Walk session ops and emit one entry per distinct read on a
     ``SUPPORTS_SNAPSHOT`` mount.
 
@@ -70,7 +71,7 @@ def capture_fingerprints(ws) -> list[dict]:
         return ETag and VersionId on every GET.
     """
     seen: set[str] = set()
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for rec in ws._ops.records:
         if rec.op != "read" or rec.path in seen:
             continue
@@ -83,7 +84,7 @@ def capture_fingerprints(ws) -> list[dict]:
             continue
         if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
             continue
-        entry: dict = {
+        entry: dict[str, Any] = {
             FingerprintKey.PATH: rec.path,
             FingerprintKey.MOUNT_PREFIX: mount.prefix,
         }
@@ -95,7 +96,7 @@ def capture_fingerprints(ws) -> list[dict]:
     return out
 
 
-def install_fingerprints(ws, fingerprint_entries: list[dict],
+def install_fingerprints(ws, fingerprint_entries: list[dict[str, Any]],
                          drift_policy: DriftPolicy) -> None:
     """Install snapshot fingerprints/revisions onto a reconstructed ws.
 

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.builtin.linear._input import resolve_text_input
@@ -39,7 +38,7 @@ async def linear_issue_create(
     accessor: LinearAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(_extra, spec=SPEC)

@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.resource.qdrant.config import QdrantConfig
 
 _SKIP_KEYS = {"_distance", "_rowid", "_score"}
 
 
-def render_json(row: dict, config: QdrantConfig) -> bytes:
+def render_json(row: dict[str, Any], config: QdrantConfig) -> bytes:
     data = {
         key: value
         for key, value in row.items() if key not in _SKIP_KEYS
@@ -29,7 +30,7 @@ def render_json(row: dict, config: QdrantConfig) -> bytes:
             "\n").encode()
 
 
-def render_text(row: dict, config: QdrantConfig) -> bytes:
+def render_text(row: dict[str, Any], config: QdrantConfig) -> bytes:
     value = row.get(config.text_field) if config.text_field else None
     if value is None:
         return b""

@@ -14,10 +14,6 @@
 
 from enum import Enum
 
-SCOPE_WARN = 100
-SCOPE_SUGGEST = 1000
-SCOPE_ERROR = 10000
-
 
 class PatternType(str, Enum):
     EXACT = "exact"

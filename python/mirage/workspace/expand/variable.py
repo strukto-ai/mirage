@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import fnmatch
+from typing import Any
 
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import NodeType as NT
@@ -141,8 +142,8 @@ def _apply_op(op: str, val: str, var_in_env: bool, args: list[str]) -> str:
 
 def _expand_braces(
     node,
-    env: dict,
-    arrays: dict,
+    env: dict[str, Any],
+    arrays: dict[str, Any],
     call_stack: CallStack | None,
 ) -> str:
     """Expand ${VAR}, ${VAR<op>...}, ${a[i]}, ${#a[@]}, etc."""

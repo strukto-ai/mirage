@@ -14,12 +14,13 @@
 
 import {
   makeFiletypeCommands,
+  makeResolveGlob,
   ResourceName,
   withDefaultProvisions,
   type RegisteredCommand,
 } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
-import { resolveGlob as opfsResolveGlob } from '../../../core/opfs/glob.ts'
+import { SCOPE_ERROR } from '../../../core/opfs/constants.ts'
 import { read as opfsRead } from '../../../core/opfs/read.ts'
 import { readdir as opfsReaddir } from '../../../core/opfs/readdir.ts'
 import { stat as opfsStat } from '../../../core/opfs/stat.ts'
@@ -86,6 +87,8 @@ import { OPFS_XXD } from './xxd.ts'
 import { OPFS_ZCAT } from './zcat.ts'
 import { OPFS_ZGREP } from './zgrep.ts'
 import { OPFS_ZIP } from './zip_cmd.ts'
+
+const opfsResolveGlob = makeResolveGlob(opfsReaddir, SCOPE_ERROR)
 
 // Bespoke commands get the same family-default provisions the factory
 // would attach, so estimates match factory-built backends.

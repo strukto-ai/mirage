@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -24,11 +25,11 @@ from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-def _json_bytes(data: dict) -> bytes:
+def _json_bytes(data: dict[str, Any]) -> bytes:
     return json.dumps(data, ensure_ascii=False, indent=2).encode()
 
 
-def _jsonl_bytes(items: list[dict]) -> bytes:
+def _jsonl_bytes(items: list[dict[str, Any]]) -> bytes:
     if not items:
         return b""
     lines = [
@@ -48,7 +49,7 @@ async def read(
     Args:
         accessor (LangfuseAccessor): langfuse accessor.
         path (str): resource-relative path.
-        index (IndexCacheStore | None): index cache.
+        index (IndexCacheStore): index cache.
         prefix (str): mount prefix for virtual index keys.
     """
     virtual = path.virtual

@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat as generic_cat
@@ -36,7 +34,7 @@ async def cat(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: bool = False,
     index: IndexCacheStore,
     **_extra: object,

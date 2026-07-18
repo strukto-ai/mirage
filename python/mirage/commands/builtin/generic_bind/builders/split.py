@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.split import split as generic_split
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation,
-                                                          with_index)
+                                                          Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -31,20 +30,21 @@ async def split(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     args_l: str | None = None,
     b: str | None = None,
     n: str | None = None,
     d: bool = False,
     a: str | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_split(paths,
-                               read_stream=with_index(ops.read_stream, index),
-                               write_bytes=ops.require(Operation.WRITE),
-                               accessor=accessor,
+                               read_stream=bound_op(ops.read_stream, accessor,
+                                                    index),
+                               write_bytes=partial(
+                                   ops.require(Operation.WRITE), accessor),
                                stdin=stdin,
                                lines_per_file=int(args_l) if args_l else 0,
                                byte_limit=int(b) if b else 0,

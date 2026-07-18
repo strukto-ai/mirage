@@ -13,16 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+from typing import Any
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.core.ram.append import append_bytes
+from mirage.core.ram.constants import SCOPE_ERROR
 from mirage.core.ram.copy import copy
 from mirage.core.ram.create import create
 from mirage.core.ram.du import du, du_all
 from mirage.core.ram.exists import exists
 from mirage.core.ram.find import find
-from mirage.core.ram.glob import resolve_glob as _resolve_glob
 from mirage.core.ram.mkdir import mkdir
 from mirage.core.ram.read import read_bytes
 from mirage.core.ram.readdir import readdir
@@ -39,7 +40,10 @@ from mirage.resource.base import BaseResource
 from mirage.resource.ram.prompt import PROMPT
 from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
 _RAM_OPS = {
     "read_bytes": read_bytes,
@@ -68,7 +72,7 @@ class RAMResource(BaseResource):
     accessor: RAMAccessor
     name: str = ResourceName.RAM
     index_ttl: float = 0
-    _ops: dict = _RAM_OPS
+    _ops: dict[str, Any] = _RAM_OPS
     PROMPT: str = PROMPT
 
     def __init__(self) -> None:
@@ -77,8 +81,8 @@ class RAMResource(BaseResource):
         self.accessor = RAMAccessor(self._store)
         for fn in RAM_COMMANDS:
             self.register(fn)
-        for fn in RAM_OPS:
-            self.register_op(fn)
+        for ro in RAM_OPS:
+            self.register_op(ro)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:
@@ -89,7 +93,7 @@ class RAMResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,
             "files": dict(self._store.files),
@@ -101,7 +105,7 @@ class RAMResource(BaseResource):
             },
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         self._store.files = dict(state.get("files", {}))
         self._store.dirs = set(state.get("dirs", ["/"]))
         self._store.modified = dict(state.get("modified", {}))

@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-from typing import Any, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
@@ -27,41 +27,40 @@ def to_pathspec(path: Any, prefix: str = "") -> PathSpec:
                     resource_path=mount_key(path, prefix))
 
 
+# The call_* helpers adapt a bound op (accessor and index already bound,
+# called as ``op(path)``) so grep/rg can walk with plain string keys.
+
+
 async def call_readdir(
-    readdir_fn: Callable,
-    accessor: Any,
-    path: Any,
-    index: Any = None,
+    readdir_fn: Callable[[PathSpec], Awaitable[list[str]]],
+    path: str | PathSpec,
     prefix: str = "",
-):
-    return await readdir_fn(accessor, to_pathspec(path, prefix), index)
+) -> list[str]:
+    return await readdir_fn(to_pathspec(path, prefix))
 
 
 async def call_stat(
-    stat_fn: Callable,
-    accessor: Any,
-    path: Any,
-    index: Any = None,
+    stat_fn: Callable[[PathSpec], Awaitable[FileStat]],
+    path: str | PathSpec,
     prefix: str = "",
-):
-    return await stat_fn(accessor, to_pathspec(path, prefix), index)
+) -> FileStat:
+    return await stat_fn(to_pathspec(path, prefix))
 
 
 async def call_read_bytes(
-    read_fn: Callable,
-    accessor: Any,
-    path: Any,
-    index: Any = None,
+    read_fn: Callable[[PathSpec], Awaitable[bytes]],
+    path: str | PathSpec,
     prefix: str = "",
 ) -> bytes:
-    return await read_fn(accessor, to_pathspec(path, prefix), index)
+    return await read_fn(to_pathspec(path, prefix))
 
 
 async def stream_from_bytes(
-    read_fn: Callable,
+    read_fn: Callable[..., Any],
     accessor: Any,
     path: Any,
     index: Any = None,
     prefix: str = "",
 ) -> AsyncIterator[bytes]:
+    # CommandIO-level adapter: raw ``(accessor, path, index)`` shape.
     yield await read_fn(accessor, to_pathspec(path, prefix), index)

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import invalidate_after_unlink
@@ -28,7 +29,7 @@ from mirage.utils.errors import enoent
 def _list_directory_sync(
     accessor: DatabricksVolumeAccessor,
     remote_path: str,
-) -> list:
+) -> list[Any]:
     return list(accessor.files.list_directory_contents(remote_path))
 
 

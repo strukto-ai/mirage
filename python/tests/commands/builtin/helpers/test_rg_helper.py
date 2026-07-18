@@ -38,11 +38,11 @@ async def _mkdir(backend, path):
 
 def _bind(backend):
     accessor = backend.accessor
-    index = backend.index
+    backend.index
     return (
-        partial(call_readdir, readdir, accessor, index=index),
-        partial(call_stat, stat, accessor),
-        partial(call_read_bytes, read, accessor),
+        partial(call_readdir, partial(readdir, accessor)),
+        partial(call_stat, partial(stat, accessor)),
+        partial(call_read_bytes, partial(read, accessor)),
     )
 
 

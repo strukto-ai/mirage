@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.discord.read import read
-from mirage.ops.discord.readdir import readdir
-from mirage.ops.discord.stat import stat
+from mirage.commands.builtin.discord.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat]
+OPS = make_generic_ops("discord", _TABLE)

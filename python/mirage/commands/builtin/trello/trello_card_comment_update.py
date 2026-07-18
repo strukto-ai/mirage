@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.builtin.trello._input import resolve_text_input
@@ -42,7 +41,7 @@ async def trello_card_comment_update(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(_extra, spec=SPEC)

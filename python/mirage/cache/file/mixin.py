@@ -14,6 +14,7 @@
 
 import asyncio
 from collections.abc import Iterable
+from typing import Any
 
 
 def validate_max_drain_bytes(cache_limit: int,
@@ -35,7 +36,7 @@ class FileCacheMixin:
     """
 
     _max_drain_bytes: int | None = None
-    _drain_tasks: dict[str, asyncio.Task]
+    _drain_tasks: dict[str, asyncio.Task[Any]]
 
     async def get(self, key: str) -> bytes | None:
         raise NotImplementedError

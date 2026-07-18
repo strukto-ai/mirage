@@ -23,7 +23,7 @@ import {
   ResourceName,
   dropboxRead,
   dropboxReaddir,
-  dropboxResolveGlob,
+  makeResolveGlob,
   dropboxStat,
   mountKey,
   mountPrefixOf,
@@ -33,6 +33,8 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
+
+const dropboxResolveGlob = makeResolveGlob(dropboxReaddir)
 
 export interface DropboxResourceState {
   type: string

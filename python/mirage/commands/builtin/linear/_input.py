@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.commands.builtin.utils.stream import \
     resolve_text_input as _resolve_text_input
 from mirage.core.linear.read import read_bytes
+from mirage.io.types import ByteSource
 from mirage.resource.linear.config import LinearConfig
 
 
@@ -25,7 +24,7 @@ async def resolve_text_input(
     *,
     inline_text: str | None,
     file_path: str | None,
-    stdin: AsyncIterator[bytes] | bytes | None,
+    stdin: ByteSource | None,
     error_message: str,
 ) -> str:
     return await _resolve_text_input(read_bytes,

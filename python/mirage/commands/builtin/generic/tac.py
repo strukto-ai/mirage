@@ -1,6 +1,5 @@
 from collections.abc import AsyncIterator, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
@@ -11,8 +10,7 @@ async def tac(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     # Each operand is reversed independently and the outputs concatenate in
     # operand order, like GNU tac.
@@ -20,10 +18,7 @@ async def tac(
         cache = [p.mount_path for p in paths]
         parts: list[bytes] = []
         for p in paths:
-            lines = [
-                line
-                async for line in AsyncLineIterator(read_stream(accessor, p))
-            ]
+            lines = [line async for line in AsyncLineIterator(read_stream(p))]
             lines.reverse()
             if lines:
                 parts.append(b"\n".join(lines) + b"\n")

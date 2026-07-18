@@ -15,10 +15,10 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation)
+                                                          Operation, bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import NativeMove, PathSpec
 
@@ -32,7 +32,7 @@ async def mv(
     f: bool = False,
     n: bool = False,
     v: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:
@@ -42,10 +42,9 @@ async def mv(
         paths,
         strategy=NativeMove(
             rename=partial(ops.require(Operation.RENAME), accessor)),
-        stat=partial(ops.stat, accessor),
+        stat=bound_op(ops.stat, accessor, index),
         n=n,
-        v=v,
-        index=index)
+        v=v)
 
 
 BUILDER = Builder('mv',

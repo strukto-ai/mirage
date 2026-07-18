@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.discord._client import discord_post
 from mirage.resource.discord.config import DiscordConfig
 
@@ -21,7 +23,7 @@ async def send_message(
     channel_id: str,
     text: str,
     message_reference_id: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Send a message to a channel.
 
     Args:
@@ -33,7 +35,7 @@ async def send_message(
     Returns:
         dict: API response.
     """
-    body: dict = {"content": text}
+    body: dict[str, Any] = {"content": text}
     if message_reference_id:
         body["message_reference"] = {"message_id": message_reference_id}
     return await discord_post(

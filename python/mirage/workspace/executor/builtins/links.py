@@ -16,6 +16,7 @@ import dataclasses
 import posixpath
 import time
 from collections.abc import Callable
+from typing import Any
 
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec, word_text
@@ -152,7 +153,8 @@ async def strip_link_operands(
     return kept, removed
 
 
-async def _stat_or_none(dispatch: Callable, path: PathSpec) -> FileStat | None:
+async def _stat_or_none(dispatch: Callable[..., Any],
+                        path: PathSpec) -> FileStat | None:
     """Stat a path via dispatch, mapping a missing file to ``None``.
 
     Args:
@@ -170,7 +172,7 @@ async def _stat_or_none(dispatch: Callable, path: PathSpec) -> FileStat | None:
 
 async def prepare_mv(
     namespace: Namespace,
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     items: list[str | PathSpec],
 ) -> tuple[list[str | PathSpec], str | None, tuple[str, str] | None, Result
            | None]:

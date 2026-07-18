@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.core.discord.paginate import after_id_pages
 from mirage.resource.discord.config import DiscordConfig
@@ -21,7 +22,7 @@ from mirage.resource.discord.config import DiscordConfig
 def list_guilds_stream(
     config: DiscordConfig,
     page_size: int = 200,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming variant of list_guilds.
 
     Args:
@@ -43,7 +44,7 @@ def list_guilds_stream(
 async def list_guilds(
     config: DiscordConfig,
     page_size: int = 200,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all guilds the bot is in (paginated).
 
     Args:
@@ -53,7 +54,7 @@ async def list_guilds(
     Returns:
         list[dict]: guild dicts with id, name.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     async for page in list_guilds_stream(config, page_size):
         out.extend(page)
     return out

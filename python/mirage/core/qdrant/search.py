@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.core.qdrant.query import search_rows
 from mirage.core.qdrant.render import render_json, render_text
@@ -19,7 +21,7 @@ from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import PathSpec
 
 
-def _content_ext(row: dict, config: QdrantConfig) -> str:
+def _content_ext(row: dict[str, Any], config: QdrantConfig) -> str:
     if config.text_field and row.get(config.text_field) is not None:
         return "txt"
     return "json"
@@ -36,7 +38,7 @@ def _target_table(paths: list[PathSpec], config: QdrantConfig) -> str | None:
     return None
 
 
-def _canonical_path(row: dict, config: QdrantConfig, table: str,
+def _canonical_path(row: dict[str, Any], config: QdrantConfig, table: str,
                     mount_prefix: str) -> str:
     segs: list[str] = []
     if not config.collection:
@@ -49,7 +51,7 @@ def _canonical_path(row: dict, config: QdrantConfig, table: str,
     return prefix + "/" + "/".join(segs)
 
 
-def _block(row: dict, config: QdrantConfig, table: str,
+def _block(row: dict[str, Any], config: QdrantConfig, table: str,
            mount_prefix: str) -> str:
     path = _canonical_path(row, config, table, mount_prefix)
     score = row.get("_score")

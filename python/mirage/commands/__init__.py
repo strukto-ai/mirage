@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.commands.builtin.ram import COMMANDS as _RAM_COMMANDS
 
-_BY_NAME: dict[str, Callable] = {}
+_BY_NAME: dict[str, Callable[..., Any]] = {}
 for _fn in _RAM_COMMANDS:
     for _rc in getattr(_fn, "_registered_commands"):
         if _rc.filetype is None and _rc.name not in _BY_NAME:
@@ -27,6 +27,9 @@ _GENERAL_NAMES = ("ls", "stat", "find", "tree", "du", "cat", "head", "tail",
                   "uniq", "cut", "tr", "mkdir", "touch", "cp", "mv", "rm",
                   "sed", "tee")
 
-COMMANDS: dict[str, Callable] = {n: _BY_NAME[n] for n in _GENERAL_NAMES}
+COMMANDS: dict[str, Callable[..., Any]] = {
+    n: _BY_NAME[n]
+    for n in _GENERAL_NAMES
+}
 
 __all__ = ["COMMANDS"]

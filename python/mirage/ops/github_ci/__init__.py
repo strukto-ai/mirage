@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.github_ci.read import read
-from mirage.ops.github_ci.readdir import readdir
-from mirage.ops.github_ci.stat import stat
+from mirage.commands.builtin.github_ci.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat]
+OPS = make_generic_ops("github_ci", _TABLE)

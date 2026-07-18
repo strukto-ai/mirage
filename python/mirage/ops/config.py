@@ -14,7 +14,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -96,4 +96,4 @@ class OpsMount:
     accessor: Accessor
     index: IndexCacheStore
     mode: MountMode
-    ops: list = field(default_factory=list)
+    ops: list[Any] = field(default_factory=list[Any])

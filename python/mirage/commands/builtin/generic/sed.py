@@ -1,7 +1,6 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.sed_helper import (_execute_program,
                                                 _parse_one_command,
                                                 _parse_program)
@@ -11,7 +10,7 @@ from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
-def _is_simple_sub(commands: list[dict], suppress: bool) -> bool:
+def _is_simple_sub(commands: list[dict[str, Any]], suppress: bool) -> bool:
     return (len(commands) == 1 and commands[0]["cmd"] == "s"
             and commands[0].get("addr_start") is None and not suppress)
 
@@ -22,12 +21,10 @@ async def sed(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]] | None,
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     in_place: bool = False,
     suppress: bool = False,
     extended: bool = False,
-    index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if ";" in expression or "{" in expression or "\n" in expression:
         commands = _parse_program(expression)
@@ -52,7 +49,7 @@ async def sed(
             edited: list[PathSpec] = []
             for p in paths:
                 try:
-                    data = await read_bytes(accessor, p)
+                    data = await read_bytes(p)
                 except FS_ERRORS as exc:
                     err += fs_error_line("sed", p, exc).encode()
                     continue
@@ -62,7 +59,7 @@ async def sed(
                                             suppress=suppress,
                                             extended=extended)
                 new_data = new_text.encode()
-                await write_bytes(accessor, p, new_data)
+                await write_bytes(p, new_data)
                 writes[p.mount_path] = new_data
                 edited.append(p)
             return None, IOResult(writes=writes,
@@ -74,7 +71,7 @@ async def sed(
         read_ok: list[PathSpec] = []
         for p in paths:
             try:
-                data = await read_bytes(accessor, p)
+                data = await read_bytes(p)
             except FS_ERRORS as exc:
                 err += fs_error_line("sed", p, exc).encode()
                 continue
@@ -98,7 +95,7 @@ async def sed(
         edited = []
         for p in paths:
             try:
-                data = await read_bytes(accessor, p)
+                data = await read_bytes(p)
             except FS_ERRORS as exc:
                 err += fs_error_line("sed", p, exc).encode()
                 continue
@@ -113,7 +110,7 @@ async def sed(
                         "sed: in-place edit (-i) is not supported on this "
                         "backend")
                 new_data = result.encode()
-                await write_bytes(accessor, p, new_data)
+                await write_bytes(p, new_data)
                 writes[p.mount_path] = new_data
                 edited.append(p)
             else:

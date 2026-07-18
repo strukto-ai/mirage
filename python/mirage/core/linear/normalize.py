@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 
-def normalize_team(team: dict) -> dict:
+def normalize_team(team: dict[str, Any]) -> dict[str, Any]:
     states = []
     for state in (team.get("states") or {}).get("nodes", []):
         states.append({
@@ -35,7 +36,7 @@ def normalize_team(team: dict) -> dict:
     }
 
 
-def normalize_user(user: dict) -> dict:
+def normalize_user(user: dict[str, Any]) -> dict[str, Any]:
     return {
         "user_id": user.get("id"),
         "name": user.get("name"),
@@ -48,7 +49,7 @@ def normalize_user(user: dict) -> dict:
     }
 
 
-def normalize_issue(issue: dict) -> dict:
+def normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
     team = issue.get("team") or {}
     state = issue.get("state") or {}
     project = issue.get("project") or {}
@@ -86,8 +87,8 @@ def normalize_issue(issue: dict) -> dict:
     }
 
 
-def normalize_comment(comment: dict, *, issue_id: str,
-                      issue_key: str | None) -> dict:
+def normalize_comment(comment: dict[str, Any], *, issue_id: str,
+                      issue_key: str | None) -> dict[str, Any]:
     user = comment.get("user") or {}
     return {
         "comment_id": comment.get("id"),
@@ -104,13 +105,13 @@ def normalize_comment(comment: dict, *, issue_id: str,
 
 
 def normalize_project(
-    project: dict,
+    project: dict[str, Any],
     *,
     team_id: str,
     team_key: str | None,
     team_name: str | None,
-    issues: list[dict],
-) -> dict:
+    issues: list[dict[str, Any]],
+) -> dict[str, Any]:
     lead = project.get("lead") or {}
     return {
         "project_id": project.get("id"),
@@ -128,7 +129,7 @@ def normalize_project(
     }
 
 
-def normalize_cycle(cycle: dict, *, team_id: str) -> dict:
+def normalize_cycle(cycle: dict[str, Any], *, team_id: str) -> dict[str, Any]:
     return {
         "cycle_id": cycle.get("id"),
         "team_id": team_id,
@@ -141,11 +142,11 @@ def normalize_cycle(cycle: dict, *, team_id: str) -> dict:
     }
 
 
-def to_json_bytes(value: dict | list) -> bytes:
+def to_json_bytes(value: dict[str, Any] | list[Any]) -> bytes:
     return json.dumps(value, ensure_ascii=False, indent=2).encode()
 
 
-def to_jsonl_bytes(rows: list[dict]) -> bytes:
+def to_jsonl_bytes(rows: list[dict[str, Any]]) -> bytes:
     ordered = sorted(rows, key=lambda row: row.get("created_at") or "")
     if not ordered:
         return b""

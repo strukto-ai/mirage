@@ -14,6 +14,7 @@
 
 import math
 import re
+from typing import Any
 
 from mirage.core.filetype.constants import CANONICAL_TYPES
 
@@ -83,7 +84,8 @@ def render_schema(fields: list[tuple[str, str]]) -> list[str]:
     return lines
 
 
-def render_table(rows: list[dict], label: str, count: int) -> list[str]:
+def render_table(rows: list[dict[str, Any]], label: str,
+                 count: int) -> list[str]:
     lines = [f"## {label} ({count} rows)", ""]
     if not rows:
         lines.append("(empty)")
@@ -114,7 +116,7 @@ def _csv_escape(value: object) -> str:
     return text
 
 
-def to_csv(rows: list[dict]) -> bytes:
+def to_csv(rows: list[dict[str, Any]]) -> bytes:
     if not rows:
         return b""
     columns = list(rows[0].keys())
@@ -124,9 +126,9 @@ def to_csv(rows: list[dict]) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
-def grep_rows(rows: list[dict],
+def grep_rows(rows: list[dict[str, Any]],
               pattern: str,
-              ignore_case: bool = False) -> list[dict]:
+              ignore_case: bool = False) -> list[dict[str, Any]]:
     flags = re.IGNORECASE if ignore_case else 0
     regex = re.compile(pattern, flags)
     matched = []
@@ -136,8 +138,8 @@ def grep_rows(rows: list[dict],
     return matched
 
 
-def cut_columns(rows: list[dict], schema_names: list[str],
-                columns: list[str]) -> list[dict]:
+def cut_columns(rows: list[dict[str, Any]], schema_names: list[str],
+                columns: list[str]) -> list[dict[str, Any]]:
     for col in columns:
         if col not in schema_names:
             raise ValueError(f"column not found: {col}")

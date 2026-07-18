@@ -12,16 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.mongodb._provision import file_read_provision
+from mirage.commands.builtin.mongodb.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
@@ -40,7 +38,7 @@ async def cat(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: bool = False,
     index: IndexCacheStore,
     **_extra: object,

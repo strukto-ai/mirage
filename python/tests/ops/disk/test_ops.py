@@ -16,11 +16,18 @@ import pytest
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.ops.disk.read.read import read
-from mirage.ops.disk.readdir import readdir
-from mirage.ops.disk.stat import stat
-from mirage.ops.disk.write import write
+from mirage.ops.disk import OPS
 from mirage.types import PathSpec
+
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
+
+
+read = _op("read")
+readdir = _op("readdir")
+stat = _op("stat")
+write = _op("write")
 
 
 @pytest.mark.asyncio

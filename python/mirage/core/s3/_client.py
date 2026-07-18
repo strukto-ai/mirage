@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import aioboto3
 from botocore.config import Config
 
@@ -32,8 +34,8 @@ def _strip_prefix(key: str, config: S3Config) -> str:
     return kp.strip(config.key_prefix or "", key)
 
 
-def _client_kwargs(config: S3Config) -> dict:
-    kwargs: dict = {"service_name": "s3"}
+def _client_kwargs(config: S3Config) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"service_name": "s3"}
     if config.region:
         kwargs["region_name"] = config.region
     if config.endpoint_url:
@@ -46,7 +48,7 @@ def _client_kwargs(config: S3Config) -> dict:
         kwargs["aws_secret_access_key"] = secret_access_key
     if session_token:
         kwargs["aws_session_token"] = session_token
-    cfg_kwargs: dict = {
+    cfg_kwargs: dict[str, Any] = {
         "connect_timeout": config.timeout,
         "read_timeout": config.timeout,
     }

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.core.msgraph.drive_ops import capture_item_metadata
 from mirage.core.onedrive._client import drive_loc, graph_list, split_path
@@ -19,7 +21,7 @@ from mirage.types import PathSpec
 
 
 async def list_versions(accessor: OneDriveAccessor,
-                        path: PathSpec) -> list[dict]:
+                        path: PathSpec) -> list[dict[str, Any]]:
     _, stripped = split_path(path)
     loc = drive_loc(accessor.config, stripped)
     return await graph_list(accessor.config, loc.item("/versions"))

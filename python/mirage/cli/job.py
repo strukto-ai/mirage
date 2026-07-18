@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import typer
 
 from mirage.cli.client import make_client
@@ -58,7 +60,7 @@ def wait_cmd(
         help="Seconds to wait before returning a still-running snapshot.",
     ),
 ) -> None:
-    body: dict = {}
+    body: dict[str, Any] = {}
     if timeout is not None:
         body["timeout_s"] = timeout
     with make_client() as client:

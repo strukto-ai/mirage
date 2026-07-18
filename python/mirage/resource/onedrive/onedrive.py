@@ -22,7 +22,6 @@ from mirage.core.onedrive.create import create
 from mirage.core.onedrive.du import du, du_all
 from mirage.core.onedrive.exists import exists
 from mirage.core.onedrive.find import find
-from mirage.core.onedrive.glob import resolve_glob as _resolve_glob
 from mirage.core.onedrive.mkdir import mkdir
 from mirage.core.onedrive.read import read_bytes
 from mirage.core.onedrive.readdir import readdir
@@ -38,7 +37,10 @@ from mirage.ops.onedrive import OPS as ONEDRIVE_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.onedrive.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _ONEDRIVE_OPS = {
     "read_bytes": read_bytes,
@@ -89,8 +91,8 @@ class OneDriveResource(BaseResource):
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

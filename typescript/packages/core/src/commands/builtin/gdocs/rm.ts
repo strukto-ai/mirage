@@ -13,13 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
-import { resolveGlob } from '../../../core/gdocs/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { GDOCS_CMD_OPS } from './ops.ts'
 import { unlink } from '../../../core/gdocs/unlink.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
+
+const resolveGlob = resolveGlobOf(GDOCS_CMD_OPS)
 
 const ENC = new TextEncoder()
 

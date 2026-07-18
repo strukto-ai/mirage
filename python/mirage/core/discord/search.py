@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.core.discord.paginate import offset_pages
 from mirage.resource.discord.config import DiscordConfig
@@ -20,13 +21,13 @@ from mirage.resource.discord.config import DiscordConfig
 PAGE_SIZE = 25
 
 
-def _flatten_contexts(contexts: list) -> list[dict]:
+def _flatten_contexts(contexts: list[Any]) -> list[dict[str, Any]]:
     """Pull the matched message from each search-context array.
 
     Discord search responses are shaped as ``[[ctx_msg, ...], ...]``;
     the matched message is the first entry of each context.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for context in contexts:
         if isinstance(context, list) and context:
             out.append(context[0])
@@ -39,7 +40,7 @@ async def search_guild_stream(
     query: str,
     channel_id: str | None = None,
     max_pages: int | None = None,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Stream guild-search pages, one flattened batch per round-trip.
 
     Args:
@@ -76,7 +77,7 @@ async def search_guild(
     query: str,
     channel_id: str | None = None,
     limit: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Search messages in a guild, optionally filtered to one channel.
 
     Args:
@@ -89,7 +90,7 @@ async def search_guild(
     Returns:
         list[dict]: matching messages sorted oldest-first.
     """
-    messages: list[dict] = []
+    messages: list[dict[str, Any]] = []
     async for page in search_guild_stream(config, guild_id, query, channel_id):
         for msg in page:
             messages.append(msg)

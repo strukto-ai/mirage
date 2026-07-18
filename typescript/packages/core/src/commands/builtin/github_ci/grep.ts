@@ -13,15 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
-import { isCrossRunRoot, resolveGlob } from '../../../core/github_ci/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { GITHUB_CI_CMD_OPS } from './ops.ts'
 import { stream as ciStream } from '../../../core/github_ci/read.ts'
-import { readdir as ciReaddir } from '../../../core/github_ci/readdir.ts'
+import { isCrossRunRoot, readdir as ciReaddir } from '../../../core/github_ci/readdir.ts'
 import { stat as ciStat } from '../../../core/github_ci/stat.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
+
+const resolveGlob = resolveGlobOf(GITHUB_CI_CMD_OPS)
 
 const ENC = new TextEncoder()
 

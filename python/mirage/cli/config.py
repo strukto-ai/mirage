@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import typer
 
 from mirage.cli.output import emit, fail
@@ -29,11 +31,11 @@ def _mask(key: str, value: str) -> str:
     return value
 
 
-def _human_table(table: dict) -> str:
+def _human_table(table: dict[str, Any]) -> str:
     return "\n".join(f"{k} = {v}" for k, v in table.items())
 
 
-def _human_resolved(table: dict) -> str:
+def _human_resolved(table: dict[str, Any]) -> str:
     return "\n".join(f"{k} = {e['value']}  ({e['origin']})"
                      for k, e in table.items())
 

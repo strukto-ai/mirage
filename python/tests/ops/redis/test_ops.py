@@ -20,19 +20,26 @@ import pytest_asyncio
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.redis.mkdir import mkdir
-from mirage.ops.redis.append import append_bytes
-from mirage.ops.redis.create import create
-from mirage.ops.redis.mkdir import mkdir as mkdir_op
-from mirage.ops.redis.read.read import read
-from mirage.ops.redis.readdir import readdir
-from mirage.ops.redis.rename import rename
-from mirage.ops.redis.rmdir import rmdir
-from mirage.ops.redis.stat import stat
-from mirage.ops.redis.truncate import truncate
-from mirage.ops.redis.unlink import unlink
-from mirage.ops.redis.write import write
+from mirage.ops.redis import OPS
 from mirage.resource.redis.store import RedisStore
 from mirage.types import FileType, PathSpec
+
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
+
+
+read = _op("read")
+readdir = _op("readdir")
+stat = _op("stat")
+write = _op("write")
+create = _op("create")
+mkdir_op = _op("mkdir")
+unlink = _op("unlink")
+rmdir = _op("rmdir")
+rename = _op("rename")
+append_bytes = _op("append")
+truncate = _op("truncate")
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")

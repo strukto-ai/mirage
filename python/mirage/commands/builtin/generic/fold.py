@@ -1,6 +1,5 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
@@ -32,15 +31,14 @@ async def fold(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     width: int = 80,
     break_spaces: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         all_lines: list[str] = []
         for p in paths:
-            data = (await read_bytes(accessor, p)).decode(errors="replace")
+            data = (await read_bytes(p)).decode(errors="replace")
             for line in split_lines(data):
                 all_lines.append(_fold_line(line, width, break_spaces))
         return (("\n".join(all_lines) +

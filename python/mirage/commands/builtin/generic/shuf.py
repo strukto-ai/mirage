@@ -1,7 +1,6 @@
 import random
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
@@ -25,8 +24,7 @@ async def shuf(
     texts: tuple[str, ...],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     count: int | None = None,
     echo: bool = False,
     zero_terminated: bool = False,
@@ -42,7 +40,7 @@ async def shuf(
     if paths:
         all_lines: list[str] = []
         for p in paths:
-            data = (await read_bytes(accessor, p)).decode(errors="replace")
+            data = (await read_bytes(p)).decode(errors="replace")
             if zero_terminated:
                 all_lines.extend(data.split("\x00"))
             else:

@@ -17,10 +17,18 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.ops.gdrive.read.read import read
+from mirage.ops.gdrive import OPS
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
+
+
+read = _op("read")
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -40,14 +48,28 @@ def index():
 
 
 @pytest.mark.asyncio
-async def test_read_calls_core(accessor, index):
-    fn = read._registered_ops[0].fn
+async def test_read_downloads_plain_file(accessor, index):
+    await index.put(
+        "/docs/readme.txt",
+        IndexEntry(
+            id="file123",
+            name="readme",
+            resource_type="gdrive/file",
+            remote_time="2026-04-01T00:00:00Z",
+            vfs_name="readme.txt",
+        ))
     with patch(
-            "mirage.ops.gdrive.read.read.core_read",
+            "mirage.core.gdrive.read.download_file",
             new_callable=AsyncMock,
             return_value=b"file content",
     ) as mock:
-        result = await fn(accessor, _scope("/docs/readme.txt"), index=index)
-        mock.assert_called_once_with(accessor, _scope("/docs/readme.txt"),
-                                     index)
+        result = await read(accessor, _scope("/docs/readme.txt"), index=index)
+        mock.assert_called_once_with(accessor.token_manager, "file123")
         assert result == b"file content"
+
+
+@pytest.mark.asyncio
+async def test_read_not_found(accessor, index):
+    await index.set_dir("/", [])
+    with pytest.raises(FileNotFoundError):
+        await read(accessor, _scope("/nonexistent.txt"), index=index)

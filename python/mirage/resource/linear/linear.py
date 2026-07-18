@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.linear import LinearAccessor
-from mirage.core.linear.glob import resolve_glob as _resolve_glob
 from mirage.core.linear.read import read
 from mirage.core.linear.readdir import readdir
 from mirage.core.linear.stat import stat
@@ -21,6 +22,9 @@ from mirage.resource.base import BaseResource
 from mirage.resource.linear.config import LinearConfig
 from mirage.resource.linear.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _LINEAR_OPS = {
     "read_bytes": read,
@@ -34,7 +38,7 @@ class LinearResource(BaseResource):
     accessor: LinearAccessor
     name: str = ResourceName.LINEAR
     caches_reads: bool = True
-    _ops: dict = _LINEAR_OPS
+    _ops: dict[str, Any] = _LINEAR_OPS
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 
@@ -53,8 +57,8 @@ class LinearResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

@@ -13,42 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.databricks_volume.head import head
-from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands)
-from mirage.core.databricks_volume.copy import copy as _copy
-from mirage.core.databricks_volume.create import create as _create
-from mirage.core.databricks_volume.exists import exists as _exists
-from mirage.core.databricks_volume.mkdir import mkdir as _mkdir
-from mirage.core.databricks_volume.read import read_bytes as _read
-from mirage.core.databricks_volume.readdir import readdir as _readdir
-from mirage.core.databricks_volume.rename import rename as _rename
-from mirage.core.databricks_volume.rm import rm_recursive as _rm_r
-from mirage.core.databricks_volume.rmdir import rmdir as _rmdir
-from mirage.core.databricks_volume.stat import stat as _stat
-from mirage.core.databricks_volume.stream import read_stream as _read_stream
-from mirage.core.databricks_volume.unlink import unlink as _unlink
-from mirage.core.databricks_volume.write import write_bytes as _write
-
-# Databricks Volume files are read and written through the generic factory;
-# head keeps a wrapper because -c fetches only the first N bytes via a single
-# range request instead of streaming the whole file.
-_DATABRICKS_CMD_OPS = CommandIO(
-    readdir=_readdir,
-    read_bytes=_read,
-    read_stream=_read_stream,
-    stat=_stat,
-    is_mounted=lambda a: True,
-    local=False,
-    write=_write,
-    exists=_exists,
-    mkdir=_mkdir,
-    unlink=_unlink,
-    rmdir=_rmdir,
-    rm_r=_rm_r,
-    rename=_rename,
-    copy=_copy,
-    create=_create,
-)
+from mirage.commands.builtin.databricks_volume.ops import \
+    OPS as _DATABRICKS_CMD_OPS
+from mirage.commands.builtin.generic_bind import make_generic_commands
 
 _DATABRICKS_OVERRIDES = {"head"}
 

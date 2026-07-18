@@ -18,10 +18,10 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.github._provision import metadata_provision
+from mirage.commands.builtin.github.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.find import find as find_core
-from mirage.core.github.glob import resolve_glob
 from mirage.core.github.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -61,8 +61,6 @@ async def find(
     index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if index is None:
-        raise ValueError("find: no tree loaded")
     paths = await resolve_glob(accessor, paths, index)
     return await generic_find(paths,
                               texts,

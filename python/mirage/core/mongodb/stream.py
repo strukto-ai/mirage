@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 
@@ -26,7 +27,7 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-def _apply_elision(value: dict, paths: set[str]) -> dict:
+def _apply_elision(value: dict[str, Any], paths: set[str]) -> dict[str, Any]:
     grouped: dict[str, set[str]] = {}
     leaves: set[str] = set()
     for p in paths:
@@ -35,7 +36,7 @@ def _apply_elision(value: dict, paths: set[str]) -> dict:
             grouped.setdefault(head, set()).add(tail)
         else:
             leaves.add(head)
-    out: dict = {}
+    out: dict[str, Any] = {}
     for k, v in value.items():
         if k in leaves:
             continue

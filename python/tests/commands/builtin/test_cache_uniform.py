@@ -35,7 +35,7 @@ class _CountingReader:
         self.data = data
         self.calls = 0
 
-    async def __call__(self, accessor, path, *args, **kwargs) -> bytes:
+    async def __call__(self, path, *args, **kwargs) -> bytes:
         self.calls += 1
         return self.data
 
@@ -52,11 +52,11 @@ async def _warm_manager() -> CacheManager:
     return CacheManager(cache, None, "/s3/", True)
 
 
-async def _stat(accessor, path, index=None) -> FileStat:
+async def _stat(path) -> FileStat:
     return FileStat(name="a.txt", type=FileType.TEXT, size=len(_PAYLOAD))
 
 
-async def _readdir(accessor, path, index=None) -> list[str]:
+async def _readdir(path) -> list[str]:
     return ["/s3/a.txt"]
 
 

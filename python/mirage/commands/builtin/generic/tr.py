@@ -1,6 +1,5 @@
 from collections.abc import AsyncIterator, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.escapes import interpret_escapes
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.spec.types import CommandName
@@ -60,8 +59,7 @@ async def tr(
     texts: tuple[str, ...],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     delete: bool = False,
     squeeze: bool = False,
     complement: bool = False,
@@ -88,7 +86,7 @@ async def tr(
 
     cache: list[str] = []
     if paths:
-        source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
+        source: AsyncIterator[bytes] = read_stream(paths[0])
         cache = [paths[0].mount_path]
     else:
         source = _resolve_source(stdin)

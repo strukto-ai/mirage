@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.notion.read import read
-from mirage.ops.notion.readdir import readdir
-from mirage.ops.notion.stat import stat
+from mirage.commands.builtin.notion.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat]
+OPS = make_generic_ops("notion", _TABLE)

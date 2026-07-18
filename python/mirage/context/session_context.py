@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from contextvars import ContextVar, Token
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mirage.types import MountMode, weaker_mode
 
@@ -26,12 +26,12 @@ _current_session: ContextVar["Session | None"] = ContextVar(
 )
 
 
-def set_current_session(session: "Session | None") -> Token:
+def set_current_session(session: "Session | None") -> Token[Any]:
     """Bind ``session`` to the current async context."""
     return _current_session.set(session)
 
 
-def reset_current_session(token: Token) -> None:
+def reset_current_session(token: Token[Any]) -> None:
     """Restore the previous session binding."""
     _current_session.reset(token)
 

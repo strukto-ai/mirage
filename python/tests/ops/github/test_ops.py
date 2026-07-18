@@ -12,31 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.github.ops import OPS as _TABLE
+from mirage.core.github.read import read as core_read
+from mirage.core.github.readdir import readdir as core_readdir
+from mirage.core.github.stat import stat as core_stat
 from mirage.ops.github import OPS
 
 
-def test_ops_contains_read():
-    fns = {fn.__name__ for fn in OPS}
-    assert "read" in fns
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
 
 
-def test_ops_contains_stat():
-    fns = {fn.__name__ for fn in OPS}
-    assert "stat" in fns
-
-
-def test_ops_contains_readdir():
-    fns = {fn.__name__ for fn in OPS}
-    assert "readdir" in fns
-
-
-def test_ops_has_three_entries():
-    assert len(OPS) == 3
-
-
-def test_no_write_ops():
-    write_ops = {
-        "write", "mkdir", "unlink", "rmdir", "rename", "create", "truncate"
+def test_registers_read_only_trio():
+    rows = {(o.name, o.resource, o.filetype, o.write) for o in OPS}
+    assert rows == {
+        ("read", "github", None, False),
+        ("readdir", "github", None, False),
+        ("stat", "github", None, False),
     }
-    fns = {fn.__name__ for fn in OPS}
-    assert not write_ops.intersection(fns)
+
+
+def test_table_wires_core_functions():
+    assert _TABLE.read_bytes is core_read
+    assert _TABLE.readdir is core_readdir
+    assert _TABLE.stat is core_stat
+
+
+def test_ops_resolve_to_callables():
+    for name in ("read", "readdir", "stat"):
+        assert callable(_op(name))

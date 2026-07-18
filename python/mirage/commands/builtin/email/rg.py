@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.email.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_count_has_matches,
                                                  grep_lines, pattern_arg)
@@ -27,7 +28,6 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message
-from mirage.core.email.glob import resolve_glob
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import extract_folder
@@ -43,7 +43,7 @@ async def rg(
     accessor: EmailAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
     **flags: object,
@@ -120,11 +120,9 @@ async def rg(
         resolved,
         texts,
         flags,
-        readdir=_readdir,
-        stat=_stat,
-        read_bytes=email_read,
+        readdir=bound_op(_readdir, accessor, index),
+        stat=bound_op(_stat, accessor, index),
+        read_bytes=bound_op(email_read, accessor, index),
         read_stream=None,
-        accessor=accessor,
         stdin=stdin,
-        index=index,
     )

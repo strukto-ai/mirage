@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import du as generic_du
 from mirage.commands.builtin.generic.du import du_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
@@ -24,8 +24,8 @@ from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import rekey
 
 
-async def _du_walk(ops: CommandIO, accessor: Accessor,
-                   index: IndexCacheStore | None, path: PathSpec) -> int:
+async def _du_walk(ops: CommandIO, accessor: Accessor, index: IndexCacheStore,
+                   path: PathSpec) -> int:
     try:
         s = await ops.stat(accessor, path, index)
     except (FileNotFoundError, ValueError):
@@ -58,7 +58,7 @@ async def du(
     a: bool = False,
     max_depth: str | None = None,
     c: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):

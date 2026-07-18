@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncIterator
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.slack._provision import file_read_provision
+from mirage.commands.builtin.slack.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -27,7 +28,6 @@ from mirage.commands.spec.types import FlagView
 from mirage.core.slack.formatters import (build_query,
                                           format_file_grep_results,
                                           format_grep_results)
-from mirage.core.slack.glob import resolve_glob
 from mirage.core.slack.read import read as slack_read
 from mirage.core.slack.readdir import readdir as _readdir
 from mirage.core.slack.scope import coalesce_scopes, detect_scope
@@ -61,7 +61,7 @@ async def grep(
     accessor: SlackAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
     **flags: object,
@@ -113,11 +113,9 @@ async def grep(
         resolved,
         texts,
         flags,
-        readdir=_readdir,
-        stat=_stat,
-        read_bytes=slack_read,
+        readdir=bound_op(_readdir, accessor, index),
+        stat=bound_op(_stat, accessor, index),
+        read_bytes=bound_op(slack_read, accessor, index),
         read_stream=None,
-        accessor=accessor,
         stdin=stdin,
-        index=index,
     )

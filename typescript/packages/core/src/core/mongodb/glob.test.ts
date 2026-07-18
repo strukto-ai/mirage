@@ -23,8 +23,11 @@ import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { stubMongoDriver } from './_test_util.ts'
-import { resolveGlob } from './glob.ts'
+import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
+import { MONGODB_CMD_OPS } from '../../commands/builtin/mongodb/ops.ts'
 import { readdir } from './readdir.ts'
+
+const resolveGlob = resolveGlobOf(MONGODB_CMD_OPS)
 
 const STUB_DRIVER = stubMongoDriver()
 

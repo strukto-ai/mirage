@@ -16,6 +16,7 @@ import asyncio
 import re
 import shlex
 from collections.abc import Callable
+from typing import Any
 
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.io import IOResult
@@ -53,7 +54,7 @@ def parse_duration(raw: str) -> float | None:
 
 
 async def handle_timeout(
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     args: list[str],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -103,7 +104,7 @@ async def handle_timeout(
 
 
 async def _execute_drained(
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     inner: str,
     session_id: str,
 ) -> tuple[bytes | None, IOResult]:

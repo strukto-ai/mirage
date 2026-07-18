@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator, Callable
 from functools import partial
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -27,14 +28,14 @@ from mirage.utils.path import norm, parent
 
 async def resolve_or_empty(ops: CommandIO, accessor: Accessor,
                            paths: list[PathSpec],
-                           index: IndexCacheStore | None) -> list[PathSpec]:
+                           index: IndexCacheStore) -> list[PathSpec]:
     if paths and ops.is_mounted(accessor):
         return await ops.resolve_glob(accessor, paths, index)
     return []
 
 
 async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
-                           index: IndexCacheStore | None) -> bool:
+                           index: IndexCacheStore) -> bool:
     """Whether a path that failed stat with ENOENT is an implicit directory.
 
     Keyed backends (RAM/Redis/S3) have no directory entries: stat of a
@@ -53,7 +54,7 @@ async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
         ops (CommandIO): Backend I/O bundle providing ``readdir``.
         accessor (Accessor): Backend accessor.
         path (PathSpec): The operand whose stat raised ENOENT.
-        index (IndexCacheStore | None): Index cache store for ``readdir``.
+        index (IndexCacheStore): Index cache store for ``readdir``.
     """
     target = norm(path.virtual)
     key = path.resource_path.strip("/")
@@ -79,7 +80,7 @@ async def split_readable(
     ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     cmd_name: str,
 ) -> tuple[list[PathSpec], bytes]:
     """Partition operands into readable paths and GNU stderr lines.
@@ -97,7 +98,7 @@ async def split_readable(
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
         accessor (Accessor): Backend accessor.
         paths (list[PathSpec]): Glob-resolved operands in command order.
-        index (IndexCacheStore | None): Index cache store for ``stat``.
+        index (IndexCacheStore): Index cache store for ``stat``.
         cmd_name (str): Command name for the stderr prefix.
 
     Returns:
@@ -125,7 +126,7 @@ async def split_readable(
     return readable, err
 
 
-async def _read_refusing_dirs(ops: CommandIO, index: IndexCacheStore | None,
+async def _read_refusing_dirs(ops: CommandIO, index: IndexCacheStore,
                               accessor: Accessor,
                               path: PathSpec) -> AsyncIterator[bytes]:
     try:
@@ -140,28 +141,30 @@ async def _read_refusing_dirs(ops: CommandIO, index: IndexCacheStore | None,
         yield chunk
 
 
-def dir_refusing_read(ops: CommandIO,
-                      index: IndexCacheStore | None) -> Callable:
-    """Read-stream callable that reports directory operands as EISDIR.
+def dir_refusing_read(ops: CommandIO, accessor: Accessor,
+                      index: IndexCacheStore) -> Callable[..., Any]:
+    """Bound read-stream callable that reports directory operands as EISDIR.
 
     For generics that read per operand and format FS errors inline (wc):
     the raw backend read raises ENOENT for an implicit keyed-backend
     directory, so the injected reader refines the error the same way
     ``split_readable`` does before the generic formats the line (#457).
+    Called as ``read(path)``; accessor and index are bound here.
 
     Args:
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``
             and ``read_stream``.
-        index (IndexCacheStore | None): Index cache store bound into reads.
+        accessor (Accessor): Backend accessor bound into reads.
+        index (IndexCacheStore): Index cache store bound into reads.
     """
-    return partial(_read_refusing_dirs, ops, index)
+    return partial(_read_refusing_dirs, ops, index, accessor)
 
 
 async def resolve_readable(
     ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     cmd_name: str,
 ) -> tuple[list[PathSpec], bytes]:
     """Resolve globs, then drop unreadable operands via ``split_readable``.
@@ -175,7 +178,7 @@ async def resolve_readable(
         ops (CommandIO): Backend I/O bundle.
         accessor (Accessor): Backend accessor.
         paths (list[PathSpec]): Raw path operands (may hold globs).
-        index (IndexCacheStore | None): Index cache store.
+        index (IndexCacheStore): Index cache store.
         cmd_name (str): Command name for the stderr prefix.
     """
     resolved = await resolve_or_empty(ops, accessor, paths, index)

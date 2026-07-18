@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.rm_command import make_rm
-from mirage.core.gslides.glob import resolve_glob
+from mirage.commands.builtin.gslides.ops import RESOLVE_GLOB as resolve_glob
 from mirage.core.gslides.unlink import unlink
 
 rm = make_rm(resource="gslides", glob_fn=resolve_glob, unlink=unlink)

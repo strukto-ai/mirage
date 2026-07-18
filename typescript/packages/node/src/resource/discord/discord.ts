@@ -28,13 +28,15 @@ import {
   discordStat,
   mountKey,
   mountPrefixOf,
-  resolveDiscordGlob,
+  makeResolveGlob,
   type FileStat,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } from './config.ts'
+
+const resolveDiscordGlob = makeResolveGlob(discordReaddir)
 
 class NodeDiscordTransport extends HttpDiscordTransport {
   constructor(private readonly token: string) {

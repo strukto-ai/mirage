@@ -12,20 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import (WCCounts, format_wc,
                                                 format_wc_lines)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.mongodb._provision import file_read_provision
+from mirage.commands.builtin.mongodb.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.mongodb._client import count_documents
-from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import MongoDBDocumentsScope, detect_scope
 from mirage.io.types import ByteSource, IOResult
@@ -40,7 +38,7 @@ async def wc(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     args_l: bool = False,
     w: bool = False,
     c: bool = False,

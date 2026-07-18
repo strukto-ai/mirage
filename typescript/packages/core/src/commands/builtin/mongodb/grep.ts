@@ -15,7 +15,8 @@
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { listDatabases } from '../../../core/mongodb/_client.ts'
-import { resolveGlob } from '../../../core/mongodb/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { MONGODB_CMD_OPS } from './ops.ts'
 import { read as mongoRead } from '../../../core/mongodb/read.ts'
 import { readdir as mongoReaddir } from '../../../core/mongodb/readdir.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
@@ -34,6 +35,8 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
 import { searchProvision } from './_provision.ts'
+
+const resolveGlob = resolveGlobOf(MONGODB_CMD_OPS)
 
 async function* mongoStream(
   accessor: MongoDBAccessor,

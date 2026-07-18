@@ -1,13 +1,13 @@
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def extract_level(extra: dict) -> int:
+def extract_level(extra: dict[str, Any]) -> int:
     for n in range(9, 0, -1):
         if extra.get(str(n)):
             return n
@@ -46,8 +46,7 @@ async def gzip(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     decompress: bool = False,
     keep: bool = False,
     force: bool = False,
@@ -65,7 +64,7 @@ async def gzip(
     if to_stdout:
         chunks: list[bytes] = []
         for p in paths:
-            raw = await read_bytes(accessor, p)
+            raw = await read_bytes(p)
             if decompress:
                 chunks.append(zlib.decompress(raw, zlib.MAX_WBITS | 16))
             else:
@@ -75,7 +74,7 @@ async def gzip(
 
     writes: dict[str, ByteSource] = {}
     for p in paths:
-        raw = await read_bytes(accessor, p)
+        raw = await read_bytes(p)
         stripped = p.mount_path
         if decompress:
             out_path = stripped.removesuffix(".gz") if stripped.endswith(
@@ -86,10 +85,10 @@ async def gzip(
             out_data = zlib.compress(raw,
                                      level=level,
                                      wbits=zlib.MAX_WBITS | 16)
-        await write_bytes(accessor, PathSpec.from_str_path(out_path), out_data)
+        await write_bytes(PathSpec.from_str_path(out_path), out_data)
         writes[out_path] = out_data
         if not keep:
-            await unlink(accessor, p)
+            await unlink(p)
     return None, IOResult(writes=writes)
 
 

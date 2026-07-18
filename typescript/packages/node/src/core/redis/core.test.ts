@@ -12,17 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { LookupStatus, PathSpec, RAMIndexCacheStore, mountKey } from '@struktoai/mirage-core'
+import {
+  LookupStatus,
+  PathSpec,
+  RAMIndexCacheStore,
+  makeResolveGlob,
+  mountKey,
+} from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '../../accessor/redis.ts'
 import { RedisStore } from '../../resource/redis/store.ts'
 import { appendBytes } from './append.ts'
+import { SCOPE_ERROR } from './constants.ts'
 import { copy } from './copy.ts'
 import { create } from './create.ts'
 import { du, duAll } from './du.ts'
 import { exists } from './exists.ts'
 import { find } from './find.ts'
-import { resolveGlob } from './glob.ts'
 import { mkdir } from './mkdir.ts'
 import { mkdirP } from './mkdir_p.ts'
 import { read } from './read.ts'
@@ -35,6 +41,8 @@ import { stream } from './stream.ts'
 import { truncate } from './truncate.ts'
 import { unlink } from './unlink.ts'
 import { writeBytes } from './write.ts'
+
+const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined

@@ -1,24 +1,39 @@
-import importlib
+from types import SimpleNamespace
 
 import pytest
 
-from mirage.ops.dify.readdir import readdir
+from mirage.core.dify import readdir as core_readdir
+from mirage.ops.dify import OPS
 
-op_readdir = importlib.import_module("mirage.ops.dify.readdir")
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
 
 
-async def core_readdir_result(accessor, path, index):
-    return [path.child("a"), path.child("b")]
+readdir = _op("readdir")
+
+
+async def resolve_dir(accessor, path, index):
+    return SimpleNamespace(is_dir=True, virtual_key="/knowledge/guides")
+
+
+class ListingIndex:
+
+    async def list_dir(self, virtual_key):
+        return SimpleNamespace(entries=[
+            f"{virtual_key}/a",
+            f"{virtual_key}/b",
+        ])
 
 
 @pytest.mark.asyncio
 async def test_readdir_op_delegates_to_core(monkeypatch, dify_accessor,
-                                            dify_index, guide_path):
-    monkeypatch.setattr(op_readdir, "core_readdir", core_readdir_result)
+                                            guide_path):
+    monkeypatch.setattr(core_readdir, "resolve_path", resolve_dir)
 
-    result = await readdir(dify_accessor, guide_path, index=dify_index)
+    result = await readdir(dify_accessor, guide_path, index=ListingIndex())
 
     assert result == [
-        "/knowledge/guides/quickstart/a",
-        "/knowledge/guides/quickstart/b",
+        "/knowledge/guides/a",
+        "/knowledge/guides/b",
     ]

@@ -19,8 +19,8 @@ import pytest
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.drive import (delete_file, download_file,
-                                      download_file_stream, list_all_files,
-                                      list_files, list_shared_drives)
+                                      list_all_files, list_files,
+                                      list_shared_drives)
 
 
 @pytest.fixture
@@ -166,42 +166,6 @@ async def test_download_file(token_manager):
         result = await download_file(token_manager, "file123")
         assert result == content
         assert "supportsAllDrives=true" in mock_get.call_args.args[1]
-
-
-@pytest.mark.asyncio
-async def test_download_file_stream(token_manager):
-    chunks = [b"chunk1", b"chunk2", b"chunk3"]
-
-    async def mock_stream(*args, **kwargs):
-        for chunk in chunks:
-            yield chunk
-
-    with patch(
-            "mirage.core.google.drive.google_get_stream",
-            side_effect=mock_stream,
-    ) as mock_get:
-        result = b""
-        async for chunk in download_file_stream(token_manager, "file123"):
-            result += chunk
-        assert result == b"chunk1chunk2chunk3"
-        assert "supportsAllDrives=true" in mock_get.call_args.args[1]
-
-
-@pytest.mark.asyncio
-async def test_download_file_stream_empty(token_manager):
-
-    async def mock_stream(*args, **kwargs):
-        return
-        yield
-
-    with patch(
-            "mirage.core.google.drive.google_get_stream",
-            side_effect=mock_stream,
-    ):
-        result = b""
-        async for chunk in download_file_stream(token_manager, "file123"):
-            result += chunk
-        assert result == b""
 
 
 @pytest.mark.asyncio

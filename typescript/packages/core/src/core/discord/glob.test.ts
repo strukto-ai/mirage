@@ -19,8 +19,11 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './_client.ts'
-import { SCOPE_ERROR } from '../s3/constants.ts'
-import { resolveDiscordGlob } from './glob.ts'
+import { DISCORD_CMD_OPS } from '../../commands/builtin/discord/ops.ts'
+import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
+import { DEFAULT_MAX_GLOB_MATCHES } from '../../utils/glob_walk.ts'
+
+const resolveDiscordGlob = resolveGlobOf(DISCORD_CMD_OPS)
 
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: { method: DiscordMethod; endpoint: string }[] = []
@@ -142,11 +145,11 @@ describe('resolveDiscordGlob', () => {
     expect(out[0]?.pattern).toBeNull()
   })
 
-  it('truncates matched entries at SCOPE_ERROR', async () => {
+  it('truncates matched entries at DEFAULT_MAX_GLOB_MATCHES', async () => {
     const t = new FakeDiscordTransport()
     const idx = new RAMIndexCacheStore()
     const filenames: string[] = []
-    for (let i = 0; i < SCOPE_ERROR + 5; i++) {
+    for (let i = 0; i < DEFAULT_MAX_GLOB_MATCHES + 5; i++) {
       filenames.push(`file-${String(i).padStart(5, '0')}.jsonl`)
     }
     await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', filenames)
@@ -161,7 +164,7 @@ describe('resolveDiscordGlob', () => {
       resolved: false,
     })
     const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
-    expect(out).toHaveLength(SCOPE_ERROR)
+    expect(out).toHaveLength(DEFAULT_MAX_GLOB_MATCHES)
   })
 
   it('handles a mix of resolved, pattern, and no-pattern PathSpecs', async () => {

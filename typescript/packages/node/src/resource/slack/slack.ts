@@ -24,7 +24,7 @@ import {
   SlackAccessor,
   mountKey,
   mountPrefixOf,
-  resolveSlackGlob,
+  makeResolveGlob,
   slackRead,
   slackReaddir,
   slackStat,
@@ -34,6 +34,8 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
+
+const resolveSlackGlob = makeResolveGlob(slackReaddir)
 
 export interface SlackResourceState {
   type: string

@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.utils.naming import parse_id_name
 from mirage.utils.sanitize import sanitize_name
 
 split_suffix_id = parse_id_name
 
 
-def team_dirname(team: dict) -> str:
+def team_dirname(team: dict[str, Any]) -> str:
     parts: list[str] = []
     if team.get("key"):
         parts.append(sanitize_name(team["key"]))
@@ -31,23 +33,23 @@ def team_dirname(team: dict) -> str:
     return f"{'__'.join(parts)}__{team['id']}"
 
 
-def member_filename(user: dict) -> str:
+def member_filename(user: dict[str, Any]) -> str:
     label = sanitize_name(
         user.get("displayName") or user.get("name") or user.get("email")
         or "user")
     return f"{label}__{user['id']}.json"
 
 
-def issue_dirname(issue: dict) -> str:
+def issue_dirname(issue: dict[str, Any]) -> str:
     key = issue.get("identifier") or issue.get("id") or "issue"
     return f"{sanitize_name(key)}__{issue['id']}"
 
 
-def project_filename(project: dict) -> str:
+def project_filename(project: dict[str, Any]) -> str:
     label = sanitize_name(project.get("name") or "project")
     return f"{label}__{project['id']}.json"
 
 
-def cycle_filename(cycle: dict) -> str:
+def cycle_filename(cycle: dict[str, Any]) -> str:
     label = sanitize_name(cycle.get("name") or "cycle")
     return f"{label}__{cycle['id']}.json"

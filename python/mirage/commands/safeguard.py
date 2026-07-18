@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterable
+from typing import Any
 
 from mirage.types import CommandSafeguard
 
@@ -43,7 +44,7 @@ def resolve_safeguard(
 
 def resolve_across_mounts(
     name: str,
-    mounts: Iterable,
+    mounts: Iterable[Any],
 ) -> CommandSafeguard | None:
     """Resolve and aggregate the safeguard across the mounts a command spans.
 

@@ -1,6 +1,5 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.core.jq import (eval_jsonl_stream, format_jq_output, is_jsonl_path,
                             is_streamable_jsonl_expr, jq_eval, parse_json_auto,
                             parse_json_path)
@@ -8,8 +7,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def _read_stdin_bytes(
-        stdin: AsyncIterator[bytes] | bytes | None) -> bytes:
+async def _read_stdin_bytes(stdin: ByteSource | None) -> bytes:
     if isinstance(stdin, bytes):
         return stdin
     if stdin is None:
@@ -25,8 +23,7 @@ async def jq(
     *texts: str,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     r: bool = False,
     c: bool = False,
     s: bool = False,
@@ -37,11 +34,11 @@ async def jq(
     if paths:
         if is_jsonl_path(
                 paths[0].virtual) and is_streamable_jsonl_expr(expression):
-            source = read_stream(accessor, paths[0])
+            source = read_stream(paths[0])
             return eval_jsonl_stream(source, expression, raw=r), IOResult()
         outputs: list[bytes] = []
         for p in paths:
-            data = parse_json_path(await read_bytes(accessor, p), p.virtual)
+            data = parse_json_path(await read_bytes(p), p.virtual)
             if is_jsonl_path(p.virtual) and isinstance(data, list) and not s:
                 for item in data:
                     result = jq_eval(item, expression.strip())

@@ -20,11 +20,11 @@ from mirage.types import PathSpec
 
 async def file_read_provision(
     accessor: GitHubAccessor,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     paths: list[PathSpec],
     command: str,
 ) -> ProvisionResult:
-    if not paths or index is None:
+    if not paths:
         return ProvisionResult(command=command, precision=Precision.UNKNOWN)
     total = 0
     ops = 0

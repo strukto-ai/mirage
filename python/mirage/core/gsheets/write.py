@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 import aiohttp
 
@@ -25,7 +26,7 @@ async def append_values(
     spreadsheet_id: str,
     range_: str,
     values_json: str,
-) -> dict:
+) -> dict[str, Any]:
     """Append cell values via Values API (POST :append).
 
     Args:

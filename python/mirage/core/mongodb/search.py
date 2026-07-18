@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from typing import Any
 
 from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 from pymongo import AsyncMongoClient
@@ -38,22 +39,22 @@ async def _sampled_string_paths(col, sample_size: int = 100) -> list[str]:
     return sorted(paths)
 
 
-def _has_text_index(indexes: list[dict]) -> bool:
+def _has_text_index(indexes: list[dict[str, Any]]) -> bool:
     return any("textIndexVersion" in idx for idx in indexes)
 
 
 async def search_collection(
-    client: AsyncMongoClient,
+    client: AsyncMongoClient[Any],
     database: str,
     collection: str,
     pattern: str,
     limit: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     db = client[database]
     col = db[collection]
     indexes = await get_indexes(client, database, collection)
     if _has_text_index(indexes):
-        filter_expr: dict = {"$text": {"$search": pattern}}
+        filter_expr: dict[str, Any] = {"$text": {"$search": pattern}}
     else:
         paths = await _sampled_string_paths(col)
         if not paths:
@@ -71,11 +72,11 @@ async def search_collection(
 
 
 async def search_database(
-    client: AsyncMongoClient,
+    client: AsyncMongoClient[Any],
     database: str,
     pattern: str,
     limit: int,
-) -> list[tuple[str, str, list[dict]]]:
+) -> list[tuple[str, str, list[dict[str, Any]]]]:
     collections = await list_collections(client,
                                          database,
                                          kind=EntityKind.COLLECTION)
@@ -89,7 +90,8 @@ async def search_database(
 
 
 def format_grep_results(
-        results: list[tuple[str, str, list[dict]]]) -> list[str]:  # noqa: E125
+    results: list[tuple[str, str, list[dict[str, Any]]]]
+) -> list[str]:  # noqa: E125
     lines: list[str] = []
     for db_name, col_name, docs in results:
         path = f"{db_name}/collections/{col_name}/documents.jsonl"

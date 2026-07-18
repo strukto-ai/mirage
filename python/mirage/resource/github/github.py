@@ -14,17 +14,21 @@
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexConfig, IndexEntry
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.glob import resolve_glob as _resolve_glob
+from mirage.core.github.readdir import readdir
 from mirage.core.github.repo import fetch_default_branch_sync
 from mirage.core.github.tree import fetch_tree_sync
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.resource.base import BaseResource
 from mirage.resource.github.prompt import PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 
 class GitHubResource(BaseResource):
@@ -114,7 +118,7 @@ class GitHubResource(BaseResource):
     def is_default_branch(self) -> bool:
         return self.accessor.ref == self.accessor.default_branch
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return self.config_state(
             self.accessor.config,
             owner=self.accessor.owner,
@@ -124,5 +128,5 @@ class GitHubResource(BaseResource):
             truncated=self.accessor.truncated,
         )
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

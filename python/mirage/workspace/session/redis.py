@@ -15,7 +15,7 @@
 import json
 from collections.abc import Awaitable, Iterable
 from importlib.resources import files
-from typing import cast
+from typing import Any, cast
 
 import redis.asyncio as aioredis
 
@@ -43,12 +43,12 @@ class RedisSessionStore(SessionStore):
         self._cas = self._client.register_script(CAS_SCRIPT)
 
     async def load(self) -> dict[str, SessionFields]:
-        raw = await cast(Awaitable, self._client.hgetall(self._key))
+        raw = await cast(Awaitable[Any], self._client.hgetall(self._key))
         return {key.decode(): json.loads(value) for key, value in raw.items()}
 
     async def set(self, session_id: str, fields: SessionFields) -> None:
         await cast(
-            Awaitable,
+            Awaitable[Any],
             self._client.hset(self._key, session_id, json.dumps(fields)))
 
     async def cas_set(self, session_id: str, fields: SessionFields,
@@ -67,7 +67,7 @@ class RedisSessionStore(SessionStore):
         ids = list(session_ids)
         if not ids:
             return
-        await cast(Awaitable, self._client.hdel(self._key, *ids))
+        await cast(Awaitable[Any], self._client.hdel(self._key, *ids))
 
     async def replace_all(self, entries: dict[str, SessionFields]) -> None:
         pipe = self._client.pipeline(transaction=True)
@@ -81,7 +81,7 @@ class RedisSessionStore(SessionStore):
         await pipe.execute()
 
     async def clear(self) -> None:
-        await cast(Awaitable, self._client.delete(self._key))
+        await cast(Awaitable[Any], self._client.delete(self._key))
 
     async def close(self) -> None:
         await self._client.aclose()

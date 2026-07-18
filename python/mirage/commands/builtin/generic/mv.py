@@ -14,7 +14,6 @@
 
 from typing import Callable
 
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import descendant_path, walk
 from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
@@ -30,7 +29,6 @@ async def mv(
     strategy: MoveStrategy,
     n: bool,
     v: bool,
-    index: IndexCacheStore | None = None,
     backend_key: Callable[[PathSpec], str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Move sources to a destination, fanning out into a directory.
@@ -45,7 +43,6 @@ async def mv(
         n (bool): No-clobber; skip targets that already exist.
         v (bool): Verbose; emit one ``src -> target`` line per move.
         strategy (MoveStrategy): Complete native or primitive move capability.
-        index (IndexCacheStore | None): Cache for the destination dir probe.
         backend_key (Callable | None): Maps a path to its backend storage key
             for the same-file and into-own-subtree guards; defaults to the
             normalized mount-relative path.
@@ -57,7 +54,7 @@ async def mv(
     """
     key_of = backend_key if backend_key is not None else backend_key_default
     *sources, dst = paths
-    dst_is_dir = await is_directory(stat, dst, index)
+    dst_is_dir = await is_directory(stat, dst)
     writes: dict[str, ByteSource] = {}
     lines: list[str] = []
     errors: list[str] = []
@@ -77,7 +74,7 @@ async def mv(
         if n and await path_exists(stat, target):
             continue
         if isinstance(strategy, PrimitiveMove):
-            entries = await walk(strategy.readdir, stat, src, index)
+            entries = await walk(strategy.readdir, stat, src)
             for entry, is_dir in entries:
                 entry_dst = descendant_path(
                     target,
@@ -85,7 +82,7 @@ async def mv(
                     entry.virtual[len(src.virtual.rstrip("/")):],
                 )
                 if is_dir:
-                    if not await is_directory(stat, entry_dst, index):
+                    if not await is_directory(stat, entry_dst):
                         await strategy.mkdir(entry_dst)
                 else:
                     # write takes bytes, not a stream: file materialized here.

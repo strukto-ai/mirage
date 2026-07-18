@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 import asyncpg
 
@@ -87,14 +88,14 @@ async def table_size_bytes(conn: asyncpg.Connection, schema: str,
 
 
 async def fetch_rows(conn: asyncpg.Connection, schema: str, name: str, *,
-                     limit: int, offset: int) -> list[dict]:
+                     limit: int, offset: int) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         f'SELECT * FROM "{schema}"."{name}" LIMIT $1 OFFSET $2', limit, offset)
     return [dict(r) for r in rows]
 
 
 async def fetch_columns(conn: asyncpg.Connection, schema: str,
-                        name: str) -> list[dict]:
+                        name: str) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         "SELECT column_name, data_type, is_nullable "
         "FROM information_schema.columns "
@@ -122,7 +123,7 @@ async def fetch_primary_key(conn: asyncpg.Connection, schema: str,
 
 
 async def fetch_foreign_keys(conn: asyncpg.Connection, schema: str,
-                             name: str) -> list[dict]:
+                             name: str) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         "SELECT con.conname AS constraint_name, "
         "       a.attname AS from_column, "
@@ -144,7 +145,7 @@ async def fetch_foreign_keys(conn: asyncpg.Connection, schema: str,
         "  ON af.attrelid = con.confrelid AND af.attnum = kf.attnum "
         "WHERE con.contype = 'f' AND n.nspname = $1 AND c.relname = $2 "
         "ORDER BY con.conname, k.ord", schema, name)
-    grouped: dict[str, dict] = {}
+    grouped: dict[str, dict[str, Any]] = {}
     for r in rows:
         cn = r["constraint_name"]
         if cn not in grouped:
@@ -162,7 +163,7 @@ async def fetch_foreign_keys(conn: asyncpg.Connection, schema: str,
 
 
 async def fetch_indexes(conn: asyncpg.Connection, schema: str,
-                        name: str) -> list[dict]:
+                        name: str) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         "SELECT i.relname AS name, "
         "       ix.indisunique AS unique, "
@@ -184,7 +185,7 @@ async def fetch_indexes(conn: asyncpg.Connection, schema: str,
 
 
 async def fetch_all_relationships(conn: asyncpg.Connection,
-                                  schemas: list[str]) -> list[dict]:
+                                  schemas: list[str]) -> list[dict[str, Any]]:
     if not schemas:
         return []
     rows = await conn.fetch(
@@ -210,7 +211,7 @@ async def fetch_all_relationships(conn: asyncpg.Connection,
         "  ON af.attrelid = con.confrelid AND af.attnum = kf.attnum "
         "WHERE con.contype = 'f' AND n.nspname = ANY($1::text[]) "
         "ORDER BY n.nspname, c.relname, con.conname, k.ord", schemas)
-    grouped: dict[tuple[str, str, str], dict] = {}
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
     for r in rows:
         key = (r["from_schema"], r["from_table"], r["constraint_name"])
         if key not in grouped:

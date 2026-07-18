@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import IndexCacheStore
 from mirage.types import FileType, PathSpec, StatFn
 from mirage.utils.key_prefix import rekey
 
@@ -67,11 +66,9 @@ async def path_exists(stat: StatFn, path: PathSpec) -> bool:
     return True
 
 
-async def is_directory(stat: StatFn,
-                       path: PathSpec,
-                       index: IndexCacheStore | None = None) -> bool:
+async def is_directory(stat: StatFn, path: PathSpec) -> bool:
     try:
-        info = await stat(path, index)
+        info = await stat(path)
     except _SWALLOW:
         return False
     return info.type == FileType.DIRECTORY

@@ -12,18 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
+from mirage.commands.builtin.postgres.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.readdir import readdir as _readdir
 from mirage.core.postgres.scope import detect_scope
@@ -40,7 +39,7 @@ async def rg(
     accessor: PostgresAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
     **flags: object,
@@ -96,11 +95,9 @@ async def rg(
         resolved,
         texts,
         flags,
-        readdir=_readdir,
-        stat=_stat,
-        read_bytes=postgres_read,
+        readdir=bound_op(_readdir, accessor, index),
+        stat=bound_op(_stat, accessor, index),
+        read_bytes=bound_op(postgres_read, accessor, index),
         read_stream=None,
-        accessor=accessor,
         stdin=stdin,
-        index=index,
     )

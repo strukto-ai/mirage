@@ -16,6 +16,7 @@ import asyncio
 import math
 import re
 from collections.abc import Callable
+from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -29,8 +30,8 @@ from mirage.workspace.types import ExecutionNode
 
 
 async def handle_source(
-    dispatch: Callable,
-    execute_fn: Callable,
+    dispatch: Callable[..., Any],
+    execute_fn: Callable[..., Any],
     path: str | PathSpec,
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -49,7 +50,7 @@ async def handle_source(
 
 
 async def handle_eval(
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     args: list[str],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -65,7 +66,7 @@ _BASH_NOOP_LONG_FLAGS = frozenset(
 
 
 async def handle_bash(
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     args: list[str],
     session: Session,
     stdin: ByteSource | None = None,

@@ -123,7 +123,7 @@ class MirageFS(_FUSE_OPERATIONS):
             return self._root
         return self._root + path
 
-    def _dir_stat(self) -> dict:
+    def _dir_stat(self) -> dict[str, Any]:
         return {
             "st_mode": stat.S_IFDIR | 0o755,
             "st_nlink": 2,
@@ -135,7 +135,7 @@ class MirageFS(_FUSE_OPERATIONS):
             "st_ctime": self._now,
         }
 
-    def _file_stat(self, size: int) -> dict:
+    def _file_stat(self, size: int) -> dict[str, Any]:
         return {
             "st_mode": stat.S_IFREG | 0o644,
             "st_nlink": 1,
@@ -147,7 +147,8 @@ class MirageFS(_FUSE_OPERATIONS):
             "st_ctime": self._now,
         }
 
-    def _apply_stat_attrs(self, entry: dict, s: FileStat) -> dict:
+    def _apply_stat_attrs(self, entry: dict[str, Any],
+                          s: FileStat) -> dict[str, Any]:
         """Fold merged stat attributes into a FUSE attr dict.
 
         The ops stat already carries the namespace overlay (chmod bits,
@@ -213,7 +214,7 @@ class MirageFS(_FUSE_OPERATIONS):
         parent = path.rsplit("/", 1)[0] or "/"
         return posixpath.relpath(fuse_target, parent)
 
-    def _link_stat(self, target: str) -> dict:
+    def _link_stat(self, target: str) -> dict[str, Any]:
         entry = self._file_stat(len(target.encode()))
         entry["st_mode"] = stat.S_IFLNK | 0o777
         return entry
@@ -236,7 +237,7 @@ class MirageFS(_FUSE_OPERATIONS):
                     children.add(child)
         return sorted(children)
 
-    def drain_ops(self) -> list[dict]:
+    def drain_ops(self) -> list[dict[str, Any]]:
         records = [asdict(r) for r in self._ops.records]
         self._ops.records.clear()
         return records
@@ -297,7 +298,7 @@ class MirageFS(_FUSE_OPERATIONS):
         self._prefetch[path] = (data, time.monotonic() + PREFETCH_TTL)
         return data
 
-    def getattr(self, path: str, fh=None) -> dict:
+    def getattr(self, path: str, fh=None) -> dict[str, Any]:
         # fstat(fd) after open: answer with the hydrated handle's real byte
         # length. attr_timeout=0 on the mount makes the kernel actually ask
         # here instead of trusting the cached pre-open size, which is what
@@ -341,7 +342,7 @@ class MirageFS(_FUSE_OPERATIONS):
             pass
         raise fuse.FuseOSError(errno.ENOENT)
 
-    def readdir(self, path: str, fh) -> list:
+    def readdir(self, path: str, fh) -> list[Any]:
         names = set(self._virtual_children(path))
         links = self._ops.links
         if links is not None:
@@ -481,7 +482,7 @@ class MirageFS(_FUSE_OPERATIONS):
             raise fuse.FuseOSError(errno.ENOENT)
         self._xattrs.pop(path, None)
 
-    def statfs(self, path: str) -> dict:
+    def statfs(self, path: str) -> dict[str, Any]:
         return {
             "f_bsize": 4096,
             "f_frsize": 4096,

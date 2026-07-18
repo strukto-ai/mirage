@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from typing import Any
 
 import aiohttp
 
@@ -30,8 +31,8 @@ def discord_headers(config: DiscordConfig) -> dict[str, str]:
 async def discord_get(
     config: DiscordConfig,
     endpoint: str,
-    params: dict | None = None,
-) -> dict | list:
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any] | list[Any]:
     url = f"{DISCORD_API}{endpoint}"
     headers = discord_headers(config)
     for attempt in range(MAX_RETRIES):
@@ -54,8 +55,8 @@ async def discord_get(
 async def discord_post(
     config: DiscordConfig,
     endpoint: str,
-    body: dict | None = None,
-) -> dict:
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     url = f"{DISCORD_API}{endpoint}"
     headers = discord_headers(config)
     async with aiohttp.ClientSession() as session:

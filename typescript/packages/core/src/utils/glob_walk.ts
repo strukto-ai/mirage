@@ -19,6 +19,8 @@ import { rstripSlash } from './slash.ts'
 
 export const GLOB_CHARS = ['*', '?', '[']
 
+export const DEFAULT_MAX_GLOB_MATCHES = 10000
+
 export function hasGlob(segment: string): boolean {
   return GLOB_CHARS.some((ch) => segment.includes(ch))
 }

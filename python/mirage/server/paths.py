@@ -158,11 +158,17 @@ def resolve_within_root(root: str | Path, user_path: str) -> Path:
             or a descendant of root.
     """
     resolved_root = os.path.realpath(str(root))
-    resolved = os.path.realpath(os.path.join(resolved_root, user_path))
-    if os.path.commonpath([resolved_root, resolved]) != resolved_root:
+    joined = os.path.join(resolved_root, user_path)
+    # Normalize with a trailing separator so one plain startswith covers
+    # both the root itself and descendants: a bare `x.startswith(prefix)`
+    # on the normalized value is the guard shape static analyzers
+    # recognize as a path-injection barrier (compound conditions and
+    # commonpath are not).
+    resolved = os.path.realpath(joined) + os.sep
+    if not resolved.startswith(resolved_root + os.sep):
         raise PathOutsideRootError(
             f"path escapes the configured root: {user_path}")
-    return Path(resolved)
+    return Path(resolved.rstrip(os.sep) or os.sep)
 
 
 def validate_path_segment(segment: str) -> str:

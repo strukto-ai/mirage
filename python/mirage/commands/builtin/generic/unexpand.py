@@ -1,6 +1,5 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
@@ -41,15 +40,14 @@ async def unexpand(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     tabsize: int = 8,
     all_spaces: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         all_text: list[str] = []
         for p in paths:
-            data = (await read_bytes(accessor, p)).decode(errors="replace")
+            data = (await read_bytes(p)).decode(errors="replace")
             lines = split_lines_keepends(data)
             all_text.extend(
                 _unexpand_line(ln, tabsize, all_spaces) for ln in lines)

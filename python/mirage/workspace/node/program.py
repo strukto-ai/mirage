@@ -34,7 +34,7 @@ async def execute_program(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute program node (root / semicolon-separated)."""
     children = node.children
-    all_stdout: list = []
+    all_stdout: list[Any] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="", exit_code=0)
 

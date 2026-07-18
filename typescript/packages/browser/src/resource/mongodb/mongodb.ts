@@ -32,10 +32,12 @@ import {
   type RegisteredOp,
   type Resource,
   resolveMongoDBConfig,
-  resolveMongoGlob,
+  makeResolveGlob,
   ResourceName,
 } from '@struktoai/mirage-core'
 import { HttpMongoDriver } from './http_driver.ts'
+
+const resolveMongoGlob = makeResolveGlob(mongoReaddir)
 
 export interface MongoDBResourceOptions {
   config: MongoDBConfig

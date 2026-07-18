@@ -24,7 +24,7 @@ import {
   TokenManager,
   gsheetsRead,
   gsheetsReaddir,
-  gsheetsResolveGlob,
+  makeResolveGlob,
   gsheetsStat,
   mountKey,
   mountPrefixOf,
@@ -34,6 +34,8 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactGSheetsConfig, type GSheetsConfig, type GSheetsConfigRedacted } from './config.ts'
+
+const gsheetsResolveGlob = makeResolveGlob(gsheetsReaddir)
 
 export interface GSheetsResourceState {
   type: string

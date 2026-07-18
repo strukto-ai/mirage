@@ -15,8 +15,6 @@
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_context import grep_context_lines
 from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
@@ -162,9 +160,7 @@ def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
 async def resolve_pattern(
     texts: Sequence[str],
     flags: FlagView,
-    read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None,
-    index: IndexCacheStore | None,
+    read_bytes: Callable[[PathSpec], Awaitable[bytes]],
     usage: str,
 ) -> tuple[str, bool]:
     """Resolve the search pattern from -e/positional/-f flag arguments.
@@ -172,10 +168,8 @@ async def resolve_pattern(
     Args:
         texts (Sequence[str]): positional TEXT operands.
         flags (FlagView): typed view over raw flag kwargs.
-        read_bytes (Callable[..., Awaitable[bytes]]): whole-file reader used
-            for -f pattern files.
-        accessor (Accessor | None): backend accessor for read_bytes.
-        index (IndexCacheStore | None): optional cache index.
+        read_bytes (Callable[[PathSpec], Awaitable[bytes]]): bound
+            whole-file reader used for -f pattern files.
         usage (str): usage error message when no pattern was supplied.
 
     Returns:
@@ -191,9 +185,7 @@ async def resolve_pattern(
                  if isinstance(pattern_file, list) else [pattern_file])
         for pf in files:
             file_data = await call_read_bytes(read_bytes,
-                                              accessor,
                                               pf,
-                                              index=index,
                                               prefix=mount_prefix_of(
                                                   pf.virtual,
                                                   pf.resource_path))

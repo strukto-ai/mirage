@@ -16,6 +16,7 @@ import {
   FileType,
   IOResult,
   command,
+  resolveGlobOf,
   specOf,
   type ByteSource,
   type CommandFnResult,
@@ -23,9 +24,11 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
-import { resolveGlob } from '../../../core/hf/glob.ts'
 import { stat as hfStat } from '../../../core/hf/stat.ts'
 import { unlink as hfUnlink } from '../../../core/hf/unlink.ts'
+import { HF_CMD_OPS } from './ops.ts'
+
+const resolveGlob = resolveGlobOf(HF_CMD_OPS)
 
 const ENC = new TextEncoder()
 

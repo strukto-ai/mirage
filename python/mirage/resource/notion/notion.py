@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.notion import NotionAccessor
-from mirage.core.notion.glob import resolve_glob as _resolve_glob
 from mirage.core.notion.read import read
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
@@ -21,6 +22,9 @@ from mirage.resource.base import BaseResource
 from mirage.resource.notion.config import NotionConfig
 from mirage.resource.notion.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _NOTION_OPS = {
     "read_bytes": read,
@@ -34,7 +38,7 @@ class NotionResource(BaseResource):
     accessor: NotionAccessor
     name: str = ResourceName.NOTION
     caches_reads: bool = True
-    _ops: dict = _NOTION_OPS
+    _ops: dict[str, Any] = _NOTION_OPS
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 
@@ -53,8 +57,8 @@ class NotionResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

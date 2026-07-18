@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import typer
 
 from mirage.cli.client import make_client
@@ -60,7 +62,7 @@ def create_cmd(
               "mode. Repeat for multiple mounts; omit for unrestricted."),
     ),
 ) -> None:
-    body: dict = {}
+    body: dict[str, Any] = {}
     if session_id:
         body["session_id"] = session_id
     if mount:

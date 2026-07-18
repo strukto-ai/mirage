@@ -30,7 +30,7 @@ from mirage.types import PathSpec
 async def run_fanout(cmd_name: str,
                      scopes: list[PathSpec],
                      text_args: list[str],
-                     flag_kwargs: dict,
+                     flag_kwargs: dict[str, object],
                      run_single: RunSingle,
                      stdin: ByteSource | None = None) -> CrossResult:
     """Run a per-operand command whose operands span mounts.

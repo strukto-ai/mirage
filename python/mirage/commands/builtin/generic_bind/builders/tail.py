@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import split_readable
 from mirage.commands.builtin.tail_helper import _parse_n, number_flag_error
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -32,12 +31,12 @@ async def tail(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: str | None = None,
     c: str | None = None,
     q: bool = False,
     v: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     num_err = number_flag_error("tail", n, c)
@@ -60,9 +59,7 @@ async def tail(
         if not paths:
             return None, io
         return tail_multi(paths,
-                          read=ops.read_stream,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(ops.read_stream, accessor, index),
                           n=n_int,
                           c=c_int,
                           from_line=from_line,

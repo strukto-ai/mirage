@@ -12,29 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.optional import try_load_command
-from mirage.ops.onedrive.create import create
-from mirage.ops.onedrive.mkdir import mkdir
-from mirage.ops.onedrive.read.read import read
-from mirage.ops.onedrive.readdir import readdir
-from mirage.ops.onedrive.rename import rename
-from mirage.ops.onedrive.rmdir import rmdir
-from mirage.ops.onedrive.stat import stat
-from mirage.ops.onedrive.truncate import truncate
-from mirage.ops.onedrive.unlink import unlink
-from mirage.ops.onedrive.write import write as write_bytes
+from mirage.commands.builtin.onedrive.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-read_feather = try_load_command("mirage.ops.onedrive.read.read_feather",
-                                "read_feather", "parquet")
-read_hdf5 = try_load_command("mirage.ops.onedrive.read.read_hdf5", "read_hdf5",
-                             "hdf5")
-read_orc = try_load_command("mirage.ops.onedrive.read.read_orc", "read_orc",
-                            "parquet")
-read_parquet = try_load_command("mirage.ops.onedrive.read.read_parquet",
-                                "read_parquet", "parquet")
-
-OPS = [
-    c for c in (create, mkdir, read, read_feather, read_hdf5, read_orc,
-                read_parquet, readdir, rename, rmdir, stat, truncate, unlink,
-                write_bytes) if c is not None
-]
+OPS = make_generic_ops("onedrive", _TABLE, filetype_read=True)

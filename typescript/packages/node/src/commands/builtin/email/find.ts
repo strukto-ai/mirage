@@ -20,6 +20,7 @@ import {
   formatRecords,
   mountKey,
   mountPrefixOf,
+  resolveGlobOf,
   rstripSlash,
   specOf,
   stripSlash,
@@ -28,11 +29,13 @@ import {
   type CommandOpts,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
-import { resolveGlob } from '../../../core/email/glob.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
+import { EMAIL_CMD_OPS } from './ops.ts'
 import { metadataProvision } from './provision.ts'
 import { fnmatch } from '@struktoai/mirage-core'
 import { findSizeMtimeError, invalidFindArg } from '@struktoai/mirage-core'
+
+const resolveGlob = resolveGlobOf(EMAIL_CMD_OPS)
 
 async function walk(
   accessor: EmailAccessor,

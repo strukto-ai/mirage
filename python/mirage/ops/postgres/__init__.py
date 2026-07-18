@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.postgres.read import read
-from mirage.ops.postgres.readdir import readdir
-from mirage.ops.postgres.stat import stat
+from mirage.commands.builtin.postgres.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat]
+OPS = make_generic_ops("postgres", _TABLE)

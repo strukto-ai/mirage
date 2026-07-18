@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from typing import Any
 
 import aiohttp
 
@@ -110,10 +111,10 @@ async def _request(config: MsGraphConfig,
                    url: str,
                    *,
                    session: aiohttp.ClientSession | None = None,
-                   params: dict | None = None,
-                   json_body: dict | None = None,
+                   params: dict[str, Any] | None = None,
+                   json_body: dict[str, Any] | None = None,
                    data: bytes | None = None,
-                   extra_headers: dict | None = None,
+                   extra_headers: dict[str, Any] | None = None,
                    auth: bool = True,
                    read: str = "json"):
     own = session is None
@@ -158,19 +159,20 @@ async def _request(config: MsGraphConfig,
             await sess.close()
 
 
-async def graph_get(config: MsGraphConfig,
-                    url: str,
-                    params: dict | None = None,
-                    session: aiohttp.ClientSession | None = None) -> dict:
+async def graph_get(
+        config: MsGraphConfig,
+        url: str,
+        params: dict[str, Any] | None = None,
+        session: aiohttp.ClientSession | None = None) -> dict[str, Any]:
     return await _request(config, "GET", url, params=params, session=session)
 
 
 async def graph_list(
         config: MsGraphConfig,
         url: str,
-        params: dict | None = None,
-        session: aiohttp.ClientSession | None = None) -> list[dict]:
-    items: list[dict] = []
+        params: dict[str, Any] | None = None,
+        session: aiohttp.ClientSession | None = None) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
     next_url: str | None = url
     next_params = params
     own = session is None
@@ -238,10 +240,11 @@ async def graph_stream(config: MsGraphConfig,
             await sess.close()
 
 
-async def graph_post(config: MsGraphConfig,
-                     url: str,
-                     body: dict | None = None,
-                     session: aiohttp.ClientSession | None = None) -> dict:
+async def graph_post(
+        config: MsGraphConfig,
+        url: str,
+        body: dict[str, Any] | None = None,
+        session: aiohttp.ClientSession | None = None) -> dict[str, Any]:
     return await _request(config,
                           "POST",
                           url,
@@ -252,7 +255,7 @@ async def graph_post(config: MsGraphConfig,
 async def graph_post_monitor(
         config: MsGraphConfig,
         url: str,
-        body: dict | None = None,
+        body: dict[str, Any] | None = None,
         session: aiohttp.ClientSession | None = None) -> str:
     location = await _request(config,
                               "POST",
@@ -266,10 +269,11 @@ async def graph_post_monitor(
     return location
 
 
-async def graph_patch(config: MsGraphConfig,
-                      url: str,
-                      body: dict,
-                      session: aiohttp.ClientSession | None = None) -> dict:
+async def graph_patch(
+        config: MsGraphConfig,
+        url: str,
+        body: dict[str, Any],
+        session: aiohttp.ClientSession | None = None) -> dict[str, Any]:
     return await _request(config,
                           "PATCH",
                           url,
@@ -288,7 +292,7 @@ async def graph_put_bytes(
         url: str,
         data: bytes,
         content_type: str = "application/octet-stream",
-        session: aiohttp.ClientSession | None = None) -> dict:
+        session: aiohttp.ClientSession | None = None) -> dict[str, Any]:
     return await _request(config,
                           "PUT",
                           url,
@@ -299,7 +303,7 @@ async def graph_put_bytes(
 
 async def poll_monitor(url: str,
                        timeout: float,
-                       interval: float = 1.0) -> dict:
+                       interval: float = 1.0) -> dict[str, Any]:
     waited = 0.0
     async with aiohttp.ClientSession() as session:
         while True:
@@ -323,7 +327,7 @@ async def poll_monitor(url: str,
 
 
 async def upload_chunk(config: MsGraphConfig, upload_url: str, data: bytes,
-                       start: int, total: int) -> dict:
+                       start: int, total: int) -> dict[str, Any]:
     end = start + len(data) - 1
     hdrs = {"Content-Range": f"bytes {start}-{end}/{total}"}
     async with aiohttp.ClientSession(timeout=_timeout(config)) as session:

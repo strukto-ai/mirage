@@ -14,7 +14,8 @@
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { countDocuments } from '../../../core/mongodb/_client.ts'
-import { resolveGlob } from '../../../core/mongodb/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { MONGODB_CMD_OPS } from './ops.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
 import { ScopeLevel } from '../../../core/mongodb/types.ts'
@@ -25,6 +26,8 @@ import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
 import { formatWcLines, wcGeneric, type WcRow } from '../generic/wc.ts'
 import { fileReadProvision } from './_provision.ts'
+
+const resolveGlob = resolveGlobOf(MONGODB_CMD_OPS)
 
 function documentsScope(p: PathSpec): { database: string; name: string } | null {
   const scope = detectScope(p)

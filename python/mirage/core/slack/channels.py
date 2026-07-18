@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.core.slack.paginate import cursor_pages
 from mirage.resource.slack.config import SlackConfig
 
 
-def _channel_base_params(types: str, limit: int) -> dict:
+def _channel_base_params(types: str, limit: int) -> dict[str, Any]:
     return {"types": types, "limit": limit, "exclude_archived": "true"}
 
 
@@ -26,7 +27,7 @@ def list_channels_stream(
     config: SlackConfig,
     types: str = "public_channel,private_channel",
     limit: int = 200,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming variant: yields one Slack page per HTTP round-trip.
 
     Args:
@@ -49,7 +50,7 @@ async def list_channels(
     config: SlackConfig,
     types: str = "public_channel,private_channel",
     limit: int = 200,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List channels via conversations.list (eager; collects all pages).
 
     Args:
@@ -60,7 +61,7 @@ async def list_channels(
     Returns:
         list[dict]: channel metadata dicts.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     async for page in list_channels_stream(config, types=types, limit=limit):
         out.extend(page)
     return out
@@ -69,7 +70,7 @@ async def list_channels(
 async def list_dms(
     config: SlackConfig,
     limit: int = 200,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List direct messages via conversations.list (eager).
 
     Args:

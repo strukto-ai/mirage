@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -23,7 +24,8 @@ from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 
-async def _eval_test(dispatch: Callable, argv: list, cwd: str) -> bool:
+async def _eval_test(dispatch: Callable[..., Any], argv: list[Any],
+                     cwd: str) -> bool:
     if not argv:
         return False
     first = _scope_path(argv[0])
@@ -92,8 +94,8 @@ async def _eval_test(dispatch: Callable, argv: list, cwd: str) -> bool:
 
 
 async def handle_test(
-    dispatch: Callable,
-    argv: list,
+    dispatch: Callable[..., Any],
+    argv: list[Any],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     result = await _eval_test(dispatch, argv, session.cwd)

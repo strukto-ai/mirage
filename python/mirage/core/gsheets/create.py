@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.core.gsheets._client import (SHEETS_API_BASE, TokenManager,
                                          google_post)
 
 
-async def create_spreadsheet(token_manager: TokenManager, title: str) -> dict:
+async def create_spreadsheet(token_manager: TokenManager,
+                             title: str) -> dict[str, Any]:
     """Create a new empty Google Sheet with a title.
 
     Args:

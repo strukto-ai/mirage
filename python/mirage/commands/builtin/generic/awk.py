@@ -2,8 +2,7 @@ import re
 from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
                              Sequence)
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.awk_types import (  # yapf: disable
     CMP_OP_PATTERN, FIELD_PREFIX, PRINT_STMT, USAGE, AwkBlock, AwkBoolOp,
     AwkBuiltin, AwkCmpOp, AwkFlags)
@@ -240,9 +239,8 @@ async def awk(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore | None = None,
+    stdin: ByteSource | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the mini-awk program over backend paths or stdin.
 
@@ -260,12 +258,6 @@ async def awk(
             for the -f program file.
         read_stream (Callable[..., AsyncIterator[bytes]]): Streaming reader
             for data files.
-        accessor (Accessor | None): Backend accessor passed through wrapper
-            helpers.
-        stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
-            empty.
-        index (IndexCacheStore | None): Optional cache index for wrapped
-            backend calls.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
@@ -277,7 +269,7 @@ async def awk(
         pieces: list[str] = []
         for prog in f.program_files:
             try:
-                raw = await read_bytes(accessor, prog)
+                raw = await read_bytes(prog)
             except FileNotFoundError as exc:
                 # GNU awk exits 2 when a -f program file cannot be opened.
                 raise UsageError(f"awk: {prog.raw_path}: "
@@ -296,7 +288,7 @@ async def awk(
             variables[key] = val
 
     if paths:
-        sources = [read_stream(accessor, p) for p in paths]
+        sources = [read_stream(p) for p in paths]
         cache = [p.mount_path for p in paths]
     else:
         sources = [_resolve_source(stdin)]

@@ -12,15 +12,30 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import io
 from unittest.mock import AsyncMock, patch
 
+import pyarrow as pa
+import pyarrow.feather as feather
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.ops.gdrive.read.read_feather import read_feather
+from mirage.core.filetype.feather import cat as feather_cat
+from mirage.ops.gdrive import OPS
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+read_feather = next(o.fn for o in OPS
+                    if o.name == "read" and o.filetype == ".feather")
+
+
+def _make_feather() -> bytes:
+    table = pa.table({"name": ["alice", "bob"], "score": [1, 2]})
+    buf = io.BytesIO()
+    feather.write_feather(table, buf)
+    return buf.getvalue()
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -40,18 +55,24 @@ def index():
 
 
 @pytest.mark.asyncio
-async def test_read_feather_calls_core(accessor, index):
-    fn = read_feather._registered_ops[0].fn
+async def test_read_feather_renders_through_cat(accessor, index):
+    raw = _make_feather()
+    await index.put(
+        "/data/file.feather",
+        IndexEntry(
+            id="f1",
+            name="file",
+            resource_type="gdrive/file",
+            remote_time="2026-04-01T00:00:00Z",
+            vfs_name="file.feather",
+        ))
     with patch(
-            "mirage.ops.gdrive.read.read_feather.core_read",
+            "mirage.core.gdrive.read.download_file",
             new_callable=AsyncMock,
-            return_value=b"raw-feather",
-    ) as mock_read, patch(
-            "mirage.ops.gdrive.read.read_feather.feather_cat",
-            return_value=b"csv-output",
-    ) as mock_cat:
-        result = await fn(accessor, _scope("/data/file.feather"), index=index)
-        mock_read.assert_called_once_with(accessor,
-                                          _scope("/data/file.feather"), index)
-        mock_cat.assert_called_once_with(b"raw-feather")
-        assert result == b"csv-output"
+            return_value=raw,
+    ) as mock:
+        result = await read_feather(accessor,
+                                    _scope("/data/file.feather"),
+                                    index=index)
+        mock.assert_called_once_with(accessor.token_manager, "f1")
+        assert result == feather_cat(raw)

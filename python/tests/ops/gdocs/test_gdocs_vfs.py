@@ -22,6 +22,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops import Ops
 from mirage.ops.config import OpsMount
 from mirage.ops.gdocs import OPS as GDOCS_OPS
+from mirage.ops.registry import RegisteredOp
 from mirage.types import MountMode
 
 
@@ -29,7 +30,9 @@ def _make_gdocs_ops():
     accessor = GDocsAccessor(config=None, token_manager=None)
     ops_list = []
     for fn in GDOCS_OPS:
-        if hasattr(fn, "_registered_ops"):
+        if isinstance(fn, RegisteredOp):
+            ops_list.append(fn)
+        elif hasattr(fn, "_registered_ops"):
             ops_list.extend(fn._registered_ops)
     mount = OpsMount(
         prefix="/gdocs/",
@@ -45,14 +48,9 @@ def _make_gdocs_ops():
 @pytest.mark.asyncio
 async def test_readdir_root():
     ops = _make_gdocs_ops()
-    with patch(
-            "mirage.ops.gdocs.readdir.core_readdir",
-            new_callable=AsyncMock,
-            return_value=["/gdocs/owned", "/gdocs/shared"],
-    ):
-        result = await ops.readdir("/gdocs/")
-        assert "/gdocs/owned" in result
-        assert "/gdocs/shared" in result
+    result = await ops.readdir("/gdocs/")
+    assert "/gdocs/owned" in result
+    assert "/gdocs/shared" in result
 
 
 @pytest.mark.asyncio

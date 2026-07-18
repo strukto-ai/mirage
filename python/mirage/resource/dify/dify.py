@@ -1,6 +1,7 @@
+from typing import Any
+
 from mirage.accessor.dify import DifyAccessor
 from mirage.commands.builtin.dify import COMMANDS
-from mirage.core.dify.glob import resolve_glob as _resolve_glob
 from mirage.core.dify.read import read_bytes, read_stream
 from mirage.core.dify.readdir import readdir
 from mirage.core.dify.stat import stat
@@ -9,6 +10,9 @@ from mirage.resource.base import BaseResource
 from mirage.resource.dify.config import DifyConfig
 from mirage.resource.dify.prompt import PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 _DIFY_OPS = {
     "read_bytes": read_bytes,
@@ -40,7 +44,7 @@ class DifyResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         redacted = ["api_key"]
         config = self.config.model_dump()
         if config.get("api_key") is not None:
@@ -52,5 +56,5 @@ class DifyResource(BaseResource):
             "config": config,
         }
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

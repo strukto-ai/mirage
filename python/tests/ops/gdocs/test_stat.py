@@ -12,14 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.ops.gdocs.stat import stat
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.cache.index.config import IndexEntry
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.ops.gdocs import OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _op(name: str):
+    for o in OPS:
+        registered = [o] if isinstance(o, RegisteredOp) else o._registered_ops
+        for ro in registered:
+            if ro.name == name and ro.filetype is None:
+                return ro.fn
+    raise KeyError(name)
+
+
+stat = _op("stat")
 
 
 def _scope(path: str, prefix: str = "/gdocs") -> PathSpec:
@@ -33,48 +46,40 @@ def accessor():
     return GDocsAccessor(config=None, token_manager=None)
 
 
-@pytest.mark.asyncio
-async def test_stat_calls_core(accessor):
-    fn = stat._registered_ops[0].fn
-    fake_stat = FileStat(name="/", type=FileType.DIRECTORY)
-    with patch(
-            "mirage.ops.gdocs.stat.core_stat",
-            new_callable=AsyncMock,
-            return_value=fake_stat,
-    ) as mock:
-        scope = _scope("/gdocs")
-        result = await fn(accessor, scope, index=None)
-        mock.assert_called_once_with(accessor, _scope("/gdocs",
-                                                      prefix="/gdocs"), None)
-        assert result == fake_stat
+@pytest.fixture
+def index():
+    return RAMIndexCacheStore()
 
 
 @pytest.mark.asyncio
-async def test_stat_doc(accessor):
-    fn = stat._registered_ops[0].fn
-    fake_stat = FileStat(name="file.gdoc.json", type=FileType.JSON)
-    with patch(
-            "mirage.ops.gdocs.stat.core_stat",
-            new_callable=AsyncMock,
-            return_value=fake_stat,
-    ) as mock:
-        scope = _scope("/gdocs/owned/file.gdoc.json")
-        result = await fn(accessor, scope, index=None)
-        mock.assert_called_once_with(
-            accessor, _scope("/gdocs/owned/file.gdoc.json", prefix="/gdocs"),
-            None)
-        assert result.name == "file.gdoc.json"
+async def test_stat_root_is_directory(accessor, index):
+    result = await stat(accessor, _scope("/gdocs"), index=index)
+    assert result.name == "/"
+    assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor):
-    fn = stat._registered_ops[0].fn
-    with patch(
-            "mirage.ops.gdocs.stat.core_stat",
-            new_callable=AsyncMock,
-            side_effect=FileNotFoundError("not found"),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await fn(accessor,
-                     _scope("/gdocs/owned/nonexistent.gdoc.json"),
-                     index=None)
+async def test_stat_doc(accessor, index):
+    await index.put(
+        "/gdocs/owned/file.gdoc.json",
+        IndexEntry(
+            id="doc1",
+            name="Report",
+            resource_type="gdocs/doc",
+            remote_time="2026-04-01T00:00:00Z",
+            vfs_name="file.gdoc.json",
+        ))
+    result = await stat(accessor,
+                        _scope("/gdocs/owned/file.gdoc.json"),
+                        index=index)
+    assert result.name == "file.gdoc.json"
+    assert result.extra["doc_id"] == "doc1"
+
+
+@pytest.mark.asyncio
+async def test_stat_not_found(accessor, index):
+    await index.set_dir("/gdocs/owned", [])
+    with pytest.raises(FileNotFoundError):
+        await stat(accessor,
+                   _scope("/gdocs/owned/nonexistent.gdoc.json"),
+                   index=index)

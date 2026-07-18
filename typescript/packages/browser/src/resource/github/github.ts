@@ -33,10 +33,12 @@ import {
   githubPopulateIndex,
   githubRead,
   githubReaddir,
-  githubResolveGlob,
+  makeResolveGlob,
   githubStat,
 } from '@struktoai/mirage-core'
 import { redactGitHubConfig, type GitHubConfig, type GitHubConfigRedacted } from './config.ts'
+
+const githubResolveGlob = makeResolveGlob(githubReaddir)
 
 export interface GitHubResourceState {
   type: string

@@ -23,6 +23,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops import Ops
 from mirage.ops.config import OpsMount
 from mirage.ops.gdrive import OPS as GDRIVE_OPS
+from mirage.ops.registry import RegisteredOp
 from mirage.types import MountMode
 
 
@@ -31,7 +32,9 @@ def _make_gdrive_ops():
     index = RAMIndexCacheStore()
     ops_list = []
     for fn in GDRIVE_OPS:
-        if hasattr(fn, "_registered_ops"):
+        if isinstance(fn, RegisteredOp):
+            ops_list.append(fn)
+        elif hasattr(fn, "_registered_ops"):
             ops_list.extend(fn._registered_ops)
     mount = OpsMount(
         prefix="/gdrive/",
@@ -91,10 +94,15 @@ async def test_read_plain_file_falls_through():
 @pytest.mark.asyncio
 async def test_readdir():
     ops, index = _make_gdrive_ops()
-    with patch(
-            "mirage.ops.gdrive.readdir.core_readdir",
-            new_callable=AsyncMock,
-            return_value=["/docs/report.gdoc.json"],
-    ):
-        result = await ops.readdir("/gdrive/docs")
-        assert "/docs/report.gdoc.json" in result
+    await index.set_dir("/gdrive/docs", [(
+        "report.gdoc.json",
+        IndexEntry(
+            id="doc123",
+            name="Report",
+            resource_type="gdrive/gdoc",
+            remote_time="2026-04-01T00:00:00Z",
+            vfs_name="report.gdoc.json",
+        ),
+    )])
+    result = await ops.readdir("/gdrive/docs")
+    assert "/gdrive/docs/report.gdoc.json" in result

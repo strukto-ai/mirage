@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.relay.cmp import run_cmp
 from mirage.commands.builtin.generic.crossmount.relay.comm import run_comm
@@ -25,8 +25,9 @@ from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
 from mirage.types import PathSpec
 
 
-async def run_relay(cmd_name: str, scopes: list[PathSpec], flag_kwargs: dict,
-                    dispatch: Callable) -> CrossResult:
+async def run_relay(cmd_name: str, scopes: list[PathSpec],
+                    flag_kwargs: dict[str, object],
+                    dispatch: Callable[..., Any]) -> CrossResult:
     """Run a command whose data must colocate across mounts.
 
     Pure wiring: every operand is read or written through ``dispatch``

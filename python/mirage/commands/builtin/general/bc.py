@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.base import Accessor, NOOPAccessor
@@ -55,7 +54,7 @@ async def bc(
     accessor: Accessor = NOOPAccessor(),
     paths: list[PathSpec] | None = None,
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     args_l: bool = False,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.qdrant.query import (distinct_values, list_tables,
@@ -33,7 +35,7 @@ def is_dir_name(child: str, config) -> bool:
     return True
 
 
-def _row_files(rows: list[dict], config) -> list[str]:
+def _row_files(rows: list[dict[str, Any]], config) -> list[str]:
     names: list[str] = []
     for row in rows:
         rid = row[config.id_field]

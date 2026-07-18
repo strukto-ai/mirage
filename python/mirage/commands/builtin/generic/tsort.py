@@ -1,7 +1,6 @@
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
@@ -42,14 +41,13 @@ async def tsort(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:
         raise extra_operand_error(CommandName.TSORT, paths[1].raw_path
                                   or paths[1].virtual)
     if paths:
-        raw = await read_bytes(accessor, paths[0])
+        raw = await read_bytes(paths[0])
     else:
         stdin_raw = await _read_stdin_async(stdin)
         raw = stdin_raw if stdin_raw is not None else b""

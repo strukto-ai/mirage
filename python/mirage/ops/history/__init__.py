@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.history.read import read
-from mirage.ops.history.readdir import readdir
-from mirage.ops.history.stat import stat
+from mirage.commands.builtin.history.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat]
+OPS = make_generic_ops("history", _TABLE)

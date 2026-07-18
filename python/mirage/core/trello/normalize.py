@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 
-def normalize_workspace(workspace: dict) -> dict:
+def normalize_workspace(workspace: dict[str, Any]) -> dict[str, Any]:
     return {
         "workspace_id": workspace.get("id"),
         "workspace_name": workspace.get("displayName")
@@ -23,7 +24,7 @@ def normalize_workspace(workspace: dict) -> dict:
     }
 
 
-def normalize_board(board: dict) -> dict:
+def normalize_board(board: dict[str, Any]) -> dict[str, Any]:
     return {
         "board_id": board.get("id"),
         "board_name": board.get("name"),
@@ -33,7 +34,7 @@ def normalize_board(board: dict) -> dict:
     }
 
 
-def normalize_list(lst: dict) -> dict:
+def normalize_list(lst: dict[str, Any]) -> dict[str, Any]:
     return {
         "list_id": lst.get("id"),
         "list_name": lst.get("name"),
@@ -43,7 +44,7 @@ def normalize_list(lst: dict) -> dict:
     }
 
 
-def normalize_member(member: dict) -> dict:
+def normalize_member(member: dict[str, Any]) -> dict[str, Any]:
     return {
         "member_id": member.get("id"),
         "username": member.get("username"),
@@ -51,7 +52,7 @@ def normalize_member(member: dict) -> dict:
     }
 
 
-def normalize_label(label: dict) -> dict:
+def normalize_label(label: dict[str, Any]) -> dict[str, Any]:
     return {
         "label_id": label.get("id"),
         "label_name": label.get("name"),
@@ -60,7 +61,7 @@ def normalize_label(label: dict) -> dict:
     }
 
 
-def normalize_card(card: dict) -> dict:
+def normalize_card(card: dict[str, Any]) -> dict[str, Any]:
     card.get("members") or []
     labels = card.get("labels") or []
     return {
@@ -78,7 +79,8 @@ def normalize_card(card: dict) -> dict:
     }
 
 
-def normalize_comment(comment: dict, *, card_id: str) -> dict:
+def normalize_comment(comment: dict[str, Any], *,
+                      card_id: str) -> dict[str, Any]:
     member = comment.get("memberCreator") or {}
     data = comment.get("data") or {}
     return {
@@ -91,11 +93,11 @@ def normalize_comment(comment: dict, *, card_id: str) -> dict:
     }
 
 
-def to_json_bytes(value: dict | list) -> bytes:
+def to_json_bytes(value: dict[str, Any] | list[Any]) -> bytes:
     return json.dumps(value, ensure_ascii=False, indent=2).encode()
 
 
-def to_jsonl_bytes(rows: list[dict]) -> bytes:
+def to_jsonl_bytes(rows: list[dict[str, Any]]) -> bytes:
     ordered = sorted(rows, key=lambda row: row.get("created_at") or "")
     if not ordered:
         return b""

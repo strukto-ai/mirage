@@ -12,18 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from functools import partial
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.postgres._provision import head_tail_provision
+from mirage.commands.builtin.postgres.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -37,7 +37,7 @@ async def head(
     accessor: PostgresAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: str | None = None,
     c: str | None = None,
     q: bool = False,
@@ -58,9 +58,7 @@ async def head(
                               limit=min(n_eff,
                                         accessor.config.default_row_limit))
         return head_multi(paths,
-                          read=read_fn,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(read_fn, accessor, index),
                           n=n_int,
                           c=c_int,
                           show_headers=(v or len(paths) > 1)

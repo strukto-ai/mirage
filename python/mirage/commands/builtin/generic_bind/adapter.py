@@ -22,14 +22,13 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.ops.config import StatOverlay
 from mirage.types import FileStat, PathSpec
-from mirage.utils.glob_walk import resolve_glob_with
+from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 
 OperationFn = Callable[..., Any]
 
 
 async def overlaid_stat(stat: OperationFn, overlay: StatOverlay,
-                        path: PathSpec,
-                        index: IndexCacheStore | None) -> FileStat:
+                        path: PathSpec, index: IndexCacheStore) -> FileStat:
     """Stat through the backend, then merge the namespace attr overlay.
 
     Bound via ``partial(overlaid_stat, stat_fn, overlay)`` so stat-
@@ -40,38 +39,42 @@ async def overlaid_stat(stat: OperationFn, overlay: StatOverlay,
         stat (OperationFn): backend stat ``(path, index) -> FileStat``.
         overlay (StatOverlay): namespace merge ``(virtual, stat) -> stat``.
         path (PathSpec): entry being statted.
-        index (IndexCacheStore | None): cache index threaded through.
+        index (IndexCacheStore): cache index threaded through.
     """
     return overlay(path.virtual, await stat(path, index))
 
 
 @overload
-def with_index(fn: OperationFn, index: IndexCacheStore | None) -> OperationFn:
+def bound_op(fn: OperationFn, accessor: Accessor,
+             index: IndexCacheStore) -> OperationFn:
     ...
 
 
 @overload
-def with_index(fn: None, index: IndexCacheStore | None) -> None:
+def bound_op(fn: None, accessor: Accessor, index: IndexCacheStore) -> None:
     ...
 
 
-def with_index(fn: OperationFn | None,
-               index: IndexCacheStore | None) -> OperationFn | None:
-    """Bind the runtime cache index into a read op for the generics.
+def bound_op(fn: OperationFn | None, accessor: Accessor,
+             index: IndexCacheStore) -> OperationFn | None:
+    """Bind the backend accessor and cache index into an op for the generics.
 
-    A generic command calls its injected reader as ``read(accessor, path)``
-    with no index, but index-backed backends (gdrive, gmail, slack, ...)
-    resolve a path to its real id through the index, so the bound index must
-    travel with the reader. Harmless for backends that ignore it. ``None``
-    passes through so a backend/test can still opt out of streaming.
+    A generic command calls its injected ops as ``op(path)``: backend
+    identity (the accessor) and index-backed path resolution (gdrive,
+    gmail, slack, ... resolve a path to its real id through the index)
+    are wiring, so both bind here, mirroring the TS builders' closures.
+    ``None`` passes through so a backend/test can still opt out of
+    streaming.
 
     Args:
-        fn (OperationFn | None): read op, or None to opt out of streaming.
-        index (IndexCacheStore | None): the per-call cache index.
+        fn (OperationFn | None): backend op ``(accessor, path, *, index)``,
+            or None to opt out of streaming.
+        accessor (Accessor): backend handle bound into the op.
+        index (IndexCacheStore): the per-call cache index.
     """
     if fn is None:
         return None
-    return functools.partial(fn, index=index)
+    return functools.partial(fn, accessor, index=index)
 
 
 class Operation(StrEnum):
@@ -94,24 +97,6 @@ class Builder:
     requirements: frozenset[Operation] = frozenset()
 
 
-def make_resolve_glob(readdir: OperationFn,
-                      max_glob_matches: int | None = None) -> OperationFn:
-    """Build a resolve_glob generic over a backend's readdir.
-
-    Args:
-        readdir (OperationFn): backend readdir ``(accessor, path, index)``.
-        max_glob_matches (int | None): cap on matches per pattern before
-            truncation.
-    """
-
-    async def resolve_glob(accessor: Accessor, paths: list[PathSpec],
-                           index: IndexCacheStore | None) -> list[PathSpec]:
-        return await resolve_glob_with(readdir, accessor, paths, index,
-                                       max_glob_matches)
-
-    return resolve_glob
-
-
 @dataclass(frozen=True)
 class CommandIO:
     readdir: OperationFn
@@ -120,7 +105,7 @@ class CommandIO:
     stat: OperationFn
     is_mounted: OperationFn
     local: bool = True
-    max_glob_matches: int | None = None
+    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
     write: OperationFn | None = None
     exists: OperationFn | None = None
     mkdir: OperationFn | None = None
@@ -136,6 +121,8 @@ class CommandIO:
     is_dir_name: OperationFn | None = None
     du_total: OperationFn | None = None
     du_all: OperationFn | None = None
+    append: OperationFn | None = None
+    set_attrs: OperationFn | None = None
 
     @property
     def resolve_glob(self) -> OperationFn:

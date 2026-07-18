@@ -20,7 +20,8 @@ import {
   formatFileGrepResults,
   formatGrepResults,
 } from '../../../core/slack/formatters.ts'
-import { resolveSlackGlob } from '../../../core/slack/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { SLACK_CMD_OPS } from './ops.ts'
 import { read as slackRead } from '../../../core/slack/read.ts'
 import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { detectScope } from '../../../core/slack/scope.ts'
@@ -34,6 +35,8 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { prependStderr } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
+
+const resolveSlackGlob = resolveGlobOf(SLACK_CMD_OPS)
 
 const ENC = new TextEncoder()
 

@@ -1,7 +1,6 @@
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -25,8 +24,7 @@ async def gunzip(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     keep: bool = False,
     force: bool = False,
     to_stdout: bool = False,
@@ -39,28 +37,28 @@ async def gunzip(
 
     if test_only:
         for p in paths:
-            raw = await read_bytes(accessor, p)
+            raw = await read_bytes(p)
             zlib.decompress(raw, zlib.MAX_WBITS | 16)
         return None, IOResult()
 
     if to_stdout:
         chunks: list[bytes] = []
         for p in paths:
-            raw = await read_bytes(accessor, p)
+            raw = await read_bytes(p)
             chunks.append(zlib.decompress(raw, zlib.MAX_WBITS | 16))
         return b"".join(chunks), IOResult()
 
     writes: dict[str, ByteSource] = {}
     for p in paths:
-        raw = await read_bytes(accessor, p)
+        raw = await read_bytes(p)
         stripped = p.mount_path
         out_path = stripped.removesuffix(".gz") if stripped.endswith(
             ".gz") else stripped + ".out"
         out_data = zlib.decompress(raw, zlib.MAX_WBITS | 16)
-        await write_bytes(accessor, PathSpec.from_str_path(out_path), out_data)
+        await write_bytes(PathSpec.from_str_path(out_path), out_data)
         writes[out_path] = out_data
         if not keep:
-            await unlink(accessor, p)
+            await unlink(p)
     return None, IOResult(writes=writes)
 
 

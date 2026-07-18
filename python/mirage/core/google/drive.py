@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from enum import Enum
+from typing import Any
 
 from mirage.core.google._client import (DRIVE_API_BASE, TokenManager,
                                         google_delete, google_get,
-                                        google_get_bytes, google_get_stream)
+                                        google_get_bytes)
 
 
 class GoogleFileSuffix(str, Enum):
@@ -53,7 +53,7 @@ async def list_files(
     page_size: int = 1000,
     modified_after: str | None = None,
     modified_before: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List files via Drive API.
 
     Args:
@@ -82,7 +82,7 @@ async def list_files(
     if modified_before:
         parts.append(f"modifiedTime < '{modified_before}'")
     q = " and ".join(parts)
-    files: list[dict] = []
+    files: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
@@ -110,7 +110,7 @@ async def list_files(
 async def list_shared_drives(
     token_manager: TokenManager,
     page_size: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List shared drives visible to the authenticated user.
 
     Args:
@@ -120,7 +120,7 @@ async def list_shared_drives(
     Returns:
         list[dict]: shared drive metadata dicts.
     """
-    drives: list[dict] = []
+    drives: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
@@ -145,7 +145,7 @@ async def list_all_files(
     page_size: int = 1000,
     modified_after: str | None = None,
     modified_before: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all files (no folder filter) via Drive API.
 
     Args:
@@ -171,7 +171,7 @@ async def list_all_files(
     if modified_before:
         parts.append(f"modifiedTime < '{modified_before}'")
     q = " and ".join(parts) if parts else None
-    files: list[dict] = []
+    files: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
@@ -222,21 +222,3 @@ async def download_file(
     url = (f"{DRIVE_API_BASE}/files/{file_id}"
            "?alt=media&supportsAllDrives=true")
     return await google_get_bytes(token_manager, url)
-
-
-async def download_file_stream(
-    token_manager: TokenManager,
-    file_id: str,
-    chunk_size: int = 8192,
-) -> AsyncIterator[bytes]:
-    """Stream a regular file from Drive in chunks.
-
-    Args:
-        token_manager (TokenManager): OAuth2 token manager.
-        file_id (str): file ID.
-        chunk_size (int): chunk size in bytes.
-    """
-    url = (f"{DRIVE_API_BASE}/files/{file_id}"
-           "?alt=media&supportsAllDrives=true")
-    async for chunk in google_get_stream(token_manager, url, chunk_size):
-        yield chunk

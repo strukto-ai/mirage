@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.resource.lancedb.config import LanceDBConfig
 
 _SKIP_KEYS = {"_distance", "_rowid", "_score"}
 
 
-def render_card(row: dict, config: LanceDBConfig) -> bytes:
+def render_card(row: dict[str, Any], config: LanceDBConfig) -> bytes:
     lines: list[str] = []
     title = row.get(config.title_column) if config.title_column else None
     if title is not None:

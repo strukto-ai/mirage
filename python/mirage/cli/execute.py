@@ -14,6 +14,7 @@
 
 import json
 import sys
+from typing import Any
 
 import typer
 
@@ -51,7 +52,7 @@ def execute_cmd(
     For dry-run / cost-estimate output, use ``mirage provision``
     instead.
     """
-    payload: dict = {"command": command, "provision": False}
+    payload: dict[str, Any] = {"command": command, "provision": False}
     if session_id:
         payload["session_id"] = session_id
     path = f"/v1/workspaces/{workspace_id}/execute"

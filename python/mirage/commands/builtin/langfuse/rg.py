@@ -12,23 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import compile_pattern, pattern_arg
 from mirage.commands.builtin.langfuse.grep import (_filter_traces,
                                                    _format_dataset_results,
                                                    _format_prompt_results,
                                                    _format_session_results)
+from mirage.commands.builtin.langfuse.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.core.langfuse._client import (fetch_datasets, fetch_prompts,
                                           fetch_sessions, fetch_traces)
-from mirage.core.langfuse.glob import resolve_glob
 from mirage.core.langfuse.read import read as langfuse_read
 from mirage.core.langfuse.readdir import readdir as _readdir
 from mirage.core.langfuse.scope import detect_scope
@@ -42,7 +41,7 @@ async def rg(
     accessor: LangfuseAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
     **flags: object,
@@ -90,11 +89,9 @@ async def rg(
         resolved,
         texts,
         flags,
-        readdir=_readdir,
-        stat=_stat,
-        read_bytes=langfuse_read,
+        readdir=bound_op(_readdir, accessor, index),
+        stat=bound_op(_stat, accessor, index),
+        read_bytes=bound_op(langfuse_read, accessor, index),
         read_stream=None,
-        accessor=accessor,
         stdin=stdin,
-        index=index,
     )

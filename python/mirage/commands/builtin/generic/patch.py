@@ -1,7 +1,6 @@
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.spec.types import CommandName
@@ -112,14 +111,13 @@ async def _load_patch_data(
     i: PathSpec | None,
     paths: list[PathSpec],
     has_resource: bool,
-    stdin: AsyncIterator[bytes] | bytes | None,
+    stdin: ByteSource | None,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None,
 ) -> bytes:
     if i is not None and has_resource:
-        return await read_bytes(accessor, i)
+        return await read_bytes(i)
     if paths and has_resource:
-        return await read_bytes(accessor, paths[0])
+        return await read_bytes(paths[0])
     data = await _read_stdin_async(stdin)
     if data is None:
         return b""
@@ -132,8 +130,7 @@ async def patch(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     has_resource: bool,
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     p: str | None = None,
     R: bool = False,
     i: PathSpec | None = None,
@@ -144,15 +141,14 @@ async def patch(
                                   or paths[2].virtual)
     strip_count = int(p) if p else 0
     patch_data = await _load_patch_data(i, paths, has_resource, stdin,
-                                        read_bytes, accessor)
+                                        read_bytes)
     patch_text = patch_data.decode(errors="replace")
     file_hunks = _parse_patch(patch_text, strip_count)
     writes: dict[str, ByteSource] = {}
     for file_path, hunks in file_hunks.items():
         file_spec = PathSpec.from_str_path(file_path)
         try:
-            original = (await read_bytes(accessor,
-                                         file_spec)).decode(errors="replace")
+            original = (await read_bytes(file_spec)).decode(errors="replace")
         except FileNotFoundError:
             original = ""
         original_lines = split_lines(original)
@@ -160,7 +156,7 @@ async def patch(
             hunks = _reverse_hunks(hunks)
         patched_lines = _apply_hunks(original_lines, hunks, forward_only=N)
         patched_data = ("\n".join(patched_lines) + "\n").encode()
-        await write_bytes(accessor, file_spec, patched_data)
+        await write_bytes(file_spec, patched_data)
         writes[file_path] = patched_data
     return None, IOResult(writes=writes)
 

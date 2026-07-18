@@ -12,21 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.postgres._provision import head_tail_provision
+from mirage.commands.builtin.postgres.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.postgres import _client
-from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import PostgresEntityRowsScope, detect_scope
 from mirage.io.types import ByteSource, IOResult
@@ -41,7 +40,7 @@ async def tail(
     accessor: PostgresAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: str | None = None,
     c: str | None = None,
     q: bool = False,
@@ -86,9 +85,7 @@ async def tail(
         paths = await resolve_glob(accessor, paths, index=index)
         show_headers = (v or len(paths) > 1) and not q
         return tail_multi(paths,
-                          read=postgres_read,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(postgres_read, accessor, index),
                           n=n_int,
                           c=c_int,
                           from_line=from_line,

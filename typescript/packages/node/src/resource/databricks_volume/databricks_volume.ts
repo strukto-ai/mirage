@@ -36,7 +36,7 @@ import {
   databricksVolumeWrite,
   mountKey,
   mountPrefixOf,
-  resolveDatabricksVolumeGlob,
+  makeResolveGlob,
   type FileStat,
   type FindOptions,
   type RegisteredCommand,
@@ -50,6 +50,8 @@ import {
   type DatabricksVolumeConfigRedacted,
 } from './config.ts'
 import { loadDatabricksProfile } from './profile.ts'
+
+const resolveDatabricksVolumeGlob = makeResolveGlob(databricksVolumeReaddir)
 
 export interface DatabricksVolumeResourceState {
   type: string

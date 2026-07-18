@@ -14,6 +14,7 @@
 
 import asyncio
 from collections.abc import Iterable
+from typing import Any
 
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import default_fingerprint, parse_limit
@@ -41,7 +42,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         self._data_prefix = f"{key_prefix}data:"
         self._meta_prefix = f"{key_prefix}meta:"
         self.max_drain_bytes: int | None = max_drain_bytes
-        self._drain_tasks: dict[str, asyncio.Task] = {}
+        self._drain_tasks: dict[str, asyncio.Task[Any]] = {}
 
     async def get(self, key: str) -> bytes | None:
         return await self._cache_client.get(f"{self._data_prefix}{key}")
@@ -108,7 +109,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
                 f"{self._data_prefix}*",
                 f"{self._meta_prefix}*",
         ):
-            keys: list = []
+            keys: list[Any] = []
             async for k in self._cache_client.scan_iter(pattern):
                 keys.append(k)
             if keys:

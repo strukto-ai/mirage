@@ -246,7 +246,7 @@ def test_wc_counts_merge():
 async def test_format_multi_single_path_emits_trailing_newline():
     paths = [PathSpec.from_str_path("/a.txt")]
 
-    async def fake_read(_accessor, _path):
+    async def fake_read(_path):
         return b"hello\n"
 
     out, err = await format_multi(paths, read=fake_read, args_l=True)
@@ -262,7 +262,7 @@ async def test_format_multi_multi_path_emits_total_and_trailing_newline():
     ]
     data = {"/a.txt": b"hello\n", "/b.txt": b"world\nworld\n"}
 
-    async def fake_read(_accessor, path):
+    async def fake_read(path):
         return data[path.virtual]
 
     out, err = await format_multi(paths, read=fake_read, args_l=True)
@@ -276,7 +276,7 @@ async def test_format_multi_multi_path_emits_total_and_trailing_newline():
 async def test_format_multi_accepts_sync_read_returning_bytes():
     paths = [PathSpec.from_str_path("/a.txt")]
 
-    def sync_read(_accessor, _path):
+    def sync_read(_path):
         return b"x\n"
 
     out, err = await format_multi(paths, read=sync_read, args_l=True)
@@ -287,7 +287,7 @@ async def test_format_multi_accepts_sync_read_returning_bytes():
 @pytest.mark.asyncio
 async def test_format_multi_empty_paths_returns_empty():
 
-    async def fake_read(_accessor, _path):
+    async def fake_read(_path):
         return b""
 
     out, err = await format_multi([], read=fake_read, args_l=True)
@@ -302,7 +302,7 @@ async def test_format_multi_missing_operand_reports_and_totals():
         PathSpec.from_str_path("/m.txt"),
     ]
 
-    async def fake_read(_accessor, path):
+    async def fake_read(path):
         if path.virtual == "/m.txt":
             raise FileNotFoundError(path.virtual)
         return b"hello\n"
@@ -319,7 +319,7 @@ async def test_format_multi_all_missing_zero_total():
         PathSpec.from_str_path("/m2.txt"),
     ]
 
-    async def fake_read(_accessor, path):
+    async def fake_read(path):
         raise FileNotFoundError(path.virtual)
 
     out, err = await format_multi(paths, read=fake_read, args_l=True)
@@ -328,7 +328,7 @@ async def test_format_multi_all_missing_zero_total():
                    b"wc: /m2.txt: No such file or directory\n")
 
 
-async def _async_byte_read(_accessor, _path):
+async def _async_byte_read(_path):
     yield b"hello "
     yield b"world\n"
 

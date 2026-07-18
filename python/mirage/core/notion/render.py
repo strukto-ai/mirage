@@ -1,3 +1,5 @@
+from typing import Any
+
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +15,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-def _rich_text_to_md(rich_text_list: list[dict]) -> str:
+def _rich_text_to_md(rich_text_list: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for rt in rich_text_list:
         text = rt.get("plain_text", "")
@@ -33,7 +35,7 @@ def _rich_text_to_md(rich_text_list: list[dict]) -> str:
     return "".join(parts)
 
 
-def _block_to_md(block: dict, indent: int = 0) -> str:
+def _block_to_md(block: dict[str, Any], indent: int = 0) -> str:
     btype = block.get("type", "")
     content = block.get(btype, {})
     rich_text = content.get("rich_text", [])
@@ -84,7 +86,7 @@ def _block_to_md(block: dict, indent: int = 0) -> str:
     return f"{prefix}{text}" if text else ""
 
 
-def _walk_block(block: dict, indent: int, lines: list[str]) -> None:
+def _walk_block(block: dict[str, Any], indent: int, lines: list[str]) -> None:
     line = _block_to_md(block, indent)
     if line or block.get("type") == "paragraph":
         lines.append(line)
@@ -92,7 +94,7 @@ def _walk_block(block: dict, indent: int, lines: list[str]) -> None:
         _walk_block(child, indent + 1, lines)
 
 
-def blocks_to_markdown(blocks: list[dict]) -> str:
+def blocks_to_markdown(blocks: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for block in blocks:
         _walk_block(block, 0, lines)

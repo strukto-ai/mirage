@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.diff import diff as generic_diff
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,18 +34,18 @@ async def diff(
     u: bool = False,
     q: bool = False,
     r: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("diff: no resource")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_diff(paths,
-                              read_bytes=with_index(ops.read_bytes, index),
-                              readdir_fn=ops.readdir,
-                              stat_fn=ops.stat,
-                              accessor=accessor,
-                              index=index,
+                              read_bytes=bound_op(ops.read_bytes, accessor,
+                                                  index),
+                              readdir_fn=bound_op(ops.readdir, accessor,
+                                                  index),
+                              stat_fn=bound_op(ops.stat, accessor, index),
                               i=i,
                               w=w,
                               b=b,

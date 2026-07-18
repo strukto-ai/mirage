@@ -16,7 +16,7 @@ def _spec(path: str) -> PathSpec:
 def _make_cut_backend(files: dict[str, bytes]):
     store = dict(files)
 
-    async def read_stream(accessor, path, index=None):
+    async def read_stream(path):
         key = path.virtual if isinstance(path, PathSpec) else path
         if key not in store:
             raise FileNotFoundError(key)
@@ -95,7 +95,7 @@ async def test_cut_missing_operand():
 @pytest.mark.asyncio
 async def test_stat_default_format():
 
-    async def stat_fn(accessor, path, index=None):
+    async def stat_fn(path):
         return FileStat(name=path.virtual,
                         size=42,
                         modified="2026-01-01",
@@ -110,7 +110,7 @@ async def test_stat_default_format():
 @pytest.mark.asyncio
 async def test_stat_custom_format():
 
-    async def stat_fn(accessor, path, index=None):
+    async def stat_fn(path):
         return FileStat(name="foo", size=10, type=FileType.TEXT)
 
     out, _ = await generic_stat([_spec("foo")], stat_fn=stat_fn, c="%n=%s")
@@ -120,7 +120,7 @@ async def test_stat_custom_format():
 @pytest.mark.asyncio
 async def test_stat_format_F_directory():
 
-    async def stat_fn(accessor, path, index=None):
+    async def stat_fn(path):
         return FileStat(name="d", type=FileType.DIRECTORY)
 
     out, _ = await generic_stat([_spec("d")], stat_fn=stat_fn, c="%F")
@@ -130,7 +130,7 @@ async def test_stat_format_F_directory():
 @pytest.mark.asyncio
 async def test_stat_format_F_regular():
 
-    async def stat_fn(accessor, path, index=None):
+    async def stat_fn(path):
         return FileStat(name="x", type=FileType.JSON)
 
     out, _ = await generic_stat([_spec("x")], stat_fn=stat_fn, f="%F")
@@ -140,7 +140,7 @@ async def test_stat_format_F_regular():
 @pytest.mark.asyncio
 async def test_stat_multiple_paths():
 
-    async def stat_fn(accessor, path, index=None):
+    async def stat_fn(path):
         return FileStat(name=path.virtual, size=1, type=FileType.TEXT)
 
     out, _ = await generic_stat([_spec("a"), _spec("b")],
@@ -152,7 +152,7 @@ async def test_stat_multiple_paths():
 @pytest.mark.asyncio
 async def test_stat_missing_operand():
 
-    async def stat_fn(accessor, path, index=None):
+    async def stat_fn(path):
         return FileStat(name="x")
 
     with pytest.raises(ValueError, match="missing operand"):
@@ -162,10 +162,10 @@ async def test_stat_missing_operand():
 @pytest.mark.asyncio
 async def test_file_text_default():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(path):
         return FileStat(name=path.virtual, size=5, type=FileType.TEXT)
 
-    async def read_bytes(accessor, path):
+    async def read_bytes(path):
         return b"hello"
 
     out, _ = await file_cmd([_spec("a.txt")],
@@ -178,10 +178,10 @@ async def test_file_text_default():
 @pytest.mark.asyncio
 async def test_file_brief_mode():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(path):
         return FileStat(name="f", size=4, type=FileType.TEXT)
 
-    async def read_bytes(accessor, path):
+    async def read_bytes(path):
         return b"abcd"
 
     out, _ = await file_cmd([_spec("f")],
@@ -194,10 +194,10 @@ async def test_file_brief_mode():
 @pytest.mark.asyncio
 async def test_file_mime_mode():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(path):
         return FileStat(name="f.json", size=10, type=FileType.JSON)
 
-    async def read_bytes(accessor, path):
+    async def read_bytes(path):
         return b'{"a": 1}'
 
     out, _ = await file_cmd([_spec("f.json")],
@@ -210,10 +210,10 @@ async def test_file_mime_mode():
 @pytest.mark.asyncio
 async def test_file_directory():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(path):
         return FileStat(name="d", type=FileType.DIRECTORY)
 
-    async def read_bytes(accessor, path):
+    async def read_bytes(path):
         raise AssertionError("should not be read for directory")
 
     out, _ = await file_cmd([_spec("d")],
@@ -225,10 +225,10 @@ async def test_file_directory():
 @pytest.mark.asyncio
 async def test_file_multiple_paths():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(path):
         return FileStat(name=path.virtual, size=3, type=FileType.TEXT)
 
-    async def read_bytes(accessor, path):
+    async def read_bytes(path):
         return b"abc"
 
     out, _ = await file_cmd([_spec("a"), _spec("b")],
@@ -242,10 +242,10 @@ async def test_file_multiple_paths():
 @pytest.mark.asyncio
 async def test_file_read_error_logs_and_falls_back():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(path):
         return FileStat(name="x", size=1, type=FileType.TEXT)
 
-    async def read_bytes(accessor, path):
+    async def read_bytes(path):
         raise OSError("denied")
 
     out, _ = await file_cmd([_spec("x")],
@@ -257,10 +257,10 @@ async def test_file_read_error_logs_and_falls_back():
 @pytest.mark.asyncio
 async def test_file_missing_operand():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(path):
         return FileStat(name="x")
 
-    async def read_bytes(accessor, path):
+    async def read_bytes(path):
         return b""
 
     with pytest.raises(ValueError, match="missing operand"):

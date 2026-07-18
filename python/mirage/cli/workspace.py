@@ -27,11 +27,11 @@ from mirage.config import _interpolate_env, load_config
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
 
 
-def _load_yaml(path: Path) -> dict:
+def _load_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def _resolve_config(path: Path) -> dict:
+def _resolve_config(path: Path) -> dict[str, Any]:
     """Load + validate + interpolate env vars from the CLI's environment.
 
     Env interpolation runs client-side so the user's shell env (where
@@ -46,7 +46,7 @@ def _resolve_config(path: Path) -> dict:
     return cfg.model_dump()
 
 
-def _resolve_config_arg(path: Path) -> dict:
+def _resolve_config_arg(path: Path) -> dict[str, Any]:
     """Read a workspace YAML/JSON config and interpolate ``${VAR}`` from
     the CLI's env. Skips validation because load/clone may only need a
     subset of mounts.
@@ -128,7 +128,7 @@ def create_cmd(
     | None = typer.Option(None, "--id", help="Explicit workspace id."),
 ) -> None:
     """Create a workspace; daemon auto-spawns if not running."""
-    body: dict = {"config": _resolve_config(config_path)}
+    body: dict[str, Any] = {"config": _resolve_config(config_path)}
     if workspace_id:
         body["id"] = workspace_id
     with make_client() as client:
@@ -185,7 +185,7 @@ def clone_cmd(
         help="Clone from a past version (id or branch) not the live state."),
 ) -> None:
     """Clone a workspace, optionally from one of its past versions."""
-    body: dict = {"source_id": source_id}
+    body: dict[str, Any] = {"source_id": source_id}
     if new_id:
         body["id"] = new_id
     if at:
@@ -238,7 +238,7 @@ def load_cmd(
     The path is resolved to an absolute path and sent to the daemon,
     which reads the tar itself.
     """
-    body: dict = {"path": str(tar_path.expanduser().resolve())}
+    body: dict[str, Any] = {"path": str(tar_path.expanduser().resolve())}
     if new_id:
         body["id"] = new_id
     if config_path:

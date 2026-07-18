@@ -1,11 +1,11 @@
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.dify.ops import RESOLVE_GLOB as resolve_glob
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.generic_bind.provision import \
     make_file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.dify.glob import resolve_glob
 from mirage.core.dify.stat import stat as dify_stat
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain

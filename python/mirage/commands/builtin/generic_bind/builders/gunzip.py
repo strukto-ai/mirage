@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.gunzip import gunzip as generic_gunzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          Operation,
-                                                          with_index)
+                                                          Operation, bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,26 +28,26 @@ async def gunzip(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     k: bool = False,
     f: bool = False,
     c: bool = False,
     t: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_gunzip(paths,
-                                read_bytes=with_index(ops.read_bytes, index),
-                                write_bytes=ops.require(Operation.WRITE),
-                                unlink=ops.require(Operation.UNLINK),
-                                accessor=accessor,
-                                stdin=stdin,
-                                keep=k,
-                                force=f,
-                                to_stdout=c,
-                                test_only=t)
+    return await generic_gunzip(
+        paths,
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        write_bytes=partial(ops.require(Operation.WRITE), accessor),
+        unlink=partial(ops.require(Operation.UNLINK), accessor),
+        stdin=stdin,
+        keep=k,
+        force=f,
+        to_stdout=c,
+        test_only=t)
 
 
 BUILDER = Builder('gunzip',

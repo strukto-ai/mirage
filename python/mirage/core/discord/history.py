@@ -15,6 +15,7 @@
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from typing import Any
 
 from mirage.core.discord.paginate import after_id_pages
 from mirage.resource.discord.config import DiscordConfig
@@ -44,7 +45,7 @@ async def stream_messages_for_day(
     channel_id: str,
     date_str: str,
     page_size: int = 100,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Stream message pages for a channel-day.
 
     Walks ``/channels/<id>/messages?after=<snowflake>&limit=N``
@@ -82,7 +83,7 @@ async def list_messages_for_day(
     channel_id: str,
     date_str: str,
     page_size: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all messages for a channel-day (eager).
 
     Args:
@@ -94,7 +95,7 @@ async def list_messages_for_day(
     Returns:
         list[dict]: messages within the date, sorted oldest-first.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     async for page in stream_messages_for_day(config, channel_id, date_str,
                                               page_size):
         out.extend(page)

@@ -12,12 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.core.langfuse.glob import resolve_glob as _resolve_glob
+from mirage.core.langfuse.readdir import readdir
 from mirage.resource.base import BaseResource
 from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.resource.langfuse.prompt import PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 
 class LangfuseResource(BaseResource):
@@ -46,8 +51,8 @@ class LangfuseResource(BaseResource):
             index=self._index,
         )
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

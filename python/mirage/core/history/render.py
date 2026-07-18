@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.observe.log_entry import EVENT_COMMAND
 
 HISTSIZE = 500
 
 
-def render_bash_history(events: list[dict]) -> str:
+def render_bash_history(events: list[dict[str, Any]]) -> str:
     """Render command events as a GNU bash histfile.
 
     One `#<epoch-seconds>` timestamp comment line per entry followed by
@@ -41,7 +43,7 @@ def render_bash_history(events: list[dict]) -> str:
 
 
 def render_history_listing(
-    events: list[dict],
+    events: list[dict[str, Any]],
     n: int | None = None,
     histsize: int = HISTSIZE,
 ) -> str:

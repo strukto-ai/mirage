@@ -42,10 +42,9 @@ async def readdir(
         return [f"{prefix}/teams"]
 
     if key == "teams":
-        if index is not None:
-            listing = await index.list_dir(idx_key)
-            if listing.entries is not None:
-                return [f"{prefix}{entry}" for entry in listing.entries]
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         teams = await list_teams(accessor.config)
         if accessor.config.team_ids:
             teams = [
@@ -63,25 +62,23 @@ async def readdir(
                 vfs_name=dirname,
             )
             entries.append((dirname, entry))
-        if index is not None:
-            await index.set_dir(idx_key, entries)
+        await index.set_dir(idx_key, entries)
         return [f"{prefix}/teams/{name}" for name, _ in entries]
 
     parts = key.split("/")
     if len(parts) == 2 and parts[0] == "teams":
-        if index is not None:
+        result = await index.get(idx_key)
+        if result.entry is None:
+            # Auto-bootstrap: populate teams index.
+            parent = PathSpec(
+                virtual=prefix + "/teams",
+                directory=prefix + "/teams",
+                resource_path=mount_key(prefix + "/teams", prefix),
+            )
+            await readdir(accessor, parent, index)
             result = await index.get(idx_key)
-            if result.entry is None:
-                # Auto-bootstrap: populate teams index.
-                parent = PathSpec(
-                    virtual=prefix + "/teams",
-                    directory=prefix + "/teams",
-                    resource_path=mount_key(prefix + "/teams", prefix),
-                )
-                await readdir(accessor, parent, index)
-                result = await index.get(idx_key)
-            if result.entry is None:
-                raise enoent(virtual)
+        if result.entry is None:
+            raise enoent(virtual)
         return [
             f"{prefix}/{key}/team.json",
             f"{prefix}/{key}/members",
@@ -92,26 +89,23 @@ async def readdir(
 
     if len(parts) == 3 and parts[0] == "teams" and parts[2] == "members":
         team_vkey = "/" + "/".join(parts[:2])
-        if index is not None:
+        result = await index.get(team_vkey)
+        if result.entry is None:
+            # Auto-bootstrap: populate team index.
+            parent = PathSpec(
+                virtual=prefix + "/" + "/".join(parts[:2]),
+                directory=prefix + "/" + "/".join(parts[:2]),
+                resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
+                                        prefix),
+            )
+            await readdir(accessor, parent, index)
             result = await index.get(team_vkey)
-            if result.entry is None:
-                # Auto-bootstrap: populate team index.
-                parent = PathSpec(
-                    virtual=prefix + "/" + "/".join(parts[:2]),
-                    directory=prefix + "/" + "/".join(parts[:2]),
-                    resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
-                                            prefix),
-                )
-                await readdir(accessor, parent, index)
-                result = await index.get(team_vkey)
-            if result.entry is None:
-                raise enoent(virtual)
-            team_id = result.entry.id
-            listing = await index.list_dir(idx_key)
-            if listing.entries is not None:
-                return [f"{prefix}{entry}" for entry in listing.entries]
-        else:
+        if result.entry is None:
             raise enoent(virtual)
+        team_id = result.entry.id
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         users = await list_team_members(accessor.config, team_id)
         entries = []
         for user in users:
@@ -132,25 +126,22 @@ async def readdir(
 
     if len(parts) == 3 and parts[0] == "teams" and parts[2] == "issues":
         team_vkey = "/" + "/".join(parts[:2])
-        if index is not None:
+        result = await index.get(team_vkey)
+        if result.entry is None:
+            parent = PathSpec(
+                virtual=prefix + "/" + "/".join(parts[:2]),
+                directory=prefix + "/" + "/".join(parts[:2]),
+                resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
+                                        prefix),
+            )
+            await readdir(accessor, parent, index)
             result = await index.get(team_vkey)
-            if result.entry is None:
-                parent = PathSpec(
-                    virtual=prefix + "/" + "/".join(parts[:2]),
-                    directory=prefix + "/" + "/".join(parts[:2]),
-                    resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
-                                            prefix),
-                )
-                await readdir(accessor, parent, index)
-                result = await index.get(team_vkey)
-            if result.entry is None:
-                raise enoent(virtual)
-            team_id = result.entry.id
-            listing = await index.list_dir(idx_key)
-            if listing.entries is not None:
-                return [f"{prefix}{entry}" for entry in listing.entries]
-        else:
+        if result.entry is None:
             raise enoent(virtual)
+        team_id = result.entry.id
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         issues = await list_team_issues(accessor.config, team_id)
         entries = []
         for issue in issues:
@@ -169,42 +160,38 @@ async def readdir(
         return [f"{prefix}/{key}/{name}" for name, _ in entries]
 
     if len(parts) == 4 and parts[0] == "teams" and parts[2] == "issues":
-        if index is not None:
+        result = await index.get(idx_key)
+        if result.entry is None:
+            parent = PathSpec(
+                virtual=prefix + "/" + "/".join(parts[:3]),
+                directory=prefix + "/" + "/".join(parts[:3]),
+                resource_path=mount_key(prefix + "/" + "/".join(parts[:3]),
+                                        prefix),
+            )
+            await readdir(accessor, parent, index)
             result = await index.get(idx_key)
-            if result.entry is None:
-                parent = PathSpec(
-                    virtual=prefix + "/" + "/".join(parts[:3]),
-                    directory=prefix + "/" + "/".join(parts[:3]),
-                    resource_path=mount_key(prefix + "/" + "/".join(parts[:3]),
-                                            prefix),
-                )
-                await readdir(accessor, parent, index)
-                result = await index.get(idx_key)
-            if result.entry is None:
-                raise enoent(virtual)
+        if result.entry is None:
+            raise enoent(virtual)
         return [f"{prefix}/{key}/issue.json", f"{prefix}/{key}/comments.jsonl"]
 
     if len(parts) == 3 and parts[0] == "teams" and parts[2] == "projects":
         team_vkey = "/" + "/".join(parts[:2])
-        if index is not None:
+        result = await index.get(team_vkey)
+        if result.entry is None:
+            parent = PathSpec(
+                virtual=prefix + "/" + "/".join(parts[:2]),
+                directory=prefix + "/" + "/".join(parts[:2]),
+                resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
+                                        prefix),
+            )
+            await readdir(accessor, parent, index)
             result = await index.get(team_vkey)
-            if result.entry is None:
-                parent = PathSpec(
-                    virtual=prefix + "/" + "/".join(parts[:2]),
-                    directory=prefix + "/" + "/".join(parts[:2]),
-                    resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
-                                            prefix),
-                )
-                await readdir(accessor, parent, index)
-                result = await index.get(team_vkey)
-            if result.entry is None:
-                raise enoent(virtual)
-            team_id = result.entry.id
-            listing = await index.list_dir(idx_key)
-            if listing.entries is not None:
-                return [f"{prefix}{entry}" for entry in listing.entries]
-        else:
+        if result.entry is None:
             raise enoent(virtual)
+        team_id = result.entry.id
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         projects = await list_team_projects(accessor.config, team_id)
         entries = []
         for project in projects:
@@ -224,25 +211,22 @@ async def readdir(
 
     if len(parts) == 3 and parts[0] == "teams" and parts[2] == "cycles":
         team_vkey = "/" + "/".join(parts[:2])
-        if index is not None:
+        result = await index.get(team_vkey)
+        if result.entry is None:
+            parent = PathSpec(
+                virtual=prefix + "/" + "/".join(parts[:2]),
+                directory=prefix + "/" + "/".join(parts[:2]),
+                resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
+                                        prefix),
+            )
+            await readdir(accessor, parent, index)
             result = await index.get(team_vkey)
-            if result.entry is None:
-                parent = PathSpec(
-                    virtual=prefix + "/" + "/".join(parts[:2]),
-                    directory=prefix + "/" + "/".join(parts[:2]),
-                    resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
-                                            prefix),
-                )
-                await readdir(accessor, parent, index)
-                result = await index.get(team_vkey)
-            if result.entry is None:
-                raise enoent(virtual)
-            team_id = result.entry.id
-            listing = await index.list_dir(idx_key)
-            if listing.entries is not None:
-                return [f"{prefix}{entry}" for entry in listing.entries]
-        else:
+        if result.entry is None:
             raise enoent(virtual)
+        team_id = result.entry.id
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         cycles = await list_team_cycles(accessor.config, team_id)
         entries = []
         for cycle in cycles:

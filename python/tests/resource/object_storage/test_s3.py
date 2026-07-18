@@ -70,10 +70,8 @@ def test_s3_write_ops_tagged():
         "truncate",
         "rename",
     }
-    for fn in OPS:
-        for ro in fn._registered_ops:
-            if ro.name in write_op_names:
-                assert ro.write is True, (f"op {ro.name} should be write=True")
-            else:
-                assert ro.write is False, (
-                    f"op {ro.name} should be write=False")
+    for ro in OPS:
+        if ro.name in write_op_names:
+            assert ro.write is True, (f"op {ro.name} should be write=True")
+        else:
+            assert ro.write is False, (f"op {ro.name} should be write=False")

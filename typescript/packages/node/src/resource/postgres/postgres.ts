@@ -26,7 +26,7 @@ import {
   postgresReaddir,
   postgresStat,
   resolvePostgresConfig,
-  resolvePostgresGlob,
+  makeResolveGlob,
   type FileStat,
   type PostgresConfig,
   type PostgresConfigResolved,
@@ -35,6 +35,8 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { PostgresStore } from './store.ts'
+
+const resolvePostgresGlob = makeResolveGlob(postgresReaddir)
 
 export interface PostgresResourceOptions {
   config: PostgresConfig

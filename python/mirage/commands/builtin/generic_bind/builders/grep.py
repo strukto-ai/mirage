@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,9 +27,9 @@ async def grep(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = (await ops.resolve_glob(accessor, paths, index)
@@ -40,13 +38,11 @@ async def grep(
         resolved,
         texts,
         flags,
-        readdir=ops.readdir,
-        stat=ops.stat,
-        read_bytes=ops.read_bytes,
-        read_stream=with_index(ops.read_stream, index),
-        accessor=accessor,
+        readdir=bound_op(ops.readdir, accessor, index),
+        stat=bound_op(ops.stat, accessor, index),
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        read_stream=bound_op(ops.read_stream, accessor, index),
         stdin=stdin,
-        index=index,
     )
 
 

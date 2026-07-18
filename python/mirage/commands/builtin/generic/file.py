@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.file_helper import _detect
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
@@ -46,7 +45,6 @@ async def file_cmd(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     stat_fn: Callable[..., Awaitable[FileStat]],
-    accessor: Accessor | None = None,
     b: bool = False,
     i: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -54,13 +52,13 @@ async def file_cmd(
         raise ValueError("file: missing operand")
     lines: list[str] = []
     for p in paths:
-        s = await stat_fn(accessor, p)
+        s = await stat_fn(p)
         if s.type == FileType.DIRECTORY:
             lines.append(
                 _format_file_result(p.virtual, FileType.DIRECTORY, b, i))
             continue
         try:
-            header = (await read_bytes(accessor, p))[:512]
+            header = (await read_bytes(p))[:512]
         except Exception as exc:
             _logger.debug("file: failed to read header for %s: %s", p.virtual,
                           exc)

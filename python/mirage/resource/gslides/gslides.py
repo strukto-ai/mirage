@@ -12,15 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.gslides import GSlidesAccessor
 from mirage.commands.builtin.gslides import COMMANDS
 from mirage.core.google._client import TokenManager
-from mirage.core.gslides.glob import resolve_glob as _resolve_glob
+from mirage.core.gslides.readdir import readdir
 from mirage.ops.gslides import OPS as GSLIDES_VFS_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.gslides.config import GSlidesConfig
 from mirage.resource.gslides.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
+from mirage.utils.glob_walk import make_resolve_glob
+
+_resolve_glob = make_resolve_glob(readdir)
 
 
 class GSlidesResource(BaseResource):
@@ -45,8 +50,8 @@ class GSlidesResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
 
-    def load_state(self, state: dict) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass

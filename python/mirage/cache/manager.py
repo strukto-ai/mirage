@@ -31,12 +31,12 @@ class CacheManager:
     """
 
     def __init__(self, file_cache: FileCacheMixin | None,
-                 index: IndexCacheStore | None, prefix: str,
+                 index: IndexCacheStore, prefix: str,
                  caches_reads: bool) -> None:
         """Args:
             file_cache (FileCacheMixin | None): Workspace file cache
                 store; entries are keyed by mount-absolute path.
-            index (IndexCacheStore | None): The mount resource's index
+            index (IndexCacheStore): The mount resource's index
                 cache; listings are keyed by mount-absolute path.
             prefix (str): Mount prefix (e.g. "/data/").
             caches_reads (bool): Whether the resource caches reads; the
@@ -94,14 +94,11 @@ class CacheManager:
         virtual = self._virtual(path)
         if self._caches_reads and self._file_cache is not None:
             await self._file_cache.remove(virtual)
-        if self._index is not None:
-            await self._index.invalidate_dir(virtual)
-            await self._index.invalidate_dir(virtual + "/")
+        await self._index.invalidate_dir(virtual)
+        await self._index.invalidate_dir(virtual + "/")
         await self._invalidate_parent(virtual)
 
     async def _invalidate_parent(self, virtual: str) -> None:
-        if self._index is None:
-            return
         parent = virtual.rsplit("/", 1)[0] or "/"
         await self._index.invalidate_dir(parent)
         await self._index.invalidate_dir(parent + "/")

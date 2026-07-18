@@ -12,14 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.databricks_volume.create import create
-from mirage.ops.databricks_volume.mkdir import mkdir
-from mirage.ops.databricks_volume.read import read
-from mirage.ops.databricks_volume.readdir import readdir
-from mirage.ops.databricks_volume.rename import rename
-from mirage.ops.databricks_volume.rmdir import rmdir
-from mirage.ops.databricks_volume.stat import stat
-from mirage.ops.databricks_volume.unlink import unlink
-from mirage.ops.databricks_volume.write import write
+from mirage.commands.builtin.databricks_volume.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat, write, create, unlink, mkdir, rmdir, rename]
+OPS = make_generic_ops("databricks_volume", _TABLE, mkdir_parents=True)

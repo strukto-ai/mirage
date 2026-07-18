@@ -54,11 +54,11 @@ from mirage.workspace.executor.builtins import (  # isort: skip
 
 
 async def _recurse_reassociated(
-    recurse: Callable,
-    dispatch: Callable,
-    execute_fn: Callable,
+    recurse: Callable[..., Any],
+    dispatch: Callable[..., Any],
+    execute_fn: Callable[..., Any],
     registry: MountRegistry,
-    redirects: list,
+    redirects: list[Any],
     right: Any,
     node: Any,
     session: Session,
@@ -100,11 +100,11 @@ async def _recurse_reassociated(
 
 
 async def execute_node(
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
     job_table: JobTable,
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     agent_id: str,
     node: Any,
     session: Session,
@@ -237,7 +237,7 @@ async def execute_node(
 
     # ── compound statement ({ ... }) ───────────
     if kind == NodeKind.COMPOUND:
-        all_stdout: list = []
+        all_stdout: list[Any] = []
         merged_io = IOResult()
         last_exec = ExecutionNode(command="{}", exit_code=0)
         for child in node.named_children:

@@ -14,6 +14,7 @@
 
 import functools
 from collections.abc import Callable
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -24,22 +25,22 @@ from mirage.commands.spec import SPECS
 from mirage.types import PathSpec
 
 
-async def _drop_index(read_bytes: Callable, accessor: Accessor, path: PathSpec,
-                      index: IndexCacheStore | None) -> bytes:
+async def _drop_index(read_bytes: Callable[..., Any], accessor: Accessor,
+                      path: PathSpec, index: IndexCacheStore) -> bytes:
     return await read_bytes(accessor, path)
 
 
 def make_filetype_commands(
     resource: str,
-    resolve_glob: Callable,
-    read_bytes: Callable,
+    resolve_glob: Callable[..., Any],
+    read_bytes: Callable[..., Any],
     *,
     read_takes_index: bool = False,
-    provision: Callable | None = None,
-) -> list[Callable]:
+    provision: Callable[..., Any] | None = None,
+) -> list[Callable[..., Any]]:
     read = (read_bytes if read_takes_index else functools.partial(
         _drop_index, read_bytes))
-    commands: list[Callable] = []
+    commands: list[Callable[..., Any]] = []
     for ext, module in _EXT_MODULES.items():
         for name, fn in _BUILDERS:
             bound = functools.partial(fn, resolve_glob, read, module)

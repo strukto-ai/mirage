@@ -14,7 +14,7 @@
 
 import inspect
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.types import PathSpec
@@ -25,7 +25,7 @@ class RegisteredOp:
     name: str
     resource: str
     filetype: str | None
-    fn: Callable
+    fn: Callable[..., Any]
     write: bool = False
 
 
@@ -35,9 +35,9 @@ def op(
     resource: str | list[str],
     filetype: str | None = None,
     write: bool = False,
-) -> Callable:
+) -> Callable[..., Any]:
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         resources = (resource if isinstance(resource, list) else [resource])
         ops = getattr(fn, "_registered_ops", [])
         for p in resources:
@@ -87,7 +87,7 @@ class OpsRegistry:
         name: str,
         resource: str,
         filetype: str | None = None,
-    ) -> Callable:
+    ) -> Callable[..., Any]:
         if filetype:
             key: tuple[str, str | None,
                        str | None] = (name, filetype, resource)

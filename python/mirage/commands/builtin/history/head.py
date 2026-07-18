@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.generic_bind.provision import \
     make_head_tail_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -37,21 +36,19 @@ async def head(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: str | None = None,
     c: str | None = None,
     q: bool = False,
     v: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int = int(n) if n is not None else None
     c_int = int(c) if c is not None else None
     if paths:
         return head_multi(paths,
-                          read=history_read,
-                          accessor=accessor,
-                          index=index,
+                          read=bound_op(history_read, accessor, index),
                           n=n_int,
                           c=c_int,
                           show_headers=(v or len(paths) > 1)

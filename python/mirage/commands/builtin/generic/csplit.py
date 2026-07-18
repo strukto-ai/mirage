@@ -1,7 +1,6 @@
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
@@ -39,8 +38,7 @@ async def csplit(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     prefix: str | PathSpec = "xx",
     digits: int = 2,
     suffix_format: str | None = None,
@@ -51,7 +49,7 @@ async def csplit(
         prefix = prefix.mount_path
     suffix_fmt = suffix_format if suffix_format else f"%0{digits}d"
     if paths:
-        raw = await read_bytes(accessor, paths[0])
+        raw = await read_bytes(paths[0])
     else:
         stdin_raw = await _read_stdin_async(stdin)
         raw = stdin_raw if stdin_raw is not None else b""
@@ -64,7 +62,7 @@ async def csplit(
         for idx, part in enumerate(parts):
             filename = prefix + (suffix_fmt % idx)
             data = ("\n".join(part) + "\n").encode() if part else b""
-            await write_bytes(accessor, PathSpec.from_str_path(filename), data)
+            await write_bytes(PathSpec.from_str_path(filename), data)
             writes[filename] = data
             sizes.append(str(len(data)))
     except Exception:

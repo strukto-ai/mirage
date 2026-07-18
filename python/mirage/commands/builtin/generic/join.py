@@ -1,6 +1,5 @@
 from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
@@ -117,7 +116,6 @@ async def join_cmd(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None = None,
     field1: int = 0,
     field2: int = 0,
     separator: str | None = None,
@@ -131,8 +129,8 @@ async def join_cmd(
                                   or paths[2].virtual)
     if len(paths) < 2:
         raise ValueError("join: requires two paths")
-    data1 = (await read_bytes(accessor, paths[0])).decode(errors="replace")
-    data2 = (await read_bytes(accessor, paths[1])).decode(errors="replace")
+    data1 = (await read_bytes(paths[0])).decode(errors="replace")
+    data2 = (await read_bytes(paths[1])).decode(errors="replace")
     lines1 = split_lines(data1)
     lines2 = split_lines(data2)
     out_lines = _join_lines(lines1, lines2, field1, field2, separator,

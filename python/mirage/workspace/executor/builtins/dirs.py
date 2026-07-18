@@ -14,6 +14,7 @@
 
 import posixpath
 from collections.abc import Callable
+from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -108,7 +109,7 @@ def _cd_candidates(
 
 
 async def handle_cd(
-    dispatch: Callable,
+    dispatch: Callable[..., Any],
     is_mount_root: Callable[[str], bool],
     path: str | PathSpec,
     session: Session,

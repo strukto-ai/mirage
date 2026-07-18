@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping
+from typing import Any
 
 from mirage.shell.constants import (ARITH_ASSIGN_OPS, ARITH_MAX_DEPTH,
                                     ARITH_NAME, ARITH_SIGN, ARITH_TOKEN,
@@ -90,20 +91,20 @@ class ArithParser:
         if self.take() != tok:
             raise ArithError(f'syntax error: "{tok}" expected')
 
-    def parse(self) -> tuple:
+    def parse(self) -> tuple[Any, ...]:
         node = self.comma()
         if self.peek() is not None:
             raise ArithError(f'syntax error: unexpected token "{self.peek()}"')
         return node
 
-    def comma(self) -> tuple:
+    def comma(self) -> tuple[Any, ...]:
         parts = [self.assign()]
         while self.peek() == ",":
             self.take()
             parts.append(self.assign())
         return parts[0] if len(parts) == 1 else ("comma", parts)
 
-    def assign(self) -> tuple:
+    def assign(self) -> tuple[Any, ...]:
         if (self.peek() is not None
                 and ARITH_NAME.fullmatch(self.tokens[self.pos])
                 and self.pos + 1 < len(self.tokens)
@@ -113,7 +114,7 @@ class ArithParser:
             return ("assign", name, op, self.assign())
         return self.ternary()
 
-    def ternary(self) -> tuple:
+    def ternary(self) -> tuple[Any, ...]:
         cond = self.logic_or()
         if self.peek() != "?":
             return cond
@@ -123,84 +124,84 @@ class ArithParser:
         other = self.assign()
         return ("ternary", cond, then, other)
 
-    def logic_or(self) -> tuple:
+    def logic_or(self) -> tuple[Any, ...]:
         node = self.logic_and()
         while self.peek() == "||":
             self.take()
             node = ("logic", "||", node, self.logic_and())
         return node
 
-    def logic_and(self) -> tuple:
+    def logic_and(self) -> tuple[Any, ...]:
         node = self.bit_or()
         while self.peek() == "&&":
             self.take()
             node = ("logic", "&&", node, self.bit_or())
         return node
 
-    def bit_or(self) -> tuple:
+    def bit_or(self) -> tuple[Any, ...]:
         node = self.bit_xor()
         while self.peek() == "|":
             self.take()
             node = ("binop", "|", node, self.bit_xor())
         return node
 
-    def bit_xor(self) -> tuple:
+    def bit_xor(self) -> tuple[Any, ...]:
         node = self.bit_and()
         while self.peek() == "^":
             self.take()
             node = ("binop", "^", node, self.bit_and())
         return node
 
-    def bit_and(self) -> tuple:
+    def bit_and(self) -> tuple[Any, ...]:
         node = self.equality()
         while self.peek() == "&":
             self.take()
             node = ("binop", "&", node, self.equality())
         return node
 
-    def equality(self) -> tuple:
+    def equality(self) -> tuple[Any, ...]:
         node = self.relational()
         while self.peek() in ("==", "!="):
             op = self.take()
             node = ("binop", op, node, self.relational())
         return node
 
-    def relational(self) -> tuple:
+    def relational(self) -> tuple[Any, ...]:
         node = self.shift()
         while self.peek() in ("<", "<=", ">", ">="):
             op = self.take()
             node = ("binop", op, node, self.shift())
         return node
 
-    def shift(self) -> tuple:
+    def shift(self) -> tuple[Any, ...]:
         node = self.additive()
         while self.peek() in ("<<", ">>"):
             op = self.take()
             node = ("binop", op, node, self.additive())
         return node
 
-    def additive(self) -> tuple:
+    def additive(self) -> tuple[Any, ...]:
         node = self.multiplicative()
         while self.peek() in ("+", "-"):
             op = self.take()
             node = ("binop", op, node, self.multiplicative())
         return node
 
-    def multiplicative(self) -> tuple:
+    def multiplicative(self) -> tuple[Any, ...]:
         node = self.power()
         while self.peek() in ("*", "/", "%"):
             op = self.take()
             node = ("binop", op, node, self.power())
         return node
 
-    def power(self) -> tuple:
+    def power(self) -> tuple[Any, ...]:
         node = self.unary()
         if self.peek() == "**":
             self.take()
             return ("binop", "**", node, self.power())
         return node
 
-    def unary(self) -> tuple:
+    def unary(self) -> tuple[Any, ...]:
         tok = self.peek()
         if tok in ("!", "~", "-", "+"):
             self.take()
@@ -213,14 +214,14 @@ class ArithParser:
             return ("pre", tok, name)
         return self.postfix()
 
-    def postfix(self) -> tuple:
+    def postfix(self) -> tuple[Any, ...]:
         node = self.primary()
         if self.peek() in ("++", "--") and node[0] == "var":
             op = self.take()
             return ("post", op, node[1])
         return node
 
-    def primary(self) -> tuple:
+    def primary(self) -> tuple[Any, ...]:
         tok = self.take()
         if tok == "(":
             node = self.comma()
@@ -271,7 +272,7 @@ class ArithEvaluator:
                                        depth=self.depth + 1)
             return result
 
-    def run(self, node: tuple) -> int:
+    def run(self, node: tuple[Any, ...]) -> int:
         kind = node[0]
         if kind == "num":
             return node[1]

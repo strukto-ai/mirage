@@ -24,7 +24,7 @@ import {
   TokenManager,
   gslidesRead,
   gslidesReaddir,
-  gslidesResolveGlob,
+  makeResolveGlob,
   gslidesStat,
   mountKey,
   mountPrefixOf,
@@ -34,6 +34,8 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactGSlidesConfig, type GSlidesConfig, type GSlidesConfigRedacted } from './config.ts'
+
+const gslidesResolveGlob = makeResolveGlob(gslidesReaddir)
 
 export interface GSlidesResourceState {
   type: string

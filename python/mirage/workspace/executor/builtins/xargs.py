@@ -14,6 +14,7 @@
 
 import shlex
 from collections.abc import Callable
+from typing import Any
 
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.io import IOResult
@@ -49,7 +50,7 @@ def _split_items(data: bytes, flags: dict[str, str | bool]) -> list[str]:
 
 
 async def handle_xargs(
-    execute_fn: Callable,
+    execute_fn: Callable[..., Any],
     args: list[str],
     session: Session,
     stdin: ByteSource | None,

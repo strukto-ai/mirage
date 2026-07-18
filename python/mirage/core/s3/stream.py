@@ -15,6 +15,7 @@
 import time
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
+from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -53,7 +54,10 @@ async def read_stream(
     rec = record_stream("read", path, "s3")
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
-        kwargs: dict = {"Bucket": config.bucket, "Key": _key(path, config)}
+        kwargs: dict[str, Any] = {
+            "Bucket": config.bucket,
+            "Key": _key(path, config)
+        }
         if pinned_revision is not None:
             kwargs["VersionId"] = pinned_revision
         try:
@@ -96,7 +100,7 @@ async def range_read(accessor: S3Accessor, path_spec: PathSpec, start: int,
     start_ms = int(time.monotonic() * 1000)
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "Bucket": config.bucket,
             "Key": _key(path, config),
             "Range": f"bytes={start}-{end - 1}",

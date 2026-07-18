@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
-import { resolveGlob } from '../../../core/mongodb/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { MONGODB_CMD_OPS } from './ops.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { stat as mongoStat } from '../../../core/mongodb/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
@@ -21,6 +22,8 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { catGeneric } from '../generic/cat.ts'
 import { fileReadProvision } from './_provision.ts'
+
+const resolveGlob = resolveGlobOf(MONGODB_CMD_OPS)
 
 async function catCommand(
   accessor: MongoDBAccessor,

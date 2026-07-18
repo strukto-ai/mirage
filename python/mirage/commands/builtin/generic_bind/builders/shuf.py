@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.shuf import shuf as generic_shuf
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+                                                          bound_op)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -28,12 +26,12 @@ async def shuf(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: str | None = None,
     e: bool = False,
     z: bool = False,
     r: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
@@ -42,8 +40,8 @@ async def shuf(
         paths = []
     return await generic_shuf(paths,
                               texts,
-                              read_bytes=with_index(ops.read_bytes, index),
-                              accessor=accessor,
+                              read_bytes=bound_op(ops.read_bytes, accessor,
+                                                  index),
                               stdin=stdin,
                               count=int(n) if n is not None else None,
                               echo=e,

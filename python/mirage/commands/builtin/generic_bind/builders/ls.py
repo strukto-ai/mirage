@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
@@ -41,7 +41,7 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
     stat_overlay: StatOverlay | None = None,
     **kwargs,

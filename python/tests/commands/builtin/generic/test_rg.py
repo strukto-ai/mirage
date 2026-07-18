@@ -22,7 +22,7 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
             inferred_dirs.add(d)
     inferred_dirs.add("/")
 
-    async def readdir(accessor, path, index=None):
+    async def readdir(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         p = spec.virtual.rstrip("/") or "/"
@@ -44,7 +44,7 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
                 children.add(prefix + child)
         return sorted(children)
 
-    async def stat(accessor, path, index=None):
+    async def stat(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         p = spec.virtual
@@ -57,15 +57,15 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
                             type=FileType.DIRECTORY)
         raise FileNotFoundError(p)
 
-    async def read_bytes(accessor, path, index=None):
+    async def read_bytes(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         if spec.virtual not in files:
             raise FileNotFoundError(spec.virtual)
         return files[spec.virtual]
 
-    async def read_stream(accessor, path, index=None):
-        data = await read_bytes(accessor, path)
+    async def read_stream(path):
+        data = await read_bytes(path)
         yield data
 
     return readdir, stat, read_bytes, read_stream
@@ -335,9 +335,7 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
             return mount_prefix + p
         return p
 
-    async def readdir(accessor, path, index=None):
-        if index is None:
-            raise FileNotFoundError("index required")
+    async def readdir(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         p = _full(spec.virtual).rstrip("/") or "/"
@@ -356,9 +354,7 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
             children.add(child)
         return sorted(children)
 
-    async def stat(accessor, path, index=None):
-        if index is None:
-            raise FileNotFoundError("index required")
+    async def stat(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         p = _full(spec.virtual)
@@ -371,9 +367,7 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
                             type=FileType.DIRECTORY)
         raise FileNotFoundError(p)
 
-    async def read_bytes(accessor, path, index=None):
-        if index is None:
-            raise FileNotFoundError("index required")
+    async def read_bytes(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
             resource_path=(path).strip("/"), virtual=path, directory=path)
         p = _full(spec.virtual)
@@ -405,34 +399,10 @@ async def test_rg_files_only_mount_prefix_not_doubled():
         read_bytes=rb,
         read_stream=None,
         flags={"args_l": True},
-        index=object(),
     )
     decoded = (await _drain_async(output)).decode().strip()
     assert decoded == "/s3/dir/a.txt"
     assert "/s3/s3" not in decoded
-
-
-@pytest.mark.asyncio
-async def test_rg_single_file_threads_index():
-    readdir, stat, rb = _make_prefixed_backend(
-        {"/dir/a.txt": b"apple\n"},
-        mount_prefix="/gd",
-    )
-    p = PathSpec(resource_path=mount_key("/dir/a.txt", "/gd"),
-                 virtual="/dir/a.txt",
-                 directory="/dir/a.txt",
-                 resolved=True)
-    output, _ = await rg(
-        [p],
-        ["apple"],
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=None,
-        index=object(),
-    )
-    decoded = (await _drain_async(output)).decode()
-    assert "apple" in decoded
 
 
 @pytest.mark.asyncio

@@ -147,17 +147,17 @@ async def test_split_readable_reports_stat_typed_dir_as_eisdir():
 @pytest.mark.asyncio
 async def test_dir_refusing_read_raises_eisdir_for_dirs():
     ops = _ops(set(), implicit_dirs={"/sub"})
-    read = dir_refusing_read(ops, None)
+    read = dir_refusing_read(ops, None, None)
     with pytest.raises(IsADirectoryError):
-        async for _ in read(None, PathSpec.from_str_path("/sub")):
+        async for _ in read(PathSpec.from_str_path("/sub")):
             raise AssertionError("no data expected")
 
 
 @pytest.mark.asyncio
 async def test_dir_refusing_read_streams_files():
     ops = _ops(set())
-    read = dir_refusing_read(ops, None)
-    chunks = [c async for c in read(None, PathSpec.from_str_path("/f.txt"))]
+    read = dir_refusing_read(ops, None, None)
+    chunks = [c async for c in read(PathSpec.from_str_path("/f.txt"))]
     assert chunks == [b"data"]
 
 

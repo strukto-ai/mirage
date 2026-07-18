@@ -30,9 +30,11 @@ import {
   type RegisteredOp,
   type Resource,
   ResourceName,
-  resolveLangfuseGlob,
+  makeResolveGlob,
 } from '@struktoai/mirage-core'
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
+
+const resolveLangfuseGlob = makeResolveGlob(langfuseReaddir)
 
 export interface LangfuseResourceState {
   type: string

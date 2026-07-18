@@ -30,10 +30,12 @@ import {
   TokenManager,
   gmailRead,
   gmailReaddir,
-  gmailResolveGlob,
+  makeResolveGlob,
   gmailStat,
 } from '@struktoai/mirage-core'
 import { redactGmailConfig, type GmailConfig, type GmailConfigRedacted } from './config.ts'
+
+const gmailResolveGlob = makeResolveGlob(gmailReaddir)
 
 export interface GmailResourceState {
   type: string

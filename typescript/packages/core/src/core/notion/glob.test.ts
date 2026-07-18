@@ -16,7 +16,11 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
-import { resolveNotionGlob, type NotionGlobAccessor } from './glob.ts'
+import { NotionAccessor } from '../../accessor/notion.ts'
+import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
+import { NOTION_CMD_OPS } from '../../commands/builtin/notion/ops.ts'
+
+const resolveNotionGlob = resolveGlobOf(NOTION_CMD_OPS)
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []
@@ -41,8 +45,8 @@ class FakeTransport implements NotionTransport {
   }
 }
 
-function makeAccessor(transport: NotionTransport): NotionGlobAccessor {
-  return { transport }
+function makeAccessor(transport: NotionTransport): NotionAccessor {
+  return new NotionAccessor(transport)
 }
 
 const TOP1_ID = 'aaaa1111-2222-3333-4444-555566667777'

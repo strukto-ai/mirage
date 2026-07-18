@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -39,8 +40,8 @@ def github_url(path: str, **kwargs: str) -> str:
 
 async def github_get(token: SecretStr,
                      path: str,
-                     params: dict | None = None,
-                     **kwargs: str) -> dict:
+                     params: dict[str, Any] | None = None,
+                     **kwargs: str) -> dict[str, Any]:
     url = github_url(path, **kwargs)
     headers = github_headers(token)
     async with aiohttp.ClientSession() as session:
@@ -51,8 +52,8 @@ async def github_get(token: SecretStr,
 
 def github_get_sync(token: SecretStr,
                     path: str,
-                    params: dict | None = None,
-                    **kwargs: str) -> dict:
+                    params: dict[str, Any] | None = None,
+                    **kwargs: str) -> dict[str, Any]:
     url = github_url(path, **kwargs)
     if params:
         url = f"{url}?{urlencode(params)}"

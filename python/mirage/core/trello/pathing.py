@@ -12,39 +12,41 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.utils.naming import parse_id_name
 from mirage.utils.sanitize import sanitize_name
 
 split_suffix_id = parse_id_name
 
 
-def workspace_dirname(workspace: dict) -> str:
+def workspace_dirname(workspace: dict[str, Any]) -> str:
     label = sanitize_name(
         workspace.get("displayName") or workspace.get("name") or "workspace")
     return f"{label}__{workspace['id']}"
 
 
-def board_dirname(board: dict) -> str:
+def board_dirname(board: dict[str, Any]) -> str:
     label = sanitize_name(board.get("name") or "board")
     return f"{label}__{board['id']}"
 
 
-def list_dirname(lst: dict) -> str:
+def list_dirname(lst: dict[str, Any]) -> str:
     label = sanitize_name(lst.get("name") or "list")
     return f"{label}__{lst['id']}"
 
 
-def card_dirname(card: dict) -> str:
+def card_dirname(card: dict[str, Any]) -> str:
     label = sanitize_name(card.get("name") or "card")
     return f"{label}__{card['id']}"
 
 
-def member_filename(member: dict) -> str:
+def member_filename(member: dict[str, Any]) -> str:
     label = sanitize_name(
         member.get("fullName") or member.get("username") or "member")
     return f"{label}__{member['id']}.json"
 
 
-def label_filename(label: dict) -> str:
+def label_filename(label: dict[str, Any]) -> str:
     name = label.get("name") or label.get("color") or "label"
     return f"{sanitize_name(name)}__{label['id']}.json"

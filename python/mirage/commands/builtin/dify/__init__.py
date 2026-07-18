@@ -14,30 +14,10 @@
 
 from mirage.commands.builtin.dify.cat import make_cat
 from mirage.commands.builtin.dify.find import find
+from mirage.commands.builtin.dify.ops import OPS as _DIFY_CMD_OPS
 from mirage.commands.builtin.dify.search import search
-from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands,
+from mirage.commands.builtin.generic_bind import (make_generic_commands,
                                                   with_read_cache)
-from mirage.core.dify.read import read_bytes as _read
-from mirage.core.dify.read import read_stream as _read_stream
-from mirage.core.dify.readdir import readdir as _readdir
-from mirage.core.dify.stat import stat as _stat
-
-# Dify knowledge-base documents are read through the generic factory. cat and
-# find keep wrappers to avoid an extra document-detail API call per path: the
-# generic cat eagerly stats the file and the generic find would call the full
-# stat, while Dify's stat is a detail fetch (the wrappers use bespoke glob
-# resolution / stat_light instead). search pushes down to the Dify retrieval
-# API. Dify is read-only, so the generic byte-mutation commands are
-# intentionally absent (no write op wired).
-_DIFY_CMD_OPS = CommandIO(
-    readdir=_readdir,
-    read_bytes=_read,
-    read_stream=_read_stream,
-    stat=_stat,
-    is_mounted=lambda a: True,
-    local=False,
-)
 
 _DIFY_OVERRIDES = {"cat", "find"}
 

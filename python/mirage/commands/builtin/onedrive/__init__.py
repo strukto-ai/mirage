@@ -13,48 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
-from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.onedrive._provision import \
     file_read_provision as _ft_provision
 from mirage.commands.builtin.onedrive.du import du
-from mirage.core.onedrive.copy import copy as _copy
-from mirage.core.onedrive.du import du as _du
-from mirage.core.onedrive.du import du_all as _du_all
-from mirage.core.onedrive.exists import exists as _exists
-from mirage.core.onedrive.find import find as _find
-from mirage.core.onedrive.glob import resolve_glob as _ft_resolve_glob
-from mirage.core.onedrive.mkdir import mkdir as _mkdir
+from mirage.commands.builtin.onedrive.ops import OPS as _ONEDRIVE_CMD_OPS
 from mirage.core.onedrive.read import read_bytes as _read
-from mirage.core.onedrive.readdir import readdir as _readdir
-from mirage.core.onedrive.rename import rename as _rename
-from mirage.core.onedrive.rm import rm_r as _rm_r
-from mirage.core.onedrive.rmdir import rmdir as _rmdir
-from mirage.core.onedrive.stat import stat as _stat
-from mirage.core.onedrive.stream import read_stream as _read_stream
-from mirage.core.onedrive.unlink import unlink as _unlink
-from mirage.core.onedrive.write import write_bytes as _write
-
-_ONEDRIVE_CMD_OPS = CommandIO(
-    readdir=_readdir,
-    read_bytes=_read,
-    read_stream=_read_stream,
-    stat=_stat,
-    is_mounted=lambda a: True,
-    local=False,
-    write=_write,
-    exists=_exists,
-    mkdir=_mkdir,
-    unlink=_unlink,
-    rmdir=_rmdir,
-    rm_r=_rm_r,
-    rename=_rename,
-    copy=_copy,
-    dir_copy=_copy,
-    find=_find,
-    du_total=_du,
-    du_all=_du_all,
-)
 
 # du keeps a wrapper because OneDrive's du_all
 # returns a flat list (du_multi contract) rather than the generic (list,
@@ -62,8 +26,10 @@ _ONEDRIVE_CMD_OPS = CommandIO(
 _ONEDRIVE_OVERRIDES = {"du"}
 
 COMMANDS = [
-    *make_filetype_commands(
-        "onedrive", _ft_resolve_glob, _read, provision=_ft_provision),
+    *make_filetype_commands("onedrive",
+                            _ONEDRIVE_CMD_OPS.resolve_glob,
+                            _read,
+                            provision=_ft_provision),
     *make_generic_commands(
         "onedrive",
         _ONEDRIVE_CMD_OPS,

@@ -12,10 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
@@ -32,7 +30,7 @@ async def cat(
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     n: bool = False,
     E: bool = False,
     T: bool = False,
@@ -41,7 +39,7 @@ async def cat(
     t: bool = False,
     A: bool = False,
     s: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     # GNU combinations: -e is -vE, -t is -vT, -A is -vET.

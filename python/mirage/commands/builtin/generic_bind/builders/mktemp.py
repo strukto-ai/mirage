@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.mktemp import mktemp as generic_mktemp
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
@@ -32,9 +34,10 @@ async def mktemp(
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_mktemp(*texts,
-                                mkdir_fn=ops.require(Operation.MKDIR),
-                                write_bytes_fn=ops.require(Operation.WRITE),
-                                accessor=accessor,
+                                mkdir_fn=partial(ops.require(Operation.MKDIR),
+                                                 accessor),
+                                write_bytes_fn=partial(
+                                    ops.require(Operation.WRITE), accessor),
                                 d=d,
                                 p=p,
                                 t=t)

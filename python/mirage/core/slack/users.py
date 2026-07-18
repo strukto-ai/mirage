@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.core.slack._client import slack_get
 from mirage.core.slack.paginate import cursor_pages
 from mirage.resource.slack.config import SlackConfig
 
 
-def _is_real_user(m: dict) -> bool:
+def _is_real_user(m: dict[str, Any]) -> bool:
     return (not m.get("deleted") and not m.get("is_bot")
             and m.get("id") != "USLACKBOT")
 
@@ -27,7 +28,7 @@ def _is_real_user(m: dict) -> bool:
 async def list_users_stream(
     config: SlackConfig,
     limit: int = 200,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming user list; yields filtered humans per page.
 
     Args:
@@ -50,7 +51,7 @@ async def list_users_stream(
 async def list_users(
     config: SlackConfig,
     limit: int = 200,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List workspace users (eager; collects all pages).
 
     Args:
@@ -60,7 +61,7 @@ async def list_users(
     Returns:
         list[dict]: user dicts.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     async for page in list_users_stream(config, limit=limit):
         out.extend(page)
     return out
@@ -69,7 +70,7 @@ async def list_users(
 async def get_user_profile(
     config: SlackConfig,
     user_id: str,
-) -> dict:
+) -> dict[str, Any]:
     """Get a single user's profile.
 
     Args:
@@ -87,7 +88,7 @@ async def search_users(
     config: SlackConfig,
     query: str,
     limit: int = 200,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Search users by name, real name, or email.
 
     Args:

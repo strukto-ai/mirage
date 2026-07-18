@@ -29,10 +29,12 @@ import {
   ResourceName,
   boxRead,
   boxReaddir,
-  boxResolveGlob,
+  makeResolveGlob,
   boxStat,
 } from '@struktoai/mirage-core'
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
+
+const boxResolveGlob = makeResolveGlob(boxReaddir)
 
 export interface BoxResourceState {
   type: string

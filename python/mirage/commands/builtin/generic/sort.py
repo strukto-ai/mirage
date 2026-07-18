@@ -1,6 +1,5 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.sort_helper import _sort_key, _unique_key
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
@@ -12,8 +11,7 @@ async def sort(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     reverse: bool = False,
     numeric: bool = False,
     unique: bool = False,
@@ -28,7 +26,7 @@ async def sort(
     if paths:
         all_lines: list[str] = []
         for p in paths:
-            data = (await read_bytes(accessor, p)).decode(errors="replace")
+            data = (await read_bytes(p)).decode(errors="replace")
             all_lines.extend(split_lines(data))
     else:
         raw = await _read_stdin_async(stdin)

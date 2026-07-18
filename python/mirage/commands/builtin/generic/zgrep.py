@@ -1,12 +1,9 @@
 import gzip as gziplib
 import re
-from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
-                             Sequence)
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import (build_pattern_str,
                                                  resolve_pattern)
 from mirage.commands.builtin.utils.lines import split_lines
@@ -19,11 +16,9 @@ from mirage.types import PathSpec
 
 async def _read_plain(
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
 ) -> bytes:
-    return await read_bytes(accessor, path)
+    return await read_bytes(path)
 
 
 def _zgrep_search(
@@ -135,13 +130,11 @@ async def zgrep(
     flags: Mapping[str, object] | None = None,
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["zgrep"])
     pattern, never_match = await resolve_pattern(
-        texts, fl, partial(_read_plain, read_bytes), accessor, index,
+        texts, fl, partial(_read_plain, read_bytes),
         "zgrep: usage: zgrep [flags] pattern [path]")
     f = parse_flags(fl, never_match)
     compiled = build_pattern_str(pattern, f.fixed, f.whole_word)
@@ -152,7 +145,7 @@ async def zgrep(
 
     if paths:
         for p in paths:
-            raw = await read_bytes(accessor, p)
+            raw = await read_bytes(p)
             data = gziplib.decompress(raw)
             fname = p.virtual if show_filename else None
             if f.files_only:

@@ -15,7 +15,7 @@
 import io
 import json
 import tarfile
-from typing import Literal
+from typing import Any, Literal
 
 from mirage.workspace.snapshot.manifest import resolve_manifest
 from mirage.workspace.snapshot.utils import is_safe_blob_path
@@ -31,7 +31,7 @@ _COMPRESS_MODES: dict[str | None, Literal["w", "w:gz", "w:bz2", "w:xz"]] = {
 
 
 def write_tar(target,
-              manifest: dict,
+              manifest: dict[str, Any],
               blobs: dict[str, bytes],
               *,
               compress: str | None = None) -> None:
@@ -61,7 +61,7 @@ def write_tar(target,
             _add(tar, tar_path, data)
 
 
-def read_tar(source) -> dict:
+def read_tar(source) -> dict[str, Any]:
     """Read a tar produced by write_tar; return a resolved state dict.
 
     Args:

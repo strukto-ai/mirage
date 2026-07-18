@@ -1,6 +1,5 @@
 from collections.abc import AsyncIterator, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.cut_helper import cut_stream, parse_ranges
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.stream import async_chain
@@ -12,8 +11,7 @@ async def cut(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     f: str | None = None,
     d: str | None = None,
     c: str | None = None,
@@ -28,8 +26,8 @@ async def cut(
         # operand order, like GNU (a file without a trailing newline never
         # merges its last line into the next operand's first).
         outputs = [
-            cut_stream(read_stream(accessor, p), delim, field_ranges,
-                       char_ranges, complement, z) for p in paths
+            cut_stream(read_stream(p), delim, field_ranges, char_ranges,
+                       complement, z) for p in paths
         ]
         return async_chain(*outputs), IOResult()
     source = _resolve_source(stdin, "cut: missing operand")

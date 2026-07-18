@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
+from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -22,7 +23,8 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-def _fp_rev_from_response(resp: dict) -> tuple[str | None, str | None]:
+def _fp_rev_from_response(
+        resp: dict[str, Any]) -> tuple[str | None, str | None]:
     """Extract ``(fingerprint, revision)`` from a boto GET response.
 
     Args:

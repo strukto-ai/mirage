@@ -16,7 +16,8 @@ import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { DiscordApiError } from '../../../core/discord/_client.ts'
-import { resolveDiscordGlob } from '../../../core/discord/glob.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
+import { DISCORD_CMD_OPS } from './ops.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
@@ -29,6 +30,8 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_helper.ts'
 import { rgGeneric } from '../generic/rg.ts'
+
+const resolveDiscordGlob = resolveGlobOf(DISCORD_CMD_OPS)
 
 const ENC = new TextEncoder()
 

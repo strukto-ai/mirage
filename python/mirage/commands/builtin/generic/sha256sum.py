@@ -1,7 +1,6 @@
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
@@ -18,13 +17,12 @@ async def _sha256_stream(source: AsyncIterator[bytes],
 
 
 async def _sha256_multi(
-    accessor: Accessor | None,
     paths: list[PathSpec],
     read_stream: Callable[..., AsyncIterator[bytes]],
 ) -> AsyncIterator[bytes]:
     for p in paths:
         h = hashlib.sha256()
-        async for chunk in read_stream(accessor, p):
+        async for chunk in read_stream(p):
             h.update(chunk)
         yield (h.hexdigest() + "  " + p.raw_path + "\n").encode()
 
@@ -38,12 +36,11 @@ def _resolve_check_target(filename: str, mount_prefix: str) -> str | PathSpec:
 
 
 async def _sha256_check(
-    accessor: Accessor | None,
     path: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
 ) -> tuple[bytes, int]:
-    data = (await read_bytes(accessor, path)).decode(errors="replace")
+    data = (await read_bytes(path)).decode(errors="replace")
     mount_prefix = mount_prefix_of(
         path.virtual, path.resource_path) if isinstance(path, PathSpec) else ""
     lines: list[str] = []
@@ -57,7 +54,7 @@ async def _sha256_check(
         expected_hash, filename = parts
         target = _resolve_check_target(filename, mount_prefix)
         h = hashlib.sha256()
-        async for chunk in read_stream(accessor, target):
+        async for chunk in read_stream(target):
             h.update(chunk)
         if h.hexdigest() == expected_hash:
             lines.append(f"{filename}: OK")
@@ -72,18 +69,15 @@ async def sha256sum(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: Accessor | None = None,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
+    stdin: ByteSource | None = None,
     check: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if check and paths:
-        out, exit_code = await _sha256_check(accessor, paths[0], read_bytes,
-                                             read_stream)
+        out, exit_code = await _sha256_check(paths[0], read_bytes, read_stream)
         return out, IOResult(exit_code=exit_code)
     if paths:
         return _sha256_multi(
-            accessor, paths,
-            read_stream), IOResult(cache=[p.mount_path for p in paths])
+            paths, read_stream), IOResult(cache=[p.mount_path for p in paths])
     source = _resolve_source(stdin)
     return _sha256_stream(source, "-"), IOResult()
 

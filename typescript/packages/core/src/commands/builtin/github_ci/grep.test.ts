@@ -22,7 +22,10 @@ vi.mock('../../../core/github_ci/read.ts', () => {
   }
   return { read, stream }
 })
-vi.mock('../../../core/github_ci/readdir.ts', () => ({ readdir: vi.fn() }))
+vi.mock('../../../core/github_ci/readdir.ts', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  readdir: vi.fn(),
+}))
 vi.mock('../../../core/github_ci/stat.ts', () => ({ stat: vi.fn() }))
 
 import { GitHubCIAccessor } from '../../../accessor/github_ci.ts'

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.core.discord._client import discord_get
 from mirage.resource.discord.config import DiscordConfig
@@ -23,7 +24,7 @@ TEXT_CHANNEL_TYPES = (0, 5, 15)
 async def list_channels_stream(
     config: DiscordConfig,
     guild_id: str,
-) -> AsyncIterator[list[dict]]:
+) -> AsyncIterator[list[dict[str, Any]]]:
     """List text channels in a guild as a single-page stream.
 
     Discord returns all guild channels in one response (no pagination
@@ -46,7 +47,7 @@ async def list_channels_stream(
 async def list_channels(
     config: DiscordConfig,
     guild_id: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List text channels in a guild.
 
     Args:
@@ -56,7 +57,7 @@ async def list_channels(
     Returns:
         list[dict]: channel dicts (text channels only).
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     async for page in list_channels_stream(config, guild_id):
         out.extend(page)
     return out
