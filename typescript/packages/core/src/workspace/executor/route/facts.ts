@@ -39,7 +39,7 @@ export function commandFacts(root: TSNodeLike): CommandFacts[] {
         facts.push({
           command,
           words,
-          known: command in SPECS,
+          builtin: command in SPECS,
           paths: words.slice(1).filter((w) => w.startsWith('/')),
         })
       }

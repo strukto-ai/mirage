@@ -499,7 +499,7 @@ class Workspace:
             line=command,
             commands=facts,
             command=facts[0].command if facts else "",
-            known=facts[0].known if facts else False,
+            builtin=facts[0].builtin if facts else False,
             cwd=session.cwd,
             env=dict(session.env),
             session_id=session_id,

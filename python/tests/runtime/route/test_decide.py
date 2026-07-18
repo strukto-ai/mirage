@@ -42,7 +42,7 @@ def ctx_for(line: str) -> RouteContext:
     return RouteContext(line=line,
                         commands=facts,
                         command=facts[0].command if facts else "",
-                        known=facts[0].known if facts else False,
+                        builtin=facts[0].builtin if facts else False,
                         cwd="/",
                         env={},
                         session_id="s",

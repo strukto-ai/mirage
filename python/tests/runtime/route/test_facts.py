@@ -21,8 +21,8 @@ def test_command_facts_parse_pipes_and_lists():
     assert [f.command for f in facts] == ["cat", "python3", "nope"]
     assert facts[0].paths == ("/a/big.csv", )
     assert facts[1].words == ("python3", "/r/x.py", "1")
-    assert facts[0].known and facts[1].known
-    assert not facts[2].known
+    assert facts[0].builtin and facts[1].builtin
+    assert not facts[2].builtin
 
 
 def test_command_facts_empty_on_unparsable():

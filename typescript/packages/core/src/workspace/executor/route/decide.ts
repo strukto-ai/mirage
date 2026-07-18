@@ -24,11 +24,11 @@ function ctxPayload(ctx: RouteContext, runtime?: Runtime): Record<string, unknow
     commands: ctx.commands.map((c) => ({
       command: c.command,
       words: [...c.words],
-      known: c.known,
+      builtin: c.builtin,
       paths: [...c.paths],
     })),
     command: ctx.command,
-    known: ctx.known,
+    builtin: ctx.builtin,
     cwd: ctx.cwd,
     env: { ...ctx.env },
     session_id: ctx.sessionId,
@@ -56,7 +56,7 @@ async function evalMonty(
 }
 
 /**
- * The context as one runtime's script sees it: command/known become
+ * The context as one runtime's script sees it: command/builtin become
  * the first stage the runtime captures, so `ctx.command === 'python3'`
  * means what it reads as even on `cat x | python3`. A runtime with no
  * captured stage on the line (including the catch-all vfs) keeps the
@@ -65,7 +65,7 @@ async function evalMonty(
 function ctxForRuntime(ctx: RouteContext, runtime: Runtime): RouteContext {
   for (const fact of ctx.commands) {
     if (runtime.captures.includes(fact.command)) {
-      return { ...ctx, command: fact.command, known: fact.known }
+      return { ...ctx, command: fact.command, builtin: fact.builtin }
     }
   }
   return ctx

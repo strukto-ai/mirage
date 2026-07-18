@@ -26,19 +26,42 @@ class CommandFacts:
     Args:
         command (str): the command name (first word).
         words (tuple[str, ...]): every word of the command, name first.
-        known (bool): whether the command has a builtin spec.
+        builtin (bool): whether the command has a builtin spec.
         paths (tuple[str, ...]): absolute-path operands.
     """
 
     command: str
     words: tuple[str, ...]
-    known: bool
+    builtin: bool
     paths: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class RouteContext:
     """Facts about the line being routed, parse-before-route.
+
+    For ``cat /data/logs.txt | python3 process.py`` typed in ``/data``,
+    monty's script (monty captures ``python3``) is consulted with::
+
+        ctx.line      == "cat /data/logs.txt | python3 process.py"
+        ctx.commands  == (
+            CommandFacts(command="cat",
+                         words=("cat", "/data/logs.txt"),
+                         builtin=True,
+                         paths=("/data/logs.txt",)),
+            CommandFacts(command="python3",
+                         words=("python3", "process.py"),
+                         builtin=True,
+                         paths=()),
+        )
+        ctx.command   == "python3"  # monty's first captured stage
+        ctx.builtin   == True
+        ctx.cwd       == "/data"
+
+    The global route script sees the same context with
+    ``ctx.command == "cat"``, the line's first stage. A monty-source
+    script gets this as the ``ctx`` dict (see to_dict), with
+    ``ctx["runtime"]`` naming the runtime being asked.
 
     Args:
         line (str): the raw command line.
@@ -48,7 +71,7 @@ class RouteContext:
             entry script sees its runtime's first captured stage (see
             for_runtime), the global route sees the line's first
             command. "" when unparsable.
-        known (bool): whether ``command`` has a builtin spec.
+        builtin (bool): whether ``command`` has a builtin spec.
         cwd (str): session working directory.
         env (dict[str, str]): session environment.
         session_id (str): session hosting the line.
@@ -59,7 +82,7 @@ class RouteContext:
     line: str
     commands: tuple[CommandFacts, ...]
     command: str
-    known: bool
+    builtin: bool
     cwd: str
     env: dict[str, str]
     session_id: str
@@ -69,7 +92,7 @@ class RouteContext:
     def for_runtime(self, runtime: Runtime) -> "RouteContext":
         """The context as one runtime's script sees it.
 
-        ``command``/``known`` become the first stage the runtime
+        ``command``/``builtin`` become the first stage the runtime
         captures, so `ctx.command == 'python3'` means what it reads as
         even on `cat x | python3`. A runtime with no captured stage on
         the line (including the catch-all vfs) keeps the line's first
@@ -80,7 +103,9 @@ class RouteContext:
         """
         for fact in self.commands:
             if fact.command in runtime.captures:
-                return replace(self, command=fact.command, known=fact.known)
+                return replace(self,
+                               command=fact.command,
+                               builtin=fact.builtin)
         return self
 
     def to_dict(self, runtime: Runtime | None = None) -> dict[str, Any]:
@@ -96,13 +121,13 @@ class RouteContext:
             "commands": [{
                 "command": c.command,
                 "words": list(c.words),
-                "known": c.known,
+                "builtin": c.builtin,
                 "paths": list(c.paths),
             } for c in self.commands],
             "command":
             self.command,
-            "known":
-            self.known,
+            "builtin":
+            self.builtin,
             "cwd":
             self.cwd,
             "env":

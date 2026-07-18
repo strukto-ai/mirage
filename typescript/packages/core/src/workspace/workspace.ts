@@ -488,7 +488,7 @@ export class Workspace {
       line: command,
       commands: facts,
       command: facts[0]?.command ?? '',
-      known: facts[0]?.known ?? false,
+      builtin: facts[0]?.builtin ?? false,
       cwd: options.cwd ?? session.cwd,
       env: { ...session.env, ...(options.env ?? {}) },
       sessionId,

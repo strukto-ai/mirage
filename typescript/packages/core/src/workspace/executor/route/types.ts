@@ -18,21 +18,43 @@ import type { Runtime } from '../runtime.ts'
 export interface CommandFacts {
   command: string
   words: readonly string[]
-  known: boolean
+  builtin: boolean
   paths: readonly string[]
 }
 
 /**
  * Facts about the line being routed, parse-before-route. `command` /
- * `known` name the stage addressed to the consulted party: an entry
+ * `builtin` name the stage addressed to the consulted party: an entry
  * script sees its runtime's first captured stage (see ctxForRuntime),
  * the global route sees the line's first command.
+ *
+ * For `cat /data/logs.txt | python3 process.py` typed in `/data`, the
+ * python runtime's script (it captures `python3`) is consulted with:
+ *
+ * ```
+ * ctx.line     === 'cat /data/logs.txt | python3 process.py'
+ * ctx.commands === [
+ *   { command: 'cat', words: ['cat', '/data/logs.txt'],
+ *     builtin: true, paths: ['/data/logs.txt'] },
+ *   { command: 'python3', words: ['python3', 'process.py'],
+ *     builtin: true, paths: [] },
+ * ]
+ * ctx.command  === 'python3' // the runtime's first captured stage
+ * ctx.builtin  === true
+ * ctx.cwd      === '/data'
+ * ```
+ *
+ * The global route script sees the same context with
+ * `ctx.command === 'cat'`, the line's first stage. A monty-source
+ * script gets this as the `ctx` dict (snake_case `session_id` /
+ * `agent_id`, matching Python), with `ctx['runtime']` naming the
+ * runtime being asked.
  */
 export interface RouteContext {
   line: string
   commands: readonly CommandFacts[]
   command: string
-  known: boolean
+  builtin: boolean
   cwd: string
   env: Record<string, string>
   sessionId: string

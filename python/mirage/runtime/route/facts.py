@@ -41,7 +41,7 @@ def command_facts(ast: tree_sitter.Node) -> tuple[CommandFacts, ...]:
                     CommandFacts(
                         command=words[0],
                         words=words,
-                        known=words[0] in SPECS,
+                        builtin=words[0] in SPECS,
                         paths=tuple(w for w in words[1:] if w.startswith("/")),
                     ))
         stack.extend(reversed(node.children))
