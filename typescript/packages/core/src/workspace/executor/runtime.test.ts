@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   bindCommands,
+  pinBindings,
   DEFAULT_ENTRIES,
   VFS_ENTRY,
   type RunArgs,
@@ -94,5 +95,25 @@ describe('buildRuntime option validation', () => {
 
   it('accepts declared option keys', () => {
     expect(() => buildRuntime('pyodide', { home: '/assets/pyodide' })).not.toThrow()
+  })
+})
+
+describe('pinBindings', () => {
+  it('maps only the pinned captures', () => {
+    const fake = new FakeRuntime()
+    const bindings = pinBindings([fake, VFS_ENTRY], 'fake')
+    expect(bindings).toEqual({ python3: fake, 'made-up': fake })
+  })
+
+  it('rejects the vfs marker', () => {
+    expect(() => pinBindings([new FakeRuntime(), VFS_ENTRY], VFS_ENTRY)).toThrow(
+      /not a pinnable runtime/,
+    )
+  })
+
+  it('unknown names list the workspace entries', () => {
+    expect(() => pinBindings([new FakeRuntime(), VFS_ENTRY], 'nope')).toThrow(
+      /unknown runtime pin: 'nope' \(workspace runtimes: 'fake', 'vfs'\)/,
+    )
   })
 })

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, Callable
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.js.quickjs import QuickJsRuntime
@@ -29,6 +29,32 @@ RUNTIMES: tuple[type[Runtime], ...] = (MontyRuntime, WasiRuntime, LocalRuntime,
 NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}
 
 VFS_ENTRY = "vfs"
+
+
+class VfsEntry(Runtime):
+    """The vfs executor as an ordinary, scriptable entry.
+
+    The plain "vfs" string is the unconditional form; this class exists
+    so the vfs rung can carry a route script like any other entry
+    (e.g. refuse oversized lines). It captures nothing and never runs:
+    the workspace executor itself serves the commands it admits.
+
+    Args:
+        script (Callable | str | None): per-line admission script, the
+            same contract as any runtime's script.
+    """
+
+    name = VFS_ENTRY
+    captures: tuple[str, ...] = ()
+
+    def __init__(self,
+                 script: "Callable[..., Any] | str | None" = None) -> None:
+        self.script = script
+
+    async def run(self, args: Any) -> Any:
+        raise RuntimeError("the vfs entry is an ordering marker; the "
+                           "workspace executor runs its commands")
+
 
 # The default world when no runtimes list is given: today's behavior
 # exactly. Defaults build gracefully (a missing extra leaves the
@@ -76,6 +102,35 @@ def build_runtime(name: str, **options: Any) -> Runtime:
         raise ValueError(f"unknown runtime: {name!r} (expected one of "
                          f"{known}, or {VFS_ENTRY!r})")
     return cls(**options)
+
+
+def pin_bindings(entries: list[Runtime | str],
+                 name: str) -> dict[str, Runtime]:
+    """Resolve a per-line pin name into a binding override map.
+
+    A pin places a line's captured stages on the named runtime without
+    touching capability: only commands the runtime captures rebind,
+    everything else keeps its normal binding.
+
+    Args:
+        entries (list[Runtime | str]): the workspace's ordered runtime
+            world.
+        name (str): the runtime entry name to pin.
+
+    Raises:
+        ValueError: the name is the vfs marker or not a workspace
+            entry.
+    """
+    if name == VFS_ENTRY:
+        raise ValueError(
+            "'vfs' is the default executor, not a pinnable runtime")
+    for entry in entries:
+        if not isinstance(entry, str) and entry.name == name:
+            return {command: entry for command in entry.captures}
+    known = ", ".join(
+        repr(e if isinstance(e, str) else e.name) for e in entries)
+    raise ValueError(f"unknown runtime pin: {name!r} "
+                     f"(workspace runtimes: {known})")
 
 
 def bind_commands(entries: list[Runtime | str]) -> dict[str, Runtime]:

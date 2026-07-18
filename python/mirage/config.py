@@ -25,7 +25,7 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import VFS_ENTRY, build_runtime
+from mirage.runtime.table import VFS_ENTRY, VfsEntry, build_runtime
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import (DEFAULT_STATE_ROOT,
@@ -238,16 +238,37 @@ class MountBlock(BaseModel):
         return _coerce_mount_mode(v)
 
 
+def _load_script_source(value: str) -> str:
+    """Resolve a config script value: a .py path loads, else inline.
+
+    Docker-style route-by-path: the client embeds the file's content,
+    the wire carries content. A single-line value ending in ``.py`` is
+    a path; anything else (typically a yaml block scalar) is inline
+    monty source.
+
+    Args:
+        value (str): the yaml ``script``/``route`` value.
+
+    Raises:
+        FileNotFoundError: a path-form value that does not exist.
+    """
+    if "\n" not in value and value.strip().endswith(".py"):
+        return Path(value.strip()).read_text()
+    return value
+
+
 def _build_runtime_entries(
         entries: list[str | dict[str, Any]]) -> list["Runtime | str"]:
     """Turn config runtime entries into workspace runtime entries.
 
     Args:
         entries (list[str | dict[str, Any]]): name strings, or maps
-            carrying a name plus constructor options flat on the entry.
+            carrying a name plus a ``script`` and constructor options
+            flat on the entry.
 
     Raises:
-        ValueError: a map entry without a name, or options on vfs.
+        ValueError: a map entry without a name, or non-script options
+            on vfs.
     """
     out: list[Runtime | str] = []
     for entry in entries:
@@ -258,12 +279,22 @@ def _build_runtime_entries(
         name = options.pop("name", None)
         if not isinstance(name, str) or not name:
             raise ValueError("runtime entry needs a non-empty 'name'")
+        script = options.pop("script", None)
+        if script is not None and not isinstance(script, str):
+            raise ValueError("a runtime entry script must be a string "
+                             "(inline monty source or a .py path)")
         if name == VFS_ENTRY:
             if options:
-                raise ValueError("the vfs runtime entry takes no options")
-            out.append(VFS_ENTRY)
+                raise ValueError("the vfs runtime entry takes only a script")
+            if script is None:
+                out.append(VFS_ENTRY)
+            else:
+                out.append(VfsEntry(script=_load_script_source(script)))
             continue
-        out.append(build_runtime(name, **options))
+        built = build_runtime(name, **options)
+        if script is not None:
+            built.script = _load_script_source(script)
+        out.append(built)
     return out
 
 
@@ -275,6 +306,10 @@ class WorkspaceConfig(BaseModel):
     # with a name plus constructor options flat on the entry
     # ({name: wasi, home: /opt/...}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
+    # Global route script: inline monty source (block scalar) or a
+    # .py path whose content is embedded. Its last expression names
+    # the runtime for the line, or None to fall to entry scripts.
+    route: str | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
     default_session_id: str | None = None
@@ -329,6 +364,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["owns_store"] = True
         if self.runtimes is not None:
             kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
+        if self.route is not None:
+            kwargs["route"] = _load_script_source(self.route)
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:

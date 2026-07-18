@@ -15,6 +15,7 @@
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { MongoClient } from "mongodb";
 import {
+  buildRuntime,
   CommandSafeguard,
   MongoDBResource,
   MountMode,
@@ -22,6 +23,7 @@ import {
   RAMResource,
   RedisResource,
   S3Resource,
+  VfsEntry,
   Workspace,
 } from "@struktoai/mirage-node";
 
@@ -74,6 +76,8 @@ const CASES: [string, string][] = [
   ["py3_script_argv", "python3 /ram/analyze.py 40 2"],
   ["py3_stdin_pipe", "cat /ram/pipe.py | python3"],
   ["py3_pipe_to_grep", "python3 -c \"print('alpha'); print('beta')\" | grep beta"],
+  ["js_node_eval", 'node -e "console.log(6 * 7)"'],
+  ["js_node_pipe_to_grep", "node -e \"console.log('alpha'); console.log('beta')\" | grep beta"],
   [
     "py3_write_back",
     "python3 -c \"from pathlib import Path; Path('/ram/out.txt').write_text('written-by-python3')\" && cat /ram/out.txt",
@@ -171,7 +175,7 @@ function buildWorkspace(runId: string): Workspace {
   const mongodb = new MongoDBResource({ uri: MONGODB_URI, databases: [DB] });
   return new Workspace(
     { "/ram": ram, "/redis": redis, "/s3": s3, "/mongodb": mongodb },
-    { mode: MountMode.EXEC, runtimes: ["monty", "vfs"] },
+    { mode: MountMode.EXEC, runtimes: ["monty", "quickjs", "vfs"] },
   );
 }
 
@@ -269,6 +273,53 @@ async function main(): Promise<void> {
   );
   await runError(wsSg, "py3_safeguard_timeout", "python3 /ram/slow.py");
   await wsSg.close();
+
+  // Routing ladder: monty's entry script refuses lines carrying a
+  // skip-monty marker; with no other capturer those lines are
+  // admission failures (126) while vfs commands keep running. A
+  // scripted vfs entry locks down the lines it refuses.
+  const routedMonty = buildRuntime("monty");
+  routedMonty.script = "'skip-monty' not in ctx['line']";
+  const wsRoute = new Workspace(
+    { "/ram": new RAMResource() },
+    { mode: MountMode.EXEC, runtimes: [routedMonty, "vfs"] },
+  );
+  await run(wsRoute, "route_script_monty", 'python3 -c "print(6 * 7)"');
+  const denied = await wsRoute.execute('python3 -c "x" && echo skip-monty');
+  console.log("=== route_refused ===");
+  console.log(`exit_code=${denied.exitCode}`);
+  process.stdout.write(DEC.decode(denied.stderr));
+  await run(wsRoute, "route_vfs_open", "echo vfs-open");
+  await wsRoute.close();
+
+  const wsLock = new Workspace(
+    { "/ram": new RAMResource() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [new VfsEntry("'secret' not in ctx['line']")],
+    },
+  );
+  await run(wsLock, "lockdown_allow", "echo fine");
+  await runError(wsLock, "lockdown_deny", "cat /ram/secret.txt");
+  await wsLock.close();
+
+  // addRuntime: a pin can only name a workspace entry, so it fails
+  // loud until the entry is added at runtime.
+  const wsAdd = new Workspace(
+    { "/ram": new RAMResource() },
+    { mode: MountMode.EXEC, runtimes: ["quickjs", "vfs"] },
+  );
+  try {
+    await wsAdd.execute('python3 -c "x"', { runtime: "monty" });
+  } catch {
+    console.log("=== add_runtime_pin_before ===");
+    console.log("unknown-pin-rejected");
+  }
+  wsAdd.addRuntime("monty");
+  const added = await wsAdd.execute('python3 -c "print(40 + 2)"', { runtime: "monty" });
+  console.log("=== add_runtime_pin_after ===");
+  process.stdout.write(DEC.decode(added.stdout));
+  await wsAdd.close();
   await ws.close();
 }
 

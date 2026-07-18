@@ -109,12 +109,29 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
   })
 
-  it('rejects options on the vfs entry', async () => {
+  it('rejects non-script options on the vfs entry', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
       runtimes: [{ name: 'vfs', home: '/x' }],
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/vfs runtime entry takes no/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/vfs runtime entry takes only/)
+  })
+
+  it('carries entry scripts and the global route through', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtimes: [
+        { name: 'quickjs', script: "ctx['command'] == 'node'" },
+        { name: 'vfs', script: 'True' },
+      ],
+      route: "'quickjs'",
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const entries = args.options.runtimes
+    expect((entries?.[0] as { script?: string }).script).toBe("ctx['command'] == 'node'")
+    expect((entries?.[1] as { name: string; script?: string }).name).toBe('vfs')
+    expect((entries?.[1] as { script?: string }).script).toBe('True')
+    expect(args.options.route).toBe("'quickjs'")
   })
 
   it('builds a redis index config from an index block', async () => {

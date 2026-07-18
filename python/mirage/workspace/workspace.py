@@ -44,8 +44,13 @@ from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
+from mirage.runtime.pin import (current_line_routing, push_line_routing,
+                                reset_line_routing)
+from mirage.runtime.route import (LineRouting, RouteContext, RouteFn,
+                                  RoutingDecisionError, command_facts,
+                                  decide_line)
 from mirage.runtime.table import (DEFAULT_ENTRIES, VFS_ENTRY, bind_commands,
-                                  build_runtime)
+                                  build_runtime, pin_bindings)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -114,6 +119,7 @@ class Workspace:
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
         runtimes: list[Runtime | str] | None = None,
+        route: RouteFn | None = None,
     ) -> None:
         self._registry = MountRegistry()
         # One provider scopes every control-plane store by workspace id;
@@ -240,6 +246,7 @@ class Workspace:
         # per invocation, never a silent escalation to another runtime).
         self._runtime_entries = self._resolve_runtime_entries(runtimes)
         self._registry.runtime_bindings = bind_commands(self._runtime_entries)
+        self._route = route
 
         for prefix, fuse_target in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
@@ -425,6 +432,88 @@ class Workspace:
             if isinstance(entry, Runtime):
                 entry.attach(self.dispatch, self._runtime_mount_prefixes)
         return entries
+
+    def add_runtime(self, runtime: Runtime | str) -> Runtime | str:
+        """Append a runtime entry to the workspace's ordered world.
+
+        The entry lands last, so it never steals a command an earlier
+        entry already captures (first capturer still wins). A name
+        builds like a config entry and fails loud; a duplicate name is
+        rejected before any state changes.
+
+        Args:
+            runtime: a Runtime instance, a runtime name, or the vfs
+                marker.
+
+        Raises:
+            ValueError: unknown name or duplicate entry.
+        """
+        entry: Runtime | str = (build_runtime(runtime)
+                                if isinstance(runtime, str)
+                                and runtime != VFS_ENTRY else runtime)
+        candidate = [*self._runtime_entries, entry]
+        bindings = bind_commands(candidate)
+        if isinstance(entry, Runtime):
+            entry.attach(self.dispatch, self._runtime_mount_prefixes)
+        self._runtime_entries = candidate
+        self._registry.runtime_bindings = bindings
+        return entry
+
+    async def _resolve_line_routing(self, ast: Any, command: str,
+                                    pin: str | None, provision: bool,
+                                    session: Session,
+                                    session_id: str) -> LineRouting | None:
+        """The routing ladder for one typed line: pin, route, scripts.
+
+        Returns None when nothing decides (no pin, no policy
+        configured, or the line is a nested eval inheriting its typed
+        line's decision) so dispatch falls to the static bindings.
+        Provision never routes.
+
+        Args:
+            ast: the parsed tree-sitter root node.
+            command: the raw command line.
+            pin: the execute() runtime pin, top of the ladder.
+            provision: whether this is a provision run.
+            session: the effective session (cwd, env).
+            session_id: session hosting the line.
+        """
+        if pin is not None:
+            try:
+                overlay = pin_bindings(self._runtime_entries, pin)
+            except ValueError as exc:
+                raise RoutingDecisionError(str(exc)) from exc
+            return LineRouting(bindings={
+                **self._registry.runtime_bindings,
+                **overlay
+            })
+        if provision or current_line_routing() is not None:
+            return None
+        has_scripts = any(
+            isinstance(entry, Runtime) and entry.script is not None
+            for entry in self._runtime_entries)
+        if self._route is None and not has_scripts:
+            return None
+        facts = command_facts(ast)
+        ctx = RouteContext(
+            line=command,
+            commands=facts,
+            command=facts[0].command if facts else "",
+            known=facts[0].known if facts else False,
+            cwd=session.cwd,
+            env=dict(session.env),
+            session_id=session_id,
+            agent_id=self._current_agent_id or "",
+            mounts=tuple(self._runtime_mount_prefixes()),
+        )
+        try:
+            return await decide_line(self._runtime_entries, self._route, ctx,
+                                     self._registry.runtime_bindings,
+                                     self.dispatch)
+        except RoutingDecisionError:
+            raise
+        except (ValueError, ImportError) as exc:
+            raise RoutingDecisionError(str(exc)) from exc
 
     @property
     def _cwd(self) -> str:
@@ -890,7 +979,8 @@ class Workspace:
                       cwd: str | None = ...,
                       env: dict[str, str] | None = ...,
                       cancel: asyncio.Event | None = ...,
-                      record: bool = ...) -> IOResult:
+                      record: bool = ...,
+                      runtime: str | None = ...) -> IOResult:
         ...
 
     @overload
@@ -904,7 +994,8 @@ class Workspace:
                       cwd: str | None = ...,
                       env: dict[str, str] | None = ...,
                       cancel: asyncio.Event | None = ...,
-                      record: bool = ...) -> ProvisionResult:
+                      record: bool = ...,
+                      runtime: str | None = ...) -> ProvisionResult:
         ...
 
     async def execute(
@@ -918,6 +1009,7 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
+        runtime: str | None = None,
     ) -> IOResult | ProvisionResult:
         """Execute a shell command in the workspace.
 
@@ -943,7 +1035,14 @@ class Workspace:
                 opening a recording context; ops emitted by the command
                 flow into the caller's recorder. Used by the executor's
                 internal evaluations and available to SDK callers that
-                need an unrecorded run.
+                need an unrecorded run. Nested lines inherit the typed
+                line's routing decision and never re-route.
+            runtime: Per-line runtime pin, naming a workspace runtime
+                entry. Stages the pinned runtime captures rebind to it
+                for this line only (nested evals inherit the pin);
+                everything else keeps its normal binding, so a pin
+                overrides policy, never capability. Raises ValueError
+                for a name that is not a workspace entry.
         """
         if cancel is not None and cancel.is_set():
             raise MirageAbortError()
@@ -977,9 +1076,16 @@ class Workspace:
 
         exec_recursion = partial(self._exec_recursion, cancel)
 
+        routing_token = None
         session_token = set_current_session(effective_session)
         try:
             ast = parse(command)
+            routing = await self._resolve_line_routing(ast, command, runtime,
+                                                       provision,
+                                                       effective_session,
+                                                       session_id)
+            if routing is not None:
+                routing_token = push_line_routing(routing)
             offending = find_syntax_error(ast)
             if offending is not None:
                 snippet = offending.strip()[:40]
@@ -1023,7 +1129,7 @@ class Workspace:
             io = IOResult(exit_code=124, stderr=msg)
             session.last_exit_code = 124
             return io
-        except (MirageAbortError, ContentDriftError):
+        except (MirageAbortError, ContentDriftError, RoutingDecisionError):
             raise
         except FindParseError as exc:
             msg = f"{exc}\n".encode()
@@ -1049,6 +1155,8 @@ class Workspace:
             # emitted them succeeded.
             scope.close()
             reset_current_session(session_token)
+            if routing_token is not None:
+                reset_line_routing(routing_token)
             await self._session_mgr.flush()
             self._ops.records.extend(scope.records)
             if is_line:

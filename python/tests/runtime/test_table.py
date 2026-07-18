@@ -18,7 +18,8 @@ from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.python import LocalRuntime, MontyRuntime, WasiRuntime
 from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VFS_ENTRY,
-                                  bind_commands, build_runtime, candidates)
+                                  bind_commands, build_runtime, candidates,
+                                  pin_bindings)
 
 
 class FakeRuntime(Runtime):
@@ -77,3 +78,19 @@ def test_bind_commands_rejects_duplicate_names():
 def test_every_runtime_declares_captures():
     for cls in RUNTIMES:
         assert cls.captures
+
+
+def test_pin_bindings_maps_only_the_pinned_captures():
+    fake = FakeRuntime()
+    bindings = pin_bindings([fake, VFS_ENTRY], "fake")
+    assert bindings == {"python3": fake, "made-up": fake}
+
+
+def test_pin_bindings_rejects_vfs():
+    with pytest.raises(ValueError, match="not a pinnable runtime"):
+        pin_bindings([FakeRuntime(), VFS_ENTRY], VFS_ENTRY)
+
+
+def test_pin_bindings_unknown_name_lists_entries():
+    with pytest.raises(ValueError, match="'fake', 'vfs'"):
+        pin_bindings([FakeRuntime(), VFS_ENTRY], "nope")

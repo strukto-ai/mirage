@@ -436,13 +436,25 @@ export {
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
 export {
   bindCommands,
+  pinBindings,
   DEFAULT_ENTRIES,
   VFS_ENTRY,
+  VfsEntry,
   type RunArgs,
   type RunResult,
   type Runtime,
   type RuntimeEntry,
 } from './workspace/executor/runtime.ts'
+export {
+  commandFacts,
+  decideLine,
+  RoutingDecisionError,
+  type CommandFacts,
+  type LineRouting,
+  type RouteContext,
+  type RouteFn,
+  type RouteScript,
+} from './workspace/executor/route.ts'
 export { buildRuntime, candidates, RUNTIMES } from './workspace/executor/runtime_table.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'

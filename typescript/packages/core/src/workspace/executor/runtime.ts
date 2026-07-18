@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
+import type { RouteScript } from './route.ts'
 
 /** One interpreter execution request, language-agnostic. */
 export interface RunArgs {
@@ -48,6 +49,14 @@ export interface Runtime {
   readonly name: string
   readonly captures: readonly string[]
   /**
+   * Per-line admission script for the routing ladder: a callable
+   * taking a RouteContext (or monty source whose last expression is
+   * the verdict) answering "do I want this line". Absent = always
+   * willing. Policy, not capability: it can only refuse lines the
+   * captures already allow.
+   */
+  script?: RouteScript
+  /**
    * Late-wire workspace I/O into a user-constructed instance. The
    * workspace attaches its dispatch bridge at construction; runtimes
    * that never touch workspace files keep this a no-op.
@@ -61,6 +70,38 @@ export interface Runtime {
 export type RuntimeEntry = Runtime | string
 
 export const VFS_ENTRY = 'vfs'
+
+/**
+ * The vfs executor as an ordinary, scriptable entry.
+ *
+ * The plain "vfs" string is the unconditional form; this class exists
+ * so the vfs rung can carry a route script like any other entry (e.g.
+ * refuse oversized lines). It captures nothing and never runs: the
+ * workspace executor itself serves the commands it admits.
+ */
+export class VfsEntry implements Runtime {
+  readonly name = VFS_ENTRY
+  readonly captures: readonly string[] = []
+  script?: RouteScript
+
+  constructor(script?: RouteScript) {
+    if (script !== undefined) this.script = script
+  }
+
+  attach(): void {
+    // the workspace executor serves vfs commands; nothing to wire
+  }
+
+  run(): Promise<never> {
+    return Promise.reject(
+      new Error('the vfs entry is an ordering marker; the workspace executor runs its commands'),
+    )
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
+}
 
 /**
  * The default world when no runtimes list is given: today's behavior
@@ -80,6 +121,31 @@ export const PYTHON_ONLY_HINTS: Record<string, string> = {
     "runtime 'local' is Python-only (the host CPython); TypeScript " +
     "supports 'pyodide' (WASM CPython, default), 'monty' (sandboxed), " +
     "and 'quickjs' (sandboxed JavaScript)",
+}
+
+/**
+ * Resolve a per-line pin name into a binding override map.
+ *
+ * A pin places a line's captured stages on the named runtime without
+ * touching capability: only commands the runtime captures rebind,
+ * everything else keeps its normal binding.
+ */
+export function pinBindings(
+  entries: readonly RuntimeEntry[],
+  name: string,
+): Record<string, Runtime> {
+  if (name === VFS_ENTRY) {
+    throw new Error(`'${VFS_ENTRY}' is the default executor, not a pinnable runtime`)
+  }
+  for (const entry of entries) {
+    if (typeof entry !== 'string' && entry.name === name) {
+      const bindings: Record<string, Runtime> = {}
+      for (const command of entry.captures) bindings[command] = entry
+      return bindings
+    }
+  }
+  const known = entries.map((e) => `'${typeof e === 'string' ? e : e.name}'`).join(', ')
+  throw new Error(`unknown runtime pin: '${name}' (workspace runtimes: ${known})`)
 }
 
 /**

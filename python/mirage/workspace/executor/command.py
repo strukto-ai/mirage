@@ -31,6 +31,8 @@ from mirage.commands.spec.usage import (missing_value_error,
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
+from mirage.runtime.base import Runtime
+from mirage.runtime.pin import current_line_routing
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -140,6 +142,33 @@ def _check_mount_root_guard_raw(
     return None
 
 
+def _line_runtime(
+        cmd_name: str,
+        registry: MountRegistry) -> tuple[Runtime | None, IOResult | None]:
+    """Resolve a command against the line's routing decision.
+
+    With no decision active, the workspace's static bindings apply.
+    With one, the line's bindings win; an unbound command whose
+    capturers all refused, or any unbound command when the vfs rung
+    was refused, is an admission failure: exit 126, "no runtime
+    accepted this line", like a shell refusing to exec.
+
+    Args:
+        cmd_name (str): the command being dispatched.
+        registry (MountRegistry): registry holding static bindings.
+    """
+    routing = current_line_routing()
+    if routing is None:
+        return registry.runtime_bindings.get(cmd_name), None
+    runtime = routing.bindings.get(cmd_name)
+    if runtime is not None:
+        return runtime, None
+    if cmd_name in routing.captured or not routing.vfs_allowed:
+        msg = f"mirage: {cmd_name}: no runtime accepted this line\n"
+        return None, IOResult(exit_code=126, stderr=msg.encode())
+    return None, None
+
+
 def _scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, Any]:
     # `repeatable=True` on find value-flags makes parse_to_kwargs emit
     # lists; bespoke backend wrappers read these as scalars. Migrated
@@ -228,6 +257,10 @@ async def run_on_mount(
     stat_overlay = (functools.partial(_namespace_stat_overlay, namespace)
                     if cmd_name == "ls" and namespace is not None else None)
 
+    line_runtime, denial = _line_runtime(cmd_name, registry)
+    if denial is not None:
+        return None, denial
+
     try:
         stdout, io = await mount.execute_cmd(
             cmd_name,
@@ -240,7 +273,7 @@ async def run_on_mount(
             session_id=session.session_id,
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
-            runtime=registry.runtime_bindings.get(cmd_name),
+            runtime=line_runtime,
             stat_overlay=stat_overlay,
         )
     except UsageError as exc:

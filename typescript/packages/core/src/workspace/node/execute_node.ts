@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../executor/runtime.ts'
+import type { LineRouting } from '../executor/route.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -85,6 +86,7 @@ export interface ExecuteNodeDeps {
   ensureOpen?: (resource: Resource) => Promise<void>
   unmount?: (prefix: string) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
+  lineRouting?: LineRouting
   signal?: AbortSignal
 }
 
@@ -132,6 +134,7 @@ export async function executeNode(
       deps.ensureOpen,
       deps.unmount,
       deps.runtimeBindings,
+      deps.lineRouting,
       deps.signal,
     )
   }

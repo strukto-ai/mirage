@@ -272,6 +272,99 @@ export class MontyRuntime implements PythonRuntime {
   }
 }
 
+let routeModulePromise: Promise<MontyModuleLike> | null = null
+let routePool: MontyPoolLike | null = null
+let routePoolPromise: Promise<MontyPoolLike> | null = null
+
+async function routeModule(): Promise<MontyModuleLike> {
+  routeModulePromise ??= import('@pydantic/monty').then(
+    (m) => m as unknown as MontyModuleLike,
+    (err: unknown) => {
+      routeModulePromise = null
+      throw new MontyUnavailableError(
+        "route scripts run on monty; install '@pydantic/monty' or use a function instead",
+        { cause: err },
+      )
+    },
+  )
+  return routeModulePromise
+}
+
+/**
+ * Evaluate a route script on monty; the snippet's trailing expression
+ * is the verdict. The script sees the ctx payload as the `ctx` global
+ * and gets read-only workspace file access through the bridge.
+ */
+export async function evalMontyValue(
+  code: string,
+  payload: Record<string, unknown>,
+  bridge: BridgeDispatchFn | null,
+): Promise<unknown> {
+  const module = await routeModule()
+  if (routePool === null) {
+    routePoolPromise ??= module.Monty.create()
+    routePool = await routePoolPromise
+  }
+  const session = await routePool.checkout()
+  try {
+    return await session.feedRun(code, {
+      inputs: { ctx: payload },
+      os: routeOsCallback(module, bridge),
+    })
+  } catch (caught) {
+    if (caught instanceof module.MontySyntaxError) {
+      throw new Error('route script syntax error: ' + displayError(caught))
+    }
+    if (caught instanceof module.MontyRuntimeError) {
+      throw new Error('route script failed: ' + displayError(caught))
+    }
+    throw caught
+  } finally {
+    await session.close()
+  }
+}
+
+function routeOsCallback(
+  module: MontyModuleLike,
+  bridge: BridgeDispatchFn | null,
+): (name: string, args: unknown[]) => unknown {
+  const notHandled = module.NOT_HANDLED
+  return (name: string, args: unknown[]): unknown => {
+    if (bridge === null) return notHandled
+    const path = pathArg(args[0])
+    if (path === null) return notHandled
+    switch (name) {
+      case 'Path.read_bytes':
+        return readBytes(bridge, path)
+      case 'Path.read_text':
+        return readBytes(bridge, path).then((b) => new TextDecoder().decode(b))
+      case 'Path.iterdir':
+        return listEntries(bridge, path).then((entries) => entries.map((e) => e.path))
+      case 'Path.is_dir':
+        return listEntries(bridge, path).then(
+          () => true,
+          () => false,
+        )
+      case 'Path.is_file':
+        return entryFor(bridge, path).then(
+          (e) => e !== null && !e.isDir,
+          () => false,
+        )
+      case 'Path.exists':
+        return entryFor(bridge, path).then(
+          (e) => e !== null,
+          () =>
+            listEntries(bridge, path).then(
+              () => true,
+              () => false,
+            ),
+        )
+      default:
+        return notHandled
+    }
+  }
+}
+
 function pathArg(value: unknown): string | null {
   if (typeof value === 'string') return value
   if (value !== null && typeof value === 'object' && 'path' in value) {

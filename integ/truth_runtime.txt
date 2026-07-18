@@ -18,6 +18,10 @@ argv sum: 42
 came-through-pipe
 === py3_pipe_to_grep ===
 beta
+=== js_node_eval ===
+42
+=== js_node_pipe_to_grep ===
+beta
 === py3_write_back ===
 written-by-python3
 === python_alias ===
@@ -48,3 +52,18 @@ exit_code=1
 exit_code=1
 === py3_safeguard_timeout ===
 exit_code=124
+=== route_script_monty ===
+42
+=== route_refused ===
+exit_code=126
+mirage: python3: no runtime accepted this line
+=== route_vfs_open ===
+vfs-open
+=== lockdown_allow ===
+fine
+=== lockdown_deny ===
+exit_code=126
+=== add_runtime_pin_before ===
+unknown-pin-rejected
+=== add_runtime_pin_after ===
+42

@@ -32,6 +32,7 @@ import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import type { Runtime } from './runtime.ts'
+import type { LineRouting } from './route.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -63,6 +64,29 @@ interface RunOnMountCtx {
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
+  lineRouting?: LineRouting
+}
+
+/**
+ * Resolve a command against the line's routing decision. With no
+ * decision, the static bindings apply. With one, the line's bindings
+ * win; an unbound command whose capturers all refused, or any unbound
+ * command when the vfs rung was refused, is an admission failure:
+ * exit 126, "no runtime accepted this line".
+ */
+function lineRuntimeFor(
+  cmdName: string,
+  runtimeBindings: Record<string, Runtime> | undefined,
+  lineRouting: LineRouting | undefined,
+): [Runtime | undefined, IOResult | null] {
+  if (lineRouting === undefined) return [runtimeBindings?.[cmdName], null]
+  const runtime = lineRouting.bindings[cmdName]
+  if (runtime !== undefined) return [runtime, null]
+  if (lineRouting.captured.has(cmdName) || !lineRouting.vfsAllowed) {
+    const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
+    return [undefined, new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })]
+  }
+  return [undefined, null]
 }
 
 interface RunOnMountOpts {
@@ -101,7 +125,7 @@ async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings } = ctx
+  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings, lineRouting } = ctx
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
@@ -158,6 +182,9 @@ async function runOnMount(
       ? (virtual: string, stat: FileStat) => mergeOverlayStat(namespace.metaFor(virtual), stat)
       : null
 
+  const [lineRuntime, denial] = lineRuntimeFor(cmdName, runtimeBindings, lineRouting)
+  if (denial !== null) return [null, denial]
+
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {
       stdin: opts.stdin ?? null,
@@ -166,7 +193,7 @@ async function runOnMount(
       sessionId: session.sessionId,
       env: session.env,
       execAllowed: registry.isExecAllowed(),
-      ...(runtimeBindings?.[cmdName] !== undefined ? { runtime: runtimeBindings[cmdName] } : {}),
+      ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
       safeguardOverride,
     })
@@ -240,6 +267,7 @@ export async function handleCommand(
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
+  lineRouting?: LineRouting,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -354,6 +382,7 @@ export async function handleCommand(
       ...(namespace !== undefined ? { namespace } : {}),
       ...(ensureOpen !== undefined ? { ensureOpen } : {}),
       ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
+      ...(lineRouting !== undefined ? { lineRouting } : {}),
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
@@ -502,6 +531,7 @@ export async function handleCommand(
     ...(namespace !== undefined ? { namespace } : {}),
     ...(ensureOpen !== undefined ? { ensureOpen } : {}),
     ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
+    ...(lineRouting !== undefined ? { lineRouting } : {}),
   }
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,

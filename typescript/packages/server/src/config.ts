@@ -26,6 +26,7 @@ import {
   RedisWorkspaceStateStore,
   buildRuntime,
   VFS_ENTRY,
+  VfsEntry,
   type RuntimeEntry,
   type FileCache,
   type IndexConfig,
@@ -45,6 +46,18 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
 
+/**
+ * Resolve a config script value: a .py path loads, else inline.
+ * Docker-style route-by-path: the client embeds the file's content,
+ * the wire carries content.
+ */
+function loadScriptSource(value: string): string {
+  if (!value.includes('\n') && value.trim().endsWith('.py')) {
+    return readFileSync(value.trim(), 'utf-8')
+  }
+  return value
+}
+
 function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
   const out: RuntimeEntry[] = []
   for (const entry of entries) {
@@ -53,18 +66,23 @@ function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
       continue
     }
     if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
-    const { name, ...options } = entry
+    const { name, script, ...options } = entry
     if (typeof name !== 'string' || name === '') {
       throw new Error("runtime entry needs a non-empty 'name'")
     }
+    if (script !== undefined && typeof script !== 'string') {
+      throw new Error('a runtime entry script must be a string (inline monty source or a .py path)')
+    }
     if (name === VFS_ENTRY) {
       if (Object.keys(options).length > 0) {
-        throw new Error('the vfs runtime entry takes no options')
+        throw new Error('the vfs runtime entry takes only a script')
       }
-      out.push(VFS_ENTRY)
+      out.push(script === undefined ? VFS_ENTRY : new VfsEntry(loadScriptSource(script)))
       continue
     }
-    out.push(buildRuntime(name, options))
+    const built = buildRuntime(name, options)
+    if (script !== undefined) built.script = loadScriptSource(script)
+    out.push(built)
   }
   return out
 }
@@ -264,6 +282,7 @@ interface StoreBlock {
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
   runtimes?: (string | Record<string, unknown>)[] | null
+  route?: string | null
   mode?: string
   consistency?: string
   defaultSessionId?: string
@@ -326,6 +345,7 @@ export interface WorkspaceArgs {
     workspaceId?: string
     store?: WorkspaceStateStore
     runtimes?: RuntimeEntry[]
+    route?: string
   }
   fuseMounts: Record<string, boolean | string>
 }
@@ -418,6 +438,9 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(stateStore !== undefined ? { store: stateStore } : {}),
       ...(cfg.runtimes !== undefined && cfg.runtimes !== null
         ? { runtimes: buildRuntimeEntries(cfg.runtimes) }
+        : {}),
+      ...(cfg.route !== undefined && cfg.route !== null
+        ? { route: loadScriptSource(cfg.route) }
         : {}),
     },
     fuseMounts,
