@@ -29,7 +29,7 @@ def _ws() -> Workspace:
 
 
 @pytest.mark.asyncio
-async def test_state_diff_covers_every_plane(tmp_path):
+async def test_state_diff_covers_every_category(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
 

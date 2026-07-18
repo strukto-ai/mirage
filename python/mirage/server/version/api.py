@@ -102,7 +102,7 @@ async def checkout(store: VersionStore,
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:
     # File-level diff/status stay content-only: the control-plane
     # subtree changes on every command (history) and is surfaced by the
-    # structured cross-plane diff instead.
+    # structured state_diff instead.
     return {
         kind: [p for p in paths if not p.startswith(CONTROL_PREFIX)]
         for kind, paths in changes.items()

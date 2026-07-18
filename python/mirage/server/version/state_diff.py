@@ -122,9 +122,9 @@ def grant_widenings(sessions_diff: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def state_diff(store: VersionStore, ref_a, ref_b) -> dict[str, Any]:
-    """The structured cross-plane difference between two versions.
+    """The structured difference, category by category, between two versions.
 
-    The judge's evidence surface: files (content plane), sessions (env
+    The judge's evidence surface: files (content), sessions (env
     references, mount grants, cwd), namespace nodes (symlinks and
     overlays), the commands that ran between the two states, and the
     grant widenings that applying B would re-open. Wire shape is plain

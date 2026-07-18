@@ -25,19 +25,19 @@ import type { VersionStore } from './store.ts'
 
 type AnyDict = Record<string, unknown>
 
-const PLANES = ['files', 'sessions', 'namespace', 'history'] as const
-type Plane = (typeof PLANES)[number]
+const CATEGORIES = ['files', 'sessions', 'namespace', 'history'] as const
+type Category = (typeof CATEGORIES)[number]
 
 export interface RestoreReport {
   version: string
-  planes: Plane[]
+  categories: Category[]
   paths: string[] | null
   grant_widenings: GrantWidening[]
 }
 
 export interface RestoreOptions {
   paths?: string[]
-  planes?: Plane[]
+  categories?: Category[]
 }
 
 function normPath(p: string): string {
@@ -78,12 +78,12 @@ function mergeMountFiles(
 }
 
 /**
- * Surgical restore: whole world, chosen planes, or chosen paths.
+ * Surgical restore: whole world, chosen categories, or chosen paths.
  *
  * Scope rules: no options = the whole world (checkout semantics);
- * `planes` picks a subset and leaves the live state of the others
+ * `categories` picks a subset and leaves the live state of the others
  * untouched; `paths` restores only the matching files (a path selects
- * itself or its subtree) and implies the files plane alone. Restoring
+ * itself or its subtree) and implies the files category alone. Restoring
  * sessions re-applies their mount grants, so the report carries
  * `grant_widenings`: every grant the restore widened relative to the
  * live state, surfaced, never silent. Mirrors the Python restore.
@@ -94,21 +94,23 @@ export async function restore(
   ref: string,
   options: RestoreOptions = {},
 ): Promise<RestoreReport> {
-  const { paths, planes } = options
-  if (paths !== undefined && planes !== undefined) {
-    throw new Error('restore takes paths or planes, not both')
+  const { paths, categories } = options
+  if (paths !== undefined && categories !== undefined) {
+    throw new Error('restore takes paths or categories, not both')
   }
-  for (const plane of planes ?? []) {
-    if (!PLANES.includes(plane)) {
-      throw new Error(`unknown plane '${plane as string}'; expected one of ${PLANES.join(', ')}`)
+  for (const category of categories ?? []) {
+    if (!CATEGORIES.includes(category)) {
+      throw new Error(
+        `unknown category '${category as string}'; expected one of ${CATEGORIES.join(', ')}`,
+      )
     }
   }
   const version = await resolveRef(store, ref)
   const { entries, meta } = await readVersion(store, version)
   const target = toState(entries, meta) as unknown as AnyDict
   const live = (await toStateDict(ws)) as unknown as AnyDict
-  const fallback: readonly Plane[] = paths !== undefined ? ['files'] : PLANES
-  const selected = new Set<Plane>(planes ?? fallback)
+  const fallback: readonly Category[] = paths !== undefined ? ['files'] : CATEGORIES
+  const selected = new Set<Category>(categories ?? fallback)
 
   let widenings: GrantWidening[] = []
   if (selected.has('sessions')) {
@@ -145,7 +147,7 @@ export async function restore(
   await applyStateDict(ws, merged as unknown as WorkspaceStateDict)
   return {
     version,
-    planes: [...selected].sort(),
+    categories: [...selected].sort(),
     paths: paths ?? null,
     grant_widenings: widenings,
   }

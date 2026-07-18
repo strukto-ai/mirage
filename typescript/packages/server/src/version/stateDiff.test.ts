@@ -39,7 +39,7 @@ describe('stateDiff + restore', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('covers every plane and flags grant widenings', async () => {
+  it('covers every category and flags grant widenings', async () => {
     await ws.execute('echo one > /m/a.txt')
     const session = ws.createSession('narrow', { mounts: { '/m': 'read' } })
     session.env.API_KEY = '@aws:prod-key'
@@ -76,7 +76,7 @@ describe('stateDiff + restore', () => {
     ])
   })
 
-  it('restores a single path, leaving other files and planes alone', async () => {
+  it('restores a single path, leaving other files and categories alone', async () => {
     await ws.execute('echo one > /m/a.txt')
     await ws.execute('echo keep > /m/b.txt')
     const v1 = await commitState(store, await toStateDict(ws), 'main', 'v1')
@@ -89,11 +89,11 @@ describe('stateDiff + restore', () => {
     const b = await ws.execute('cat /m/b.txt')
     expect(new TextDecoder().decode(a.stdout)).toBe('one\n')
     expect(new TextDecoder().decode(b.stdout)).toBe('edited\n')
-    expect(report.planes).toEqual(['files'])
+    expect(report.categories).toEqual(['files'])
     expect(report.grant_widenings).toEqual([])
   })
 
-  it('restores the sessions plane only, reporting widenings', async () => {
+  it('restores the sessions category only, reporting widenings', async () => {
     const session = ws.createSession('narrow', { mounts: { '/m': 'write' } })
     await ws.execute('echo one > /m/a.txt')
     await ws.flushSessions()
@@ -102,7 +102,7 @@ describe('stateDiff + restore', () => {
     await ws.execute('echo two > /m/a.txt')
     await ws.flushSessions()
 
-    const report = await restore(store, ws, v1, { planes: ['sessions'] })
+    const report = await restore(store, ws, v1, { categories: ['sessions'] })
 
     const a = await ws.execute('cat /m/a.txt')
     expect(new TextDecoder().decode(a.stdout)).toBe('two\n')
@@ -116,7 +116,7 @@ describe('stateDiff + restore', () => {
     await ws.execute('echo one > /m/a.txt')
     const v1 = await commitState(store, await toStateDict(ws), 'main', 'v1')
     await expect(
-      restore(store, ws, v1, { paths: ['/m/a.txt'], planes: ['files'] }),
+      restore(store, ws, v1, { paths: ['/m/a.txt'], categories: ['files'] }),
     ).rejects.toThrow('not both')
   })
 })

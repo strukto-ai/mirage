@@ -57,7 +57,9 @@ async def test_restore_whole_world_reports_widenings(tmp_path):
 
     assert await _cat(ws, "/m/a.txt") == "one\n"
     assert ws.get_session("narrow").mount_modes["/m"] == MountMode.WRITE
-    assert report["planes"] == ["files", "history", "namespace", "sessions"]
+    assert report["categories"] == [
+        "files", "history", "namespace", "sessions"
+    ]
     assert report["grant_widenings"] == [{
         "session_id": "narrow",
         "mount": "/m",
@@ -76,12 +78,12 @@ async def test_restore_single_path_leaves_other_files_alone(tmp_path):
 
     assert await _cat(ws, "/m/a.txt") == "one\n"
     assert await _cat(ws, "/m/b.txt") == "edited\n"
-    assert report["planes"] == ["files"]
+    assert report["categories"] == ["files"]
     assert report["grant_widenings"] == []
 
 
 @pytest.mark.asyncio
-async def test_restore_files_plane_keeps_live_sessions(tmp_path):
+async def test_restore_files_category_keeps_live_sessions(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
     session = ws.create_session("narrow", mounts={"/m": "read"})
@@ -93,16 +95,16 @@ async def test_restore_files_plane_keeps_live_sessions(tmp_path):
     session.env["API_KEY"] = "@aws:new-key"
     await ws.flush_sessions()
 
-    report = await restore(store, ws, v1, planes=["files"])
+    report = await restore(store, ws, v1, categories=["files"])
 
     assert await _cat(ws, "/m/a.txt") == "one\n"
     assert ws.get_session("narrow").env["API_KEY"] == "@aws:new-key"
-    assert report["planes"] == ["files"]
+    assert report["categories"] == ["files"]
     assert report["grant_widenings"] == []
 
 
 @pytest.mark.asyncio
-async def test_restore_sessions_plane_keeps_live_files(tmp_path):
+async def test_restore_sessions_category_keeps_live_files(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
     session = ws.create_session("narrow", mounts={"/m": "read"})
@@ -114,7 +116,7 @@ async def test_restore_sessions_plane_keeps_live_files(tmp_path):
     session.env["API_KEY"] = "@aws:new-key"
     await ws.flush_sessions()
 
-    await restore(store, ws, v1, planes=["sessions"])
+    await restore(store, ws, v1, categories=["sessions"])
 
     assert await _cat(ws, "/m/a.txt") == "two\n"
     assert ws.get_session("narrow").env["API_KEY"] == "@aws:prod-key"
@@ -127,6 +129,6 @@ async def test_restore_rejects_bad_scopes(tmp_path):
     await ws.execute("echo one > /m/a.txt")
     v1 = await commit(store, ws, "main", "v1")
     with pytest.raises(ValueError):
-        await restore(store, ws, v1, paths=["/m/a.txt"], planes=["files"])
+        await restore(store, ws, v1, paths=["/m/a.txt"], categories=["files"])
     with pytest.raises(ValueError):
-        await restore(store, ws, v1, planes=["cache"])
+        await restore(store, ws, v1, categories=["cache"])

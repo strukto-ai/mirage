@@ -22,7 +22,7 @@ from mirage.types import DriftPolicy, MountKey, ResourceStateKey, StateKey
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
                                        to_state_dict)
 
-PLANES = ("files", "sessions", "namespace", "history")
+CATEGORIES = ("files", "sessions", "namespace", "history")
 
 
 def _norm_path(path: str) -> str:
@@ -63,31 +63,31 @@ async def restore(
         ref,
         *,
         paths: list[str] | None = None,
-        planes: list[str] | None = None,
+        categories: list[str] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT) -> dict[str, Any]:
-    """Surgical restore: whole world, chosen planes, or chosen paths.
+    """Surgical restore: whole world, chosen categories, or chosen paths.
 
     Scope rules: no arguments = the whole world (checkout semantics);
-    ``planes`` picks a subset of files/sessions/namespace/history and
+    ``categories`` picks a subset of files/sessions/namespace/history and
     leaves the live state of the others untouched; ``paths`` restores
     only the matching files (a path selects itself or its subtree) and
-    implies the files plane alone. Restoring sessions re-applies their
+    implies the files category alone. Restoring sessions re-applies their
     mount grants, so the report carries ``grant_widenings``: every
     grant the restore widened relative to the live state, surfaced,
     never silent.
     """
-    if paths is not None and planes is not None:
-        raise ValueError("restore takes paths= or planes=, not both")
-    for plane in planes or []:
-        if plane not in PLANES:
-            raise ValueError(f"unknown plane {plane!r}; expected one of "
-                             f"{', '.join(PLANES)}")
+    if paths is not None and categories is not None:
+        raise ValueError("restore takes paths= or categories=, not both")
+    for category in categories or []:
+        if category not in CATEGORIES:
+            raise ValueError(f"unknown category {category!r}; expected one of "
+                             f"{', '.join(CATEGORIES)}")
     version = await resolve_ref(store, ref)
     entries, meta = await read_version(store, version)
     target = to_state(entries, meta)
     live = await to_state_dict(ws)
-    selected = (set(planes) if planes is not None else
-                {"files"} if paths is not None else set(PLANES))
+    selected = (set(categories) if categories is not None else
+                {"files"} if paths is not None else set(CATEGORIES))
 
     widenings: list[dict[str, Any]] = []
     if "sessions" in selected:
@@ -127,7 +127,7 @@ async def restore(
                              drift_policy)
     return {
         "version": version.decode(),
-        "planes": sorted(selected),
+        "categories": sorted(selected),
         "paths": paths,
         "grant_widenings": widenings,
     }
