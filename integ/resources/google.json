@@ -335,6 +335,48 @@
         "stdout": "1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "g_files_get",
+      "seq": 500024,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files get --params '{\"fileId\": \"doc0001\"}' | jq -c '{id, name, mimeType}'",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "{\"id\":\"doc0001\",\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n"
+      }
+    },
+    {
+      "id": "g_files_copy",
+      "seq": 500025,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files copy --params '{\"fileId\": \"doc0001\"}' --json '{\"name\": \"Notes copy\"}' | jq -c '{name, mimeType}' && gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes copy'\\\"}\" | jq -c '[.files[].name]'",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n\"Notes copy\"\n"
+      }
+    },
+    {
+      "id": "g_sheet_write",
+      "seq": 500026,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws sheets +write --params '{\"spreadsheetId\": \"sheet0001\", \"range\": \"Sheet1!A2:C2\"}' --json '{\"values\": [[\"x\", \"y\", \"z\"]]}' > /dev/null && gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "{\"range\":\"Sheet1!A2:C2\",\"majorDimension\":\"ROWS\",\"values\":[[\"x\",\"y\",\"z\"]]}"
+      }
     }
   ]
 }

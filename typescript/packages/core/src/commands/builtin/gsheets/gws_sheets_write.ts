@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GoogleApiAccessor } from '../../../accessor/google_api.ts'
-import { SHEETS_API_BASE, googleHeaders } from '../../../core/google/_client.ts'
+import { googleHeaders, sheetsBase } from '../../../core/google/_client.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -65,7 +65,7 @@ async function gwsSheetsWriteCommand(
       new IOResult({ exitCode: 2, stderr: ENC.encode('--params must contain range\n') }),
     ]
   }
-  const url = `${SHEETS_API_BASE}/spreadsheets/${sheetId}/values/${range}?valueInputOption=${vio}`
+  const url = `${sheetsBase(accessor.tokenManager)}/spreadsheets/${sheetId}/values/${range}?valueInputOption=${vio}`
   const headers = await googleHeaders(accessor.tokenManager)
   const r = await fetch(url, {
     method: 'PUT',

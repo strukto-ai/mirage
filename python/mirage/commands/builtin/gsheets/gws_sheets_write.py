@@ -19,7 +19,7 @@ import aiohttp
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.commands.registry import command
 from mirage.commands.spec.types import CommandSpec, OperandKind, Option
-from mirage.core.gsheets._client import SHEETS_API_BASE, google_headers
+from mirage.core.gsheets._client import google_headers, sheets_base
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -55,7 +55,7 @@ async def gws_sheets_write(
     if not range_:
         raise ValueError("--params must contain range")
     body = json.loads(json_str)
-    base = f"{SHEETS_API_BASE}/spreadsheets/{sheet_id}"
+    base = f"{sheets_base(accessor.token_manager)}/spreadsheets/{sheet_id}"
     url = f"{base}/values/{range_}?valueInputOption={vio}"
     headers = await google_headers(accessor.token_manager)
     async with aiohttp.ClientSession() as session:
