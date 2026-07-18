@@ -13,11 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  DRIVE_API_BASE,
+  driveBase,
+  driveUploadBase,
   googleDelete,
   googleGet,
   googleGetBytes,
   googleGetStream,
+  googlePatch,
+  googlePost,
+  googleSendBytes,
 } from './_client.ts'
 import type { TokenManager } from './_client.ts'
 
@@ -90,6 +94,7 @@ export async function listFiles(
     pageSize?: number
     modifiedAfter?: string | null
     modifiedBefore?: string | null
+    name?: string | null
   } = {},
 ): Promise<DriveFile[]> {
   const folderId = opts.folderId ?? 'root'
@@ -99,7 +104,9 @@ export async function listFiles(
   const pageSize = opts.pageSize ?? 1000
   const modifiedAfter = opts.modifiedAfter ?? null
   const modifiedBefore = opts.modifiedBefore ?? null
+  const name = opts.name ?? null
   const parts: string[] = [`'${folderId}' in parents`]
+  if (name !== null) parts.push(`name='${escapeQueryValue(name)}'`)
   if (mimeType !== null) parts.push(`mimeType='${mimeType}'`)
   if (!trashed) parts.push('trashed=false')
   if (modifiedAfter !== null) parts.push(`modifiedTime >= '${modifiedAfter}'`)
@@ -121,7 +128,7 @@ export async function listFiles(
       params.supportsAllDrives = 'true'
     }
     if (pageToken !== null) params.pageToken = pageToken
-    const url = `${DRIVE_API_BASE}/files`
+    const url = `${driveBase(tm)}/files`
     const data = (await googleGet(tm, url, params)) as ListResponse
     if (data.files !== undefined) files.push(...data.files)
     pageToken = data.nextPageToken ?? null
@@ -143,7 +150,7 @@ export async function listSharedDrives(
       pageSize,
     }
     if (pageToken !== null) params.pageToken = pageToken
-    const url = `${DRIVE_API_BASE}/drives`
+    const url = `${driveBase(tm)}/drives`
     const data = (await googleGet(tm, url, params)) as ListDrivesResponse
     if (data.drives !== undefined) drives.push(...data.drives)
     pageToken = data.nextPageToken ?? null
@@ -183,7 +190,7 @@ export async function listAllFiles(
     }
     if (q !== null) params.q = q
     if (pageToken !== null) params.pageToken = pageToken
-    const url = `${DRIVE_API_BASE}/files`
+    const url = `${driveBase(tm)}/files`
     const data = (await googleGet(tm, url, params)) as ListResponse
     if (data.files !== undefined) files.push(...data.files)
     pageToken = data.nextPageToken ?? null
@@ -193,12 +200,12 @@ export async function listAllFiles(
 }
 
 export async function downloadFile(tm: TokenManager, fileId: string): Promise<Uint8Array> {
-  const url = `${DRIVE_API_BASE}/files/${fileId}?alt=media&supportsAllDrives=true`
+  const url = `${driveBase(tm)}/files/${fileId}?alt=media&supportsAllDrives=true`
   return googleGetBytes(tm, url)
 }
 
 export async function deleteFile(tm: TokenManager, fileId: string): Promise<void> {
-  const url = `${DRIVE_API_BASE}/files/${fileId}?supportsAllDrives=true`
+  const url = `${driveBase(tm)}/files/${fileId}?supportsAllDrives=true`
   await googleDelete(tm, url)
 }
 
@@ -206,6 +213,113 @@ export async function* downloadFileStream(
   tm: TokenManager,
   fileId: string,
 ): AsyncIterable<Uint8Array> {
-  const url = `${DRIVE_API_BASE}/files/${fileId}?alt=media&supportsAllDrives=true`
+  const url = `${driveBase(tm)}/files/${fileId}?alt=media&supportsAllDrives=true`
   for await (const chunk of googleGetStream(tm, url)) yield chunk
+}
+
+export const FOLDER_MIME = 'application/vnd.google-apps.folder'
+const ITEM_FIELDS = 'id,name,mimeType,driveId,size,quotaBytesUsed,createdTime,modifiedTime,parents'
+const DEFAULT_UPLOAD_MIME = 'application/octet-stream'
+
+// Escape a value for a Drive API query string literal.
+function escapeQueryValue(value: string): string {
+  return value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
+}
+
+function multipartRelated(
+  metadata: unknown,
+  data: Uint8Array,
+  mimeType: string,
+): { body: Uint8Array; contentType: string } {
+  const boundary = crypto.randomUUID().replaceAll('-', '')
+  const enc = new TextEncoder()
+  const head = enc.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+      `${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+  )
+  const tail = enc.encode(`\r\n--${boundary}--\r\n`)
+  const body = new Uint8Array(head.length + data.length + tail.length)
+  body.set(head, 0)
+  body.set(data, head.length)
+  body.set(tail, head.length + data.length)
+  return { body, contentType: `multipart/related; boundary=${boundary}` }
+}
+
+export async function getFile(tm: TokenManager, fileId: string): Promise<DriveFile> {
+  const url = `${driveBase(tm)}/files/${fileId}`
+  return (await googleGet(tm, url, {
+    fields: ITEM_FIELDS,
+    supportsAllDrives: 'true',
+  })) as DriveFile
+}
+
+export async function createFolder(
+  tm: TokenManager,
+  name: string,
+  parentId: string,
+): Promise<DriveFile> {
+  const url = `${driveBase(tm)}/files?supportsAllDrives=true&fields=${ITEM_FIELDS}`
+  return (await googlePost(tm, url, {
+    name,
+    mimeType: FOLDER_MIME,
+    parents: [parentId],
+  })) as DriveFile
+}
+
+// Multipart uploads cap at 5 MiB on the real API; larger payloads need the
+// resumable protocol, which mirage does not use yet.
+export async function uploadFile(
+  tm: TokenManager,
+  name: string,
+  parentId: string,
+  data: Uint8Array,
+  mimeType: string = DEFAULT_UPLOAD_MIME,
+): Promise<DriveFile> {
+  const { body, contentType } = multipartRelated({ name, parents: [parentId] }, data, mimeType)
+  const url = `${driveUploadBase(tm)}/files`
+  return (await googleSendBytes(tm, 'POST', url, body, contentType, {
+    uploadType: 'multipart',
+    supportsAllDrives: 'true',
+    fields: ITEM_FIELDS,
+  })) as DriveFile
+}
+
+export async function updateFileContent(
+  tm: TokenManager,
+  fileId: string,
+  data: Uint8Array,
+  mimeType: string = DEFAULT_UPLOAD_MIME,
+): Promise<DriveFile> {
+  const url = `${driveUploadBase(tm)}/files/${fileId}`
+  return (await googleSendBytes(tm, 'PATCH', url, data, mimeType, {
+    uploadType: 'media',
+    supportsAllDrives: 'true',
+    fields: ITEM_FIELDS,
+  })) as DriveFile
+}
+
+// Patch file metadata (rename and/or move between parents).
+export async function patchFile(
+  tm: TokenManager,
+  fileId: string,
+  opts: { body?: Record<string, unknown>; addParents?: string; removeParents?: string } = {},
+): Promise<DriveFile> {
+  const params: Record<string, string> = {
+    supportsAllDrives: 'true',
+    fields: ITEM_FIELDS,
+  }
+  if (opts.addParents !== undefined) params.addParents = opts.addParents
+  if (opts.removeParents !== undefined) params.removeParents = opts.removeParents
+  const url = `${driveBase(tm)}/files/${fileId}`
+  return (await googlePatch(tm, url, opts.body ?? {}, params)) as DriveFile
+}
+
+export async function copyFile(
+  tm: TokenManager,
+  fileId: string,
+  name: string,
+  parentId: string,
+): Promise<DriveFile> {
+  const url = `${driveBase(tm)}/files/${fileId}/copy?supportsAllDrives=true&fields=${ITEM_FIELDS}`
+  return (await googlePost(tm, url, { name, parents: [parentId] })) as DriveFile
 }

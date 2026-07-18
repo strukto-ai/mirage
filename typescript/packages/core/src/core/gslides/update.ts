@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SLIDES_API_BASE, type TokenManager, googlePost } from '../google/_client.ts'
+import { slidesBase, type TokenManager, googlePost } from '../google/_client.ts'
 
 export async function batchUpdate(
   tm: TokenManager,
@@ -29,6 +29,6 @@ export async function batchUpdate(
   if (typeof payload !== 'object' || payload === null || !('requests' in payload)) {
     throw new Error("Payload must contain 'requests' key.")
   }
-  const url = `${SLIDES_API_BASE}/presentations/${presentationId}:batchUpdate`
+  const url = `${slidesBase(tm)}/presentations/${presentationId}:batchUpdate`
   return googlePost(tm, url, payload)
 }

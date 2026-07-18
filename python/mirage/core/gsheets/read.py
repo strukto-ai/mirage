@@ -18,8 +18,7 @@ import posixpath
 
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.gsheets._client import (SHEETS_API_BASE, TokenManager,
-                                         google_get)
+from mirage.core.gsheets._client import TokenManager, google_get, sheets_base
 from mirage.core.gsheets.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -39,7 +38,7 @@ async def read_spreadsheet(token_manager: TokenManager,
     Returns:
         bytes: JSON response as bytes.
     """
-    url = f"{SHEETS_API_BASE}/spreadsheets/{spreadsheet_id}"
+    url = f"{sheets_base(token_manager)}/spreadsheets/{spreadsheet_id}"
     data = await google_get(token_manager, url)
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
 
@@ -56,7 +55,8 @@ async def read_values(token_manager: TokenManager, spreadsheet_id: str,
     Returns:
         bytes: JSON response as bytes.
     """
-    url = f"{SHEETS_API_BASE}/spreadsheets/{spreadsheet_id}/values/{range_}"
+    base = sheets_base(token_manager)
+    url = f"{base}/spreadsheets/{spreadsheet_id}/values/{range_}"
     data = await google_get(token_manager, url)
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
 

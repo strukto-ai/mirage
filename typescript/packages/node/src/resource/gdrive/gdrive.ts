@@ -44,6 +44,7 @@ export interface GDriveResourceState {
 export class GDriveResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GDRIVE
   readonly cachesReads: boolean = true
+  readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = GDRIVE_PROMPT
   readonly config: GDriveConfig
@@ -56,6 +57,9 @@ export class GDriveResource extends BaseResource implements Resource {
       clientId: config.clientId,
       clientSecret: config.clientSecret,
       refreshToken: config.refreshToken,
+      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
+      ...(config.apiBase !== undefined ? { apiBase: config.apiBase } : {}),
+      ...(config.folderId !== undefined ? { folderId: config.folderId } : {}),
     })
     this.accessor = new GDriveAccessor({ tokenManager: tm })
   }

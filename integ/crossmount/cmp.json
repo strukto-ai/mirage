@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cmp /data/xdiff.txt /data2/xdiff.txt",
       "expect": {
@@ -35,7 +37,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cp /data/xdiff.txt /data2/xsame.txt && cmp /data/xdiff.txt /data2/xsame.txt && rm /data/xdiff.txt /data2/xdiff.txt /data2/xsame.txt",
       "expect": {

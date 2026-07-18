@@ -14,10 +14,11 @@
 
 from mirage.core.google._client import DRIVE_API_BASE  # noqa: F401
 from mirage.core.google._client import (SHEETS_API_BASE, TOKEN_BUFFER_SECONDS,
-                                        TOKEN_URL, TokenManager, google_get,
-                                        google_get_bytes, google_headers,
-                                        google_post, google_put,
-                                        refresh_access_token)
+                                        TOKEN_URL, TokenManager, drive_base,
+                                        google_get, google_get_bytes,
+                                        google_headers, google_post,
+                                        google_put, refresh_access_token,
+                                        sheets_base)
 
 __all__ = [
     "DRIVE_API_BASE",
@@ -25,6 +26,8 @@ __all__ = [
     "TOKEN_URL",
     "TOKEN_BUFFER_SECONDS",
     "TokenManager",
+    "drive_base",
+    "sheets_base",
     "google_get",
     "google_get_bytes",
     "google_headers",

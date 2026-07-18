@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SLIDES_API_BASE, type TokenManager, googlePost } from '../google/_client.ts'
+import { slidesBase, type TokenManager, googlePost } from '../google/_client.ts'
 
 export async function createPresentation(tm: TokenManager, title: string): Promise<unknown> {
-  const url = `${SLIDES_API_BASE}/presentations`
+  const url = `${slidesBase(tm)}/presentations`
   return googlePost(tm, url, { title })
 }

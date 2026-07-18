@@ -15,8 +15,7 @@
 import json
 from typing import Any
 
-from mirage.core.gsheets._client import (SHEETS_API_BASE, TokenManager,
-                                         google_post)
+from mirage.core.gsheets._client import TokenManager, google_post, sheets_base
 
 
 async def batch_update(
@@ -42,5 +41,6 @@ async def batch_update(
         ) from exc
     if "requests" not in payload:
         raise ValueError("Payload must contain 'requests' key.")
-    url = f"{SHEETS_API_BASE}/spreadsheets/{spreadsheet_id}:batchUpdate"
+    base = sheets_base(token_manager)
+    url = f"{base}/spreadsheets/{spreadsheet_id}:batchUpdate"
     return await google_post(token_manager, url, payload)

@@ -283,6 +283,66 @@
           "fixture": "columnar/v1"
         }
       ]
+    },
+    {
+      "id": "gdrive",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "xm2"
+        },
+        {
+          "path": "/res",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "gdrive-folder",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/reports/res",
+          "fixture": "columnar/v1"
+        }
+      ]
     }
   ]
 }

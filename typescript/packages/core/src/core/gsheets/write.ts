@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SHEETS_API_BASE, type TokenManager, googleHeaders } from '../google/_client.ts'
+import { sheetsBase, type TokenManager, googleHeaders } from '../google/_client.ts'
 
 export class SheetsApiError extends Error {
   readonly status: number
@@ -36,7 +36,7 @@ export async function appendValues(
     const msg = err instanceof Error ? err.message : String(err)
     throw new Error(`Invalid JSON: ${msg}`)
   }
-  const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`
+  const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`
   const headers = await googleHeaders(tm)
   const r = await fetch(url, {
     method: 'POST',

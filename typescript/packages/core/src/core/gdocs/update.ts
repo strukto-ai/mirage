@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DOCS_API_BASE, type TokenManager, googlePost } from '../google/_client.ts'
+import { docsBase, type TokenManager, googlePost } from '../google/_client.ts'
 
 export async function batchUpdate(
   tm: TokenManager,
@@ -29,6 +29,6 @@ export async function batchUpdate(
   if (typeof payload !== 'object' || payload === null || !('requests' in payload)) {
     throw new Error("Payload must contain 'requests' key.")
   }
-  const url = `${DOCS_API_BASE}/documents/${docId}:batchUpdate`
+  const url = `${docsBase(tm)}/documents/${docId}:batchUpdate`
   return googlePost(tm, url, payload)
 }

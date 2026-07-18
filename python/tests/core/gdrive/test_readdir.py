@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdrive.readdir import readdir
@@ -255,8 +256,8 @@ async def test_readdir_root_uniquifies_duplicate_shared_drive_names(
 
     assert result == [
         "/Team/",
-        "/Team [Shared Drive]/",
         "/Team [Shared Drive 2]/",
+        "/Team [Shared Drive]/",
     ]
     assert (await index.get("/Team")).entry.id == "drive1"
     assert (await index.get("/Team [Shared Drive]")).entry.id == "drive2"
@@ -371,3 +372,18 @@ async def test_readdir_size_binary_kept_google_apps_in_extra(accessor, index):
     doc = (await index.get("/My Document.gdoc.json")).entry
     assert doc.size is None
     assert doc.extra["source_size"] == 9999
+
+
+@pytest.mark.asyncio
+async def test_readdir_scoped_mount_lists_folder_children(
+        fake_drive, scoped_accessor):
+    scope = fake_drive.folder("scope")
+    fake_drive.add("in.txt", parent=scope, content=b"x")
+    fake_drive.add("out.txt", content=b"y")
+    accessor = scoped_accessor(scope)
+    entries = await readdir(
+        accessor,
+        PathSpec(virtual="/", directory="/", resource_path=""),
+        index=NULL_INDEX,
+    )
+    assert entries == ["/in.txt"]

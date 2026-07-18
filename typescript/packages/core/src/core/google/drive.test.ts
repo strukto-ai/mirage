@@ -36,7 +36,9 @@ import {
   listSharedDrives,
 } from './drive.ts'
 
-const STUB_TOKEN_MANAGER = {} as TokenManager
+const STUB_TOKEN_MANAGER = {
+  config: { clientId: 'cid', refreshToken: 'rt' },
+} as TokenManager
 
 beforeEach(() => {
   vi.clearAllMocks()

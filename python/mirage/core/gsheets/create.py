@@ -14,8 +14,7 @@
 
 from typing import Any
 
-from mirage.core.gsheets._client import (SHEETS_API_BASE, TokenManager,
-                                         google_post)
+from mirage.core.gsheets._client import TokenManager, google_post, sheets_base
 
 
 async def create_spreadsheet(token_manager: TokenManager,
@@ -29,7 +28,7 @@ async def create_spreadsheet(token_manager: TokenManager,
     Returns:
         dict: API response with spreadsheetId, title, etc.
     """
-    url = f"{SHEETS_API_BASE}/spreadsheets"
+    url = f"{sheets_base(token_manager)}/spreadsheets"
     return await google_post(token_manager, url,
                              {"properties": {
                                  "title": title

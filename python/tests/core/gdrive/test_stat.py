@@ -140,6 +140,14 @@ async def test_stat_not_found(accessor, index):
             "mirage.core.gdrive.readdir.list_files",
             new_callable=AsyncMock,
             return_value=[],
+    ), patch(
+            "mirage.core.gdrive.resolve.list_files",
+            new_callable=AsyncMock,
+            return_value=[],
+    ), patch(
+            "mirage.core.gdrive.resolve.list_shared_drives",
+            new_callable=AsyncMock,
+            return_value=[],
     ):
         with pytest.raises(FileNotFoundError):
             await stat(

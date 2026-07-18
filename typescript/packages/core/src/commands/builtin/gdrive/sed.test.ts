@@ -17,7 +17,13 @@ import type * as DriveModule from '../../../core/google/drive.ts'
 
 vi.mock('../../../core/google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../../../core/google/drive.ts')
-  return { ...actual, downloadFile: vi.fn() }
+  return {
+    ...actual,
+    downloadFile: vi.fn(),
+    listFiles: vi.fn(() => Promise.resolve([])),
+    listSharedDrives: vi.fn(() => Promise.resolve([])),
+    updateFileContent: vi.fn(),
+  }
 })
 
 import { GDriveAccessor } from '../../../accessor/gdrive.ts'
@@ -37,7 +43,9 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 function makeAccessor(): GDriveAccessor {
-  return new GDriveAccessor({ tokenManager: {} as TokenManager })
+  return new GDriveAccessor({
+    tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
+  })
 }
 
 function makeOpts(partial: Partial<CommandOpts>): CommandOpts {
@@ -128,9 +136,22 @@ describe('gdrive sed', () => {
     expect(await outText(result)).toBe('bbnbnb\n')
   })
 
-  it('rejects -i on read-only mount', async () => {
+  it('-i writes the edit back through the Drive resolver', async () => {
     const index = new RAMIndexCacheStore()
     await putFile(index, '/test/file.txt', 'file.txt')
+    vi.mocked(drive.downloadFile).mockResolvedValue(ENC.encode('hello world\n'))
+    vi.mocked(drive.listFiles).mockImplementation((_tm, opts = {}) => {
+      if (opts.name === 'test') {
+        return Promise.resolve([{ id: 'dir1', name: 'test', mimeType: drive.FOLDER_MIME }])
+      }
+      if (opts.name === 'file.txt') {
+        return Promise.resolve([{ id: 'file123', name: 'file.txt', mimeType: 'text/plain' }])
+      }
+      return Promise.resolve([])
+    })
+    const update = vi
+      .mocked(drive.updateFileContent)
+      .mockResolvedValue({ id: 'file123', name: 'file.txt' })
     const cmd = GDRIVE_SED[0]
     if (cmd === undefined) throw new Error('sed not registered')
     const result = await cmd.fn(
@@ -142,13 +163,16 @@ describe('gdrive sed', () => {
           directory: '/test',
         }),
       ],
-      ['s/a/b/'],
+      ['s/hello/bye/'],
       makeOpts({ flags: { i: true }, index }),
     )
     if (result === null) throw new Error('expected a result')
-    const [out, io] = result
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(await io.stderrStr()).toContain('sed: -i not supported on this backend')
+    const [, io] = result
+    expect(io.exitCode).toBe(0)
+    expect(update).toHaveBeenCalledTimes(1)
+    const call = update.mock.calls[0]
+    if (call === undefined) throw new Error('expected an update call')
+    expect(call[1]).toBe('file123')
+    expect(DEC.decode(call[2])).toBe('bye world\n')
   })
 })

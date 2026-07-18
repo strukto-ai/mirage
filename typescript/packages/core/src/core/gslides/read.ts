@@ -16,7 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GSlidesAccessor } from '../../accessor/gslides.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { SLIDES_API_BASE, type TokenManager, googleGet } from '../google/_client.ts'
+import { slidesBase, type TokenManager, googleGet } from '../google/_client.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -33,7 +33,7 @@ export async function readPresentation(
   tm: TokenManager,
   presentationId: string,
 ): Promise<Uint8Array> {
-  const url = `${SLIDES_API_BASE}/presentations/${presentationId}`
+  const url = `${slidesBase(tm)}/presentations/${presentationId}`
   const data = await googleGet(tm, url)
   return ENC.encode(JSON.stringify(data))
 }

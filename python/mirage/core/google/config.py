@@ -19,3 +19,9 @@ class GoogleConfig(BaseModel):
     client_id: str
     client_secret: SecretStr | None = None
     refresh_token: SecretStr
+    # Single-host override for every Google API (drive/docs/sheets/slides)
+    # plus the OAuth token endpoint; used to point backends at a fake server.
+    api_base: str | None = None
+    # Drive-only: scope the mount to this folder ID instead of the Drive
+    # root, the s3 key_prefix analog. Other Google backends ignore it.
+    folder_id: str | None = None

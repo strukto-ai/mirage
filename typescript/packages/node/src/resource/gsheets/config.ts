@@ -19,6 +19,7 @@ export interface GSheetsConfig {
   clientSecret: string
   refreshToken: string
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
+  apiBase?: string
 }
 
 export interface GSheetsConfigRedacted {
@@ -31,6 +32,7 @@ const GSheetsConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),
+  apiBase: z.string().optional(),
 })
 
 export function redactGSheetsConfig(config: GSheetsConfig): GSheetsConfigRedacted {
@@ -43,6 +45,7 @@ export function normalizeGSheetsConfig(input: Record<string, unknown>): GSheetsC
       client_id: 'clientId',
       client_secret: 'clientSecret',
       refresh_token: 'refreshToken',
+      api_base: 'apiBase',
     },
   }) as unknown as GSheetsConfig
 }

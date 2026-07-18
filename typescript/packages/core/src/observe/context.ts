@@ -45,6 +45,13 @@ export function setVirtualPrefix(prefix: string): void {
   if (state !== undefined) state.virtualPrefix = prefix
 }
 
+// Whether a recording context is active. Backends that need an extra API
+// call to capture fingerprint/revision metadata (Drive, Graph) gate it on
+// this so unrecorded reads stay single-request.
+export function recordingActive(): boolean {
+  return storage.getStore() !== undefined
+}
+
 export interface RecordOptions {
   fingerprint?: string | null
   revision?: string | null

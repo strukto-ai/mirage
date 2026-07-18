@@ -17,8 +17,8 @@ from typing import Any
 
 import aiohttp
 
-from mirage.core.gsheets._client import (SHEETS_API_BASE, TokenManager,
-                                         google_headers)
+from mirage.core.gsheets._client import (TokenManager, google_headers,
+                                         sheets_base)
 
 
 async def append_values(
@@ -42,7 +42,7 @@ async def append_values(
         values = json.loads(values_json)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON: {exc}") from exc
-    base = f"{SHEETS_API_BASE}/spreadsheets/{spreadsheet_id}"
+    base = f"{sheets_base(token_manager)}/spreadsheets/{spreadsheet_id}"
     url = f"{base}/values/{range_}:append?valueInputOption=USER_ENTERED"
     headers = await google_headers(token_manager)
     body = {"values": values}

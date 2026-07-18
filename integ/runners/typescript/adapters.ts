@@ -25,6 +25,7 @@ import {
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import {
   DiskResource,
+  GDriveResource,
   MountMode,
   RAMResource,
   RedisResource,
@@ -186,6 +187,57 @@ async function openSsh(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+const GDRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
+
+async function gwsJson(url: string, init?: RequestInit): Promise<Record<string, unknown>> {
+  const r = await fetch(url, init)
+  if (!r.ok) throw new Error(`gws fake request failed: ${url} -> ${String(r.status)}`)
+  return (await r.json()) as Record<string, unknown>
+}
+
+async function gwsFolder(base: string, name: string, parent: string): Promise<string> {
+  const q = `name='${name}' and '${parent}' in parents and trashed=false`
+  const listed = await gwsJson(`${base}/drive/v3/files?q=${encodeURIComponent(q)}`)
+  const files = listed.files as { id: string }[]
+  const first = files[0]
+  if (first !== undefined) return first.id
+  const created = await gwsJson(`${base}/drive/v3/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: GDRIVE_FOLDER_MIME, parents: [parent] }),
+  })
+  return created.id as string
+}
+
+// The fake Google Workspace server is external and shared; /reset gives
+// each run a clean, deterministic state. Each mount is scoped to a
+// per-mount folder via GoogleConfig.folderId, the s3 key_prefix analog.
+async function openGws(target: Target): Promise<Open> {
+  let base = process.env.GWS_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('gdrive target requires GWS_URL')
+  await gwsJson(`${base}/reset`, { method: 'POST' })
+  const mounts: Record<string, GDriveResource> = {}
+  for (const m of target.mounts) {
+    let parent = 'root'
+    for (const segment of String(m.root).split('/')) {
+      parent = await gwsFolder(base, segment, parent)
+    }
+    mounts[m.path] = new GDriveResource({
+      clientId: 'integ',
+      clientSecret: 'integ',
+      refreshToken: 'integ',
+      apiBase: base,
+      folderId: parent,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
@@ -193,4 +245,5 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   opfs: openOpfs,
   s3: openS3,
   ssh: openSsh,
+  gdrive: openGws,
 }

@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir /data/xd /data2/xd && ls /data2 && rm -r /data/xd /data2/xd",
       "expect": {

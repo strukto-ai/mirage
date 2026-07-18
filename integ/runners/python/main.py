@@ -81,6 +81,9 @@ async def main() -> None:
             print(f"skip [{target_id}]: NEXTCLOUD_URL not set",
                   file=sys.stderr)
             continue
+        if (target.get("service") == "gws" and not os.environ.get("GWS_URL")):
+            print(f"skip [{target_id}]: GWS_URL not set", file=sys.stderr)
+            continue
         await run_target(target, cases, root, report, emit)
 
     if args.emit:

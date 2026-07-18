@@ -109,9 +109,16 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'gdocs', '', false],
   ],
   gdrive: [
+    ['create', 'gdrive', '', true],
+    ['mkdir', 'gdrive', '', true],
     ['read', 'gdrive', '', false],
     ['readdir', 'gdrive', '', false],
+    ['rename', 'gdrive', '', true],
+    ['rmdir', 'gdrive', '', true],
     ['stat', 'gdrive', '', false],
+    ['truncate', 'gdrive', '', true],
+    ['unlink', 'gdrive', '', true],
+    ['write', 'gdrive', '', true],
   ],
   github: [
     ['read', 'github', '', false],

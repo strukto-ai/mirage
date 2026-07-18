@@ -20,6 +20,7 @@ from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
 from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
 from mirage.commands.builtin.gdrive._provision import \
     file_read_provision as _ft_provision
+from mirage.commands.builtin.gdrive.du import du
 from mirage.commands.builtin.gdrive.ops import OPS as _GDRIVE_CMD_OPS
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
@@ -33,7 +34,15 @@ from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import
     gws_slides_presentations_batchUpdate  # noqa: E501
 from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
     gws_slides_presentations_create  # noqa: E501
+from mirage.commands.builtin.gws import (GWS_DOCS_API_COMMANDS,
+                                         GWS_DRIVE_API_COMMANDS,
+                                         GWS_SHEETS_API_COMMANDS,
+                                         GWS_SLIDES_API_COMMANDS)
 from mirage.core.gdrive.read import read as _read
+
+# du keeps a wrapper because gdrive's du_all returns a flat list (du_multi
+# contract) rather than the generic (list, total) tuple, matching onedrive.
+_GDRIVE_OVERRIDES = {"du"}
 
 COMMANDS = [
     *make_filetype_commands("gdrive",
@@ -44,7 +53,9 @@ COMMANDS = [
     *make_generic_commands(
         "gdrive",
         _GDRIVE_CMD_OPS,
+        overrides=_GDRIVE_OVERRIDES,
     ),
+    du,
     gws_docs_documents_create,
     gws_docs_documents_batchUpdate,
     gws_docs_write,
@@ -55,4 +66,8 @@ COMMANDS = [
     gws_sheets_read,
     gws_sheets_write,
     gws_sheets_append,
+    *GWS_DRIVE_API_COMMANDS,
+    *GWS_DOCS_API_COMMANDS,
+    *GWS_SHEETS_API_COMMANDS,
+    *GWS_SLIDES_API_COMMANDS,
 ]

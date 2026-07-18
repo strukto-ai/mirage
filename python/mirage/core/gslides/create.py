@@ -14,8 +14,7 @@
 
 from typing import Any
 
-from mirage.core.gslides._client import (SLIDES_API_BASE, TokenManager,
-                                         google_post)
+from mirage.core.gslides._client import TokenManager, google_post, slides_base
 
 
 async def create_presentation(token_manager: TokenManager,
@@ -29,5 +28,5 @@ async def create_presentation(token_manager: TokenManager,
     Returns:
         dict: API response with presentationId, title, etc.
     """
-    url = f"{SLIDES_API_BASE}/presentations"
+    url = f"{slides_base(token_manager)}/presentations"
     return await google_post(token_manager, url, {"title": title})

@@ -40,7 +40,9 @@ import * as labelsMod from './labels.ts'
 import * as messagesMod from './messages.ts'
 import { read } from './read.ts'
 
-const STUB_TOKEN_MANAGER = {} as TokenManager
+const STUB_TOKEN_MANAGER = {
+  config: { clientId: 'cid', refreshToken: 'rt' },
+} as TokenManager
 
 function makeAccessor(): GmailAccessor {
   return new GmailAccessor({ tokenManager: STUB_TOKEN_MANAGER })

@@ -18,8 +18,7 @@ import posixpath
 
 from mirage.accessor.gslides import GSlidesAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.gslides._client import (SLIDES_API_BASE, TokenManager,
-                                         google_get)
+from mirage.core.gslides._client import TokenManager, google_get, slides_base
 from mirage.core.gslides.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 async def read_presentation(token_manager: TokenManager,
                             presentation_id: str) -> bytes:
-    url = f"{SLIDES_API_BASE}/presentations/{presentation_id}"
+    url = f"{slides_base(token_manager)}/presentations/{presentation_id}"
     data = await google_get(token_manager, url)
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
 

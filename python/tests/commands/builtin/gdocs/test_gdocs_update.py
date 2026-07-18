@@ -20,11 +20,14 @@ import pytest
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.commands.builtin.gdocs.gws_docs_documents_batchUpdate import \
     gws_docs_documents_batchUpdate
+from mirage.core.google._client import TokenManager
+from mirage.core.google.config import GoogleConfig
 
 
 @pytest.fixture
 def accessor():
-    return GDocsAccessor(config=None, token_manager=None)
+    config = GoogleConfig(client_id="cid", refresh_token="rt")
+    return GDocsAccessor(config=config, token_manager=TokenManager(config))
 
 
 @pytest.mark.asyncio

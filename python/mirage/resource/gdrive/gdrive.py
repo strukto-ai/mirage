@@ -32,6 +32,7 @@ class GoogleDriveResource(BaseResource):
     name: str = ResourceName.GDRIVE
     caches_reads: bool = True
     PROMPT: str = PROMPT
+    SUPPORTS_SNAPSHOT: bool = True
 
     def __init__(self, config: GoogleDriveConfig) -> None:
         super().__init__()
@@ -39,10 +40,15 @@ class GoogleDriveResource(BaseResource):
         self._token_manager = TokenManager(config)
         self.accessor = GDriveAccessor(self.config, self._token_manager)
         from mirage.commands.builtin.gdrive import COMMANDS
+        from mirage.commands.builtin.gws.dispatch import gws as gws_dispatch
         from mirage.ops.gdrive import OPS as GDRIVE_VFS_OPS
 
         for fn in COMMANDS:
             self.register(fn)
+        # The gws dispatcher routes across all four google command
+        # packages, so it registers here instead of any COMMANDS list
+        # (which would be an import cycle).
+        self.register(gws_dispatch)
         for fn in GDRIVE_VFS_OPS:
             self.register_op(fn)
 

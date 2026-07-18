@@ -16,6 +16,7 @@ import logging
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.core.gdrive.resolve import root_folder
 from mirage.core.google.drive import (MIME_TO_EXT, list_files,
                                       list_shared_drives)
 from mirage.types import PathSpec
@@ -61,7 +62,7 @@ async def readdir(
         return cached.entries
 
     if not key:
-        folder_id = "root"
+        folder_id = root_folder(accessor.token_manager)
         drive_id = None
     else:
         result = await index.get(virtual_key)
@@ -124,9 +125,11 @@ async def readdir(
         )
         entries.append((filename, entry, is_dir))
 
-    if not key:
+    if not key and folder_id == "root":
         # Shared Drive enumeration is best-effort: if the account can't list
         # them (missing scope, API error), still return My Drive contents.
+        # A folder-scoped mount lists only the folder's children, so shared
+        # drives never surface there.
         try:
             shared_drives = await list_shared_drives(accessor.token_manager)
         except Exception:
@@ -146,6 +149,9 @@ async def readdir(
             )
             entries.append((filename, entry, True))
 
+    # Deterministic vfs order: glob expansion and walkers follow readdir
+    # order, so sort by rendered filename (Drive returns modifiedTime desc).
+    entries.sort(key=lambda e: e[0])
     await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
     path_prefix = f"/{key}/" if key else "/"
     result_paths = []

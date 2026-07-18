@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir -p /data/mtimecheck && printf x | tee /data/mtimecheck/probe.txt > /dev/null && echo seeded",
       "expect": {
@@ -35,7 +37,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "clear_cache": true,
       "command": "ls -l /data/mtimecheck/probe.txt | wc -l",
@@ -58,7 +62,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "clear_cache": true,
       "command": "ls -l /data/mtimecheck/probe.txt | grep -c \"Jan  1 00:00\"",
@@ -81,7 +87,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "clear_cache": true,
       "command": "ls -l /data | grep mtimecheck | grep -c \"Jan  1 00:00\"",
@@ -104,7 +112,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "rm -rf /data/mtimecheck && echo cleaned",
       "expect": {

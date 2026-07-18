@@ -19,6 +19,7 @@ from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
     gws_slides_presentations_create  # noqa: E501
 from mirage.commands.builtin.gslides.ops import OPS as _GSLIDES_CMD_OPS
 from mirage.commands.builtin.gslides.rm import rm
+from mirage.commands.builtin.gws import GWS_SLIDES_API_COMMANDS
 
 COMMANDS = [
     *make_generic_commands(
@@ -28,4 +29,5 @@ COMMANDS = [
     rm,
     gws_slides_presentations_create,
     gws_slides_presentations_batchUpdate,
+    *GWS_SLIDES_API_COMMANDS,
 ]

@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SHEETS_API_BASE, type TokenManager, googlePost } from '../google/_client.ts'
+import { sheetsBase, type TokenManager, googlePost } from '../google/_client.ts'
 
 export async function createSpreadsheet(tm: TokenManager, title: string): Promise<unknown> {
-  const url = `${SHEETS_API_BASE}/spreadsheets`
+  const url = `${sheetsBase(tm)}/spreadsheets`
   return googlePost(tm, url, { properties: { title } })
 }

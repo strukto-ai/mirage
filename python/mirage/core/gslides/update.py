@@ -15,8 +15,7 @@
 import json
 from typing import Any
 
-from mirage.core.gslides._client import (SLIDES_API_BASE, TokenManager,
-                                         google_post)
+from mirage.core.gslides._client import TokenManager, google_post, slides_base
 
 
 async def batch_update(
@@ -42,5 +41,6 @@ async def batch_update(
         ) from exc
     if "requests" not in payload:
         raise ValueError("Payload must contain 'requests' key.")
-    url = f"{SLIDES_API_BASE}/presentations/{presentation_id}:batchUpdate"
+    base = slides_base(token_manager)
+    url = f"{base}/presentations/{presentation_id}:batchUpdate"
     return await google_post(token_manager, url, payload)

@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir -p /data/pr && printf '1\\n2\\n' > /data/pr/one.txt && printf '3\\n4\\n' > /data/pr/two.txt && printf 'hello\\n' > /data/pr/h1.txt && printf 'worlds\\n' > /data/pr/h2.txt && printf 'z\\n' > /data/pr/z1.txt && printf 'y\\n' > /data/pr/z2.txt && gzip /data/pr/z1.txt /data/pr/z2.txt",
       "expect": {
@@ -35,7 +37,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cut -c1 /data/pr/one.txt /data/pr/two.txt",
       "expect": {
@@ -57,7 +61,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "tac /data/pr/one.txt /data/pr/two.txt",
       "expect": {
@@ -79,7 +85,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "nl /data/pr/one.txt /data/pr/two.txt",
       "expect": {
@@ -101,7 +109,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "strings /data/pr/h1.txt /data/pr/h2.txt",
       "expect": {
@@ -123,7 +133,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "zcat /data/pr/z1.txt.gz /data/pr/z2.txt.gz",
       "expect": {
@@ -145,7 +157,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -167,7 +181,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "head -n 1 /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -189,7 +205,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "tail -n 1 /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -211,7 +229,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "wc -l /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -233,7 +253,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "nl /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -255,7 +277,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "md5 /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -277,7 +301,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "sha256sum /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -299,7 +325,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "strings /data/pr/h1.txt /data/pr/missing.txt",
       "expect": {
@@ -321,7 +349,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "tac /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -343,7 +373,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "rev /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -365,7 +397,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cut -c1 /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -387,7 +421,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "expand /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -409,7 +445,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "unexpand /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -431,7 +469,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "fold /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -453,7 +493,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "fmt /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -475,7 +517,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "zcat /data/pr/z1.txt.gz /data/pr/missing.gz",
       "expect": {
@@ -497,7 +541,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "sed s/1/X/ /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -519,7 +565,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "sort /data/pr/one.txt /data/pr/missing.txt",
       "expect": {
@@ -541,7 +589,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/pr/missing.txt /data/pr/one.txt",
       "expect": {
@@ -563,7 +613,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "wc -l /data/pr/m1.txt /data/pr/m2.txt",
       "expect": {
@@ -585,7 +637,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/pr/one.txt /data/pr",
       "expect": {
@@ -607,7 +661,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "head /data/pr",
       "expect": {
@@ -629,7 +685,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "wc /data/pr/one.txt /data/pr",
       "expect": {
@@ -651,7 +709,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "tac /data/pr",
       "expect": {
@@ -673,7 +733,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "rm -r /data/pr",
       "expect": {
