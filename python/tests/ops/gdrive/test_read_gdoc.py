@@ -20,9 +20,16 @@ import pytest
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.ops.gdrive.read.read import read
+from mirage.ops.gdrive import OPS
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
+
+
+read = _op("read")
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -32,18 +39,17 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
 
 
 @pytest.fixture
-def index():
-    store = RAMIndexCacheStore()
-    return store
-
-
-@pytest.fixture
 def accessor():
     return GDriveAccessor(config=None, token_manager=None)
 
 
+@pytest.fixture
+def index():
+    return RAMIndexCacheStore()
+
+
 @pytest.mark.asyncio
-async def test_read_gdoc_calls_core(accessor, index):
+async def test_read_gdoc_renders_doc_json(accessor, index):
     await index.put(
         "/docs/report.gdoc.json",
         IndexEntry(
@@ -53,28 +59,21 @@ async def test_read_gdoc_calls_core(accessor, index):
             remote_time="2026-04-01T00:00:00Z",
             vfs_name="report.gdoc.json",
         ))
-    fn = read._registered_ops[0].fn
     doc_json = json.dumps({"documentId": "doc123"}).encode()
     with patch(
-            "mirage.ops.gdrive.read.read.core_read",
+            "mirage.core.gdrive.read.read_doc",
             new_callable=AsyncMock,
             return_value=doc_json,
     ) as mock:
-        result = await fn(accessor,
-                          _scope("/docs/report.gdoc.json"),
-                          index=index)
-        mock.assert_called_once_with(accessor,
-                                     _scope("/docs/report.gdoc.json"), index)
+        result = await read(accessor,
+                            _scope("/docs/report.gdoc.json"),
+                            index=index)
+        mock.assert_called_once_with(accessor.token_manager, "doc123")
         assert json.loads(result)["documentId"] == "doc123"
 
 
 @pytest.mark.asyncio
 async def test_read_gdoc_not_found(accessor, index):
-    fn = read._registered_ops[0].fn
-    with patch(
-            "mirage.ops.gdrive.read.read.core_read",
-            new_callable=AsyncMock,
-            side_effect=FileNotFoundError("nonexistent.gdoc.json"),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await fn(accessor, _scope("/nonexistent.gdoc.json"), index=index)
+    await index.set_dir("/", [])
+    with pytest.raises(FileNotFoundError):
+        await read(accessor, _scope("/nonexistent.gdoc.json"), index=index)

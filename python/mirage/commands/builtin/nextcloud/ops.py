@@ -15,6 +15,7 @@
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.core.nextcloud.copy import copy as _copy
+from mirage.core.nextcloud.create import create as _create
 from mirage.core.nextcloud.du import du as _du
 from mirage.core.nextcloud.du import du_all as _du_all
 from mirage.core.nextcloud.exists import exists as _exists
@@ -27,6 +28,7 @@ from mirage.core.nextcloud.rm import rm_r as _rm_r
 from mirage.core.nextcloud.rmdir import rmdir as _rmdir
 from mirage.core.nextcloud.stat import stat as _stat
 from mirage.core.nextcloud.stream import read_stream as _read_stream
+from mirage.core.nextcloud.truncate import truncate as _truncate
 from mirage.core.nextcloud.unlink import unlink as _unlink
 from mirage.core.nextcloud.write import write_bytes as _write
 
@@ -46,6 +48,8 @@ OPS = CommandIO(
     rm_r=_rm_r,
     rename=_rename,
     copy=_copy,
+    create=_create,
+    truncate=_truncate,
     find=_find,
     du_total=_du,
     du_all=_du_all,

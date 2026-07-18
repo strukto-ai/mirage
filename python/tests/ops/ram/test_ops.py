@@ -17,19 +17,26 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.mkdir import mkdir
-from mirage.ops.ram.append import append_bytes
-from mirage.ops.ram.create import create
-from mirage.ops.ram.mkdir import mkdir as mkdir_op
-from mirage.ops.ram.read.read import read
-from mirage.ops.ram.readdir import readdir
-from mirage.ops.ram.rename import rename
-from mirage.ops.ram.rmdir import rmdir
-from mirage.ops.ram.stat import stat
-from mirage.ops.ram.truncate import truncate
-from mirage.ops.ram.unlink import unlink
-from mirage.ops.ram.write import write
+from mirage.ops.ram import OPS
 from mirage.resource.ram.store import RAMStore
 from mirage.types import FileType, PathSpec
+
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
+
+
+read = _op("read")
+readdir = _op("readdir")
+stat = _op("stat")
+write = _op("write")
+create = _op("create")
+mkdir_op = _op("mkdir")
+unlink = _op("unlink")
+rmdir = _op("rmdir")
+rename = _op("rename")
+append_bytes = _op("append")
+truncate = _op("truncate")
 
 
 def _scope(path: str) -> PathSpec:

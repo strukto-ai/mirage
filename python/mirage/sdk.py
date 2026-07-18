@@ -21,6 +21,7 @@ from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS, CommandSpec, FlagView, Operand, Option
 from mirage.io.types import IOResult
+from mirage.ops.generic import OpsTable, make_generic_ops
 from mirage.ops.registry import RegisteredOp, op
 from mirage.resource.base import BaseResource
 from mirage.resource.generic import GenericResource
@@ -43,6 +44,7 @@ __all__ = [
     "IndexConfig",
     "NULL_INDEX",
     "Operand",
+    "OpsTable",
     "Option",
     "PathSpec",
     "RegisteredOp",
@@ -52,6 +54,7 @@ __all__ = [
     "known_resources",
     "make_filetype_commands",
     "make_generic_commands",
+    "make_generic_ops",
     "make_resolve_glob",
     "op",
     "register_resource",

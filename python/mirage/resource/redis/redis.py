@@ -92,8 +92,8 @@ class RedisResource(BaseResource):
         self.accessor = RedisAccessor(self._store)
         for fn in REDIS_COMMANDS:
             self.register(fn)
-        for fn in REDIS_OPS:
-            self.register_op(fn)
+        for ro in REDIS_OPS:
+            self.register_op(ro)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

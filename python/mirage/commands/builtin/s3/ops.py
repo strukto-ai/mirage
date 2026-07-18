@@ -15,6 +15,7 @@
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
+from mirage.core.s3.create import create as _create
 from mirage.core.s3.du import du as _du
 from mirage.core.s3.du import du_all as _du_all
 from mirage.core.s3.exists import exists as _exists
@@ -46,6 +47,7 @@ OPS = CommandIO(
     rm_r=_rm_r,
     rename=_rename,
     copy=_copy,
+    create=_create,
     find=_find,
     du_total=_du,
     du_all=_du_all,

@@ -81,8 +81,8 @@ class RAMResource(BaseResource):
         self.accessor = RAMAccessor(self._store)
         for fn in RAM_COMMANDS:
             self.register(fn)
-        for fn in RAM_OPS:
-            self.register_op(fn)
+        for ro in RAM_OPS:
+            self.register_op(ro)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

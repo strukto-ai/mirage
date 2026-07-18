@@ -18,45 +18,55 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gslides import GSlidesAccessor
+from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops import Ops
 from mirage.ops.config import OpsMount
 from mirage.ops.gslides import OPS as GSLIDES_OPS
+from mirage.ops.registry import RegisteredOp
 from mirage.types import MountMode
 
 
 def _make_gslides_ops():
     accessor = GSlidesAccessor(config=None, token_manager=None)
+    index = RAMIndexCacheStore()
     ops_list = []
     for fn in GSLIDES_OPS:
-        if hasattr(fn, "_registered_ops"):
+        if isinstance(fn, RegisteredOp):
+            ops_list.append(fn)
+        elif hasattr(fn, "_registered_ops"):
             ops_list.extend(fn._registered_ops)
     mount = OpsMount(
         prefix="/gslides/",
         resource_type="gslides",
         accessor=accessor,
-        index=RAMIndexCacheStore(),
+        index=index,
         mode=MountMode.READ,
         ops=ops_list,
     )
-    return Ops([mount])
+    return Ops([mount]), index
 
 
 @pytest.mark.asyncio
 async def test_readdir():
-    ops = _make_gslides_ops()
-    with patch(
-            "mirage.ops.gslides.readdir.core_readdir",
-            new_callable=AsyncMock,
-            return_value=["/gslides/owned/deck.gslide.json"],
-    ):
-        result = await ops.readdir("/gslides/owned")
-        assert "/gslides/owned/deck.gslide.json" in result
+    ops, index = _make_gslides_ops()
+    await index.set_dir("/gslides/owned", [(
+        "deck.gslide.json",
+        IndexEntry(
+            id="slide1",
+            name="Deck",
+            resource_type="gslides/slide",
+            remote_time="2026-04-01T00:00:00Z",
+            vfs_name="deck.gslide.json",
+        ),
+    )])
+    result = await ops.readdir("/gslides/owned")
+    assert "/gslides/owned/deck.gslide.json" in result
 
 
 @pytest.mark.asyncio
 async def test_read_presentation():
-    ops = _make_gslides_ops()
+    ops, _ = _make_gslides_ops()
     pres_json = json.dumps({"presentationId": "slide1"}).encode()
     with patch(
             "mirage.ops.gslides.read.core_read",

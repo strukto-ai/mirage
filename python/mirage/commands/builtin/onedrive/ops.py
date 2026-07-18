@@ -14,6 +14,7 @@
 
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.onedrive.copy import copy as _copy
+from mirage.core.onedrive.create import create as _create
 from mirage.core.onedrive.du import du as _du
 from mirage.core.onedrive.du import du_all as _du_all
 from mirage.core.onedrive.exists import exists as _exists
@@ -26,6 +27,7 @@ from mirage.core.onedrive.rm import rm_r as _rm_r
 from mirage.core.onedrive.rmdir import rmdir as _rmdir
 from mirage.core.onedrive.stat import stat as _stat
 from mirage.core.onedrive.stream import read_stream as _read_stream
+from mirage.core.onedrive.truncate import truncate as _truncate
 from mirage.core.onedrive.unlink import unlink as _unlink
 from mirage.core.onedrive.write import write_bytes as _write
 
@@ -45,6 +47,8 @@ OPS = CommandIO(
     rename=_rename,
     copy=_copy,
     dir_copy=_copy,
+    create=_create,
+    truncate=_truncate,
     find=_find,
     du_total=_du,
     du_all=_du_all,

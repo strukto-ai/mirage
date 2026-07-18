@@ -121,6 +121,8 @@ class CommandIO:
     is_dir_name: OperationFn | None = None
     du_total: OperationFn | None = None
     du_all: OperationFn | None = None
+    append: OperationFn | None = None
+    set_attrs: OperationFn | None = None
 
     @property
     def resolve_glob(self) -> OperationFn:

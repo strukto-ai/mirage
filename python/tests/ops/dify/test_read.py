@@ -1,21 +1,32 @@
-import importlib
+from types import SimpleNamespace
 
 import pytest
 
-from mirage.ops.dify.read import read
+from mirage.core.dify import read as core_read
+from mirage.ops.dify import OPS
 
-op_read = importlib.import_module("mirage.ops.dify.read")
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
 
 
-async def read_bytes(accessor, path, index):
-    return path.virtual.encode()
+read = _op("read")
+
+
+async def resolve_file(accessor, path, index):
+    return SimpleNamespace(is_dir=False, entry=SimpleNamespace(id="doc-1"))
+
+
+async def get_segments(config, document_id):
+    return [{"content": "first"}, {"content": "second"}]
 
 
 @pytest.mark.asyncio
 async def test_read_op_delegates_to_core(monkeypatch, dify_accessor,
                                          dify_index, guide_path):
-    monkeypatch.setattr(op_read, "read_bytes", read_bytes)
+    monkeypatch.setattr(core_read, "resolve_path", resolve_file)
+    monkeypatch.setattr(core_read, "get_document_segments", get_segments)
 
     result = await read(dify_accessor, guide_path, index=dify_index)
 
-    assert result == guide_path.virtual.encode()
+    assert result == b"first\nsecond"

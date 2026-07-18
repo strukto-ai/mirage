@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.lancedb.read import read
-from mirage.ops.lancedb.readdir import readdir
-from mirage.ops.lancedb.stat import stat
+from mirage.commands.builtin.lancedb.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat]
+OPS = make_generic_ops("lancedb", _TABLE)

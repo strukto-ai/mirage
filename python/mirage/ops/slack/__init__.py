@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.slack.read import read
-from mirage.ops.slack.readdir import readdir
-from mirage.ops.slack.stat import stat
+from mirage.commands.builtin.slack.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-OPS = [read, readdir, stat]
+OPS = make_generic_ops("slack", _TABLE)

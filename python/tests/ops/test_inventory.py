@@ -17,6 +17,8 @@ import importlib.util
 
 import pytest
 
+from mirage.ops.registry import RegisteredOp
+
 # Golden snapshot of every backend's registered op surface, taken before the
 # ops-layer refactor. Each row is (name, resource, filetype, write); filetype
 # "" means no filetype binding. Any diff here is a registration regression
@@ -346,7 +348,9 @@ def test_ops_inventory(backend):
     mod = importlib.import_module(f"mirage.ops.{backend}")
     actual = set()
     for fn in mod.OPS:
-        for ro in fn._registered_ops:
+        registered = ([fn]
+                      if isinstance(fn, RegisteredOp) else fn._registered_ops)
+        for ro in registered:
             actual.add((ro.name, ro.resource, ro.filetype or "", ro.write))
     expected = {row for row in OPS_INVENTORY[backend] if _available(row[2])}
     assert actual == expected

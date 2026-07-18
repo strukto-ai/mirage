@@ -12,35 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
+from mirage.commands.builtin.disk.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-from mirage.commands.optional import try_load_command
-from mirage.ops.disk.append import append_bytes
-from mirage.ops.disk.create import create
-from mirage.ops.disk.mkdir import mkdir
-from mirage.ops.disk.read.read import read
-from mirage.ops.disk.readdir import readdir
-from mirage.ops.disk.rename import rename
-from mirage.ops.disk.rmdir import rmdir
-from mirage.ops.disk.set_attrs import set_attrs
-from mirage.ops.disk.stat import stat
-from mirage.ops.disk.truncate import truncate
-from mirage.ops.disk.unlink import unlink
-from mirage.ops.disk.write import write as write_bytes
-
-_logger = logging.getLogger(__name__)
-
-read_feather = try_load_command("mirage.ops.disk.read.read_feather",
-                                "read_feather", "parquet")
-read_hdf5 = try_load_command("mirage.ops.disk.read.read_hdf5", "read_hdf5",
-                             "hdf5")
-read_orc = try_load_command("mirage.ops.disk.read.read_orc", "read_orc",
-                            "parquet")
-read_parquet = try_load_command("mirage.ops.disk.read.read_parquet",
-                                "read_parquet", "parquet")
-
-OPS = [
-    c for c in (append_bytes, create, mkdir, read, read_feather, read_hdf5,
-                read_orc, read_parquet, readdir, rename, rmdir, set_attrs,
-                stat, truncate, unlink, write_bytes) if c is not None
-]
+OPS = make_generic_ops("disk", _TABLE, filetype_read=True, mkdir_parents=True)

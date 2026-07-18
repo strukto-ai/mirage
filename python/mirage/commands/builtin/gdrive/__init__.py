@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.gdocs.gws_docs_documents_batchUpdate import \
     gws_docs_documents_batchUpdate
@@ -22,8 +20,8 @@ from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
 from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
 from mirage.commands.builtin.gdrive._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands)
+from mirage.commands.builtin.gdrive.ops import OPS as _GDRIVE_CMD_OPS
+from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
 from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
 from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_batchUpdate import \
@@ -35,25 +33,7 @@ from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import
     gws_slides_presentations_batchUpdate  # noqa: E501
 from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
     gws_slides_presentations_create  # noqa: E501
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.gdrive.read import read as _read
-from mirage.core.gdrive.readdir import readdir as _readdir
-from mirage.core.gdrive.stat import stat as _stat
-
-# Drive holds real byte files (read via the generic factory) but is written
-# only through the bespoke gws_* Workspace commands, so the generic
-# byte-mutation commands (cp/mv/tee/...) are intentionally absent.
-# gdrive's native read_stream is a
-# coroutine returning bytes-or-iterator (Workspace-aware), so the stream op is
-# synthesized from the whole-file read instead.
-_GDRIVE_CMD_OPS = CommandIO(
-    readdir=_readdir,
-    read_bytes=_read,
-    read_stream=partial(stream_from_bytes, _read),
-    stat=_stat,
-    is_mounted=lambda a: True,
-    local=False,
-)
 
 COMMANDS = [
     *make_filetype_commands("gdrive",

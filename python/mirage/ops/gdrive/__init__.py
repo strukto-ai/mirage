@@ -12,25 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
+from mirage.commands.builtin.gdrive.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-from mirage.commands.optional import try_load_command
-from mirage.ops.gdrive.read.read import read
-from mirage.ops.gdrive.readdir import readdir
-from mirage.ops.gdrive.stat import stat
-
-_logger = logging.getLogger(__name__)
-
-read_feather = try_load_command("mirage.ops.gdrive.read.read_feather",
-                                "read_feather", "parquet")
-read_hdf5 = try_load_command("mirage.ops.gdrive.read.read_hdf5", "read_hdf5",
-                             "hdf5")
-read_orc = try_load_command("mirage.ops.gdrive.read.read_orc", "read_orc",
-                            "parquet")
-read_parquet = try_load_command("mirage.ops.gdrive.read.read_parquet",
-                                "read_parquet", "parquet")
-
-OPS = [
-    c for c in (read, read_feather, read_hdf5, read_orc, read_parquet, readdir,
-                stat) if c is not None
-]
+OPS = make_generic_ops("gdrive", _TABLE, filetype_read=True)

@@ -12,14 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.ops.gslides.readdir import readdir
+from mirage.cache.index.config import IndexEntry
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.ops.gslides import OPS
+from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _op(name: str):
+    for o in OPS:
+        registered = [o] if isinstance(o, RegisteredOp) else o._registered_ops
+        for ro in registered:
+            if ro.name == name and ro.filetype is None:
+                return ro.fn
+    raise KeyError(name)
+
+
+readdir = _op("readdir")
 
 
 def _scope(path: str, prefix: str = "/gslides") -> PathSpec:
@@ -33,16 +46,26 @@ def accessor():
     return GSlidesAccessor(config=None, token_manager=None)
 
 
+@pytest.fixture
+def index():
+    return RAMIndexCacheStore()
+
+
 @pytest.mark.asyncio
-async def test_readdir_calls_core(accessor):
-    fn = readdir._registered_ops[0].fn
-    with patch(
-            "mirage.ops.gslides.readdir.core_readdir",
-            new_callable=AsyncMock,
-            return_value=["/gslides/owned/deck.gslide.json"],
-    ) as mock:
-        scope = _scope("/gslides/owned")
-        result = await fn(accessor, scope, index=None)
-        mock.assert_called_once_with(
-            accessor, _scope("/gslides/owned", prefix="/gslides"), None)
-        assert result == ["/gslides/owned/deck.gslide.json"]
+async def test_readdir_root(accessor, index):
+    result = await readdir(accessor, _scope("/gslides"), index=index)
+    assert result == ["/gslides/owned", "/gslides/shared"]
+
+
+@pytest.mark.asyncio
+async def test_readdir_owned_serves_cached_listing(accessor, index):
+    entry = IndexEntry(
+        id="slide1",
+        name="Deck",
+        resource_type="gslides/slide",
+        remote_time="2026-04-01T00:00:00Z",
+        vfs_name="deck.gslide.json",
+    )
+    await index.set_dir("/gslides/owned", [("deck.gslide.json", entry)])
+    result = await readdir(accessor, _scope("/gslides/owned"), index=index)
+    assert "/gslides/owned/deck.gslide.json" in result

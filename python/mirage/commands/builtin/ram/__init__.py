@@ -13,46 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
-from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands)
-from mirage.core.ram.constants import SCOPE_ERROR
-from mirage.core.ram.copy import copy as _copy
-from mirage.core.ram.du import du as _du
-from mirage.core.ram.du import du_all as _du_all
-from mirage.core.ram.exists import exists as _exists
-from mirage.core.ram.find import find as _find
-from mirage.core.ram.mkdir import mkdir as _mkdir
-from mirage.core.ram.read import read as _read
+from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.ram.ops import OPS as _RAM_CMD_OPS
 from mirage.core.ram.read import read_bytes as _ft_read
-from mirage.core.ram.readdir import readdir as _readdir
-from mirage.core.ram.rename import rename as _rename
-from mirage.core.ram.rm import rm_r as _rm_r
-from mirage.core.ram.rmdir import rmdir as _rmdir
-from mirage.core.ram.stat import stat as _stat
-from mirage.core.ram.stream import read_stream as _read_stream
-from mirage.core.ram.unlink import unlink as _unlink
-from mirage.core.ram.write import write_bytes as _write
-
-_RAM_CMD_OPS = CommandIO(
-    readdir=_readdir,
-    read_bytes=_read,
-    read_stream=_read_stream,
-    stat=_stat,
-    is_mounted=lambda a: a.store is not None,
-    local=True,
-    max_glob_matches=SCOPE_ERROR,
-    write=_write,
-    exists=_exists,
-    mkdir=_mkdir,
-    unlink=_unlink,
-    rmdir=_rmdir,
-    rm_r=_rm_r,
-    rename=_rename,
-    copy=_copy,
-    find=_find,
-    du_total=_du,
-    du_all=_du_all,
-)
 
 COMMANDS = [
     *make_filetype_commands("ram", _RAM_CMD_OPS.resolve_glob, _ft_read),

@@ -75,8 +75,8 @@ class DiskResource(BaseResource):
         self.accessor = DiskAccessor(self.root)
         for fn in DISK_COMMANDS:
             self.register(fn)
-        for fn in DISK_OPS:
-            self.register_op(fn)
+        for ro in DISK_OPS:
+            self.register_op(ro)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

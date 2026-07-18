@@ -1,15 +1,18 @@
-from mirage.ops.nextcloud.create import create
-from mirage.ops.nextcloud.mkdir import mkdir
-from mirage.ops.nextcloud.read import read
-from mirage.ops.nextcloud.readdir import readdir
-from mirage.ops.nextcloud.rename import rename
-from mirage.ops.nextcloud.rmdir import rmdir
-from mirage.ops.nextcloud.stat import stat
-from mirage.ops.nextcloud.truncate import truncate
-from mirage.ops.nextcloud.unlink import unlink
-from mirage.ops.nextcloud.write import write as write_bytes
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-OPS = [
-    create, mkdir, read, readdir, rename, rmdir, stat, truncate, unlink,
-    write_bytes
-]
+from mirage.commands.builtin.nextcloud.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
+
+OPS = make_generic_ops("nextcloud", _TABLE)

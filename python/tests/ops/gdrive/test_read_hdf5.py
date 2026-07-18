@@ -12,15 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import tempfile
 from unittest.mock import AsyncMock, patch
 
+import pandas as pd
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.ops.gdrive.read.read_hdf5 import read_hdf5
+from mirage.core.filetype.hdf5 import cat as hdf5_cat
+from mirage.ops.gdrive import OPS
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+read_hdf5 = next(o.fn for o in OPS
+                 if o.name == "read" and o.filetype == ".hdf5")
+
+
+def _make_hdf5() -> bytes:
+    df = pd.DataFrame({"name": ["alice", "bob"], "score": [1, 2]})
+    with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as f:
+        df.to_hdf(f.name, key="data", mode="w")
+        tmp = f.name
+    with open(tmp, "rb") as fh:
+        return fh.read()
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -40,18 +56,24 @@ def index():
 
 
 @pytest.mark.asyncio
-async def test_read_hdf5_calls_core(accessor, index):
-    fn = read_hdf5._registered_ops[0].fn
+async def test_read_hdf5_renders_through_cat(accessor, index):
+    raw = _make_hdf5()
+    await index.put(
+        "/data/file.hdf5",
+        IndexEntry(
+            id="h1",
+            name="file",
+            resource_type="gdrive/file",
+            remote_time="2026-04-01T00:00:00Z",
+            vfs_name="file.hdf5",
+        ))
     with patch(
-            "mirage.ops.gdrive.read.read_hdf5.core_read",
+            "mirage.core.gdrive.read.download_file",
             new_callable=AsyncMock,
-            return_value=b"raw-hdf5",
-    ) as mock_read, patch(
-            "mirage.ops.gdrive.read.read_hdf5.hdf5_cat",
-            return_value=b"csv-output",
-    ) as mock_cat:
-        result = await fn(accessor, _scope("/data/file.hdf5"), index=index)
-        mock_read.assert_called_once_with(accessor, _scope("/data/file.hdf5"),
-                                          index)
-        mock_cat.assert_called_once_with(b"raw-hdf5")
-        assert result == b"csv-output"
+            return_value=raw,
+    ) as mock:
+        result = await read_hdf5(accessor,
+                                 _scope("/data/file.hdf5"),
+                                 index=index)
+        mock.assert_called_once_with(accessor.token_manager, "h1")
+        assert result == hdf5_cat(raw)

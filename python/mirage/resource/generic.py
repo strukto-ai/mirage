@@ -19,6 +19,8 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
+from mirage.ops.generic import make_generic_ops
+from mirage.ops.registry import RegisteredOp
 from mirage.resource.base import BaseResource
 from mirage.types import PathSpec
 
@@ -49,8 +51,14 @@ class GenericResource(BaseResource):
             replaces (pass the replacements via ``commands``).
         commands (list[Callable] | None): extra ``@command``-decorated
             functions (bespoke verbs or override replacements).
-        ops (list[Callable] | None): ``@op``-decorated functions for
-            VFS/FUSE dispatch.
+        ops (list[Callable] | None): ``@op``-decorated functions or
+            ``RegisteredOp`` instances for VFS/FUSE dispatch, layered
+            over (and shadowing same-named entries of) the auto-derived
+            set.
+        auto_ops (bool): derive the VFS/FUSE op set from the table via
+            ``make_generic_ops`` (read/readdir/stat plus whatever
+            mutations the table carries); disable to register only
+            explicit ``ops``.
         provision_overrides (dict[str, Callable] | None): per-command
             cost estimators replacing the catalog default.
         caches_reads (bool): serve repeat reads from the file cache;
@@ -70,6 +78,7 @@ class GenericResource(BaseResource):
         commands: list[Callable[..., Any]] | None = None,
         ops: list[Callable[..., Any]] | None = None,
         provision_overrides: dict[str, Callable[..., Any]] | None = None,
+        auto_ops: bool = True,
         caches_reads: bool = False,
         index: IndexConfig | None = None,
     ) -> None:
@@ -91,8 +100,18 @@ class GenericResource(BaseResource):
             self.register(fn)
         for fn in commands or []:
             self.register(fn)
+        user_ops: list[RegisteredOp] = []
         for fn in ops or []:
-            self.register_op(fn)
+            if isinstance(fn, RegisteredOp):
+                user_ops.append(fn)
+            else:
+                user_ops.extend(getattr(fn, "_registered_ops"))
+        if auto_ops:
+            shadowed = {ro.name for ro in user_ops if ro.filetype is None}
+            for ro in make_generic_ops(name, io, overrides=shadowed):
+                self.register_op(ro)
+        for ro in user_ops:
+            self.register_op(ro)
 
     async def resolve_glob(self,
                            paths: list[Any],

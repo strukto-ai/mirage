@@ -12,15 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import io
 from unittest.mock import AsyncMock, patch
 
+import pyarrow as pa
+import pyarrow.orc as orc
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.ops.gdrive.read.read_orc import read_orc
+from mirage.core.filetype.orc import cat as orc_cat
+from mirage.ops.gdrive import OPS
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+read_orc = next(o.fn for o in OPS if o.name == "read" and o.filetype == ".orc")
+
+
+def _make_orc() -> bytes:
+    table = pa.table({"name": ["alice", "bob"], "score": [1, 2]})
+    buf = io.BytesIO()
+    orc.write_table(table, buf)
+    return buf.getvalue()
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -40,18 +54,24 @@ def index():
 
 
 @pytest.mark.asyncio
-async def test_read_orc_calls_core(accessor, index):
-    fn = read_orc._registered_ops[0].fn
+async def test_read_orc_renders_through_cat(accessor, index):
+    raw = _make_orc()
+    await index.put(
+        "/data/file.orc",
+        IndexEntry(
+            id="o1",
+            name="file",
+            resource_type="gdrive/file",
+            remote_time="2026-04-01T00:00:00Z",
+            vfs_name="file.orc",
+        ))
     with patch(
-            "mirage.ops.gdrive.read.read_orc.core_read",
+            "mirage.core.gdrive.read.download_file",
             new_callable=AsyncMock,
-            return_value=b"raw-orc",
-    ) as mock_read, patch(
-            "mirage.ops.gdrive.read.read_orc.orc_cat",
-            return_value=b"csv-output",
-    ) as mock_cat:
-        result = await fn(accessor, _scope("/data/file.orc"), index=index)
-        mock_read.assert_called_once_with(accessor, _scope("/data/file.orc"),
-                                          index)
-        mock_cat.assert_called_once_with(b"raw-orc")
-        assert result == b"csv-output"
+            return_value=raw,
+    ) as mock:
+        result = await read_orc(accessor,
+                                _scope("/data/file.orc"),
+                                index=index)
+        mock.assert_called_once_with(accessor.token_manager, "o1")
+        assert result == orc_cat(raw)

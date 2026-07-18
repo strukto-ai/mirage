@@ -12,46 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.disk.ops import OPS as _DISK_CMD_OPS
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
-from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands)
-from mirage.core.disk.constants import SCOPE_ERROR
-from mirage.core.disk.copy import copy as _copy
-from mirage.core.disk.du import du as _du
-from mirage.core.disk.du import du_all as _du_all
-from mirage.core.disk.exists import exists as _exists
-from mirage.core.disk.find import find as _find
-from mirage.core.disk.mkdir import mkdir as _mkdir
+from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.core.disk.read import read_bytes as _read
-from mirage.core.disk.readdir import readdir as _readdir
-from mirage.core.disk.rename import rename as _rename
-from mirage.core.disk.rm import rm_r as _rm_r
-from mirage.core.disk.rmdir import rmdir as _rmdir
-from mirage.core.disk.stat import stat as _stat
-from mirage.core.disk.stream import read_stream as _read_stream
-from mirage.core.disk.unlink import unlink as _unlink
-from mirage.core.disk.write import write_bytes as _write
-
-_DISK_CMD_OPS = CommandIO(
-    readdir=_readdir,
-    read_bytes=_read,
-    read_stream=_read_stream,
-    stat=_stat,
-    is_mounted=lambda a: a.root is not None,
-    local=True,
-    max_glob_matches=SCOPE_ERROR,
-    write=_write,
-    exists=_exists,
-    mkdir=_mkdir,
-    unlink=_unlink,
-    rmdir=_rmdir,
-    rm_r=_rm_r,
-    rename=_rename,
-    copy=_copy,
-    find=_find,
-    du_total=_du,
-    du_all=_du_all,
-)
 
 COMMANDS = [
     *make_filetype_commands("disk", _DISK_CMD_OPS.resolve_glob, _read),

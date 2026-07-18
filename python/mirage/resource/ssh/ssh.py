@@ -80,8 +80,8 @@ class SSHResource(BaseResource):
         self.accessor = SSHAccessor(self.config)
         for fn in SSH_COMMANDS:
             self.register(fn)
-        for fn in SSH_OPS:
-            self.register_op(fn)
+        for ro in SSH_OPS:
+            self.register_op(ro)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, self._index)

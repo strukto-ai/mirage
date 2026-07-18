@@ -203,10 +203,7 @@ class TestFiletypeOps:
 
     @pytest.mark.asyncio
     async def test_registered_for_s3(self):
-        s3_ops = []
-        for fn in S3_VFS_OPS:
-            for ro in fn._registered_ops:
-                s3_ops.append(ro)
+        s3_ops = list(S3_VFS_OPS)
         mount = OpsMount(
             prefix="/s3/",
             resource_type="s3",

@@ -12,25 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.optional import try_load_command
-from mirage.ops.hf_buckets.create import create
-from mirage.ops.hf_buckets.mkdir import mkdir
-from mirage.ops.hf_buckets.read.read import read
-from mirage.ops.hf_buckets.readdir import readdir
-from mirage.ops.hf_buckets.stat import stat
-from mirage.ops.hf_buckets.unlink import unlink
-from mirage.ops.hf_buckets.write import write
+from mirage.accessor._hf import HF_RESOURCES
+from mirage.commands.builtin.hf_buckets.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-read_feather = try_load_command("mirage.ops.hf_buckets.read.read_feather",
-                                "read_feather", "parquet")
-read_hdf5 = try_load_command("mirage.ops.hf_buckets.read.read_hdf5",
-                             "read_hdf5", "hdf5")
-read_orc = try_load_command("mirage.ops.hf_buckets.read.read_orc", "read_orc",
-                            "parquet")
-read_parquet = try_load_command("mirage.ops.hf_buckets.read.read_parquet",
-                                "read_parquet", "parquet")
-
-OPS = [
-    c for c in (read, read_feather, read_hdf5, read_orc, read_parquet, readdir,
-                stat, write, create, unlink, mkdir) if c is not None
-]
+OPS = make_generic_ops(HF_RESOURCES, _TABLE, filetype_read=True)

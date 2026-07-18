@@ -45,7 +45,9 @@ def make_jira_resource(config) -> GenericResource:
 
 Mount it like any builtin: `Workspace({"/jira/": make_jira_resource(cfg)})`.
 
-The escape hatches mirror what builtins use: optional `CommandIO` fields unlock more surface (`write` enables the byte-mutation family; `find`/`du_total`/`du_all` become native fast paths; `is_dir_name` hints virtual directories), `overrides=` suppresses a generic command you replace, `commands=[...]` adds bespoke `@command` verbs, and `ops=[...]` registers `@op` handlers for FUSE mounts.
+The escape hatches mirror what builtins use: optional `CommandIO` fields unlock more surface (`write` enables the byte-mutation family; `find`/`du_total`/`du_all` become native fast paths; `is_dir_name` hints virtual directories), `overrides=` suppresses a generic command you replace, and `commands=[...]` adds bespoke `@command` verbs.
+
+VFS/FUSE ops are derived from the same table automatically (`make_generic_ops` under the hood): read/readdir/stat plus whatever mutations the table carries. Pass `ops=[...]` only for irregular handlers (they shadow same-named derived ops), or `auto_ops=False` to opt out.
 
 To make the backend constructible by name (workspace YAML, snapshots, the daemon), register it:
 

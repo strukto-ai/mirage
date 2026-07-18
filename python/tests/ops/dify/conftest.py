@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
@@ -23,7 +23,3 @@ def guide_path() -> PathSpec:
     return PathSpec.from_str_path(
         "/knowledge/guides/quickstart",
         mount_key("/knowledge/guides/quickstart", "/knowledge"))
-
-
-def sample_stat() -> FileStat:
-    return FileStat(name="quickstart", type=FileType.TEXT, size=12)

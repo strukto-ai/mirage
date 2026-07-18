@@ -12,15 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.ops.gdrive.readdir import readdir
+from mirage.ops.gdrive import OPS
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _op(name: str):
+    return next(o.fn for o in OPS if o.name == name and o.filetype is None)
+
+
+readdir = _op("readdir")
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -40,13 +46,14 @@ def index():
 
 
 @pytest.mark.asyncio
-async def test_readdir_calls_core(accessor, index):
-    fn = readdir._registered_ops[0].fn
-    with patch(
-            "mirage.ops.gdrive.readdir.core_readdir",
-            new_callable=AsyncMock,
-            return_value=["/docs/readme.txt"],
-    ) as mock:
-        result = await fn(accessor, _scope("/docs"), index=index)
-        mock.assert_called_once_with(accessor, _scope("/docs"), index)
-        assert result == ["/docs/readme.txt"]
+async def test_readdir_serves_cached_listing(accessor, index):
+    entry = IndexEntry(
+        id="file123",
+        name="readme",
+        resource_type="gdrive/file",
+        remote_time="2026-04-01T00:00:00Z",
+        vfs_name="readme.txt",
+    )
+    await index.set_dir("/docs", [("readme.txt", entry)])
+    result = await readdir(accessor, _scope("/docs"), index=index)
+    assert result == ["/docs/readme.txt"]

@@ -12,29 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.optional import try_load_command
-from mirage.ops.sharepoint.create import create
-from mirage.ops.sharepoint.mkdir import mkdir
-from mirage.ops.sharepoint.read.read import read
-from mirage.ops.sharepoint.readdir import readdir
-from mirage.ops.sharepoint.rename import rename
-from mirage.ops.sharepoint.rmdir import rmdir
-from mirage.ops.sharepoint.stat import stat
-from mirage.ops.sharepoint.truncate import truncate
-from mirage.ops.sharepoint.unlink import unlink
-from mirage.ops.sharepoint.write import write as write_bytes
+from mirage.commands.builtin.sharepoint.ops import OPS as _TABLE
+from mirage.ops.generic import make_generic_ops
 
-read_feather = try_load_command("mirage.ops.sharepoint.read.read_feather",
-                                "read_feather", "parquet")
-read_hdf5 = try_load_command("mirage.ops.sharepoint.read.read_hdf5",
-                             "read_hdf5", "hdf5")
-read_orc = try_load_command("mirage.ops.sharepoint.read.read_orc", "read_orc",
-                            "parquet")
-read_parquet = try_load_command("mirage.ops.sharepoint.read.read_parquet",
-                                "read_parquet", "parquet")
-
-OPS = [
-    c for c in (create, mkdir, read, read_feather, read_hdf5, read_orc,
-                read_parquet, readdir, rename, rmdir, stat, truncate, unlink,
-                write_bytes) if c is not None
-]
+OPS = make_generic_ops("sharepoint", _TABLE, filetype_read=True)

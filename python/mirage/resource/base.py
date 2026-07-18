@@ -96,6 +96,9 @@ class BaseResource:
             f"'{type(self).__name__}' has no attribute '{name}'")
 
     def register_op(self, fn: Any) -> None:
+        if isinstance(fn, RegisteredOp):
+            self._ops_list.append(fn)
+            return
         for ro in fn._registered_ops:
             self._ops_list.append(ro)
 

@@ -186,3 +186,30 @@ async def test_workspace_execution_end_to_end():
 
     result = await ws.execute("wiki_hello")
     assert await result.stdout_str() == "hello custom verb\n"
+
+
+def test_auto_ops_derived_from_table():
+    resource = make_resource()
+    names = {(ro.name, ro.write) for ro in resource.ops_list()}
+    assert names == {("read", False), ("readdir", False), ("stat", False)}
+
+
+def test_auto_ops_disabled():
+    resource = make_resource(auto_ops=False)
+    assert resource.ops_list() == []
+
+
+def test_user_ops_shadow_derived():
+    from mirage.ops.registry import RegisteredOp
+
+    async def my_read(accessor, path, *, index=None, **kwargs):
+        return b"custom"
+
+    custom = RegisteredOp(name="read",
+                          resource="wiki",
+                          filetype=None,
+                          fn=my_read)
+    resource = make_resource(ops=[custom])
+    reads = [ro for ro in resource.ops_list() if ro.name == "read"]
+    assert len(reads) == 1
+    assert reads[0].fn is my_read
