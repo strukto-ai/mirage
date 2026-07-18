@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# CLI config battery. Part A relocates every daemon path setting through
-# `mirage config set` (pid_file, version_root, snapshot_root, port + url),
-# runs the real workspace workload (create, execute, commit, log, snapshot,
-# readback), and asserts both that everything still works AND that the
-# artifacts physically land in the configured locations, with nothing leaked
-# to the defaults. It then moves version_root a second time and restarts to
-# prove settings are re-read at startup (Docker data-root semantics). Part B
-# covers the command surface: 0600 perms, unknown-key rejection with a clean
-# message, a typo key making the daemon refuse to start until repaired with
-# `config unset`, malformed TOML failing cleanly, resolved-view origins with
-# auth_token masked, and env-beats-config proven by where bytes land.
+# CLI config battery. Part A proves MIRAGE_HOME is the single data root
+# (Docker data-root semantics): with the home relocated, the real
+# workspace workload (create, execute, commit, log, snapshot, readback)
+# runs fine and every artifact (pid file, git repos, snapshots, config,
+# state) physically lands under it, with snapshots outside it refused.
+# It then moves the daemon port through `mirage config set` and restarts
+# to prove settings are re-read at startup, and proves env beats config
+# via allowed_hosts. Part B covers the command surface: 0600 perms,
+# unknown-key rejection with a clean message, a typo key making the
+# daemon refuse to start until repaired with `config unset`, malformed
+# TOML failing cleanly, resolved-view origins with auth_token masked,
+# and allowed_hosts/jwt key handling.
 #
 # Usage: cli_config.sh "<py-cli>" "<ts-cli>"
 set -uo pipefail
@@ -20,12 +21,12 @@ fail=0
 
 probe() {
   local cli="$1" lang="$2" port="$3"
+  local port2=$((port + 1))
   local home work
   home="$(mktemp -d "/tmp/cli-config-$lang-home.XXXXXX")"
   work="$(mktemp -d "/tmp/cli-config-$lang-work.XXXXXX")"
   export MIRAGE_HOME="$home"
-  unset MIRAGE_PID_FILE MIRAGE_VERSION_ROOT MIRAGE_SNAPSHOT_ROOT \
-    MIRAGE_DAEMON_PORT MIRAGE_DAEMON_URL MIRAGE_ALLOWED_HOSTS \
+  unset MIRAGE_DAEMON_PORT MIRAGE_DAEMON_URL MIRAGE_ALLOWED_HOSTS \
     MIRAGE_AUTH_MODE 2>/dev/null || true
 
   local yaml="$work/ram.yaml"
@@ -36,10 +37,7 @@ mounts:
     resource: ram
 YML
 
-  # --- Part A: relocate everything, then run the real workload ---
-  $cli config set pid_file "$work/custom.pid" >/dev/null </dev/null
-  $cli config set version_root "$work/vroot" >/dev/null </dev/null
-  $cli config set snapshot_root "$work/sroot" >/dev/null </dev/null
+  # --- Part A: the home is the single root; run the real workload ---
   $cli config set port "$port" >/dev/null </dev/null
   $cli config set url "http://127.0.0.1:$port" >/dev/null </dev/null
   echo "file_perms=$(stat -c '%a' "$home/config.toml" 2>/dev/null || stat -f '%Lp' "$home/config.toml")"
@@ -48,50 +46,49 @@ YML
   $cli workspace create "$yaml" --id cc >/dev/null </dev/null
   local health
   health="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/v1/health")"
-  echo "relocate_health=$([ "$health" == "200" ] && echo ok || echo "$health")"
-  echo "relocate_pid_custom=$([ -s "$work/custom.pid" ] && echo exists || echo absent)"
-  echo "relocate_pid_default=$([ -e "$home/daemon.pid" ] && echo exists || echo absent)"
+  echo "home_health=$([ "$health" == "200" ] && echo ok || echo "$health")"
+  echo "home_pid=$([ -s "$home/daemon.pid" ] && echo exists || echo absent)"
 
   $cli execute -w cc -c 'echo hello > /data/f.txt' </dev/null >/dev/null
-  echo "relocate_readback=$($cli execute -w cc -c 'cat /data/f.txt' </dev/null | tail -c 200 | grep -o hello | head -1)"
+  echo "home_readback=$($cli execute -w cc -c 'cat /data/f.txt' </dev/null | tail -c 200 | grep -o hello | head -1)"
   $cli workspace commit cc -m v1 >/dev/null </dev/null
-  echo "relocate_repo_custom=$([ -d "$work/vroot/cc/objects" ] && echo exists || echo absent)"
-  echo "relocate_repo_default=$([ -d "$home/repos" ] && echo exists || echo absent)"
-  echo "relocate_log=$($cli workspace log cc </dev/null | grep -o v1 | head -1)"
+  echo "home_repo=$([ -d "$home/repos/cc/objects" ] && echo exists || echo absent)"
+  echo "home_log=$($cli workspace log cc </dev/null | grep -o v1 | head -1)"
 
-  # Snapshots must land inside snapshot_root: a target outside it is refused,
-  # a target under the relocated root is written there.
+  # Snapshots must land inside $home/snapshots: a target outside it is
+  # refused, a target under it is written there.
   if $cli workspace snapshot cc "$work/outside.tar" >/dev/null 2>&1 </dev/null; then
     echo "snapshot_outside_root=allowed"
   else
     echo "snapshot_outside_root=denied"
   fi
-  $cli workspace snapshot cc "$work/sroot/out.tar" >/dev/null </dev/null
-  echo "relocate_snapshot_custom=$([ -s "$work/sroot/out.tar" ] && echo exists || echo absent)"
-  echo "relocate_snapshot_default=$([ -d "$home/snapshots" ] && echo exists || echo absent)"
+  mkdir -p "$home/snapshots"
+  $cli workspace snapshot cc "$home/snapshots/out.tar" >/dev/null </dev/null
+  echo "home_snapshot=$([ -s "$home/snapshots/out.tar" ] && echo exists || echo absent)"
 
-  # --- settings are re-read on restart: move version_root again ---
+  # --- settings are re-read on restart: move the port ---
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
-  $cli config set version_root "$work/vroot2" >/dev/null </dev/null
+  $cli config set port "$port2" >/dev/null </dev/null
+  $cli config set url "http://127.0.0.1:$port2" >/dev/null </dev/null
   $cli workspace create "$yaml" --id cc2 >/dev/null </dev/null
-  $cli workspace commit cc2 -m v2 >/dev/null </dev/null
-  echo "remove_new_repo=$([ -d "$work/vroot2/cc2/objects" ] && echo exists || echo absent)"
-  echo "remove_old_untouched=$([ -d "$work/vroot/cc/objects" ] && echo exists || echo absent)"
-  echo "remove_new_not_in_old=$([ -d "$work/vroot/cc2" ] && echo leaked || echo clean)"
+  health="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port2/v1/health")"
+  echo "reread_health=$([ "$health" == "200" ] && echo ok || echo "$health")"
 
-  # --- env beats config, proven by where the repo lands ---
+  # --- env beats config, proven by the Host-header allowlist ---
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
-  MIRAGE_VERSION_ROOT="$work/envroot" $cli workspace create "$yaml" --id cc3 >/dev/null </dev/null
-  MIRAGE_VERSION_ROOT="$work/envroot" $cli workspace commit cc3 -m v3 >/dev/null </dev/null
-  echo "env_beats_config_effective=$([ -d "$work/envroot/cc3/objects" ] && echo yes || echo no)"
-  echo "env_config_dir_untouched=$([ -d "$work/vroot2/cc3" ] && echo leaked || echo clean)"
+  $cli config set allowed_hosts '127.0.0.1,localhost,::1' >/dev/null </dev/null
+  MIRAGE_ALLOWED_HOSTS='*' $cli workspace create "$yaml" --id cc3 >/dev/null </dev/null
+  local env_code
+  env_code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' "http://127.0.0.1:$port2/v1/health")"
+  echo "env_beats_config=$([ "$env_code" == "200" ] && echo open || echo "$env_code")"
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
+  $cli config unset allowed_hosts >/dev/null </dev/null
 
   # --- Part B: command surface ---
-  echo "set_get=$($cli config get version_root </dev/null | tr -d '"{}: ' | grep -o vroot2 | head -1)"
+  echo "set_get=$($cli config get port </dev/null | tr -d '"{}: ' | grep -q "$port2" && echo moved || echo missing)"
   $cli config unset socket >/dev/null 2>&1 </dev/null
   echo "unset_unknown_ok=$($cli config unset typo_free >/dev/null 2>&1 </dev/null && echo exit0 || echo exit$?)"
   $cli config set MIRAGE_HOME /x >/dev/null 2>/tmp/cli-config-$lang-err.txt </dev/null
@@ -123,28 +120,29 @@ YML
 
   # The malformed file was removed wholesale; restore port + url so the
   # remaining daemon probes stay on this language's port.
-  $cli config set port "$port" >/dev/null </dev/null
-  $cli config set url "http://127.0.0.1:$port" >/dev/null </dev/null
+  $cli config set port "$port2" >/dev/null </dev/null
+  $cli config set url "http://127.0.0.1:$port2" >/dev/null </dev/null
 
   # Resolved view: origins for env / file / default, auth_token masked.
-  $cli config set version_root /file/repos >/dev/null </dev/null
+  $cli config set jwt_issuer https://file-issuer >/dev/null </dev/null
   local resolved
-  resolved="$(MIRAGE_SNAPSHOT_ROOT=/env/snaps MIRAGE_TOKEN=supersecret $cli config list --resolved </dev/null)"
-  echo "resolved_env_origin=$(printf '%s' "$resolved" | grep -o 'env MIRAGE_SNAPSHOT_ROOT' | head -1)"
-  echo "resolved_file_value=$(printf '%s' "$resolved" | grep -o '/file/repos' | head -1)"
+  resolved="$(MIRAGE_IDLE_GRACE_SECONDS=77 MIRAGE_TOKEN=supersecret $cli config list --resolved </dev/null)"
+  echo "resolved_env_origin=$(printf '%s' "$resolved" | grep -o 'env MIRAGE_IDLE_GRACE_SECONDS' | head -1)"
+  echo "resolved_file_value=$(printf '%s' "$resolved" | grep -o 'file-issuer' | head -1)"
   echo "resolved_default_origin=$(printf '%s' "$resolved" | grep -c 'default' | awk '{print ($1>0) ? "present" : "missing"}')"
   echo "resolved_token_masked=$(printf '%s' "$resolved" | grep -o supersecret | head -1 | sed 's/supersecret/LEAKED/'; printf '%s' "$resolved" | grep -o '\*\*\*' | head -1)"
+  $cli config unset jwt_issuer >/dev/null </dev/null
 
   # allowed_hosts from config takes effect on the daemon (needs restart).
   $cli config set allowed_hosts '*' >/dev/null </dev/null
   $cli workspace create "$yaml" --id cc6 >/dev/null </dev/null
   local open_code deny_code
-  open_code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' "http://127.0.0.1:$port/v1/health")"
+  open_code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' "http://127.0.0.1:$port2/v1/health")"
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
   $cli config unset allowed_hosts >/dev/null </dev/null
   $cli workspace create "$yaml" --id cc7 >/dev/null </dev/null
-  deny_code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' "http://127.0.0.1:$port/v1/health")"
+  deny_code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' "http://127.0.0.1:$port2/v1/health")"
   echo "allowed_hosts_wildcard=$([ "$open_code" == "200" ] && echo open || echo "$open_code")"
   echo "allowed_hosts_default_denies=$([ "$deny_code" != "200" ] && echo denied || echo open)"
 
@@ -192,22 +190,16 @@ expect() {
   fi
 }
 expect "file_perms" "600"
-expect "relocate_health" "ok"
-expect "relocate_pid_custom" "exists"
-expect "relocate_pid_default" "absent"
-expect "relocate_readback" "hello"
-expect "relocate_repo_custom" "exists"
-expect "relocate_repo_default" "absent"
-expect "relocate_log" "v1"
+expect "home_health" "ok"
+expect "home_pid" "exists"
+expect "home_readback" "hello"
+expect "home_repo" "exists"
+expect "home_log" "v1"
 expect "snapshot_outside_root" "denied"
-expect "relocate_snapshot_custom" "exists"
-expect "relocate_snapshot_default" "absent"
-expect "remove_new_repo" "exists"
-expect "remove_old_untouched" "exists"
-expect "remove_new_not_in_old" "clean"
-expect "env_beats_config_effective" "yes"
-expect "env_config_dir_untouched" "clean"
-expect "set_get" "vroot2"
+expect "home_snapshot" "exists"
+expect "reread_health" "ok"
+expect "env_beats_config" "open"
+expect "set_get" "moved"
 expect "unset_unknown_ok" "exit0"
 expect "unknown_set" "exit2"
 expect "unknown_set_msg" "unknown config key"
@@ -220,8 +212,8 @@ expect "repair_unset" "exit0"
 expect "start_after_repair" "exit0"
 expect "malformed_list" "exit2"
 expect "malformed_msg" "malformed"
-expect "resolved_env_origin" "env MIRAGE_SNAPSHOT_ROOT"
-expect "resolved_file_value" "/file/repos"
+expect "resolved_env_origin" "env MIRAGE_IDLE_GRACE_SECONDS"
+expect "resolved_file_value" "file-issuer"
 expect "resolved_default_origin" "present"
 expect "resolved_token_masked" "***"
 expect "allowed_hosts_wildcard" "open"
@@ -235,4 +227,4 @@ if [ "$fail" != "0" ]; then
   exit 1
 fi
 echo
-echo "CLI config battery OK (relocation, restart re-read, env precedence, validation, repair, resolved view; py == ts)."
+echo "CLI config battery OK (single-root home, restart re-read, env precedence, validation, repair, resolved view; py == ts)."

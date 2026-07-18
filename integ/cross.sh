@@ -15,8 +15,8 @@ fail=0
 
 export CROSS_DISK_ROOT="${CROSS_DISK_ROOT:-/tmp/mirage-cross-disk}"
 export CROSS_REDIS_PREFIX="${CROSS_REDIS_PREFIX:-mirage-cross/}"
-export CROSS_SNAPSHOT_ROOT="${CROSS_SNAPSHOT_ROOT:-/tmp/mirage-cross-snap}"
-export MIRAGE_SNAPSHOT_ROOT="$CROSS_SNAPSHOT_ROOT"
+export MIRAGE_HOME="${MIRAGE_HOME:-/tmp/mirage-cross-home}"
+export CROSS_SNAPSHOT_ROOT="$MIRAGE_HOME/snapshots"
 mkdir -p "$CROSS_DISK_ROOT" "$CROSS_SNAPSHOT_ROOT"
 
 FINGERPRINTS=(

@@ -16,7 +16,7 @@ import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
-import { Workspace, type Resource } from '@struktoai/mirage-node'
+import { DiskWorkspaceStateStore, Workspace, type Resource } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-node'
 import { type WorkspaceRegistry } from '../registry.ts'
 import { buildOverrideResources, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
@@ -31,6 +31,7 @@ import { makeBrief, makeDetail } from '../summary.ts'
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
   snapshotRoot: string
+  stateRoot: string
 }
 
 const WRITE_RATE_LIMIT = {
@@ -107,7 +108,10 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           ...(args.options.sessionId !== undefined ? { sessionId: args.options.sessionId } : {}),
           ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
           workspaceId: wid,
-          ...(args.options.store !== undefined ? { store: args.options.store } : {}),
+          // Daemon default is disk (a created workspace survives restart
+          // with zero infrastructure, like git init); the library default
+          // stays ram. An explicit store always wins.
+          store: args.options.store ?? new DiskWorkspaceStateStore({ root: deps.stateRoot }),
           ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
           ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
           ...(args.options.index !== undefined ? { index: args.options.index } : {}),

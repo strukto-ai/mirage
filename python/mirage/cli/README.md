@@ -43,9 +43,10 @@ Other command groups: `session`, `provision`, `daemon`, plus
 | `MIRAGE_IDLE_GRACE_SECONDS` | `30`                      | Seconds the daemon waits after its last workspace is removed before shutting down |
 | `MIRAGE_ALLOWED_HOSTS`      | `127.0.0.1,localhost,::1` | Daemon Host-header allowlist (CSV; `*` disables the check)                        |
 | `MIRAGE_DAEMON_PORT`        | `8765`                    | Port the spawned daemon binds                                                     |
-| `MIRAGE_PID_FILE`           | `~/.mirage/daemon.pid`    | Daemon pid file location                                                          |
-| `MIRAGE_VERSION_ROOT`       | `~/.mirage/repos`         | Bare git repos backing workspace versioning                                       |
-| `MIRAGE_SNAPSHOT_ROOT`      | `~/.mirage/snapshots`     | Snapshot storage root                                                             |
+
+Like docker's `data-root` and git's `GIT_DIR`, `MIRAGE_HOME` is the
+single configurable root; its layout is fixed (`daemon.pid`, `repos/`,
+`snapshots/`, `state/`, `config.toml`, `daemon.log` all live under it).
 
 Every daemon setting (except the bootstrap `MIRAGE_HOME` and raw
 secrets) can also live in `~/.mirage/config.toml` under `[daemon]`,

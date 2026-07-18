@@ -69,8 +69,8 @@ mirage job wait <job-id>
 ## Versioning
 
 Each workspace has a git-backed history kept by the daemon (under
-`~/.mirage/repos/<id>`; set `MIRAGE_VERSION_ROOT` to relocate). Same verbs and
-semantics as the [Python CLI](/home/cli#versioning).
+`~/.mirage/repos/<id>`; set `MIRAGE_HOME` to relocate the whole data
+tree). Same verbs and semantics as the [Python CLI](/home/cli#versioning).
 
 ```bash
 mirage workspace commit <id> -m "first"            # commit live state
@@ -122,7 +122,6 @@ Precedence (highest first):
    auth_token = ""
    idle_grace_seconds = 30
    port = 8765
-   version_root = "/data/repos"
    ```
    The daemon validates the table at startup and refuses to start on
    unknown keys or malformed TOML. The full key list and semantics
