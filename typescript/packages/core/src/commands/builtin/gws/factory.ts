@@ -36,7 +36,13 @@ import {
 } from '../../config.ts'
 import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
 import type { GwsMethod, GwsService } from './methods.ts'
-import { GWS_METHODS, gwsCommandName } from './methods.ts'
+import {
+  GWS_API_SPEC,
+  GWS_METHODS,
+  SERVICE_BASES,
+  SERVICE_RESOURCES,
+  gwsCommandName,
+} from './methods.ts'
 
 const ENC = new TextEncoder()
 
@@ -47,27 +53,6 @@ const ENC = new TextEncoder()
 // need them use clear_cache).
 async function invalidateMountListing(): Promise<void> {
   await invalidateAfterWrite(PathSpec.fromStrPath('/.gws-write'))
-}
-
-const GWS_API_SPEC = new CommandSpec({
-  options: [
-    new Option({ long: '--params', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--json', valueKind: OperandKind.TEXT }),
-  ],
-})
-
-const BASES: Record<GwsService, (tm: TokenManager) => string> = {
-  drive: driveBase,
-  docs: docsBase,
-  sheets: sheetsBase,
-  slides: slidesBase,
-}
-
-const RESOURCES: Record<GwsService, string[]> = {
-  drive: [ResourceName.GDRIVE],
-  docs: [ResourceName.GDOCS, ResourceName.GDRIVE],
-  sheets: [ResourceName.GSHEETS, ResourceName.GDRIVE],
-  slides: [ResourceName.GSLIDES, ResourceName.GDRIVE],
 }
 
 function parseJsonFlag(value: unknown, flag: string): Record<string, unknown> {
@@ -164,7 +149,7 @@ export async function runGwsMethod(
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
   }
-  const url = BASES[method.service](tm) + path
+  const url = SERVICE_BASES[method.service](tm) + path
   const queryParams = queryStr(query)
   if (method.rawBytes === true) {
     const data = await googleGetBytes(tm, withQuery(url, queryParams))
@@ -183,7 +168,7 @@ export function makeGwsApiCommands(service: GwsService): RegisteredCommand[] {
     commands.push(
       ...command({
         name: gwsCommandName(m),
-        resource: RESOURCES[service],
+        resource: SERVICE_RESOURCES[service],
         spec: GWS_API_SPEC,
         write: m.http !== 'GET',
         fn: (accessor, paths, texts, opts) =>

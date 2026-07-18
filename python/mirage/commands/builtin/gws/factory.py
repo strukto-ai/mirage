@@ -18,36 +18,17 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.cache.context import invalidate_after_write
-from mirage.commands.builtin.gws.methods import GWS_METHODS, GwsMethod
+from mirage.commands.builtin.gws.methods import (GWS_API_SPEC, GWS_METHODS,
+                                                 SERVICE_BASES,
+                                                 SERVICE_RESOURCES, GwsMethod)
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
-from mirage.core.google._client import (TokenManager, docs_base, drive_base,
-                                        google_delete, google_get,
-                                        google_get_bytes, google_patch,
-                                        google_post, sheets_base, slides_base)
+from mirage.core.google._client import (TokenManager, google_delete,
+                                        google_get, google_get_bytes,
+                                        google_patch, google_post)
 from mirage.core.google.tree_ops import DriveItemAccessor
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-GWS_API_SPEC = CommandSpec(options=(
-    Option(long="--params", value_kind=OperandKind.TEXT),
-    Option(long="--json", value_kind=OperandKind.TEXT),
-), )
-
-_BASES: dict[str, Callable[[TokenManager], str]] = {
-    "drive": drive_base,
-    "docs": docs_base,
-    "sheets": sheets_base,
-    "slides": slides_base,
-}
-
-_RESOURCES: dict[str, list[str]] = {
-    "drive": ["gdrive"],
-    "docs": ["gdocs", "gdrive"],
-    "sheets": ["gsheets", "gdrive"],
-    "slides": ["gslides", "gdrive"],
-}
 
 
 async def invalidate_mount_listing() -> None:
@@ -149,7 +130,7 @@ async def run_gws_method(
         raise ValueError("--json is required")
     token_manager: TokenManager = accessor.token_manager
     path, query = fill_path(method.path, params)
-    url = _BASES[method.service](token_manager) + path
+    url = SERVICE_BASES[method.service](token_manager) + path
     query_params = _query_str(query)
     if method.raw_bytes:
         data = await google_get_bytes(token_manager,
@@ -185,7 +166,7 @@ def make_gws_api_commands(service: str) -> list[Callable[..., object]]:
             continue
         commands.append(
             command(m.command_name,
-                    resource=_RESOURCES[service],
+                    resource=SERVICE_RESOURCES[service],
                     spec=GWS_API_SPEC,
                     write=m.http
                     != "GET")(functools.partial(run_gws_method, m)))

@@ -12,7 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from dataclasses import dataclass
+
+from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.core.google._client import (TokenManager, docs_base, drive_base,
+                                        sheets_base, slides_base)
 
 # The official gws CLI generates one command per Discovery method and
 # speaks raw API resources: `--params` carries path/query parameters,
@@ -106,3 +111,22 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
     GwsMethod("drive", "permissions", "delete", "DELETE",
               "/files/{fileId}/permissions/{permissionId}"),
 )
+
+GWS_API_SPEC = CommandSpec(options=(
+    Option(long="--params", value_kind=OperandKind.TEXT),
+    Option(long="--json", value_kind=OperandKind.TEXT),
+), )
+
+SERVICE_BASES: dict[str, Callable[[TokenManager], str]] = {
+    "drive": drive_base,
+    "docs": docs_base,
+    "sheets": sheets_base,
+    "slides": slides_base,
+}
+
+SERVICE_RESOURCES: dict[str, list[str]] = {
+    "drive": ["gdrive"],
+    "docs": ["gdocs", "gdrive"],
+    "sheets": ["gsheets", "gdrive"],
+    "slides": ["gslides", "gdrive"],
+}

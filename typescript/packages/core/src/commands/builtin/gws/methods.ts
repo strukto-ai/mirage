@@ -12,6 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { TokenManager } from '../../../core/google/_client.ts'
+import { docsBase, driveBase, sheetsBase, slidesBase } from '../../../core/google/_client.ts'
+import { ResourceName } from '../../../types.ts'
+import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+
 // The official gws CLI generates one command per Discovery method and
 // speaks raw API resources: `--params` carries path/query parameters,
 // `--json` the request body, and the output is the API response JSON.
@@ -167,3 +172,24 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     path: '/files/{fileId}/permissions/{permissionId}',
   },
 ] as const
+
+export const GWS_API_SPEC = new CommandSpec({
+  options: [
+    new Option({ long: '--params', valueKind: OperandKind.TEXT }),
+    new Option({ long: '--json', valueKind: OperandKind.TEXT }),
+  ],
+})
+
+export const SERVICE_BASES: Record<GwsService, (tm: TokenManager) => string> = {
+  drive: driveBase,
+  docs: docsBase,
+  sheets: sheetsBase,
+  slides: slidesBase,
+}
+
+export const SERVICE_RESOURCES: Record<GwsService, string[]> = {
+  drive: [ResourceName.GDRIVE],
+  docs: [ResourceName.GDOCS, ResourceName.GDRIVE],
+  sheets: [ResourceName.GSHEETS, ResourceName.GDRIVE],
+  slides: [ResourceName.GSLIDES, ResourceName.GDRIVE],
+}
