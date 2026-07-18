@@ -15,10 +15,6 @@
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
 from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
-from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_batchUpdate import \
-    gws_sheets_spreadsheets_batchUpdate  # noqa: E501
-from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_create import \
-    gws_sheets_spreadsheets_create  # noqa: E501
 from mirage.commands.builtin.gsheets.gws_sheets_write import gws_sheets_write
 from mirage.commands.builtin.gsheets.ops import OPS as _GSHEETS_CMD_OPS
 from mirage.commands.builtin.gsheets.rm import rm
@@ -32,8 +28,6 @@ COMMANDS = [
     rm,
     gws_sheets_append,
     gws_sheets_read,
-    gws_sheets_spreadsheets_batchUpdate,
-    gws_sheets_spreadsheets_create,
     gws_sheets_write,
     *GWS_SHEETS_API_COMMANDS,
 ]

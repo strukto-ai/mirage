@@ -45,7 +45,7 @@ const ENC = new TextEncoder()
 // synthetic root child flushes the cached root listing so newly created
 // items surface in the next ls. Deeper listings stay cached (cases that
 // need them use clear_cache).
-export async function invalidateMountListing(): Promise<void> {
+async function invalidateMountListing(): Promise<void> {
   await invalidateAfterWrite(PathSpec.fromStrPath('/.gws-write'))
 }
 
@@ -117,6 +117,25 @@ function withQuery(url: string, query: Record<string, string>): string {
   return url + (url.includes('?') ? '&' : '?') + pairs
 }
 
+const NO_CONTENT = Symbol('no-content')
+
+type Caller = (
+  tm: TokenManager,
+  url: string,
+  body: Record<string, unknown>,
+  query: Record<string, string>,
+) => Promise<unknown>
+
+const CALLERS: Record<GwsMethod['http'], Caller> = {
+  GET: (tm, url, _body, query) => googleGet(tm, url, query),
+  POST: (tm, url, body, query) => googlePost(tm, withQuery(url, query), body),
+  PATCH: (tm, url, body, query) => googlePatch(tm, url, body, query),
+  DELETE: async (tm, url, _body, query) => {
+    await googleDelete(tm, withQuery(url, query))
+    return NO_CONTENT
+  },
+}
+
 export async function runGwsMethod(
   method: GwsMethod,
   accessor: GoogleApiAccessor,
@@ -151,20 +170,9 @@ export async function runGwsMethod(
     const data = await googleGetBytes(tm, withQuery(url, queryParams))
     return [data, new IOResult()]
   }
-  let result: unknown
-  if (method.http === 'GET') {
-    result = await googleGet(tm, url, queryParams)
-  } else if (method.http === 'POST') {
-    result = await googlePost(tm, withQuery(url, queryParams), body)
-    await invalidateMountListing()
-  } else if (method.http === 'PATCH') {
-    result = await googlePatch(tm, url, body, queryParams)
-    await invalidateMountListing()
-  } else {
-    await googleDelete(tm, withQuery(url, queryParams))
-    await invalidateMountListing()
-    return [null, new IOResult()]
-  }
+  const result = await CALLERS[method.http](tm, url, body, queryParams)
+  if (method.http !== 'GET') await invalidateMountListing()
+  if (result === NO_CONTENT) return [null, new IOResult()]
   return [ENC.encode(JSON.stringify(result)), new IOResult()]
 }
 

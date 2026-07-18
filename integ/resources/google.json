@@ -7,7 +7,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws docs documents create --json '{\"title\": \"Notes\"}'",
+      "command": "gws-docs-documents-create --json '{\"title\": \"Notes\"}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Notes\",\"body\":{\"content\":[{\"startIndex\":1,\"endIndex\":1,\"sectionBreak\":{\"sectionStyle\":{\"columnSeparatorStyle\":\"NONE\",\"contentDirection\":\"LEFT_TO_RIGHT\",\"sectionType\":\"CONTINUOUS\"}}},{\"startIndex\":1,\"endIndex\":2,\"paragraph\":{\"elements\":[{\"startIndex\":1,\"endIndex\":2,\"textRun\":{\"content\":\"\\n\",\"textStyle\":{}}}],\"paragraphStyle\":{\"namedStyleType\":\"NORMAL_TEXT\",\"direction\":\"LEFT_TO_RIGHT\"}}}]},\"revisionId\":\"rev-0\"}",
@@ -21,7 +21,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws docs +write --document doc0001 --text 'hello gdoc'",
+      "command": "gws-docs-write --document doc0001 --text 'hello gdoc'",
       "expect": {
         "exit": 0,
         "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{}]}",
@@ -35,7 +35,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws docs documents get --params '{\"documentId\": \"doc0001\"}'",
+      "command": "gws-docs-documents-get --params '{\"documentId\": \"doc0001\"}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Notes\",\"body\":{\"content\":[{\"startIndex\":1,\"endIndex\":1,\"sectionBreak\":{\"sectionStyle\":{\"columnSeparatorStyle\":\"NONE\",\"contentDirection\":\"LEFT_TO_RIGHT\",\"sectionType\":\"CONTINUOUS\"}}},{\"startIndex\":1,\"endIndex\":12,\"paragraph\":{\"elements\":[{\"startIndex\":1,\"endIndex\":12,\"textRun\":{\"content\":\"hello gdoc\\n\",\"textStyle\":{}}}],\"paragraphStyle\":{\"namedStyleType\":\"NORMAL_TEXT\",\"direction\":\"LEFT_TO_RIGHT\"}}}]},\"revisionId\":\"rev-0\"}",
@@ -49,7 +49,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws docs documents batchUpdate --params '{\"documentId\": \"doc0001\"}' --json '{\"requests\": [{\"replaceAllText\": {\"containsText\": {\"text\": \"hello\"}, \"replaceText\": \"HELLO\"}}]}'",
+      "command": "gws-docs-documents-batchUpdate --params '{\"documentId\": \"doc0001\"}' --json '{\"requests\": [{\"replaceAllText\": {\"containsText\": {\"text\": \"hello\"}, \"replaceText\": \"HELLO\"}}]}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{\"replaceAllText\":{\"occurrencesChanged\":1}}]}",
@@ -63,7 +63,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws drive files export --params '{\"fileId\": \"doc0001\", \"mimeType\": \"text/plain\"}'",
+      "command": "gws-drive-files-export --params '{\"fileId\": \"doc0001\", \"mimeType\": \"text/plain\"}'",
       "expect": {
         "exit": 0,
         "stdout": "HELLO gdoc",
@@ -77,7 +77,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws drive files create --json '{\"name\": \"Plan\", \"mimeType\": \"application/vnd.google-apps.document\", \"parents\": [\"f0001\"]}' > /dev/null && ls /data | grep gdoc",
+      "command": "gws-drive-files-create --json '{\"name\": \"Plan\", \"mimeType\": \"application/vnd.google-apps.document\", \"parents\": [\"f0001\"]}' > /dev/null && ls /data | grep gdoc",
       "expect": {
         "exit": 0,
         "stdout": "Plan.gdoc.json\n",
@@ -105,7 +105,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws docs +write --document $D --text 'from drive' | jq -c '.replies'",
+      "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws-docs-write --document $D --text 'from drive' | jq -c '.replies'",
       "expect": {
         "exit": 0,
         "stdout": "[{}]\n",
@@ -133,7 +133,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Data\"}}'",
+      "command": "gws-sheets-spreadsheets-create --json '{\"properties\": {\"title\": \"Data\"}}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
@@ -147,7 +147,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
+      "command": "gws-sheets-append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
       "expect": {
         "exit": 0,
         "stdout": "{\"spreadsheetId\":\"sheet0001\",\"updates\":{\"spreadsheetId\":\"sheet0001\",\"updatedRange\":\"Sheet1!A1:C1\",\"updatedRows\":1,\"updatedColumns\":3,\"updatedCells\":3}}",
@@ -161,7 +161,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
+      "command": "gws-sheets-read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
       "expect": {
         "exit": 0,
         "stdout": "{\"range\":\"Sheet1!A1:C1\",\"majorDimension\":\"ROWS\",\"values\":[[\"a\",\"b\",\"c\"]]}",
@@ -175,7 +175,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets spreadsheets get --params '{\"spreadsheetId\": \"sheet0001\"}'",
+      "command": "gws-sheets-spreadsheets-get --params '{\"spreadsheetId\": \"sheet0001\"}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
@@ -189,7 +189,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": \"Extra\"}}}]}'",
+      "command": "gws-sheets-spreadsheets-batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": \"Extra\"}}}]}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"spreadsheetId\":\"sheet0001\",\"replies\":[{\"addSheet\":{\"properties\":{\"sheetId\":1,\"title\":\"Extra\"}}}]}",
@@ -203,7 +203,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws slides presentations create --json '{\"title\": \"Deck\"}'",
+      "command": "gws-slides-presentations-create --json '{\"title\": \"Deck\"}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Deck\",\"pageSize\":{\"width\":{\"magnitude\":9144000,\"unit\":\"EMU\"},\"height\":{\"magnitude\":6858000,\"unit\":\"EMU\"}},\"slides\":[{\"objectId\":\"slide0001\",\"pageElements\":[]}],\"revisionId\":\"rev-1\"}",
@@ -217,7 +217,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws slides presentations batchUpdate --params '{\"presentationId\": \"pres0001\"}' --json '{\"requests\": [{\"createSlide\": {}}]}' | jq -c '.replies'",
+      "command": "gws-slides-presentations-batchUpdate --params '{\"presentationId\": \"pres0001\"}' --json '{\"requests\": [{\"createSlide\": {}}]}' | jq -c '.replies'",
       "expect": {
         "exit": 0,
         "stdout": "[{\"createSlide\":{\"objectId\":\"slide0002\"}}]\n",
@@ -231,7 +231,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws slides presentations get --params '{\"presentationId\": \"pres0001\"}' | jq -c '{presentationId, title, slides: (.slides | length)}'",
+      "command": "gws-slides-presentations-get --params '{\"presentationId\": \"pres0001\"}' | jq -c '{presentationId, title, slides: (.slides | length)}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Deck\",\"slides\":2}\n",
@@ -245,7 +245,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws drive permissions create --params '{\"fileId\": \"doc0001\"}' --json '{\"role\": \"reader\", \"type\": \"anyone\"}'",
+      "command": "gws-drive-permissions-create --params '{\"fileId\": \"doc0001\"}' --json '{\"role\": \"reader\", \"type\": \"anyone\"}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"kind\":\"drive#permission\",\"id\":\"perm0001\",\"role\":\"reader\",\"type\":\"anyone\"}",
@@ -259,7 +259,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws drive permissions list --params '{\"fileId\": \"doc0001\"}'",
+      "command": "gws-drive-permissions-list --params '{\"fileId\": \"doc0001\"}'",
       "expect": {
         "exit": 0,
         "stdout": "{\"kind\":\"drive#permissionList\",\"permissions\":[{\"id\":\"perm0001\",\"role\":\"reader\",\"type\":\"anyone\"}]}",
@@ -273,7 +273,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws drive permissions delete --params '{\"fileId\": \"doc0001\", \"permissionId\": \"perm0001\"}' && echo deleted",
+      "command": "gws-drive-permissions-delete --params '{\"fileId\": \"doc0001\", \"permissionId\": \"perm0001\"}' && echo deleted",
       "expect": {
         "exit": 0,
         "stdout": "deleted\n",
@@ -287,7 +287,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes'\\\"}\" | jq -c '[.files[] | {name, mimeType}]'",
+      "command": "gws-drive-files-list --params \"{\\\"q\\\": \\\"name = 'Notes'\\\"}\" | jq -c '[.files[] | {name, mimeType}]'",
       "expect": {
         "exit": 0,
         "stdout": "{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n",
@@ -301,7 +301,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "F=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws drive files update --params \"{\\\"fileId\\\": \\\"$F\\\"}\" --json '{\"name\": \"Plan2\"}' > /dev/null && ls /data | grep gdoc",
+      "command": "F=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws-drive-files-update --params \"{\\\"fileId\\\": \\\"$F\\\"}\" --json '{\"name\": \"Plan2\"}' > /dev/null && ls /data | grep gdoc",
       "expect": {
         "exit": 0,
         "stdout": "Plan.gdoc.json\n",
@@ -315,7 +315,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "printf v1 | tee /data/rev.txt > /dev/null && printf v2 | tee /data/rev.txt > /dev/null && F=$(gws drive files list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].id') && gws drive files list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].headRevisionId' | grep -c \"$F-r2\"",
+      "command": "printf v1 | tee /data/rev.txt > /dev/null && printf v2 | tee /data/rev.txt > /dev/null && F=$(gws-drive-files-list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].id') && gws-drive-files-list --params \"{\\\"q\\\": \\\"name = 'rev.txt'\\\"}\" | jq -r '.files[0].headRevisionId' | grep -c \"$F-r2\"",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
@@ -329,7 +329,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "F=$(cat /data/Plan2.gdoc.json | jq -r .documentId) && gws drive files delete --params \"{\\\"fileId\\\": \\\"$F\\\"}\" && ls /data | grep -c gdoc",
+      "command": "F=$(cat /data/Plan2.gdoc.json | jq -r .documentId) && gws-drive-files-delete --params \"{\\\"fileId\\\": \\\"$F\\\"}\" && ls /data | grep -c gdoc",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
