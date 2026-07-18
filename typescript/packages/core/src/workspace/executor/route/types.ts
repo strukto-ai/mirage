@@ -62,7 +62,30 @@ export interface RouteContext {
   mounts: readonly string[]
 }
 
+/**
+ * A per-runtime willingness script, answering "do I want this line?".
+ * A function (sync or async) on the RouteContext returning a truthy
+ * verdict, or monty source that sees ctx as a dict and whose LAST
+ * EXPRESSION is the verdict.
+ *
+ * ```
+ * new VfsRuntime((ctx) => ctx.builtin && !ctx.line.includes('/secret'))
+ * new VfsRuntime("'/secret' not in ctx['line']")
+ * ```
+ */
 export type RouteScript = ((ctx: RouteContext) => boolean | Promise<boolean>) | string
+
+/**
+ * The global route, answering "who takes this line?". A function (sync
+ * or async) on the RouteContext returning a runtime name, or null to
+ * pass down the ladder; or monty source whose LAST EXPRESSION is that
+ * name or None.
+ *
+ * ```
+ * route: (ctx) => (ctx.command === 'python3' ? 'monty' : null)
+ * route: "'monty' if ctx['command'] == 'python3' else None"
+ * ```
+ */
 export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | null>) | string
 
 /**

@@ -147,13 +147,28 @@ class RouteContext:
         return payload
 
 
-# A per-runtime willingness script: a callable on the RouteContext
-# returning a truthy verdict, or monty source whose last expression is
-# the verdict. Mirrors the TS RouteScript.
+# A per-runtime willingness script, answering "do I want this line?".
+# A callable (sync or async) on the RouteContext returning a truthy
+# verdict, or monty source that sees ctx as a dict (to_dict) and whose
+# LAST EXPRESSION is the verdict. Mirrors the TS RouteScript.
+#
+#     def wants(ctx: RouteContext) -> bool:
+#         return ctx.builtin and "/secret" not in ctx.line
+#
+#     VfsRuntime(script=wants)
+#     VfsRuntime(script="'/secret' not in ctx['line']")
 RouteScript = Callable[[RouteContext], bool | Awaitable[bool]] | str
 
-# The global route: a callable on the RouteContext returning a runtime
-# name (or None to pass), or monty source. Mirrors the TS RouteFn.
+# The global route, answering "who takes this line?". A callable (sync
+# or async) on the RouteContext returning a runtime name, or None to
+# pass down the ladder; or monty source whose LAST EXPRESSION is that
+# name or None. Mirrors the TS RouteFn.
+#
+#     def route(ctx: RouteContext) -> str | None:
+#         return "wasi" if ctx.command == "python3" else None
+#
+#     Workspace(..., route=route)
+#     Workspace(..., route="'wasi' if ctx['command'] == 'python3' else None")
 RouteFn = Callable[[RouteContext], str | None | Awaitable[str | None]] | str
 
 
