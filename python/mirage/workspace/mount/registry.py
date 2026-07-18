@@ -71,6 +71,10 @@ class MountRegistry:
         # bound runtime only for commands that have one, so it cannot
         # tell python3 from grep.
         self.runtime_bindings: dict[str, Runtime] = {}
+        # The world's vfs runtime, set by Workspace after construction.
+        # Catch-all when its captures are empty; explicit captures make
+        # unclaimed commands an admission failure (126).
+        self.vfs_runtime: Runtime | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None

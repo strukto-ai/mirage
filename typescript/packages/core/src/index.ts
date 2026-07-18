@@ -438,7 +438,6 @@ export {
   bindCommands,
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
-  VFS_ENTRY,
   VfsRuntime,
   type RunArgs,
   type RunResult,

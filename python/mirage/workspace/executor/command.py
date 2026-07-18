@@ -142,6 +142,16 @@ def _check_mount_root_guard_raw(
     return None
 
 
+def _admission_denial(cmd_name: str) -> IOResult:
+    """The 126 result for a command no runtime accepted.
+
+    Args:
+        cmd_name (str): the refused command.
+    """
+    msg = f"mirage: {cmd_name}: no runtime accepted this line\n"
+    return IOResult(exit_code=126, stderr=msg.encode())
+
+
 def _line_runtime(
         cmd_name: str, registry: MountRegistry, routing: RoutingDecision | None
 ) -> tuple[Runtime | None, IOResult | None]:
@@ -151,21 +161,34 @@ def _line_runtime(
     the line's bindings win; an unbound command whose capturers all
     refused, or any unbound command when the vfs rung was refused, is
     an admission failure: exit 126, "no runtime accepted this line",
-    like a shell refusing to exec.
+    like a shell refusing to exec. A command bound to the vfs runtime
+    is served by the executor itself (the vfs runtime has no
+    interpreter door), and when the vfs runtime declares explicit
+    captures the catch-all is off: unclaimed commands are admission
+    failures too.
 
     Args:
         cmd_name (str): the command being dispatched.
-        registry (MountRegistry): registry holding static bindings.
+        registry (MountRegistry): registry holding static bindings and
+            the world's vfs runtime.
         routing (RoutingDecision | None): the typed line's decision.
     """
+    vfs = registry.vfs_runtime
+    restricted = vfs is not None and len(vfs.captures) > 0
     if routing is None:
-        return registry.runtime_bindings.get(cmd_name), None
+        runtime = registry.runtime_bindings.get(cmd_name)
+        if runtime is vfs and vfs is not None:
+            return None, None
+        if runtime is None and restricted:
+            return None, _admission_denial(cmd_name)
+        return runtime, None
     runtime = routing.bindings.get(cmd_name)
+    if runtime is vfs and vfs is not None:
+        return None, None
     if runtime is not None:
         return runtime, None
-    if cmd_name in routing.captured or not routing.vfs_allowed:
-        msg = f"mirage: {cmd_name}: no runtime accepted this line\n"
-        return None, IOResult(exit_code=126, stderr=msg.encode())
+    if (cmd_name in routing.captured or not routing.vfs_allowed or restricted):
+        return None, _admission_denial(cmd_name)
     return None, None
 
 

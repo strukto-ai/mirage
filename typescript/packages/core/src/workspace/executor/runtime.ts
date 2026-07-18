@@ -69,28 +69,39 @@ export interface Runtime {
 /** A workspace runtimes-list entry: an instance or a name shorthand. */
 export type RuntimeEntry = Runtime | string
 
-export const VFS_ENTRY = 'vfs'
-
 /**
  * The workspace's built-in command engine as a runtime.
  *
- * Serves every command no other runtime captures (cat, ls, echo, and
- * anything unknown), so its own captures list is empty: it is the
- * fallback, not a capturer. Required: every workspace world contains
+ * By default it captures nothing and serves every command no other
+ * runtime captures (cat, ls, echo, and anything unknown): it is the
+ * catch-all. Passing explicit captures flips it into an ordinary
+ * capturer: the workspace serves exactly those commands and anything
+ * unclaimed exits 126. Required: every workspace world contains
  * exactly one, appended automatically when the runtimes list omits it;
- * pass your own instance to give it a route script. run() stays
- * unimplemented until the line-door contract exists; the workspace
- * executor serves its commands internally.
+ * pass your own instance to customize it. run() stays unimplemented
+ * until the line-door contract exists; the workspace executor serves
+ * its commands internally.
  */
 export class VfsRuntime implements Runtime {
-  readonly name = VFS_ENTRY
+  readonly name = 'vfs'
   readonly captures: readonly string[] = []
   script?: RouteScript
 
   // The record form exists for the shared buildRuntime path, which
-  // hands every runtime its (empty, for vfs) options object.
-  constructor(script?: RouteScript | Record<string, unknown>) {
-    if (typeof script === 'string' || typeof script === 'function') this.script = script
+  // hands every runtime its options object ({script?, captures?}).
+  constructor(options?: RouteScript | Record<string, unknown>) {
+    if (typeof options === 'string' || typeof options === 'function') {
+      this.script = options
+      return
+    }
+    if (options === undefined) return
+    const script = options.script
+    if (typeof script === 'string' || typeof script === 'function') {
+      this.script = script as RouteScript
+    }
+    if (Array.isArray(options.captures)) {
+      this.captures = (options.captures as string[]).slice()
+    }
   }
 
   attach(): void {
@@ -116,7 +127,7 @@ export class VfsRuntime implements Runtime {
  * `@pydantic/monty` can answer builtin `open()` calls; `local`/`wasi`
  * are Python-only.
  */
-export const DEFAULT_ENTRIES: readonly string[] = ['pyodide', 'quickjs', VFS_ENTRY]
+export const DEFAULT_ENTRIES: readonly string[] = ['pyodide', 'quickjs', 'vfs']
 
 /** Python-only runtime names a cross-language config may carry. */
 export const PYTHON_ONLY_HINTS: Record<string, string> = {
@@ -141,8 +152,8 @@ export function runtimeBindingsFor(
   entries: readonly Runtime[],
   name: string,
 ): Record<string, Runtime> {
-  if (name === VFS_ENTRY) {
-    throw new Error(`'${VFS_ENTRY}' is the default executor, not a runtime you can select`)
+  if (name === 'vfs') {
+    throw new Error(`'vfs' is the default executor, not a runtime you can select`)
   }
   for (const entry of entries) {
     if (entry.name === name) {

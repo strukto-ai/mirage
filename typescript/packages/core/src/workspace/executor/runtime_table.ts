@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PYTHON_ONLY_HINTS, VFS_ENTRY, VfsRuntime, type Runtime } from './runtime.ts'
+import { PYTHON_ONLY_HINTS, VfsRuntime, type Runtime } from './runtime.ts'
 import { MontyRuntime } from './python/runtimes/monty.ts'
 import { PyodideRuntime } from './python/runtimes/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
@@ -25,7 +25,7 @@ const NAMED: Record<string, new (options?: Record<string, unknown>) => Runtime> 
   pyodide: PyodideRuntime,
   monty: MontyRuntime,
   quickjs: QuickJsRuntime,
-  [VFS_ENTRY]: VfsRuntime,
+  vfs: VfsRuntime,
 }
 
 /** The runtime classes that capture a command, preference order. */
@@ -47,7 +47,7 @@ const OPTION_KEYS: Record<string, readonly string[]> = {
   ],
   monty: ['workspaceBridge', 'listMounts'],
   quickjs: ['workspaceBridge', 'listMounts'],
-  [VFS_ENTRY]: [],
+  vfs: ['script', 'captures'],
 }
 
 /**

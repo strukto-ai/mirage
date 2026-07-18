@@ -73,7 +73,6 @@ import {
   bindCommands,
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
-  VFS_ENTRY,
   VfsRuntime,
   type Runtime,
   type RuntimeEntry,
@@ -339,9 +338,11 @@ export class Workspace {
     // The vfs runtime is required: every world names an executor for
     // unclaimed commands, so an omitted entry appends the default
     // unconditional one.
-    if (!this.runtimeEntries.some((entry) => entry.name === VFS_ENTRY)) {
+    if (!this.runtimeEntries.some((entry) => entry.name === 'vfs')) {
       this.runtimeEntries.push(new VfsRuntime())
     }
+    this.registry.vfsRuntime =
+      this.runtimeEntries.find((entry) => entry instanceof VfsRuntime) ?? null
     for (const entry of this.runtimeEntries) {
       entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
       this.closers.push(() => entry.close())

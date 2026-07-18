@@ -20,7 +20,7 @@ from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
 from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.python import LocalRuntime, MontyRuntime
-from mirage.runtime.table import VFS_ENTRY, VfsRuntime
+from mirage.runtime.table import VfsRuntime
 
 
 @pytest_asyncio.fixture
@@ -41,7 +41,7 @@ async def test_default_world_binds_python3(ws):
 async def test_explicit_name_entry_binds():
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
-                   runtimes=["monty", VFS_ENTRY])
+                   runtimes=["monty", "vfs"])
     try:
         io = await ws.execute("python3 -c 'print(6 * 7)'")
         assert io.exit_code == 0
@@ -93,7 +93,7 @@ def test_config_entries_build_instances():
     entries = _build_runtime_entries(["local", {"name": "local"}, "vfs"])
     assert entries[0] == "local"
     assert isinstance(entries[1], LocalRuntime)
-    assert entries[2] == VFS_ENTRY
+    assert entries[2] == "vfs"
 
 
 def test_config_entry_needs_a_name():
@@ -127,7 +127,7 @@ async def runtime_arg_ws():
     workspace = Workspace({"/": RAMResource()},
                           mode=MountMode.EXEC,
                           runtimes=[AlphaRuntime(),
-                                    BetaRuntime(), VFS_ENTRY])
+                                    BetaRuntime(), "vfs"])
     yield workspace
     await workspace.close()
 
@@ -166,7 +166,7 @@ async def test_runtime_arg_unknown_name_fails_loud(runtime_arg_ws):
 @pytest.mark.asyncio
 async def test_runtime_arg_vfs_fails_loud(runtime_arg_ws):
     with pytest.raises(ValueError, match="not a runtime you can select"):
-        await runtime_arg_ws.execute("python3 -c 'x'", runtime=VFS_ENTRY)
+        await runtime_arg_ws.execute("python3 -c 'x'", runtime="vfs")
 
 
 @pytest_asyncio.fixture
@@ -175,7 +175,7 @@ async def routed_ws():
     alpha.script = lambda ctx: "big" not in ctx.line
     workspace = Workspace({"/": RAMResource()},
                           mode=MountMode.EXEC,
-                          runtimes=[alpha, beta, VFS_ENTRY])
+                          runtimes=[alpha, beta, "vfs"])
     yield workspace
     await workspace.close()
 
@@ -200,7 +200,7 @@ async def test_all_capturers_refuse_is_admission_failure():
     alpha.script = lambda ctx: False
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
-                   runtimes=[alpha, VFS_ENTRY])
+                   runtimes=[alpha, "vfs"])
     try:
         io = await ws.execute("python3 -c 'x'")
         assert io.exit_code == 126
@@ -228,11 +228,55 @@ async def test_vfs_entry_script_locks_down_lines():
 
 
 @pytest.mark.asyncio
+async def test_vfs_explicit_captures_restrict_the_workspace():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(),
+                             VfsRuntime(captures=("echo", ))])
+    try:
+        io = await ws.execute("echo listed")
+        assert await materialize(io.stdout) == b"listed\n"
+        io = await ws.execute("ls /")
+        assert io.exit_code == 126
+        err = await materialize(io.stderr)
+        assert err == b"mirage: ls: no runtime accepted this line\n"
+        io = await ws.execute("python3 -c 'x'")
+        assert await materialize(io.stdout) == b"ran-alpha\n"
+    finally:
+        await ws.close()
+
+
+def test_config_vfs_entry_carries_captures():
+    entries = _build_runtime_entries([{
+        "name": "vfs",
+        "captures": ["grep", "cat"]
+    }])
+    assert isinstance(entries[0], VfsRuntime)
+    assert entries[0].captures == ("grep", "cat")
+
+
+@pytest.mark.asyncio
+async def test_vfs_explicit_captures_restrict_under_routing():
+    alpha = AlphaRuntime()
+    alpha.script = lambda ctx: True
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[alpha, VfsRuntime(captures=("echo", ))])
+    try:
+        io = await ws.execute("echo routed-ok")
+        assert await materialize(io.stdout) == b"routed-ok\n"
+        io = await ws.execute("ls /")
+        assert io.exit_code == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_global_route_names_the_runtime():
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[AlphaRuntime(),
-                             BetaRuntime(), VFS_ENTRY],
+                             BetaRuntime(), "vfs"],
                    route=lambda ctx: "beta" if "heavy" in ctx.line else None)
     try:
         io = await ws.execute("python3 -c 'heavy'")
@@ -249,7 +293,7 @@ async def test_nested_eval_inherits_routing():
     alpha.script = lambda ctx: "big" not in ctx.line
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
-                   runtimes=[alpha, beta, VFS_ENTRY])
+                   runtimes=[alpha, beta, "vfs"])
     try:
         # The typed line routes to beta; the inner eval must not
         # re-route even though the inner line alone would pick alpha.
@@ -263,7 +307,7 @@ async def test_nested_eval_inherits_routing():
 async def test_add_runtime_appends_and_rebinds():
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
-                   runtimes=[AlphaRuntime(), VFS_ENTRY])
+                   runtimes=[AlphaRuntime(), "vfs"])
     try:
         ws.add_runtime(BetaRuntime())
         io = await ws.execute("python3 -c 'x'")

@@ -17,7 +17,6 @@ import {
   bindCommands,
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
-  VFS_ENTRY,
   VfsRuntime,
   type RunArgs,
   type Runtime,
@@ -50,7 +49,7 @@ describe('runtime table', () => {
   })
 
   it('default entries end with the vfs marker', () => {
-    expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe(VFS_ENTRY)
+    expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('vfs')
   })
 
   it('buildRuntime fails loud on unknown names', () => {
@@ -59,6 +58,8 @@ describe('runtime table', () => {
 
   it('buildRuntime builds the vfs runtime by name', () => {
     expect(buildRuntime('vfs')).toBeInstanceOf(VfsRuntime)
+    const restricted = buildRuntime('vfs', { captures: ['grep', 'cat'] })
+    expect([...restricted.captures]).toEqual(['grep', 'cat'])
   })
 
   it("buildRuntime hints Python-only for 'wasi' and 'local'", () => {
@@ -111,7 +112,7 @@ describe('runtimeBindingsFor', () => {
   })
 
   it('rejects the vfs marker', () => {
-    expect(() => runtimeBindingsFor([new FakeRuntime(), new VfsRuntime()], VFS_ENTRY)).toThrow(
+    expect(() => runtimeBindingsFor([new FakeRuntime(), new VfsRuntime()], 'vfs')).toThrow(
       /not a runtime you can select/,
     )
   })

@@ -47,9 +47,8 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
-from mirage.runtime.table import (DEFAULT_ENTRIES, VFS_ENTRY, VfsRuntime,
-                                  bind_commands, build_runtime,
-                                  runtime_bindings_for)
+from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
+                                  build_runtime, runtime_bindings_for)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -245,6 +244,9 @@ class Workspace:
         # per invocation, never a silent escalation to another runtime).
         self._runtime_entries = self._resolve_runtime_entries(runtimes)
         self._registry.runtime_bindings = bind_commands(self._runtime_entries)
+        self._registry.vfs_runtime = next(
+            (entry for entry in self._runtime_entries
+             if isinstance(entry, VfsRuntime)), None)
         self._route = route
 
         for prefix, fuse_target in fuse_targets:
@@ -424,7 +426,7 @@ class Workspace:
             for entry in runtimes:
                 entries.append(
                     build_runtime(entry) if isinstance(entry, str) else entry)
-        if not any(entry.name == VFS_ENTRY for entry in entries):
+        if not any(entry.name == VfsRuntime.name for entry in entries):
             entries.append(VfsRuntime())
         for entry in entries:
             entry.attach(self.dispatch, self._runtime_mount_prefixes)

@@ -117,6 +117,16 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown vfs runtime option 'home'/)
   })
 
+  it('carries vfs captures through', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtimes: [{ name: 'vfs', captures: ['grep', 'cat'] }],
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const entry = args.options.runtimes?.[0] as { captures: readonly string[] }
+    expect([...entry.captures]).toEqual(['grep', 'cat'])
+  })
+
   it('carries entry scripts and the global route through', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },

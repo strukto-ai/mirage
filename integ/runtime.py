@@ -34,6 +34,7 @@ from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.resource.redis import RedisResource  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
 from mirage.runtime.python.monty import MontyRuntime  # noqa: E402
+from mirage.runtime.table import VfsRuntime  # noqa: E402
 from mirage.types import CommandSafeguard, PathSpec  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -378,6 +379,39 @@ async def main() -> None:
         print("=== add_runtime_arg_after ===")
         print(await result.stdout_str(), end="")
         await ws_add.close()
+
+        # Overriding the vfs runtime: explicit captures restrict the
+        # workspace to those commands; interpreter bindings untouched.
+        ws_vfs = Workspace(
+            {"/ram": RAMResource()},
+            mode=MountMode.EXEC,
+            runtimes=["monty", VfsRuntime(captures=("echo", "cat"))])
+        result = await ws_vfs.execute("echo vfs-captured")
+        print("=== vfs_captures_allow ===")
+        print(await result.stdout_str(), end="")
+        result = await ws_vfs.execute("ls /ram")
+        print("=== vfs_captures_deny ===")
+        print(f"exit_code={result.exit_code}")
+        print((await result.stderr_str()), end="")
+        result = await ws_vfs.execute('python3 -c "print(6 * 7)"')
+        print("=== vfs_captures_python3 ===")
+        print(await result.stdout_str(), end="")
+        await ws_vfs.close()
+
+        # Overriding the vfs runtime with a script: lockdown, the same
+        # per-line contract every runtime uses.
+        ws_lock = Workspace(
+            {"/ram": RAMResource()},
+            mode=MountMode.EXEC,
+            runtimes=[VfsRuntime(script="'secret' not in ctx['line']")])
+        result = await ws_lock.execute("echo fine")
+        print("=== vfs_script_allow ===")
+        print(await result.stdout_str(), end="")
+        result = await ws_lock.execute("cat /ram/secret.txt")
+        print("=== vfs_script_deny ===")
+        print(f"exit_code={result.exit_code}")
+        print((await result.stderr_str()), end="")
+        await ws_lock.close()
 
         slow_ram = RAMResource()
         slow_ram._store.files["/slow.py"] = SLOW_SCRIPT.encode()

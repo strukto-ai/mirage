@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
+import type { Runtime } from '../executor/runtime.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
@@ -63,6 +64,10 @@ export class MountRegistry {
   private readonly defaultMode: MountMode
   private cacheStore: FileCache | null = null
   private reconciler: ReadReconciler | null = null
+  // The world's vfs runtime, set by Workspace after construction.
+  // Catch-all when its captures are empty; explicit captures make
+  // unclaimed commands an admission failure (126).
+  vfsRuntime: Runtime | null = null
 
   setReconciler(reconciler: ReadReconciler): void {
     this.reconciler = reconciler

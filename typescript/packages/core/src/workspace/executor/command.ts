@@ -67,24 +67,40 @@ interface RunOnMountCtx {
   routingDecision?: RoutingDecision
 }
 
+/** The 126 result for a command no runtime accepted. */
+function admissionDenial(cmdName: string): IOResult {
+  const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
+  return new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })
+}
+
 /**
  * Resolve a command against the line's routing decision. With no
  * decision, the static bindings apply. With one, the line's bindings
  * win; an unbound command whose capturers all refused, or any unbound
  * command when the vfs rung was refused, is an admission failure:
- * exit 126, "no runtime accepted this line".
+ * exit 126, "no runtime accepted this line". A command bound to the
+ * vfs runtime is served by the executor itself, and when the vfs
+ * runtime declares explicit captures the catch-all is off: unclaimed
+ * commands are admission failures too.
  */
 function lineRuntimeFor(
   cmdName: string,
   runtimeBindings: Record<string, Runtime> | undefined,
+  vfs: Runtime | null,
   routingDecision: RoutingDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
-  if (routingDecision === undefined) return [runtimeBindings?.[cmdName], null]
+  const restricted = vfs !== null && vfs.captures.length > 0
+  if (routingDecision === undefined) {
+    const runtime = runtimeBindings?.[cmdName]
+    if (runtime !== undefined && runtime === vfs) return [undefined, null]
+    if (runtime === undefined && restricted) return [undefined, admissionDenial(cmdName)]
+    return [runtime, null]
+  }
   const runtime = routingDecision.bindings[cmdName]
+  if (runtime !== undefined && runtime === vfs) return [undefined, null]
   if (runtime !== undefined) return [runtime, null]
-  if (routingDecision.captured.has(cmdName) || !routingDecision.vfsAllowed) {
-    const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
-    return [undefined, new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })]
+  if (routingDecision.captured.has(cmdName) || !routingDecision.vfsAllowed || restricted) {
+    return [undefined, admissionDenial(cmdName)]
   }
   return [undefined, null]
 }
@@ -183,7 +199,12 @@ async function runOnMount(
       ? (virtual: string, stat: FileStat) => mergeOverlayStat(namespace.metaFor(virtual), stat)
       : null
 
-  const [lineRuntime, denial] = lineRuntimeFor(cmdName, runtimeBindings, routingDecision)
+  const [lineRuntime, denial] = lineRuntimeFor(
+    cmdName,
+    runtimeBindings,
+    registry.vfsRuntime,
+    routingDecision,
+  )
   if (denial !== null) return [null, denial]
 
   try {

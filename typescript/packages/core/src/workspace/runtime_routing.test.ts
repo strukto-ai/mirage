@@ -257,3 +257,50 @@ not big
     }
   })
 })
+
+describe('vfs runtime overrides', () => {
+  it('explicit captures restrict the workspace', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), new VfsRuntime({ captures: ['echo'] })],
+      },
+    )
+    try {
+      const ok = await ws.execute('echo listed')
+      expect(DEC.decode(ok.stdout)).toBe('listed\n')
+      const denied = await ws.execute('ls /')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('mirage: ls: no runtime accepted this line\n')
+      const py = await ws.execute('python3 -c "x"')
+      expect(DEC.decode(py.stdout)).toBe('ran-alpha\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explicit captures restrict under routing', async () => {
+    const parser = await getTestParser()
+    const alpha = new NamedFakeRuntime('alpha')
+    alpha.script = () => true
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [alpha, new VfsRuntime({ captures: ['echo'] })],
+      },
+    )
+    try {
+      const ok = await ws.execute('echo routed-ok')
+      expect(DEC.decode(ok.stdout)).toBe('routed-ok\n')
+      const denied = await ws.execute('ls /')
+      expect(denied.exitCode).toBe(126)
+    } finally {
+      await ws.close()
+    }
+  })
+})

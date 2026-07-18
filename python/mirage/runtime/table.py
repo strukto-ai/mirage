@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
 from typing import Any, Callable
 
 from mirage.runtime.base import Runtime
@@ -26,47 +27,52 @@ from mirage.runtime.python.wasi import WasiRuntime
 RUNTIMES: tuple[type[Runtime], ...] = (MontyRuntime, WasiRuntime, LocalRuntime,
                                        QuickJsRuntime)
 
-VFS_ENTRY = "vfs"
-
 
 class VfsRuntime(Runtime):
     """The workspace's built-in command engine as a runtime.
 
-    Serves every command no other runtime captures (cat, ls, echo, and
-    anything unknown), so its own captures list is empty: it is the
-    fallback, not a capturer. Required: every workspace world contains
+    By default it captures nothing and serves every command no other
+    runtime captures (cat, ls, echo, and anything unknown): it is the
+    catch-all. Passing explicit captures flips it into an ordinary
+    capturer: the workspace serves exactly those commands and anything
+    unclaimed exits 126. Required: every workspace world contains
     exactly one, appended automatically when the runtimes list omits
-    it; pass your own instance to give it a route script. run() stays
+    it; pass your own instance to customize it. run() stays
     unimplemented until the line-door contract exists; the workspace
     executor serves its commands internally.
 
     Args:
         script (Callable | str | None): per-line admission script, the
             same contract as any runtime's script.
+        captures (Sequence[str] | None): restrict the workspace to
+            exactly these commands, the same field every runtime uses.
+            None (the default) keeps the catch-all behavior.
     """
 
-    name = VFS_ENTRY
+    name = "vfs"
     captures: tuple[str, ...] = ()
 
     def __init__(self,
-                 script: "Callable[..., Any] | str | None" = None) -> None:
+                 script: "Callable[..., Any] | str | None" = None,
+                 captures: Sequence[str] | None = None) -> None:
         self.script = script
+        if captures is not None:
+            self.captures = tuple(captures)
 
     async def run(self, args: Any) -> Any:
         raise RuntimeError("the vfs runtime has no interpreter door; the "
                            "workspace executor runs its commands")
 
 
-NAMEABLE: tuple[type[Runtime], ...] = (*RUNTIMES, VfsRuntime)
-
-NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in NAMEABLE}
+NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}
+NAMED[VfsRuntime.name] = VfsRuntime
 
 # The default world when no runtimes list is given: today's behavior
 # exactly. Defaults build gracefully (a missing extra leaves the
 # command reporting its install hint per invocation); an explicitly
 # listed name still fails loud. `local` is deliberately absent: a
 # sandboxed default must never silently escalate to host execution.
-DEFAULT_ENTRIES: tuple[str, ...] = ("monty", "quickjs", VFS_ENTRY)
+DEFAULT_ENTRIES: tuple[str, ...] = ("monty", "quickjs", VfsRuntime.name)
 
 # TypeScript-only runtime names a cross-language config may carry.
 TS_ONLY_HINTS: dict[str, str] = {
@@ -125,7 +131,7 @@ def runtime_bindings_for(entries: list[Runtime],
         ValueError: the name is vfs (captures nothing, so there is
             nothing to rebind) or not a workspace entry.
     """
-    if name == VFS_ENTRY:
+    if name == VfsRuntime.name:
         raise ValueError(
             "'vfs' is the default executor, not a runtime you can select")
     for entry in entries:

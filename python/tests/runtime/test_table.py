@@ -17,9 +17,9 @@ import pytest
 from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.python import LocalRuntime, MontyRuntime, WasiRuntime
-from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VFS_ENTRY,
-                                  VfsRuntime, bind_commands, build_runtime,
-                                  candidates, runtime_bindings_for)
+from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VfsRuntime,
+                                  bind_commands, build_runtime, candidates,
+                                  runtime_bindings_for)
 
 
 class FakeRuntime(Runtime):
@@ -39,7 +39,7 @@ def test_candidates_are_ordered_sandboxed_first():
 
 def test_default_entries_never_include_local():
     assert "local" not in DEFAULT_ENTRIES
-    assert DEFAULT_ENTRIES[-1] == VFS_ENTRY
+    assert DEFAULT_ENTRIES[-1] == "vfs"
 
 
 def test_build_runtime_unknown_name_fails_loud():
@@ -71,7 +71,7 @@ def test_bind_commands_vfs_runtime_binds_nothing():
 
 
 def test_build_runtime_vfs_is_a_named_runtime():
-    assert isinstance(build_runtime(VFS_ENTRY), VfsRuntime)
+    assert isinstance(build_runtime("vfs"), VfsRuntime)
 
 
 def test_bind_commands_rejects_duplicate_names():
@@ -92,7 +92,7 @@ def test_runtime_bindings_for_maps_only_the_named_captures():
 
 def test_runtime_bindings_for_rejects_vfs():
     with pytest.raises(ValueError, match="not a runtime you can select"):
-        runtime_bindings_for([FakeRuntime(), VfsRuntime()], VFS_ENTRY)
+        runtime_bindings_for([FakeRuntime(), VfsRuntime()], "vfs")
 
 
 def test_runtime_bindings_for_unknown_name_lists_entries():

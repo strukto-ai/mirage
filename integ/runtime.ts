@@ -303,6 +303,20 @@ async function main(): Promise<void> {
   await runError(wsLock, "lockdown_deny", "cat /ram/secret.txt");
   await wsLock.close();
 
+  // Overriding the vfs runtime: explicit captures restrict the
+  // workspace to those commands; interpreter bindings untouched.
+  const wsCap = new Workspace(
+    { "/ram": new RAMResource() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: ["quickjs", new VfsRuntime({ captures: ["echo", "cat"] })],
+    },
+  );
+  await run(wsCap, "vfs_captures_allow", "echo vfs-captured");
+  await runError(wsCap, "vfs_captures_deny", "ls /ram");
+  await run(wsCap, "vfs_captures_node", 'node -e "console.log(6 * 7)"');
+  await wsCap.close();
+
   // addRuntime: the runtime argument can only name a workspace entry,
   // so it fails loud until the entry is added at runtime.
   const wsAdd = new Workspace(
