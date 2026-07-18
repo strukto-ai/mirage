@@ -75,3 +75,11 @@ exit_code=126
 unknown-runtime-rejected
 === add_runtime_arg_after ===
 42
+=== whole_line_capture ===
+box:nvidia-smi -L | grep GPU
+=== whole_line_uncaptured ===
+still-the-workspace
+=== whole_line_star ===
+box:ls /ram && echo done
+=== whole_line_refused ===
+keep-out

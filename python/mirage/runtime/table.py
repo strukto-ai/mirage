@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 
 from mirage.runtime.base import Runtime, ScriptSource
@@ -37,9 +37,9 @@ class VfsRuntime(Runtime):
     capturer: the workspace serves exactly those commands and anything
     unclaimed exits 126. Required: every workspace world contains
     exactly one, appended automatically when the runtimes list omits
-    it; pass your own instance to customize it. run() stays
-    unimplemented until the line-door contract exists; the workspace
-    executor serves its commands internally.
+    it; pass your own instance to customize it. Its run_line is the
+    workspace executor itself, wired in at construction; run() stays
+    unimplemented because vfs has no single-command interpreter.
 
     Args:
         script (Callable | ScriptSource | None): per-line admission
@@ -52,9 +52,10 @@ class VfsRuntime(Runtime):
 
     name = "vfs"
     captures: tuple[str, ...] = ()
+    runs_lines = True
 
     def __init__(self,
-                 script: "Callable[..., Any] | ScriptSource | None" = None,
+                 script: Callable[..., Any] | ScriptSource | None = None,
                  captures: Sequence[str] | None = None) -> None:
         self.script = script
         # Declaring captures (even empty) turns the catch-all off; the
@@ -62,10 +63,28 @@ class VfsRuntime(Runtime):
         self.restricted = captures is not None
         if captures is not None:
             self.captures = tuple(captures)
+        self._execute_line: Callable[..., Any] | None = None
+
+    def bind_line_executor(self, execute: Callable[..., Any]) -> None:
+        """Wire the workspace executor in as this runtime's run_line.
+
+        Args:
+            execute (Callable): async (line, stdin, env, cwd) ->
+                RunResult, provided by the owning workspace.
+        """
+        self._execute_line = execute
 
     async def run(self, args: Any) -> Any:
-        raise RuntimeError("the vfs runtime has no interpreter door; the "
-                           "workspace executor runs its commands")
+        raise RuntimeError("the vfs runtime runs whole lines through the "
+                           "workspace executor; it has no single-command "
+                           "interpreter")
+
+    async def run_line(self, line: str, stdin: bytes | None,
+                       env: dict[str, str], cwd: str) -> Any:
+        if self._execute_line is None:
+            raise RuntimeError(
+                "the vfs runtime is not attached to a workspace")
+        return await self._execute_line(line, stdin, env, cwd)
 
 
 NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}
@@ -162,6 +181,33 @@ def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
             if command not in bindings:
                 bindings[command] = entry
     return bindings
+
+
+def whole_line_runtime(bindings: Mapping[str, Runtime | None],
+                       commands: Sequence[str]) -> Runtime | None:
+    """The runtime that runs this entire line, if any.
+
+    A runtime with ``runs_lines`` takes the raw line when it captures
+    one of the line's commands; a "*" capture claims any line. A
+    specific capture beats "*". The vfs runtime never matches here:
+    the workspace executor IS its run_line, the path the line takes
+    anyway when nothing else claims it.
+
+    Args:
+        bindings (Mapping[str, Runtime | None]): the line's resolved
+            command bindings (a RoutingDecision's or the registry's).
+        commands (Sequence[str]): the line's stage command names.
+    """
+    for command in commands:
+        runtime = bindings.get(command)
+        if (runtime is not None and runtime.runs_lines
+                and not isinstance(runtime, VfsRuntime)):
+            return runtime
+    star = bindings.get("*")
+    if (star is not None and star.runs_lines
+            and not isinstance(star, VfsRuntime)):
+        return star
+    return None
 
 
 def catch_all(entries: list[Runtime]) -> Runtime | None:

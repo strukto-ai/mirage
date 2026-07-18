@@ -392,3 +392,96 @@ def test_config_script_path_form_missing_file_fails_loud(tmp_path):
             "name": "local",
             "script": str(tmp_path / "nope.py")
         }])
+
+
+class LineBox(Runtime):
+    name = "sandbox"
+    captures = ("nvidia-smi", )
+    runs_lines = True
+
+    def __init__(self) -> None:
+        self.lines: list[tuple[str, bytes | None, str]] = []
+
+    async def run(self, args: RunArgs) -> RunResult:
+        raise AssertionError("run_line runtimes never get single stages")
+
+    async def run_line(self, line: str, stdin: bytes | None,
+                       env: dict[str, str], cwd: str) -> RunResult:
+        self.lines.append((line, stdin, cwd))
+        return RunResult(stdout=b"box:" + line.encode(),
+                         stderr=None,
+                         exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_whole_line_goes_to_the_capturing_runtime():
+    box = LineBox()
+    ws = Workspace({"/ram": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    io = await ws.execute("nvidia-smi -L | grep GPU > /out.txt")
+    assert await materialize(io.stdout
+                             ) == b"box:nvidia-smi -L | grep GPU > /out.txt"
+    assert box.lines[0][0] == "nvidia-smi -L | grep GPU > /out.txt"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_star_captures_any_line_and_stdin_arrives():
+    box = LineBox()
+    box.captures = ("*", )
+    ws = Workspace({"/ram": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    io = await ws.execute("ls /ram && echo done", stdin=b"fed")
+    assert (await materialize(io.stdout)).startswith(b"box:")
+    assert box.lines[0][1] == b"fed"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_refused_line_runtime_falls_to_the_workspace():
+    box = LineBox()
+    box.captures = ("*", )
+    box.script = lambda ctx: "keep-out" not in ctx.line
+    ws = Workspace({"/ram": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    taken = await ws.execute("echo captured")
+    kept = await ws.execute("echo keep-out")
+    assert (await materialize(taken.stdout)).startswith(b"box:")
+    assert await materialize(kept.stdout) == b"keep-out\n"
+    assert kept.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_argument_places_the_whole_line():
+    box = LineBox()
+    box.captures = ("*", )
+    box.script = lambda ctx: False
+    ws = Workspace({"/ram": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    refused = await ws.execute("echo hi")
+    forced = await ws.execute("echo hi", runtime="sandbox")
+    assert await materialize(refused.stdout) == b"hi\n"
+    assert (await materialize(forced.stdout)).startswith(b"box:")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_vfs_run_line_is_the_workspace_executor():
+    ws = Workspace({"/ram": RAMResource()}, mode=MountMode.EXEC)
+    vfs = ws._registry.vfs_runtime
+    assert vfs is not None
+    result = await vfs.run_line("echo through-vfs", None, {}, "/")
+    assert result.stdout == b"through-vfs\n"
+    assert result.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_run_line_default_is_not_implemented():
+    with pytest.raises(NotImplementedError, match="whole lines"):
+        await MontyRuntime().run_line("echo x", None, {}, "/")

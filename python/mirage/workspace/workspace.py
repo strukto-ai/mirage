@@ -31,7 +31,7 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
 from mirage.commands.errors import FindParseError, UsageError
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import RecordingScope
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
@@ -43,13 +43,13 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import Runtime
+from mirage.runtime.base import RunResult, Runtime
 from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
 from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
                                   build_runtime, catch_all,
-                                  runtime_bindings_for)
+                                  runtime_bindings_for, whole_line_runtime)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -270,6 +270,9 @@ class Workspace:
         self._registry.vfs_runtime = next(
             (entry for entry in self._runtime_entries
              if isinstance(entry, VfsRuntime)), None)
+        if isinstance(self._registry.vfs_runtime, VfsRuntime):
+            self._registry.vfs_runtime.bind_line_executor(
+                self._execute_line_for_vfs)
         _reject_config_script("route", route)
         self._route = route
 
@@ -482,6 +485,48 @@ class Workspace:
         self._runtime_entries = candidate
         self._registry.runtime_bindings = bindings
         return entry
+
+    def _whole_line_runtime(
+            self, ast: Any,
+            decision: RoutingDecision | None) -> Runtime | None:
+        """The runtime taking this whole line, None for the executor.
+
+        A runtime with ``runs_lines`` takes the raw line when the
+        line's resolved bindings place one of its commands (or "*") on
+        it; everything else walks the executor's tree as today. The
+        common world has no such runtime, so this is a cheap scan.
+
+        Args:
+            ast: the parsed tree-sitter root node.
+            decision (RoutingDecision | None): the line's decision,
+                None when only static bindings apply.
+        """
+        if not any(entry.runs_lines and not isinstance(entry, VfsRuntime)
+                   for entry in self._runtime_entries):
+            return None
+        bindings: Mapping[str, Runtime
+                          | None] = (decision.bindings if decision is not None
+                                     else self._registry.runtime_bindings)
+        facts = command_facts(ast)
+        return whole_line_runtime(bindings, [fact.command for fact in facts])
+
+    async def _execute_line_for_vfs(self, line: str, stdin: bytes | None,
+                                    env: dict[str,
+                                              str], cwd: str) -> RunResult:
+        """The workspace executor as the vfs runtime's run_line.
+
+        Args:
+            line (str): the raw command line.
+            stdin (bytes | None): bytes piped into the line.
+            env (dict[str, str]): environment overrides for the line.
+            cwd (str): working directory for the line.
+        """
+        io = await self.execute(line, stdin=stdin, cwd=cwd, env=env)
+        stdout = (await materialize(io.stdout)
+                  if io.stdout is not None else b"")
+        stderr = (await materialize(io.stderr)
+                  if io.stderr is not None else None)
+        return RunResult(stdout=stdout, stderr=stderr, exit_code=io.exit_code)
 
     async def _resolve_routing_decision(
             self, ast: Any, command: str, runtime: str | None, provision: bool,
@@ -1143,6 +1188,18 @@ class Workspace:
                                    self._plan_eval_stub, self._namespace, ast,
                                    effective_session), prov_timeout, prov_name
                     or "")
+            line_runtime = self._whole_line_runtime(ast, decision)
+            if line_runtime is not None:
+                data = (await materialize(stdin)
+                        if stdin is not None else None)
+                result = await line_runtime.run_line(
+                    command, data, dict(effective_session.env),
+                    effective_session.cwd)
+                io = IOResult(exit_code=result.exit_code,
+                              stdout=result.stdout,
+                              stderr=result.stderr)
+                session.last_exit_code = io.exit_code
+                return io
             io, _ = await run_command_tree(
                 self.dispatch,
                 self._registry,

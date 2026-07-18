@@ -26,6 +26,9 @@ import {
   ScriptSource,
   VfsRuntime,
   Workspace,
+  type RouteScript,
+  type Runtime,
+  type RunResult,
 } from "@struktoai/mirage-node";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379/0";
@@ -178,6 +181,28 @@ function buildWorkspace(runId: string): Workspace {
     { "/ram": ram, "/redis": redis, "/s3": s3, "/mongodb": mongodb },
     { mode: MountMode.EXEC, runtimes: ["monty", "quickjs", "vfs"] },
   );
+}
+
+class EchoBox implements Runtime {
+  readonly name = "sandbox";
+  captures: readonly string[] = ["nvidia-smi"];
+  readonly runsLines = true;
+  script?: RouteScript;
+  attach(): void {}
+  run(): Promise<RunResult> {
+    return Promise.reject(new Error("whole-line runtimes take lines"));
+  }
+  runLine(
+    line: string,
+    _stdin: Uint8Array | null,
+    _env: Record<string, string>,
+    _cwd: string,
+  ): Promise<RunResult> {
+    return Promise.resolve({ stdout: ENC.encode(`box:${line}\n`), stderr: null, exitCode: 0 });
+  }
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 async function run(ws: Workspace, name: string, cmd: string): Promise<void> {
@@ -347,6 +372,28 @@ async function main(): Promise<void> {
   console.log("=== add_runtime_arg_after ===");
   process.stdout.write(DEC.decode(added.stdout));
   await wsAdd.close();
+
+  // A runtime that runs whole lines: the raw line lands there
+  // wholesale when it captures one of the line's commands or "*";
+  // a refused line falls back to the workspace shell.
+  const wsLine = new Workspace(
+    { "/ram": new RAMResource() },
+    { mode: MountMode.EXEC, runtimes: [new EchoBox(), "vfs"] },
+  );
+  await run(wsLine, "whole_line_capture", "nvidia-smi -L | grep GPU");
+  await run(wsLine, "whole_line_uncaptured", "echo still-the-workspace");
+  await wsLine.close();
+
+  const star = new EchoBox();
+  star.captures = ["*"];
+  star.script = new ScriptSource("'keep-out' not in ctx['line']");
+  const wsStar = new Workspace(
+    { "/ram": new RAMResource() },
+    { mode: MountMode.EXEC, runtimes: [star, "vfs"] },
+  );
+  await run(wsStar, "whole_line_star", "ls /ram && echo done");
+  await run(wsStar, "whole_line_refused", "echo keep-out");
+  await wsStar.close();
   await ws.close();
 }
 

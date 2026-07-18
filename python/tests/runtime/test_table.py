@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VfsRuntime,
                                   bind_commands, build_runtime,
-                                  runtime_bindings_for)
+                                  runtime_bindings_for, whole_line_runtime)
 
 
 class FakeRuntime(Runtime):
@@ -90,3 +92,42 @@ def test_runtime_bindings_for_rejects_vfs():
 def test_runtime_bindings_for_unknown_name_lists_entries():
     with pytest.raises(ValueError, match="'fake', 'vfs'"):
         runtime_bindings_for([FakeRuntime(), VfsRuntime()], "nope")
+
+
+class _LineRuntime(Runtime):
+    name = "boxy"
+    captures = ("nvidia-smi", )
+    runs_lines = True
+
+    async def run(self, args: RunArgs) -> RunResult:
+        raise AssertionError
+
+    async def run_line(self, line: str, stdin: bytes | None,
+                       env: dict[str, str], cwd: str) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+def test_whole_line_runtime_matches_a_captured_command():
+    box = _LineRuntime()
+    assert whole_line_runtime({"nvidia-smi": box},
+                              ["cat", "nvidia-smi"]) is box
+
+
+def test_whole_line_runtime_specific_beats_star():
+    box, star = _LineRuntime(), _LineRuntime()
+    bindings = {"nvidia-smi": box, "*": star}
+    assert whole_line_runtime(bindings, ["nvidia-smi"]) is box
+    assert whole_line_runtime(bindings, ["ls"]) is star
+
+
+def test_whole_line_runtime_skips_stage_engines_and_vfs():
+    vfs = VfsRuntime(captures=["grep"])
+    monty_like = _LineRuntime()
+    monty_like.runs_lines = False
+    bindings = {"grep": vfs, "python3": monty_like}
+    assert whole_line_runtime(bindings, ["grep", "python3"]) is None
+
+
+def test_vfs_run_line_requires_a_workspace():
+    with pytest.raises(RuntimeError, match="not attached"):
+        asyncio.run(VfsRuntime().run_line("echo x", None, {}, "/"))

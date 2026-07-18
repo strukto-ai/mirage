@@ -343,3 +343,119 @@ describe('script context', () => {
     }
   })
 })
+
+class LineBox implements Runtime {
+  readonly name = 'sandbox'
+  captures: readonly string[] = ['nvidia-smi']
+  readonly runsLines = true
+  script?: RouteScript
+  lines: [string, Uint8Array | null, string][] = []
+  attach(): void {
+    // wiring is a no-op for the fake
+  }
+  run(_args: RunArgs): Promise<RunResult> {
+    return Promise.reject(new Error('runLine runtimes never get single stages'))
+  }
+  runLine(
+    line: string,
+    stdin: Uint8Array | null,
+    _env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    this.lines.push([line, stdin, cwd])
+    return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
+  }
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
+describe('whole-line runtimes', () => {
+  it('a captured command sends the raw line wholesale', async () => {
+    const parser = await getTestParser()
+    const box = new LineBox()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+    )
+    try {
+      const result = await ws.execute('nvidia-smi -L | grep GPU > /out.txt')
+      expect(DEC.decode(result.stdout)).toBe('box:nvidia-smi -L | grep GPU > /out.txt')
+      expect(box.lines[0]?.[0]).toBe('nvidia-smi -L | grep GPU > /out.txt')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a "*" capture claims any line and stdin arrives', async () => {
+    const parser = await getTestParser()
+    const box = new LineBox()
+    box.captures = ['*']
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+    )
+    try {
+      const result = await ws.execute('ls / && echo done', { stdin: ENC.encode('fed') })
+      expect(DEC.decode(result.stdout)).toBe('box:ls / && echo done')
+      expect(DEC.decode(box.lines[0]?.[1] ?? new Uint8Array())).toBe('fed')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a refused line falls to the workspace, never 126', async () => {
+    const parser = await getTestParser()
+    const box = new LineBox()
+    box.captures = ['*']
+    box.script = (ctx) => !ctx.line.includes('keep-out')
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+    )
+    try {
+      const taken = await ws.execute('echo captured')
+      const kept = await ws.execute('echo keep-out')
+      expect(DEC.decode(taken.stdout)).toBe('box:echo captured')
+      expect(DEC.decode(kept.stdout)).toBe('keep-out\n')
+      expect(kept.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('the runtime argument places the whole line', async () => {
+    const parser = await getTestParser()
+    const box = new LineBox()
+    box.captures = ['*']
+    box.script = () => false
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+    )
+    try {
+      const refused = await ws.execute('echo hi')
+      const forced = await ws.execute('echo hi', { runtime: 'sandbox' })
+      expect(DEC.decode(refused.stdout)).toBe('hi\n')
+      expect(DEC.decode(forced.stdout)).toBe('box:echo hi')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("the vfs runtime's runLine is the workspace executor", async () => {
+    const parser = await getTestParser()
+    const vfs = new VfsRuntime()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['pyodide', vfs] },
+    )
+    try {
+      const result = await vfs.runLine('echo through-vfs', null, {}, '/')
+      expect(DEC.decode(result.stdout)).toBe('through-vfs\n')
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+})

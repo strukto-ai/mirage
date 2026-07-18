@@ -25,7 +25,7 @@ class ScriptSource:
     value references a ``.py`` file whose content is embedded here at
     load. The source sees ctx as a dict and its LAST EXPRESSION is the
     verdict. It runs on the routing interpreter (monty today; a
-    sandbox runtime is a candidate door later).
+    sandbox runtime may take this over later).
 
     Args:
         source (str): the script program.
@@ -93,6 +93,10 @@ class Runtime(ABC):
     # config-borne ScriptSource. None = always willing. Policy, not
     # capability: it can only refuse lines the captures already allow.
     script: Callable[..., Any] | ScriptSource | None = None
+    # A runtime that runs whole lines sets this True and implements
+    # run_line. Interpreter runtimes leave it False: they are the
+    # engine inside one command (python3, node), never the line.
+    runs_lines: bool = False
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:
@@ -117,6 +121,25 @@ class Runtime(ABC):
         Args:
             args (RunArgs): the execution request.
         """
+
+    async def run_line(self, line: str, stdin: bytes | None,
+                       env: dict[str, str], cwd: str) -> RunResult:
+        """Execute one raw command line wholesale.
+
+        Only runtimes with ``runs_lines`` implement this. The runtime
+        owns the entire line: pipes, redirects, and every command in
+        it run inside the runtime's world (its own cat, its own grep),
+        the workspace shell never splits the line. A line lands here
+        when this runtime captures one of the line's commands or "*".
+
+        Args:
+            line (str): the raw typed line.
+            stdin (bytes | None): bytes piped into the line.
+            env (dict[str, str]): the session environment.
+            cwd (str): the session working directory.
+        """
+        raise NotImplementedError(
+            f"runtime {self.name!r} runs single commands, not whole lines")
 
     async def close(self) -> None:
         """Release interpreter resources. Default: nothing held."""

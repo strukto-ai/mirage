@@ -56,12 +56,31 @@ export interface Runtime {
    */
   script?: RouteScript
   /**
+   * A runtime that runs whole lines sets this true and implements
+   * runLine. Interpreter runtimes leave it unset: they are the engine
+   * inside one command (python3, node), never the line.
+   */
+  readonly runsLines?: boolean
+  /**
    * Late-wire workspace I/O into a user-constructed instance. The
    * workspace attaches its dispatch bridge at construction; runtimes
    * that never touch workspace files keep this a no-op.
    */
   attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void
   run(args: RunArgs): Promise<RunResult>
+  /**
+   * Execute one raw command line wholesale. Only runtimes with
+   * runsLines implement this: the runtime owns the entire line
+   * (pipes, redirects, its own cat), the workspace shell never
+   * splits it. A line lands here when this runtime captures one of
+   * the line's commands or "*".
+   */
+  runLine?(
+    line: string,
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult>
   close(): Promise<void>
 }
 
@@ -85,9 +104,9 @@ export function scriptStringError(kind = 'a script'): Error {
  * capturer: the workspace serves exactly those commands and anything
  * unclaimed exits 126. Required: every workspace world contains
  * exactly one, appended automatically when the runtimes list omits it;
- * pass your own instance to customize it. run() stays unimplemented
- * until the line-door contract exists; the workspace executor serves
- * its commands internally.
+ * pass your own instance to customize it. Its runLine is the workspace
+ * executor itself, wired in at construction; run() stays unimplemented
+ * because vfs has no single-command interpreter.
  */
 export class VfsRuntime implements Runtime {
   readonly name = 'vfs'
@@ -95,7 +114,16 @@ export class VfsRuntime implements Runtime {
   // Declaring captures (even empty) turns the catch-all off; the
   // dispatcher reads this bit, not the array's length.
   readonly restricted: boolean = false
+  readonly runsLines = true
   script?: RouteScript
+  private executeLine:
+    | ((
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ) => Promise<RunResult>)
+    | null = null
 
   // The record form exists for the shared buildRuntime path, which
   // hands every runtime its options object ({script?, captures?}).
@@ -124,9 +152,34 @@ export class VfsRuntime implements Runtime {
   run(): Promise<never> {
     return Promise.reject(
       new Error(
-        'the vfs runtime has no interpreter door; the workspace executor runs its commands',
+        'the vfs runtime runs whole lines through the workspace executor; ' +
+          'it has no single-command interpreter',
       ),
     )
+  }
+
+  /** Wire the workspace executor in as this runtime's runLine. */
+  bindLineExecutor(
+    execute: (
+      line: string,
+      stdin: Uint8Array | null,
+      env: Record<string, string>,
+      cwd: string,
+    ) => Promise<RunResult>,
+  ): void {
+    this.executeLine = execute
+  }
+
+  runLine(
+    line: string,
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    if (this.executeLine === null) {
+      return Promise.reject(new Error('the vfs runtime is not attached to a workspace'))
+    }
+    return this.executeLine(line, stdin, env, cwd)
   }
 
   close(): Promise<void> {
@@ -201,6 +254,32 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
     }
   }
   return bindings
+}
+
+/**
+ * The runtime that runs this entire line, if any.
+ *
+ * A runtime with runsLines takes the raw line when it captures one of
+ * the line's commands; a "*" capture claims any line. A specific
+ * capture beats "*". The vfs runtime never matches here: the
+ * workspace executor IS its runLine, the path the line takes anyway
+ * when nothing else claims it.
+ */
+export function wholeLineRuntime(
+  bindings: Record<string, Runtime | null>,
+  commands: readonly string[],
+): Runtime | null {
+  for (const command of commands) {
+    const runtime = Object.hasOwn(bindings, command) ? bindings[command] : null
+    if (runtime?.runsLines === true) {
+      if (!(runtime instanceof VfsRuntime)) return runtime
+    }
+  }
+  const star = Object.hasOwn(bindings, '*') ? bindings['*'] : null
+  if (star?.runsLines === true) {
+    if (!(star instanceof VfsRuntime)) return star
+  }
+  return null
 }
 
 /**

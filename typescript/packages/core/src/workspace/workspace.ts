@@ -74,10 +74,12 @@ import {
   catchAll,
   runtimeBindingsFor,
   scriptStringError,
+  wholeLineRuntime,
   DEFAULT_ENTRIES,
   VfsRuntime,
   type Runtime,
   type RuntimeEntry,
+  type RunResult,
 } from './executor/runtime.ts'
 import { buildRuntime } from './executor/runtime_table.ts'
 import type { PythonReplRunResult } from './executor/python/types.ts'
@@ -345,6 +347,11 @@ export class Workspace {
     }
     this.registry.vfsRuntime =
       this.runtimeEntries.find((entry) => entry instanceof VfsRuntime) ?? null
+    if (this.registry.vfsRuntime instanceof VfsRuntime) {
+      this.registry.vfsRuntime.bindLineExecutor((line, lineStdin, env, cwd) =>
+        this.executeLineForVfs(line, lineStdin, env, cwd),
+      )
+    }
     for (const entry of this.runtimeEntries) {
       if (typeof entry.script === 'string')
         throw scriptStringError(`runtime '${entry.name}' script`)
@@ -464,6 +471,46 @@ export class Workspace {
    * so dispatch falls to the static bindings; a nested eval inherits
    * the typed line's decision and never re-routes.
    */
+  /**
+   * The runtime taking this whole line, null for the executor.
+   *
+   * A runtime with runsLines takes the raw line when the line's
+   * resolved bindings place one of its commands (or "*") on it;
+   * everything else walks the executor's tree as today. The common
+   * world has no such runtime, so this is a cheap scan.
+   */
+  private wholeLineRuntimeFor(
+    rootNode: TSNodeLike,
+    decision: RoutingDecision | null,
+  ): Runtime | null {
+    const candidates = this.runtimeEntries.some(
+      (entry) => entry.runsLines === true && !(entry instanceof VfsRuntime),
+    )
+    if (!candidates) return null
+    const bindings: Record<string, Runtime | null> =
+      decision !== null ? decision.bindings : this.runtimeBindings
+    const facts = commandFacts(rootNode)
+    return wholeLineRuntime(
+      bindings,
+      facts.map((fact) => fact.command),
+    )
+  }
+
+  /** The workspace executor as the vfs runtime's runLine. */
+  private async executeLineForVfs(
+    line: string,
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    const result = await this.execute(line, { stdin, cwd, env })
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr.length > 0 ? result.stderr : null,
+      exitCode: result.exitCode,
+    }
+  }
+
   private async resolveRoutingDecision(
     root: TSNodeLike,
     command: string,
@@ -1131,6 +1178,33 @@ export class Workspace {
     // with record:false: no new recording scope, so their ops land in the
     // caller's recorder, and no command entry is logged for them.
     const isLine = options.record !== false
+    const lineRuntime = this.wholeLineRuntimeFor(rootNode, deps.routingDecision ?? null)
+    if (lineRuntime?.runLine !== undefined) {
+      const data = stdin !== null ? await materialize(stdin) : null
+      const result = await lineRuntime.runLine(
+        command,
+        data,
+        { ...effectiveSession.env },
+        effectiveSession.cwd,
+      )
+      targetSession.lastExitCode = result.exitCode
+      if (isLine) {
+        const lineIo = new IOResult({
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          ...(result.stderr !== null ? { stderr: result.stderr } : {}),
+        })
+        await this.observer.logExecution(
+          command,
+          lineIo,
+          [],
+          callAgentId,
+          targetSession.sessionId,
+          effectiveSession.cwd,
+        )
+      }
+      return new ExecuteResult(result.stdout, result.stderr ?? new Uint8Array(), result.exitCode)
+    }
     const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
       runWithSession(effectiveSession, () =>
         runCommandTree(deps, rootNode, effectiveSession, stdin),

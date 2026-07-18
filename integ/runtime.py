@@ -33,6 +33,8 @@ from mirage.resource.mongodb import MongoDBResource  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.resource.redis import RedisResource  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
+from mirage.runtime.base import RunArgs  # noqa: E402
+from mirage.runtime.base import RunResult, Runtime  # noqa: E402
 from mirage.runtime.python.monty import MontyRuntime  # noqa: E402
 from mirage.runtime.route import ScriptSource  # noqa: E402
 from mirage.runtime.table import VfsRuntime  # noqa: E402
@@ -193,6 +195,21 @@ async def _run_error(ws: Workspace, name: str, cmd: str) -> None:
     result = await ws.execute(cmd)
     print(f"=== {name} ===")
     print(f"exit_code={result.exit_code}")
+
+
+class EchoBox(Runtime):
+    name = "sandbox"
+    captures = ("nvidia-smi", )
+    runs_lines = True
+
+    async def run(self, args: RunArgs) -> RunResult:
+        raise AssertionError("whole-line runtimes take lines")
+
+    async def run_line(self, line: str, stdin: bytes | None,
+                       env: dict[str, str], cwd: str) -> RunResult:
+        return RunResult(stdout=f"box:{line}\n".encode(),
+                         stderr=None,
+                         exit_code=0)
 
 
 async def main() -> None:
@@ -444,6 +461,34 @@ async def main() -> None:
         print("=== py3_safeguard_timeout ===")
         print(f"exit_code={result.exit_code}")
         await ws_sg.close()
+
+        # A runtime that runs whole lines: the raw line lands there
+        # wholesale when it captures one of the line's commands or "*";
+        # a refused line falls back to the workspace shell.
+        ws_line = Workspace({"/ram": RAMResource()},
+                            mode=MountMode.EXEC,
+                            runtimes=[EchoBox(), "vfs"])
+        result = await ws_line.execute("nvidia-smi -L | grep GPU")
+        print("=== whole_line_capture ===")
+        print(await result.stdout_str(), end="")
+        result = await ws_line.execute("echo still-the-workspace")
+        print("=== whole_line_uncaptured ===")
+        print(await result.stdout_str(), end="")
+        await ws_line.close()
+
+        star = EchoBox()
+        star.captures = ("*", )
+        star.script = ScriptSource("'keep-out' not in ctx['line']")
+        ws_star = Workspace({"/ram": RAMResource()},
+                            mode=MountMode.EXEC,
+                            runtimes=[star, "vfs"])
+        result = await ws_star.execute("ls /ram && echo done")
+        print("=== whole_line_star ===")
+        print(await result.stdout_str(), end="")
+        result = await ws_star.execute("echo keep-out")
+        print("=== whole_line_refused ===")
+        print(await result.stdout_str(), end="")
+        await ws_star.close()
         await ws.close()
     finally:
         server.stop()
