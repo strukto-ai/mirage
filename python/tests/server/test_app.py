@@ -18,7 +18,7 @@ import pytest
 
 from mirage.server.app import _remove_pid_file, _write_pid_file, build_app
 from mirage.server.daemon_config import DaemonConfigError
-from mirage.server.env import ENV_HOME, ENV_PID_FILE
+from mirage.server.env import ENV_HOME
 
 
 def test_build_app_pid_file_explicit_wins(tmp_path):
@@ -27,18 +27,12 @@ def test_build_app_pid_file_explicit_wins(tmp_path):
     assert app.state.pid_file == target
 
 
-def test_build_app_pid_file_from_env(monkeypatch, tmp_path):
-    monkeypatch.setenv(ENV_PID_FILE, str(tmp_path / "env.pid"))
-    app = build_app()
-    assert app.state.pid_file == tmp_path / "env.pid"
-
-
 def test_build_app_roots_follow_mirage_home(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
-    monkeypatch.delenv(ENV_PID_FILE, raising=False)
     app = build_app()
     assert app.state.pid_file == tmp_path / "daemon.pid"
     assert app.state.snapshot_root == tmp_path / "snapshots"
+    assert app.state.state_root == tmp_path / "state"
 
 
 def test_write_and_remove_pid_file_creates_parents(tmp_path):
@@ -55,7 +49,6 @@ def test_remove_pid_file_missing_is_quiet(tmp_path):
 
 def test_build_app_rejects_unknown_config_key(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
-    monkeypatch.delenv(ENV_PID_FILE, raising=False)
     (tmp_path / "config.toml").write_text('[daemon]\ntypo_key = "x"\n')
     with pytest.raises(DaemonConfigError, match="typo_key"):
         build_app()
@@ -63,6 +56,5 @@ def test_build_app_rejects_unknown_config_key(monkeypatch, tmp_path):
 
 def test_build_app_accepts_valid_config(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
-    monkeypatch.delenv(ENV_PID_FILE, raising=False)
     (tmp_path / "config.toml").write_text('[daemon]\nurl = "http://h:1"\n')
     build_app()

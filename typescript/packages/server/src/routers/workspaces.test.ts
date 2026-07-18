@@ -279,3 +279,28 @@ describe('workspaces router', () => {
     }
   })
 })
+
+describe('daemon disk-store default', () => {
+  it('persists a store-less workspace under the state root', async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), 'mir-stateroot-'))
+    const app = buildApp({ stateRoot })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: {
+        id: 'diskws',
+        config: { mounts: { '/': { resource: 'ram', mode: 'write' } } },
+      },
+    })
+    expect(res.statusCode).toBe(201)
+    const exec = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/diskws/execute',
+      payload: { command: 'echo hi' },
+    })
+    expect(exec.statusCode).toBe(200)
+    expect(existsSync(join(stateRoot, 'workspaces', 'diskws', 'workspace.json'))).toBe(true)
+    await app.close()
+    rmSync(stateRoot, { recursive: true, force: true })
+  })
+})
