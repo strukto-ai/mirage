@@ -14,24 +14,17 @@
 
 import asyncio
 import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 import tree_sitter
 
 from mirage.commands.spec import SPECS
 from mirage.runtime.base import Runtime
+from mirage.runtime.python.monty import _MirageOS, pydantic_monty
 from mirage.runtime.table import VfsEntry, bind_commands, pin_bindings
-
-try:
-    import pydantic_monty as _pydantic_monty
-except ImportError:
-    pydantic_monty = None
-else:
-    pydantic_monty = _pydantic_monty
-
-RouteScript = Callable[..., Any] | str
-RouteFn = Callable[..., Any] | str
+from mirage.shell.types import NodeType
 
 
 class RoutingDecisionError(ValueError):
@@ -44,8 +37,8 @@ class RoutingDecisionError(ValueError):
     """
 
 
-_WORD_TYPES = ("command_name", "word", "string", "raw_string", "number",
-               "concatenation")
+_WORD_TYPES = (NodeType.COMMAND_NAME, NodeType.WORD, NodeType.STRING,
+               NodeType.RAW_STRING, NodeType.NUMBER, NodeType.CONCATENATION)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +124,16 @@ class RouteContext:
         return payload
 
 
+# A per-runtime willingness script: a callable on the RouteContext
+# returning a truthy verdict, or monty source whose last expression is
+# the verdict. Mirrors the TS RouteScript.
+RouteScript = Callable[[RouteContext], bool | Awaitable[bool]] | str
+
+# The global route: a callable on the RouteContext returning a runtime
+# name (or None to pass), or monty source. Mirrors the TS RouteFn.
+RouteFn = Callable[[RouteContext], str | None | Awaitable[str | None]] | str
+
+
 @dataclass(frozen=True, slots=True)
 class LineRouting:
     """The one-line placement decision the dispatcher consults.
@@ -196,7 +199,6 @@ async def _eval_monty(source: str, ctx_payload: dict[str, Any],
         raise ImportError(
             "route scripts run on monty; install with: pip install "
             "mirage-ai[monty], or use a Python callable instead")
-    from mirage.runtime.python.monty import _MirageOS
     loop = asyncio.get_running_loop()
     bridge = _MirageOS(loop, dispatch, {})
     try:

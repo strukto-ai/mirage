@@ -442,8 +442,9 @@ class Workspace:
         rejected before any state changes.
 
         Args:
-            runtime: a Runtime instance, a runtime name, or the vfs
-                marker.
+            runtime (Runtime | str): a Runtime instance, a registry
+                runtime name (built like a config entry), or the plain
+                "vfs" marker for the vfs executor's slot.
 
         Raises:
             ValueError: unknown name or duplicate entry.
