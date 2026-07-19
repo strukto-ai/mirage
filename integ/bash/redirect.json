@@ -708,8 +708,242 @@
       }
     },
     {
-      "id": "redirect5_cleanup",
+      "id": "redirect_stdin_stdout",
       "seq": 501117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf 'b\\na\\n' > RI && sort < RI > RO && cat RO",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_input_last_wins",
+      "seq": 501118,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf 'first\\n' > R1 && printf 'second\\n' > R2 && cat < R1 < R2",
+      "expect": {
+        "exit": 0,
+        "stdout": "second\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_bare_truncate",
+      "seq": 501119,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo old > BT && > BT && wc -c < BT",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_bare_append_preserves",
+      "seq": 501120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo keep > BAP && >> BAP && cat BAP",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_target_quoted_var",
+      "seq": 501121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "name='space file'; echo spaced > \"$name\" && cat \"$name\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "spaced\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_target_cmdsub",
+      "seq": 501122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo dynamic > \"$(printf RT)\" && cat RT",
+      "expect": {
+        "exit": 0,
+        "stdout": "dynamic\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_dup_then_stderr_file",
+      "seq": 501123,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "{ echo out; echo err >&2; } >&2 2> SPLIT && echo marker && cat SPLIT",
+      "expect": {
+        "exit": 0,
+        "stdout": "marker\nerr\n",
+        "stderr": "out\n"
+      }
+    },
+    {
+      "id": "redirect_pipeline_dup",
+      "seq": 501124,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "{ echo z; echo a >&2; } 2>&1 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_subshell",
+      "seq": 501125,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "(echo sub1; echo sub2) > SUB && cat SUB",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub1\nsub2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect5_cleanup",
+      "seq": 501126,
       "targets": [
         "ram",
         "disk",

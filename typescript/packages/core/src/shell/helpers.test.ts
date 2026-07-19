@@ -26,6 +26,7 @@ import {
   getNegatedCommand,
   getParts,
   getPipelineCommands,
+  getProcessSubBody,
   getSubshellBody,
   getText,
   getTestArgv,
@@ -82,6 +83,17 @@ describe('getParts', () => {
       ],
     })
     expect(getParts(n)).toHaveLength(2)
+  })
+})
+
+describe('getProcessSubBody', () => {
+  it('preserves the complete inner shell source', () => {
+    expect(getProcessSubBody(node('process_substitution', '<(echo one; echo two)'))).toBe(
+      'echo one; echo two',
+    )
+    expect(getProcessSubBody(node('process_substitution', '<(printf x | sort)'))).toBe(
+      'printf x | sort',
+    )
   })
 })
 

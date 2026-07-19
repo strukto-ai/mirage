@@ -391,7 +391,7 @@ def get_heredoc_meta(
     delimiter, body = get_heredoc_parts(redirect_node)
     # Any quoting anywhere in the delimiter (even partial, `EN'D'`)
     # disables expansion, matching bash.
-    quoted = "'" in delimiter or '"' in delimiter
+    quoted = "'" in delimiter or '"' in delimiter or "\\" in delimiter
     dash = False
     for c in redirect_node.children:
         if c.type == "<<-":
@@ -437,6 +437,13 @@ def get_process_sub_direction(
     if open_token == ">(":
         return ProcessSubDirection.OUTPUT
     return None
+
+
+def get_process_sub_body(node: tree_sitter.Node) -> str:
+    text = get_text(node)
+    if text.startswith(("<(", ">(")) and text.endswith(")"):
+        return text[2:-1]
+    return text
 
 
 def get_function_name(node: tree_sitter.Node) -> str:

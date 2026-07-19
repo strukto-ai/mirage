@@ -15,7 +15,11 @@
 import { materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
-import { getProcessSubDirection, getText, ProcessSubDirection } from '../../shell/helpers.ts'
+import {
+  getProcessSubBody,
+  getProcessSubDirection,
+  ProcessSubDirection,
+} from '../../shell/helpers.ts'
 import { NodeType as NT, Redirect, RedirectKind } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
@@ -23,13 +27,6 @@ import { classifyBarePath } from './classify/index.ts'
 import { expandNode, unescapeHeredoc } from './node.ts'
 import type { ExecuteFn } from './node.ts'
 import { lookupVar, type TSNodeLike } from './variable.ts'
-
-const PROC_SUB_INNER: ReadonlySet<string> = new Set([
-  NT.COMMAND,
-  NT.PIPELINE,
-  NT.LIST,
-  NT.REDIRECTED_STATEMENT,
-])
 
 // tree-sitter-bash misses bare `$_name` refs preceded by a non-space
 // character inside heredoc bodies (they stay literal text instead of
@@ -183,15 +180,13 @@ export async function expandRedirects(
       ) {
         // `cmd < <(inner)` — run the inner command and feed its stdout
         // as stdin, reusing the heredoc delivery path.
+        const inner = getProcessSubBody(procSubNode)
         let innerData: Uint8Array = new Uint8Array()
-        for (const c of procSubNode.namedChildren) {
-          if (PROC_SUB_INNER.has(c.type)) {
-            const ioPs = await executeFn(getText(c), {
-              sessionId: session.sessionId,
-            })
-            innerData = await materialize(ioPs.stdout)
-            break
-          }
+        if (inner !== '') {
+          const ioPs = await executeFn(inner, {
+            sessionId: session.sessionId,
+          })
+          innerData = await materialize(ioPs.stdout)
         }
         expanded.push(
           new Redirect({

@@ -23,8 +23,8 @@ from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_case_word, get_command_name, get_declaration_keyword,
     get_for_parts, get_function_body, get_function_name, get_heredoc_meta,
     get_heredoc_parts, get_if_branches, get_list_parts, get_negated_command,
-    get_parts, get_pipeline_commands, get_redirects, get_subshell_body,
-    get_text, get_unset_names, get_while_parts)
+    get_parts, get_pipeline_commands, get_process_sub_body, get_redirects,
+    get_subshell_body, get_text, get_unset_names, get_while_parts)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -304,6 +304,13 @@ def test_process_sub_command():
     assert len(ps_nodes) == 2
     inner = ps_nodes[0].named_children[0]
     assert get_command_name(inner) == "echo"
+
+
+def test_process_sub_body_preserves_pipeline_and_list():
+    pipeline = get_parts(_first("cat <(printf x | sort)"))[1]
+    commands = get_parts(_first("cat <(echo one; echo two)"))[1]
+    assert get_process_sub_body(pipeline) == "printf x | sort"
+    assert get_process_sub_body(commands) == "echo one; echo two"
 
 
 # ── expansion nodes ──────────────────────────────
@@ -633,6 +640,15 @@ def test_get_heredoc_meta_partially_quoted_delimiter():
         if c.type == NT.HEREDOC_REDIRECT:
             heredoc = c
     assert heredoc is not None
+    body, dash, quoted = get_heredoc_meta(heredoc)
+    assert quoted is True
+    assert dash is False
+    assert body == "x=$v\n"
+
+
+def test_get_heredoc_meta_backslash_quoted_delimiter():
+    node = _first("cat <<\\END\nx=$v\nEND\n")
+    heredoc = node.named_children[1]
     body, dash, quoted = get_heredoc_meta(heredoc)
     assert quoted is True
     assert dash is False

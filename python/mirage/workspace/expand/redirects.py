@@ -20,7 +20,7 @@ import tree_sitter
 
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
-from mirage.shell.helpers import (ProcessSubDirection,
+from mirage.shell.helpers import (ProcessSubDirection, get_process_sub_body,
                                   get_process_sub_direction, get_text)
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
@@ -34,13 +34,6 @@ from mirage.workspace.session import Session
 # character inside heredoc bodies (they stay literal text instead of
 # becoming simple_expansion nodes); this catches them in literal pieces.
 _VAR_REF = re.compile(r"(?<!\\)\$([A-Za-z_][A-Za-z0-9_]*)")
-
-_PROC_SUB_INNER = frozenset({
-    NT.COMMAND,
-    NT.PIPELINE,
-    NT.LIST,
-    NT.REDIRECTED_STATEMENT,
-})
 
 
 def _lookup_match(match: re.Match[str], session: Session,
@@ -192,13 +185,12 @@ async def expand_redirects(
                     r.target_node) == ProcessSubDirection.INPUT):
                 # `cmd < <(inner)` — run the inner command and feed its
                 # stdout as stdin, reusing the heredoc delivery path.
+                inner = get_process_sub_body(r.target_node)
                 inner_data = b""
-                for c in r.target_node.named_children:
-                    if c.type in _PROC_SUB_INNER:
-                        io_ps = await execute_fn(get_text(c),
-                                                 session_id=session.session_id)
-                        inner_data = io_ps.stdout or b""
-                        break
+                if inner:
+                    io_ps = await execute_fn(inner,
+                                             session_id=session.session_id)
+                    inner_data = io_ps.stdout or b""
                 expanded.append(
                     Redirect(fd=0,
                              target=inner_data,

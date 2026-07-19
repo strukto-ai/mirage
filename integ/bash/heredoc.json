@@ -749,6 +749,398 @@
         "stdout": "a=one b=two three\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_partial_quoted_delim",
+      "seq": 501227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "v=expanded\ncat <<EN'D'\n$v\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "$v\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_backslash_quoted_delim",
+      "seq": 501228,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "v=expanded\ncat <<\\END\n$v\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "$v\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_quoted_continuation",
+      "seq": 501229,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\nleft \\\nright\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "left \\\nright\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_escape_matrix",
+      "seq": 501230,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "v=value\ncat <<END\ndollar=\\$v\nslash=\\\\\nquote=\\\"\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "dollar=$v\nslash=\\\nquote=\\\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_param_default",
+      "seq": 501231,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hv=\ncat <<END\n${hv:-fallback}\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "fallback\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_cmdsub_trailing_newlines",
+      "seq": 501232,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<END\nx=$(printf 'a\\n\\n')z\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "x=az\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_input_then_here",
+      "seq": 501233,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf 'file\\n' > /data/HIN1\ncat < /data/HIN1 <<END\nhere\nEND\nrm /data/HIN1",
+      "expect": {
+        "exit": 0,
+        "stdout": "here\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_here_then_input",
+      "seq": 501234,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf 'file\\n' > /data/HIN2\ncat <<END < /data/HIN2\nhere\nEND\nrm /data/HIN2",
+      "expect": {
+        "exit": 0,
+        "stdout": "file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_dash_expansion",
+      "seq": 501235,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hv=tabbed\ncat <<-END\n\t$hv\n\tEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "tabbed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_empty",
+      "seq": 501236,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "wc -c <<< \"\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_unquoted_var",
+      "seq": 501237,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hs='two words'; cat <<< $hs",
+      "expect": {
+        "exit": 0,
+        "stdout": "two words\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_arith",
+      "seq": 501238,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<< $((4 * 5))",
+      "expect": {
+        "exit": 0,
+        "stdout": "20\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_pipe_precedence",
+      "seq": 501239,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf 'pipe\\n' | cat <<< here",
+      "expect": {
+        "exit": 0,
+        "stdout": "here\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_cmdsub_trim",
+      "seq": 501240,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<< \"$(printf 'x\\n\\n')\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      }
     }
   ]
 }

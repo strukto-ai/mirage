@@ -21,6 +21,7 @@ import {
   ProcessSubDirection,
   getCommandName,
   getParts,
+  getProcessSubBody,
   getProcessSubDirection,
   getText,
   splitEnvPrefix,
@@ -269,10 +270,9 @@ async function runCommandBody(
           }),
         ]
       }
-      const innerCmds = p.namedChildren.filter((c) => c.type === NT.COMMAND)
-      const innerFirst = innerCmds[0]
-      if (innerFirst !== undefined) {
-        const io = await executeFn(getText(innerFirst), { sessionId: session.sessionId })
+      const inner = getProcessSubBody(p)
+      if (inner !== '') {
+        const io = await executeFn(inner, { sessionId: session.sessionId })
         procSubParts.push(await materialize(io.stdout))
       }
       continue

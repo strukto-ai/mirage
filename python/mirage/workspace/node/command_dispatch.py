@@ -33,7 +33,7 @@ from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
-    ProcessSubDirection, get_command_name, get_parts,
+    ProcessSubDirection, get_command_name, get_parts, get_process_sub_body,
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
     follow_paths, handle_bash, handle_cd, handle_chmod, handle_chown,
@@ -190,10 +190,9 @@ async def _dispatch_command_body(
                 err = b"mirage: unsupported: process substitution >(...)\n"
                 return None, IOResult(exit_code=2, stderr=err), ExecutionNode(
                     command=name or "process_sub", exit_code=2, stderr=err)
-            inner_cmds = [c for c in p.named_children if c.type == NT.COMMAND]
-            if inner_cmds:
-                io_ps = await execute_fn(get_text(inner_cmds[0]),
-                                         session_id=session.session_id)
+            inner = get_process_sub_body(p)
+            if inner:
+                io_ps = await execute_fn(inner, session_id=session.session_id)
                 proc_sub_parts.append(io_ps.stdout or b"")
         else:
             clean_parts.append(p)

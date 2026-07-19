@@ -379,7 +379,7 @@ export function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, bool
   const [delimiter, rawBody] = getHeredocParts(redirectNode)
   // Any quoting anywhere in the delimiter (even partial, `EN'D'`)
   // disables expansion, matching bash.
-  const quoted = delimiter.includes("'") || delimiter.includes('"')
+  const quoted = delimiter.includes("'") || delimiter.includes('"') || delimiter.includes('\\')
   let dash = false
   for (const c of redirectNode.children) {
     if (c.type === '<<-') {
@@ -444,6 +444,14 @@ export function getProcessSubDirection(node: TSNodeLike): ProcessSubDirection | 
   if (open === '<(') return ProcessSubDirection.INPUT
   if (open === '>(') return ProcessSubDirection.OUTPUT
   return null
+}
+
+export function getProcessSubBody(node: TSNodeLike): string {
+  const text = getText(node)
+  if ((text.startsWith('<(') || text.startsWith('>(')) && text.endsWith(')')) {
+    return text.slice(2, -1)
+  }
+  return text
 }
 
 export function getFunctionName(node: TSNodeLike): string {

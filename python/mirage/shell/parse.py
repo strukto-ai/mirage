@@ -78,6 +78,35 @@ def _is_structural_error(node: tree_sitter.Node) -> bool:
     return False
 
 
+def _walk_named(node: tree_sitter.Node):
+    yield node
+    for child in node.named_children:
+        yield from _walk_named(child)
+
+
+def _is_recovered_quoted_heredoc_end(previous: tree_sitter.Node | None,
+                                     error: tree_sitter.Node) -> bool:
+    if previous is None:
+        return False
+    error_text = (error.text or b"").decode().strip()
+    if not error_text:
+        return False
+    for candidate in _walk_named(previous):
+        if candidate.type != "heredoc_redirect":
+            continue
+        start = None
+        end = None
+        for child in candidate.named_children:
+            if child.type == "heredoc_start":
+                start = (child.text or b"").decode()
+            elif child.type == "heredoc_end":
+                end = (child.text or b"").decode()
+        if (start is not None and ("'" in start or '"' in start) and not end
+                and start.replace("'", "").replace('"', "") == error_text):
+            return True
+    return False
+
+
 def find_syntax_error(node: tree_sitter.Node) -> str | None:
     """Locate a top-level structural syntax error in a parsed AST.
 
@@ -89,11 +118,17 @@ def find_syntax_error(node: tree_sitter.Node) -> str | None:
     """
     if not node.has_error:
         return None
+    previous = None
     for child in node.children:
         if child.is_missing:
             text = child.text
             return text.decode(errors="replace") if text else ""
         if child.type == "ERROR" and _is_structural_error(child):
+            if _is_recovered_quoted_heredoc_end(previous, child):
+                previous = child
+                continue
             text = child.text
             return text.decode(errors="replace") if text else ""
+        if child.is_named:
+            previous = child
     return None
