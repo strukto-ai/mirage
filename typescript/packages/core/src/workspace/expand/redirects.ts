@@ -148,6 +148,8 @@ export async function expandRedirects(
         heredocNode.type === NT.HEREDOC_REDIRECT
       ) {
         body = await expandHeredocBody(heredocNode, session, executeFn, callStack)
+      } else if (r.kind === RedirectKind.HERESTRING && heredocNode !== null) {
+        body = await expandNode(heredocNode, session, executeFn, callStack)
       } else if (typeof body === 'string' && r.expandVars) {
         let s: string = body
         for (const [k, v] of Object.entries(session.env)) {

@@ -335,6 +335,174 @@
         "stdout": "from-file\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_nested",
+      "seq": 501312,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <(cat <(echo deep))",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_and_or",
+      "seq": 501313,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <(false || echo recovered)",
+      "expect": {
+        "exit": 0,
+        "stdout": "recovered\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_stderr",
+      "seq": 501314,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <({ echo out; echo err >&2; })",
+      "expect": {
+        "exit": 0,
+        "stdout": "out\n",
+        "stderr": "err\n"
+      }
+    },
+    {
+      "id": "procsub_no_trailing_newline",
+      "seq": 501315,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "n=$(wc -c < <(printf abc)); echo \"$n\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_command_substitution",
+      "seq": 501316,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <(echo \"$(printf inner)\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_stdin_compound",
+      "seq": 501317,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat < <(printf 'b\\na\\n' | sort)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
     }
   ]
 }

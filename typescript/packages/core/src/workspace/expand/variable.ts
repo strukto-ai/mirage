@@ -29,6 +29,7 @@ export interface TSNodeLike {
   text: string
   children: TSNodeLike[]
   namedChildren: TSNodeLike[]
+  parent?: TSNodeLike | null
   isNamed?: boolean
   startIndex?: number
   endIndex?: number

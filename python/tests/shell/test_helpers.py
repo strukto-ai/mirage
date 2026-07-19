@@ -633,6 +633,21 @@ def test_get_redirects_hoists_file_redirect_inside_heredoc():
     assert stdout_r.target == "out.txt"
 
 
+def test_get_redirects_hoists_herestring_before_file_redirect():
+    node = _first("cat <<< here < input.txt")
+    _, redirects = get_redirects(node)
+    assert [r.kind for r in redirects
+            ] == [RedirectKind.HERESTRING, RedirectKind.STDIN]
+
+
+def test_get_redirects_recovers_herestring_after_file_redirect():
+    node = _first("cat < input.txt <<< here")
+    _, redirects = get_redirects(node)
+    assert [r.kind for r in redirects
+            ] == [RedirectKind.STDIN, RedirectKind.HERESTRING]
+    assert redirects[1].target == "here"
+
+
 def test_get_heredoc_meta_partially_quoted_delimiter():
     node = _first("cat <<EN'D'\nx=$v\nEND\n")
     heredoc = None

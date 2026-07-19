@@ -18,6 +18,7 @@ from typing import Any
 from mirage.commands.builtin.utils.safeguard import run_with_timeout
 from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
+from mirage.io.types import materialize
 from mirage.runtime.route import RoutingDecision
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
@@ -171,18 +172,21 @@ async def _dispatch_command_body(
     cancel: asyncio.Event | None = None,
     routing_decision: RoutingDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
-    for child in node.named_children:
-        if child.type == NT.HERESTRING_REDIRECT:
-            for sc in child.named_children:
-                content = await expand_node(sc, session, execute_fn,
-                                            call_stack)
-                stdin = content.encode() + b"\n"
-                break
+    parent = node.parent
+    if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
+        for child in node.named_children:
+            if child.type == NT.HERESTRING_REDIRECT:
+                for sc in child.named_children:
+                    content = await expand_node(sc, session, execute_fn,
+                                                call_stack)
+                    stdin = content.encode() + b"\n"
+                    break
 
     # Process substitution: <(cmd) feeds inner stdout as stdin.
     # Output direction >(cmd) is unsupported; reject early so the
     # caller sees a capability gap rather than a silent no-op.
     proc_sub_parts = []
+    proc_sub_stderr = []
     clean_parts = []
     for p in parts:
         if hasattr(p, "type") and p.type == NT.PROCESS_SUBSTITUTION:
@@ -194,6 +198,9 @@ async def _dispatch_command_body(
             if inner:
                 io_ps = await execute_fn(inner, session_id=session.session_id)
                 proc_sub_parts.append(io_ps.stdout or b"")
+                stderr = await materialize(io_ps.stderr)
+                if stderr:
+                    proc_sub_stderr.append(stderr)
         else:
             clean_parts.append(p)
     if proc_sub_parts and stdin is None:
@@ -209,7 +216,12 @@ async def _dispatch_command_body(
     body = _run_argv(recurse, dispatch, registry, namespace, execute_fn, argv,
                      session, stdin, call_stack, job_table, cancel,
                      routing_decision)
-    return await run_with_timeout(body, timeout, argv.name or "?")
+    stdout, io, exec_node = await run_with_timeout(body, timeout, argv.name
+                                                   or "?")
+    if proc_sub_stderr:
+        io.stderr = b"".join(proc_sub_stderr) + await materialize(io.stderr)
+        exec_node.stderr = io.stderr
+    return stdout, io, exec_node
 
 
 async def _run_argv(

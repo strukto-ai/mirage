@@ -164,6 +164,10 @@ async def expand_redirects(
                     and r.target_node.type == NT.HEREDOC_REDIRECT):
                 body = await expand_heredoc_body(r.target_node, session,
                                                  execute_fn, call_stack)
+            elif (r.kind == RedirectKind.HERESTRING
+                  and r.target_node is not None):
+                body = await expand_node(r.target_node, session, execute_fn,
+                                         call_stack)
             elif isinstance(body, str) and r.expand_vars:
                 for var, val in session.env.items():
                     body = body.replace("$" + var, val)

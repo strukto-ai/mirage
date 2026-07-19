@@ -216,6 +216,20 @@ def _parse_file_redirect(child: tree_sitter.Node) -> Redirect:
                     append=append)
 
 
+def _parse_herestring_redirect(child: tree_sitter.Node) -> Redirect:
+    content = ""
+    target_node = None
+    for candidate in child.named_children:
+        if candidate.type in _TARGET_TYPES:
+            content = get_text(candidate)
+            target_node = candidate
+            break
+    return Redirect(fd=0,
+                    target=content,
+                    target_node=target_node,
+                    kind=RedirectKind.HERESTRING)
+
+
 def get_redirects(
         node: tree_sitter.Node,  # noqa: E125
 ) -> tuple[tree_sitter.Node | None, list[Redirect]]:
@@ -229,7 +243,16 @@ def get_redirects(
     command = nc[0] if nc and nc[0].type not in _REDIRECT_NODE_TYPES else None
     redirects: list[Redirect] = []
 
+    if command is not None and command.type == NT.COMMAND:
+        for child in command.named_children:
+            if child.type == NT.HERESTRING_REDIRECT:
+                redirects.append(_parse_herestring_redirect(child))
+
+    recover_herestring = False
     for child in nc if command is None else nc[1:]:
+        if child.type == "ERROR" and get_text(child) == "<<":
+            recover_herestring = True
+            continue
         if child.type == NT.HEREDOC_REDIRECT:
             body, _, quoted = get_heredoc_meta(child)
             pipe_node = None
@@ -253,19 +276,19 @@ def get_redirects(
             continue
 
         if child.type == NT.HERESTRING_REDIRECT:
-            content = ""
-            for sc in child.children:
-                if sc.is_named and sc.type != "<<<":
-                    content = get_text(sc)
-                    break
-            redirects.append(
-                Redirect(fd=0, target=content, kind=RedirectKind.HERESTRING))
+            redirects.append(_parse_herestring_redirect(child))
+            recover_herestring = False
             continue
 
         if child.type != NT.FILE_REDIRECT:
+            recover_herestring = False
             continue
 
-        redirects.append(_parse_file_redirect(child))
+        if recover_herestring:
+            redirects.append(_parse_herestring_redirect(child))
+        else:
+            redirects.append(_parse_file_redirect(child))
+        recover_herestring = False
 
     return command, redirects
 

@@ -180,6 +180,19 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
   return new Redirect({ fd, target, targetNode, kind, append })
 }
 
+function parseHerestringRedirect(child: TSNodeLike): Redirect {
+  let content = ''
+  let targetNode: TSNodeLike | null = null
+  for (const candidate of child.namedChildren) {
+    if (TARGET_TYPES.has(candidate.type)) {
+      content = getText(candidate)
+      targetNode = candidate
+      break
+    }
+  }
+  return new Redirect({ fd: 0, target: content, targetNode, kind: RedirectKind.HERESTRING })
+}
+
 /**
  * Parse all redirects from a redirected_statement.
  *
@@ -193,9 +206,23 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
   const command = first !== undefined && !REDIRECT_NODE_TYPES.has(first.type) ? first : null
   const redirects: Redirect[] = []
 
+  if (command !== null && command.type === NT.COMMAND) {
+    for (const child of command.namedChildren) {
+      if (child.type === NT.HERESTRING_REDIRECT) {
+        redirects.push(parseHerestringRedirect(child))
+      }
+    }
+  }
+
+  let recoverHerestring = false
   for (let i = command === null ? 0 : 1; i < nc.length; i++) {
     const child = nc[i]
     if (child === undefined) continue
+
+    if (child.type === NT.ERROR && getText(child) === '<<') {
+      recoverHerestring = true
+      continue
+    }
 
     if (child.type === NT.HEREDOC_REDIRECT) {
       const [body, , quoted] = getHeredocMeta(child)
@@ -228,20 +255,18 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
     }
 
     if (child.type === NT.HERESTRING_REDIRECT) {
-      let content = ''
-      for (const sc of child.children) {
-        if (sc.isNamed === true && sc.type !== NT.HERESTRING_TOKEN) {
-          content = getText(sc)
-          break
-        }
-      }
-      redirects.push(new Redirect({ fd: 0, target: content, kind: RedirectKind.HERESTRING }))
+      redirects.push(parseHerestringRedirect(child))
+      recoverHerestring = false
       continue
     }
 
-    if (child.type !== NT.FILE_REDIRECT) continue
+    if (child.type !== NT.FILE_REDIRECT) {
+      recoverHerestring = false
+      continue
+    }
 
-    redirects.push(parseFileRedirect(child))
+    redirects.push(recoverHerestring ? parseHerestringRedirect(child) : parseFileRedirect(child))
+    recoverHerestring = false
   }
 
   return [command, redirects]
