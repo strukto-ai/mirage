@@ -72,6 +72,59 @@ describe('mirageOperations.edit', () => {
     await ops.edit.writeFile('/f.txt', `${buf.toString()} + new`)
     expect(await ws.fs.readFileText('/f.txt')).toBe('old + new')
   })
+
+  it('rejects an edit after the file changed since the agent read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws)
+    await ops.read.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    await expect(ops.edit.readFile('/f.txt')).rejects.toThrow(
+      'File changed since it was last read: /f.txt',
+    )
+
+    await ops.read.readFile('/f.txt')
+    expect((await ops.edit.readFile('/f.txt')).toString()).toBe('changed elsewhere')
+  })
+
+  it('rejects a write when the file changes while an edit is in progress', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws)
+    await ops.edit.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    await expect(ops.edit.writeFile('/f.txt', 'replacement')).rejects.toThrow(
+      'Read the file again before modifying it',
+    )
+    expect(await ws.fs.readFileText('/f.txt')).toBe('changed elsewhere')
+  })
+})
+
+describe('mirageOperations stale write protection', () => {
+  it('rejects an overwrite after the file changed since the agent read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws)
+    await ops.read.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    await expect(ops.write.writeFile('/f.txt', 'replacement')).rejects.toThrow(
+      'Read the file again before modifying it',
+    )
+    expect(await ws.fs.readFileText('/f.txt')).toBe('changed elsewhere')
+  })
+
+  it('can disable stale write protection', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws, { staleWriteProtection: false })
+    await ops.read.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+    await ops.write.writeFile('/f.txt', 'replacement')
+    expect(await ws.fs.readFileText('/f.txt')).toBe('replacement')
+  })
 })
 
 describe('mirageOperations.bash', () => {

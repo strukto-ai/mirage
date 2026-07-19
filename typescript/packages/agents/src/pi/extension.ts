@@ -21,27 +21,47 @@ import {
   createLsToolDefinition,
   createReadToolDefinition,
   createWriteToolDefinition,
-  type ExtensionFactory,
+  type BashOperations,
+  type InlineExtension,
 } from '@earendil-works/pi-coding-agent'
-import { mirageOperations } from './operations.ts'
+import { buildSystemPrompt } from '../prompt.ts'
+import { mirageOperations, type MirageOperationsOptions } from './operations.ts'
 
-export interface MirageExtensionOptions {
+export interface MirageExtensionOptions extends MirageOperationsOptions {
   cwd?: string
+  systemPrompt?: string | false
 }
 
-export function mirageExtension(
-  ws: Workspace,
-  opts: MirageExtensionOptions = {},
-): ExtensionFactory {
+function bashAtCwd(operations: BashOperations, cwd: string): BashOperations {
+  return {
+    exec: (command, _hostCwd, options) => operations.exec(command, cwd, options),
+  }
+}
+
+export function mirageExtension(ws: Workspace, opts: MirageExtensionOptions = {}): InlineExtension {
   const cwd = opts.cwd ?? '/'
-  const ops = mirageOperations(ws)
-  return (pi) => {
-    pi.registerTool(createReadToolDefinition(cwd, { operations: ops.read }))
-    pi.registerTool(createWriteToolDefinition(cwd, { operations: ops.write }))
-    pi.registerTool(createEditToolDefinition(cwd, { operations: ops.edit }))
-    pi.registerTool(createBashToolDefinition(cwd, { operations: ops.bash }))
-    pi.registerTool(createGrepToolDefinition(cwd, { operations: ops.grep }))
-    pi.registerTool(createFindToolDefinition(cwd, { operations: ops.find }))
-    pi.registerTool(createLsToolDefinition(cwd, { operations: ops.ls }))
+  const ops = mirageOperations(ws, opts)
+  const userBash = bashAtCwd(ops.bash, cwd)
+  const systemPrompt =
+    opts.systemPrompt === false
+      ? undefined
+      : (opts.systemPrompt ?? buildSystemPrompt({ workspace: ws }))
+  return {
+    name: 'mirage',
+    factory: (pi) => {
+      pi.registerTool(createReadToolDefinition(cwd, { operations: ops.read }))
+      pi.registerTool(createWriteToolDefinition(cwd, { operations: ops.write }))
+      pi.registerTool(createEditToolDefinition(cwd, { operations: ops.edit }))
+      pi.registerTool(createBashToolDefinition(cwd, { operations: ops.bash }))
+      pi.registerTool(createGrepToolDefinition(cwd, { operations: ops.grep }))
+      pi.registerTool(createFindToolDefinition(cwd, { operations: ops.find }))
+      pi.registerTool(createLsToolDefinition(cwd, { operations: ops.ls }))
+      pi.on('user_bash', () => ({ operations: userBash }))
+      if (systemPrompt !== undefined) {
+        pi.on('before_agent_start', (event) => ({
+          systemPrompt: `${event.systemPrompt}\n\n${systemPrompt}`,
+        }))
+      }
+    },
   }
 }

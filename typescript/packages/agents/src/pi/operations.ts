@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteResult, Workspace } from '@struktoai/mirage-core'
+import { createHash } from 'node:crypto'
+import { rstripSlash, type ExecuteResult, type Workspace } from '@struktoai/mirage-core'
 import type {
   BashOperations,
   EditOperations,
@@ -23,7 +24,20 @@ import type {
   WriteOperations,
 } from '@earendil-works/pi-coding-agent'
 import picomatch from 'picomatch'
-import { rstripSlash } from '@struktoai/mirage-core'
+
+export interface MirageOperationsOptions {
+  staleWriteProtection?: boolean
+}
+
+export class StaleMirageFileError extends Error {
+  readonly path: string
+
+  constructor(path: string) {
+    super(`File changed since it was last read: ${path}. Read the file again before modifying it.`)
+    this.name = 'StaleMirageFileError'
+    this.path = path
+  }
+}
 
 export interface MirageOperationsBundle {
   read: ReadOperations
@@ -33,6 +47,78 @@ export interface MirageOperationsBundle {
   grep: GrepOperations
   find: FindOperations
   ls: LsOperations
+}
+
+function fingerprint(content: Uint8Array | string): string {
+  return createHash('sha256').update(content).digest('base64url')
+}
+
+async function readBuffer(ws: Workspace, path: string): Promise<Buffer> {
+  const bytes = await ws.fs.readFile(path, { raw: true })
+  return Buffer.from(bytes)
+}
+
+class FileVersionTracker {
+  private readonly readVersions = new Map<string, string>()
+  private readonly editVersions = new Map<string, string>()
+
+  constructor(
+    private readonly ws: Workspace,
+    private readonly enabled: boolean,
+  ) {}
+
+  private async currentVersion(path: string): Promise<string | null> {
+    if (!(await this.ws.fs.exists(path))) return null
+    return fingerprint(await readBuffer(this.ws, path))
+  }
+
+  private async assertVersion(path: string, expected: string): Promise<void> {
+    if ((await this.currentVersion(path)) !== expected) {
+      throw new StaleMirageFileError(path)
+    }
+  }
+
+  private recordWrite(path: string, content: string): void {
+    if (!this.enabled) return
+    this.readVersions.set(path, fingerprint(content))
+    this.editVersions.delete(path)
+  }
+
+  async read(path: string): Promise<Buffer> {
+    const content = await readBuffer(this.ws, path)
+    if (this.enabled) this.readVersions.set(path, fingerprint(content))
+    return content
+  }
+
+  async readForEdit(path: string): Promise<Buffer> {
+    const content = await readBuffer(this.ws, path)
+    if (!this.enabled) return content
+    const version = fingerprint(content)
+    const readVersion = this.readVersions.get(path)
+    if (readVersion !== undefined && readVersion !== version) {
+      throw new StaleMirageFileError(path)
+    }
+    this.editVersions.set(path, version)
+    return content
+  }
+
+  async write(path: string, content: string): Promise<void> {
+    if (this.enabled) {
+      const readVersion = this.readVersions.get(path)
+      if (readVersion !== undefined) await this.assertVersion(path, readVersion)
+    }
+    await this.ws.fs.writeFile(path, content)
+    this.recordWrite(path, content)
+  }
+
+  async writeEdit(path: string, content: string): Promise<void> {
+    if (this.enabled) {
+      const editVersion = this.editVersions.get(path)
+      if (editVersion !== undefined) await this.assertVersion(path, editVersion)
+    }
+    await this.ws.fs.writeFile(path, content)
+    this.recordWrite(path, content)
+  }
 }
 
 async function ensureParent(ws: Workspace, dir: string): Promise<void> {
@@ -62,12 +148,7 @@ async function walkDirectory(
   results: string[],
 ): Promise<void> {
   if (results.length >= opts.limit) return
-  let entries: string[]
-  try {
-    entries = await ws.fs.readdir(dir)
-  } catch {
-    return
-  }
+  const entries = await ws.fs.readdir(dir)
   for (const full of entries) {
     if (results.length >= opts.limit) return
     const rel = full.startsWith(cwdPrefix) ? full.slice(cwdPrefix.length) : full
@@ -78,21 +159,20 @@ async function walkDirectory(
   }
 }
 
-export function mirageOperations(ws: Workspace): MirageOperationsBundle {
+export function mirageOperations(
+  ws: Workspace,
+  options: MirageOperationsOptions = {},
+): MirageOperationsBundle {
+  const versions = new FileVersionTracker(ws, options.staleWriteProtection ?? true)
   const read: ReadOperations = {
-    readFile: async (absolutePath: string) => {
-      const bytes = await ws.fs.readFile(absolutePath, { raw: true })
-      return Buffer.from(bytes)
-    },
+    readFile: (absolutePath: string) => versions.read(absolutePath),
     access: async (absolutePath: string) => {
       await ws.fs.stat(absolutePath)
     },
   }
 
   const write: WriteOperations = {
-    writeFile: async (absolutePath: string, content: string) => {
-      await ws.fs.writeFile(absolutePath, content)
-    },
+    writeFile: (absolutePath: string, content: string) => versions.write(absolutePath, content),
     mkdir: async (dir: string) => {
       await ensureParent(ws, dir)
       if (!(await ws.fs.exists(dir))) {
@@ -102,8 +182,8 @@ export function mirageOperations(ws: Workspace): MirageOperationsBundle {
   }
 
   const edit: EditOperations = {
-    readFile: read.readFile,
-    writeFile: write.writeFile,
+    readFile: (absolutePath: string) => versions.readForEdit(absolutePath),
+    writeFile: (absolutePath: string, content: string) => versions.writeEdit(absolutePath, content),
     access: read.access,
   }
 
@@ -144,7 +224,7 @@ export function mirageOperations(ws: Workspace): MirageOperationsBundle {
 
   const grep: GrepOperations = {
     isDirectory: async (absolutePath: string) => ws.fs.isDir(absolutePath),
-    readFile: async (absolutePath: string) => ws.fs.readFileText(absolutePath),
+    readFile: async (absolutePath: string) => (await versions.read(absolutePath)).toString('utf-8'),
   }
 
   const find: FindOperations = {

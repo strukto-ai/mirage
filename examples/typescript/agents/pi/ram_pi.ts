@@ -24,7 +24,7 @@ import {
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
-import { buildSystemPrompt, mirageExtension } from '@struktoai/mirage-agents/pi'
+import { mirageExtension } from '@struktoai/mirage-agents/pi'
 import { configurePiModel } from './config.ts'
 
 loadEnv({
@@ -40,9 +40,6 @@ const resourceLoader = new DefaultResourceLoader({
   cwd: process.cwd(),
   agentDir: getAgentDir(),
   settingsManager: SettingsManager.create(process.cwd(), getAgentDir()),
-  systemPrompt: buildSystemPrompt({
-    mountInfo: { '/': 'In-memory filesystem (read/write)' },
-  }),
   extensionFactories: [mirageExtension(ws)],
   noExtensions: true,
   noSkills: true,
@@ -62,10 +59,7 @@ const { session } = await createAgentSession({
 })
 
 session.subscribe((event) => {
-  if (
-    event.type === 'message_update' &&
-    event.assistantMessageEvent.type === 'text_delta'
-  ) {
+  if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
     process.stdout.write(event.assistantMessageEvent.delta)
   }
 })
