@@ -1,164 +1,8 @@
 {
   "cases": [
     {
-      "id": "redirect_bare_prep",
-      "seq": 385,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "mkdir -p /data/g9 && cd /data/g9",
-      "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "redirect_bare_target",
-      "seq": 386,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "echo hi > OUT && cat OUT && cd / && rm -r /data/g9",
-      "expect": {
-        "exit": 0,
-        "stdout": "hi\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "redirect_relative_write",
-      "seq": 391,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "echo one > sub/LOG",
-      "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "redirect_relative_append",
-      "seq": 392,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "echo two >> sub/LOG && cat sub/LOG",
-      "expect": {
-        "exit": 0,
-        "stdout": "one\ntwo\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "redirect_stdin_relative",
-      "seq": 393,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "wc -l < sub/LOG && cd / && rm -r /data/g11",
-      "expect": {
-        "exit": 0,
-        "stdout": "2\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "redirect_after_cd",
-      "seq": 399,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "mkdir -p /data/g13 && cd /data/g13 && echo hi > CDOUT && cat /data/g13/CDOUT",
-      "expect": {
-        "exit": 0,
-        "stdout": "hi\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "redirect_list_last_only",
-      "seq": 400,
+      "id": "heredoc_basic",
+      "seq": 501200,
       "targets": [
         "ram",
         "disk",
@@ -177,16 +21,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo one && echo two > captured && cat captured",
+      "command": "cat <<END\nhello\nworld\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "one\ntwo\n",
+        "stdout": "hello\nworld\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_chain",
-      "seq": 401,
+      "id": "heredoc_var_expansion",
+      "seq": 501201,
       "targets": [
         "ram",
         "disk",
@@ -205,16 +49,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo a > chain && echo b >> chain && cat chain && wc -l < chain",
+      "command": "v=mirage\ncat <<END\nval=$v\nbrace=${v}\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\n2\n",
+        "stdout": "val=mirage\nbrace=mirage\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_group",
-      "seq": 402,
+      "id": "heredoc_cmdsub",
+      "seq": 501202,
       "targets": [
         "ram",
         "disk",
@@ -222,6 +66,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -231,16 +77,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo g1; echo g2; } > gout && cat gout && cd / && rm -r /data/g13",
+      "command": "cat <<END\nsub=$(echo inner)\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "g1\ng2\n",
+        "stdout": "sub=inner\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect5_prep",
-      "seq": 501100,
+      "id": "heredoc_arith",
+      "seq": 501203,
       "targets": [
         "ram",
         "disk",
@@ -248,6 +94,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -257,16 +105,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "mkdir -p /data/r5 && cd /data/r5",
+      "command": "cat <<END\nmath=$((2 + 3))\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "math=5\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_fd2_dup",
-      "seq": 501101,
+      "id": "heredoc_quoted_delim",
+      "seq": 501204,
       "targets": [
         "ram",
         "disk",
@@ -274,6 +122,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -283,68 +133,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo hi >&2",
+      "command": "v=zzz\ncat <<'END'\nraw=$v\nsub=$(echo x)\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "",
-        "stderr": "hi\n"
-      }
-    },
-    {
-      "id": "redirect_fd2_explicit",
-      "seq": 501102,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "printf 'boom\\n' 1>&2",
-      "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": "boom\n"
-      }
-    },
-    {
-      "id": "redirect_stderr_to_file",
-      "seq": 501103,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "{ echo out; echo err >&2; } 2> ELOG && cat ELOG",
-      "expect": {
-        "exit": 0,
-        "stdout": "out\nerr\n",
+        "stdout": "raw=$v\nsub=$(echo x)\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_stderr_append",
-      "seq": 501104,
+      "id": "heredoc_dquoted_delim",
+      "seq": 501205,
       "targets": [
         "ram",
         "disk",
@@ -352,6 +150,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -361,16 +161,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo a1 >&2; } 2> EA && { echo a2 >&2; } 2>> EA && cat EA",
+      "command": "v=zzz\ncat <<\"END\"\nraw=$v\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "a1\na2\n",
+        "stdout": "raw=$v\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_file_then_merge",
-      "seq": 501105,
+      "id": "heredoc_dash_tabstrip",
+      "seq": 501206,
       "targets": [
         "ram",
         "disk",
@@ -378,6 +178,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -387,16 +189,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo out; echo err >&2; } > FM 2>&1 && cat FM",
+      "command": "cat <<-END\n\ttabbed\n\t\tdouble\n\tEND",
       "expect": {
         "exit": 0,
-        "stdout": "out\nerr\n",
+        "stdout": "tabbed\ndouble\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_merge_then_file",
-      "seq": 501106,
+      "id": "heredoc_dash_spaces_kept",
+      "seq": 501207,
       "targets": [
         "ram",
         "disk",
@@ -404,6 +206,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -413,16 +217,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo out; echo err >&2; } 2>&1 > MF && echo --- && cat MF",
+      "command": "cat <<-END\n\ttab-stripped\n   spaces-kept\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "err\n---\nout\n",
+        "stdout": "tab-stripped\n   spaces-kept\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_both_streams",
-      "seq": 501107,
+      "id": "heredoc_pipeline",
+      "seq": 501208,
       "targets": [
         "ram",
         "disk",
@@ -430,6 +234,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -439,16 +245,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo out; echo err >&2; } &> BOTH && cat BOTH",
+      "command": "cat <<END | tr a-z A-Z\nshout this\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "out\nerr\n",
+        "stdout": "SHOUT THIS\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_both_append",
-      "seq": 501108,
+      "id": "heredoc_grep",
+      "seq": 501209,
       "targets": [
         "ram",
         "disk",
@@ -456,6 +262,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -465,16 +273,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo one &> BA && { echo two >&2; } &>> BA && echo three &>> BA && cat BA",
+      "command": "grep ba <<END\nfoo\nbar\nbaz\nEND",
       "expect": {
         "exit": 0,
-        "stdout": "one\ntwo\nthree\n",
+        "stdout": "bar\nbaz\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_stderr_pipe_count",
-      "seq": 501109,
+      "id": "heredoc_wc",
+      "seq": 501210,
       "targets": [
         "ram",
         "disk",
@@ -482,6 +290,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -491,7 +301,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo a; echo b >&2; echo c; } |& wc -l",
+      "command": "wc -l <<END\n1\n2\n3\nEND",
       "expect": {
         "exit": 0,
         "stdout": "3\n",
@@ -499,8 +309,8 @@
       }
     },
     {
-      "id": "redirect_stderr_pipe_sort",
-      "seq": 501110,
+      "id": "heredoc_empty_body",
+      "seq": 501211,
       "targets": [
         "ram",
         "disk",
@@ -508,6 +318,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -517,16 +329,128 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo out; echo err >&2; } |& sort",
+      "command": "cat <<END\nEND\necho after",
       "expect": {
         "exit": 0,
-        "stdout": "err\nout\n",
+        "stdout": "after\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_fd2_through_pipe",
-      "seq": 501111,
+      "id": "heredoc_escaped_dollar",
+      "seq": 501212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "v=real\ncat <<END\nesc=\\$v exp=$v\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "esc=$v exp=real\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_line_continuation",
+      "seq": 501213,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<END\nline \\\njoined\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "line joined\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_undef_var",
+      "seq": 501214,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<END\n[$undefined_heredoc_var]\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_while_read",
+      "seq": 501215,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "while read -r line; do echo \"got:$line\"; done <<END\na\nb\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "got:a\ngot:b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_write_prep",
+      "seq": 501216,
       "targets": [
         "ram",
         "disk",
@@ -543,42 +467,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo visible >&2 | cat",
+      "command": "mkdir -p /data/h5 && cd /data/h5",
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "visible\n"
-      }
-    },
-    {
-      "id": "redirect_bare_create",
-      "seq": 501112,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "> EMPTY && wc -c < EMPTY",
-      "expect": {
-        "exit": 0,
-        "stdout": "0\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_multi_stdout",
-      "seq": 501113,
+      "id": "heredoc_to_file",
+      "seq": 501217,
       "targets": [
         "ram",
         "disk",
@@ -595,16 +493,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo hi > M1 > M2 && wc -c < M1 && cat M2",
+      "command": "cat <<END > HOUT\nwritten\nEND\ncat HOUT",
       "expect": {
         "exit": 0,
-        "stdout": "0\nhi\n",
+        "stdout": "written\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_dup_before_stderr_file",
-      "seq": 501114,
+      "id": "heredoc_cleanup",
+      "seq": 501218,
       "targets": [
         "ram",
         "disk",
@@ -621,42 +519,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo a >&2 2>> DL && cat DL",
+      "command": "cd / && rm -r /data/h5",
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "a\n"
-      }
-    },
-    {
-      "id": "redirect_truncates",
-      "seq": 501115,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "s3-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder"
-      ],
-      "command": "echo long-old-content > TR && echo new > TR && cat TR",
-      "expect": {
-        "exit": 0,
-        "stdout": "new\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect_stderr_creates_empty",
-      "seq": 501116,
+      "id": "herestring_basic",
+      "seq": 501219,
       "targets": [
         "ram",
         "disk",
@@ -664,6 +536,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -673,16 +547,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo fine 2> QU && test -f QU && echo yes",
+      "command": "cat <<< hi",
       "expect": {
         "exit": 0,
-        "stdout": "fine\nyes\n",
+        "stdout": "hi\n",
         "stderr": ""
       }
     },
     {
-      "id": "redirect5_cleanup",
-      "seq": 501117,
+      "id": "herestring_quoted",
+      "seq": 501220,
       "targets": [
         "ram",
         "disk",
@@ -690,6 +564,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -699,10 +575,178 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cd / && rm -r /data/r5",
+      "command": "cat <<< \"two words\"",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "two words\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_single_quoted",
+      "seq": 501221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<< 'single $notexp'",
+      "expect": {
+        "exit": 0,
+        "stdout": "single $notexp\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_var",
+      "seq": 501222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "v=\"from var\"\ncat <<< \"$v\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "from var\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_wc",
+      "seq": 501223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "wc -c <<< hi",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_tr",
+      "seq": 501224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "tr a-z A-Z <<< abc",
+      "expect": {
+        "exit": 0,
+        "stdout": "ABC\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_cmdsub",
+      "seq": 501225,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<< \"sub=$(echo x)\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub=x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "herestring_read",
+      "seq": 501226,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "read -r a b <<< \"one two three\"\necho \"a=$a b=$b\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a=one b=two three\n",
         "stderr": ""
       }
     }

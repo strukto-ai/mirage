@@ -19,6 +19,7 @@ from typing import Any, Callable
 import tree_sitter
 
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (ProcessSubDirection,
                                   get_process_sub_direction, get_text)
 from mirage.shell.types import NodeType as NT
@@ -186,25 +187,34 @@ async def expand_redirects(
         if isinstance(r.target, int):
             expanded.append(r)
             continue
-        if (r.kind == RedirectKind.STDIN and r.target_node is not None
-                and r.target_node.type == NT.PROCESS_SUBSTITUTION
-                and get_process_sub_direction(r.target_node)
-                == ProcessSubDirection.INPUT):
-            # `cmd < <(inner)` — run the inner command and feed its
-            # stdout as stdin, reusing the heredoc delivery path.
-            inner_data = b""
-            for c in r.target_node.named_children:
-                if c.type in _PROC_SUB_INNER:
-                    io_ps = await execute_fn(get_text(c),
-                                             session_id=session.session_id)
-                    inner_data = io_ps.stdout or b""
-                    break
-            expanded.append(
-                Redirect(fd=0,
-                         target=inner_data,
-                         kind=RedirectKind.HEREDOC,
-                         expand_vars=False))
-            continue
+        if (r.target_node is not None
+                and r.target_node.type == NT.PROCESS_SUBSTITUTION):
+            if (r.kind == RedirectKind.STDIN
+                    and get_process_sub_direction(r.target_node)
+                    == ProcessSubDirection.INPUT):
+                # `cmd < <(inner)` — run the inner command and feed its
+                # stdout as stdin, reusing the heredoc delivery path.
+                inner_data = b""
+                for c in r.target_node.named_children:
+                    if c.type in _PROC_SUB_INNER:
+                        io_ps = await execute_fn(
+                            get_text(c), session_id=session.session_id)
+                        inner_data = io_ps.stdout or b""
+                        break
+                expanded.append(
+                    Redirect(fd=0,
+                             target=inner_data,
+                             kind=RedirectKind.HEREDOC,
+                             expand_vars=False))
+                continue
+            # `> >(cmd)` and friends would otherwise classify the
+            # procsub text as a literal filename and write silently
+            # wrong state; fail loudly like the argv-position check.
+            raise ExitSignal(
+                2,
+                stderr=b"mirage: unsupported: process substitution "
+                b">(...)\n",
+                contained_code=2)
         target_node = r.target_node
         if target_node is not None:
             target_str = await expand_node(target_node, session, execute_fn,

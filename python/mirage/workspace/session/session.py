@@ -38,6 +38,7 @@ class Session:
     last_bg_job_id: int | None = None
     positional_args: list[str] = field(default_factory=list)
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
+    _stdin_source: object = field(default=None, repr=False)
     _local_vars: dict[str, str | None] | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:

@@ -14,6 +14,7 @@
 
 import { materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { ExitSignal } from '../../shell/errors.ts'
 import { getProcessSubDirection, getText, ProcessSubDirection } from '../../shell/helpers.ts'
 import { NodeType as NT, Redirect, RedirectKind } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -179,33 +180,42 @@ export async function expandRedirects(
       continue
     }
     const procSubNode = r.targetNode as TSNodeLike | null
-    if (
-      r.kind === RedirectKind.STDIN &&
-      procSubNode !== null &&
-      procSubNode.type === NT.PROCESS_SUBSTITUTION &&
-      getProcessSubDirection(procSubNode) === ProcessSubDirection.INPUT
-    ) {
-      // `cmd < <(inner)` — run the inner command and feed its stdout
-      // as stdin, reusing the heredoc delivery path.
-      let innerData: Uint8Array = new Uint8Array()
-      for (const c of procSubNode.namedChildren) {
-        if (PROC_SUB_INNER.has(c.type)) {
-          const ioPs = await executeFn(getText(c), {
-            sessionId: session.sessionId,
-          })
-          innerData = (await materialize(ioPs.stdout)) ?? new Uint8Array()
-          break
+    if (procSubNode !== null && procSubNode.type === NT.PROCESS_SUBSTITUTION) {
+      if (
+        r.kind === RedirectKind.STDIN &&
+        getProcessSubDirection(procSubNode) === ProcessSubDirection.INPUT
+      ) {
+        // `cmd < <(inner)` — run the inner command and feed its stdout
+        // as stdin, reusing the heredoc delivery path.
+        let innerData: Uint8Array = new Uint8Array()
+        for (const c of procSubNode.namedChildren) {
+          if (PROC_SUB_INNER.has(c.type)) {
+            const ioPs = await executeFn(getText(c), {
+              sessionId: session.sessionId,
+            })
+            innerData = (await materialize(ioPs.stdout)) ?? new Uint8Array()
+            break
+          }
         }
+        expanded.push(
+          new Redirect({
+            fd: 0,
+            target: innerData,
+            kind: RedirectKind.HEREDOC,
+            expandVars: false,
+          }),
+        )
+        continue
       }
-      expanded.push(
-        new Redirect({
-          fd: 0,
-          target: innerData,
-          kind: RedirectKind.HEREDOC,
-          expandVars: false,
-        }),
+      // `> >(cmd)` and friends would otherwise classify the procsub
+      // text as a literal filename and write silently wrong state;
+      // fail loudly like the argv-position check.
+      throw new ExitSignal(
+        2,
+        new TextEncoder().encode('mirage: unsupported: process substitution >(...)\n'),
+        null,
+        2,
       )
-      continue
     }
     const targetNode = r.targetNode as TSNodeLike | null
     let targetScope: unknown = r.target

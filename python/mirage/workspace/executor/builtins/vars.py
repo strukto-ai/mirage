@@ -135,11 +135,18 @@ async def handle_read(
                               stderr=err), ExecutionNode(command="read",
                                                          exit_code=2)
     variables = parse.operands or ["REPLY"]
-    if session._stdin_buffer is None and stdin is not None:
+    # A NEW stdin source replaces any leftover buffer (a previous
+    # command's exhausted herestring/pipe must not shadow this one);
+    # the SAME source object reuses the buffer so sequential reads
+    # advance through its lines.
+    if stdin is not None and (session._stdin_buffer is None
+                              or session._stdin_source is not stdin):
         if isinstance(stdin, bytes):
             session._stdin_buffer = AsyncLineIterator(async_chain(stdin))
+            session._stdin_source = stdin
         elif hasattr(stdin, "__aiter__"):
             session._stdin_buffer = AsyncLineIterator(stdin)
+            session._stdin_source = stdin
 
     line_bytes: bytes | None = None
     if session._stdin_buffer is not None:
@@ -148,6 +155,7 @@ async def handle_read(
     if line_bytes is None:
         for var in variables:
             session.env[var] = ""
+            session.arrays.pop(var, None)
         return None, IOResult(exit_code=1), ExecutionNode(command="read",
                                                           exit_code=1)
 
@@ -172,6 +180,9 @@ async def handle_read(
         parts = out
     for i, var in enumerate(variables):
         session.env[var] = parts[i] if i < len(parts) else ""
+        # A scalar write replaces any array of the same name, matching
+        # the variable_assignment path.
+        session.arrays.pop(var, None)
     return None, IOResult(), ExecutionNode(command="read", exit_code=0)
 
 

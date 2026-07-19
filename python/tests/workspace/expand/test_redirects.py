@@ -154,3 +154,14 @@ async def test_procsub_stdin_redirect():
     ws = await _workspace_at("/data")
     out = await _stdout(ws, "sort < <(printf 'b\\na\\n')")
     assert out == "a\nb\n"
+
+
+@pytest.mark.asyncio
+async def test_procsub_output_redirect_errors_loudly():
+    # `> >(cmd)` would classify the procsub text as a literal filename
+    # and write silently wrong state; it must fail like argv-position
+    # output procsub.
+    ws = await _workspace_at("/data")
+    io = await ws.execute("echo hi > >(cat)")
+    assert io.exit_code == 2
+    assert b"unsupported: process substitution" in (io.stderr or b"")

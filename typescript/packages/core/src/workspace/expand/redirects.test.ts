@@ -140,3 +140,17 @@ describe('process substitution stdin redirect', () => {
     }
   })
 })
+
+describe('process substitution output redirect', () => {
+  it('errors loudly on > >(cmd)', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'echo hi > >(cat)')
+      expect(exit).toBe(2)
+      expect(out).toBe('')
+      expect(err).toContain('unsupported: process substitution')
+    } finally {
+      await ws.close()
+    }
+  })
+})
