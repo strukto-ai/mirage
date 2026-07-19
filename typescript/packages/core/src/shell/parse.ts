@@ -89,6 +89,36 @@ function isStructuralError(node: Node): boolean {
   return false
 }
 
+function walkNamed(node: Node): Node[] {
+  const out: Node[] = [node]
+  for (const child of node.namedChildren) out.push(...walkNamed(child))
+  return out
+}
+
+function isRecoveredQuotedHeredocEnd(previous: Node | null, error: Node): boolean {
+  if (previous === null) return false
+  const errorText = error.text.trim()
+  if (errorText.length === 0) return false
+  for (const candidate of walkNamed(previous)) {
+    if (candidate.type !== 'heredoc_redirect') continue
+    let start: string | null = null
+    let end: string | null = null
+    for (const child of candidate.namedChildren) {
+      if (child.type === 'heredoc_start') start = child.text
+      else if (child.type === 'heredoc_end') end = child.text
+    }
+    if (
+      start !== null &&
+      (start.includes("'") || start.includes('"')) &&
+      (end === null || end.length === 0) &&
+      start.replaceAll("'", '').replaceAll('"', '') === errorText
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 /**
  * Locate a top-level structural syntax error in a parsed AST.
  *
@@ -103,9 +133,17 @@ function isStructuralError(node: Node): boolean {
  */
 export function findSyntaxError(node: Node): string | null {
   if (!node.hasError) return null
+  let previous: Node | null = null
   for (const child of node.children) {
     if (child.isMissing) return child.text
-    if (child.type === 'ERROR' && isStructuralError(child)) return child.text
+    if (child.type === 'ERROR' && isStructuralError(child)) {
+      if (isRecoveredQuotedHeredocEnd(previous, child)) {
+        previous = child
+        continue
+      }
+      return child.text
+    }
+    if (child.isNamed) previous = child
   }
   return null
 }

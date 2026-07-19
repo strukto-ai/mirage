@@ -21,6 +21,7 @@ import {
   ProcessSubDirection,
   getCommandName,
   getParts,
+  getProcessSubBody,
   getProcessSubDirection,
   getText,
   splitEnvPrefix,
@@ -243,17 +244,20 @@ async function runCommandBody(
 ): Promise<Result> {
   let stdin = stdinIn
 
-  for (const child of node.namedChildren) {
-    if (child.type === NT.HERESTRING_REDIRECT) {
-      for (const sc of child.namedChildren) {
-        const content = await expandNode(sc, session, executeFn, callStack)
-        stdin = new TextEncoder().encode(`${content}\n`)
-        break
+  if (node.parent?.type !== NT.REDIRECTED_STATEMENT) {
+    for (const child of node.namedChildren) {
+      if (child.type === NT.HERESTRING_REDIRECT) {
+        for (const sc of child.namedChildren) {
+          const content = await expandNode(sc, session, executeFn, callStack)
+          stdin = new TextEncoder().encode(`${content}\n`)
+          break
+        }
       }
     }
   }
 
   const procSubParts: Uint8Array[] = []
+  const procSubStderr: Uint8Array[] = []
   const cleanParts: TSNodeLike[] = []
   for (const p of parts) {
     if (p.type === NT.PROCESS_SUBSTITUTION) {
@@ -269,11 +273,12 @@ async function runCommandBody(
           }),
         ]
       }
-      const innerCmds = p.namedChildren.filter((c) => c.type === NT.COMMAND)
-      const innerFirst = innerCmds[0]
-      if (innerFirst !== undefined) {
-        const io = await executeFn(getText(innerFirst), { sessionId: session.sessionId })
+      const inner = getProcessSubBody(p)
+      if (inner !== '') {
+        const io = await executeFn(inner, { sessionId: session.sessionId })
         procSubParts.push(await materialize(io.stdout))
+        const stderr = await materialize(io.stderr)
+        if (stderr.byteLength > 0) procSubStderr.push(stderr)
       }
       continue
     }
@@ -297,7 +302,7 @@ async function runCommandBody(
   // invocations get their real command's policy.
   const resolved = argv.name !== '' ? resolveSafeguard(argv.name) : null
   const timeout = resolved !== null ? resolved.timeoutSeconds : null
-  return runWithTimeout(
+  const [stdout, io, execNode] = await runWithTimeout(
     runArgv(
       recurse,
       dispatch,
@@ -318,6 +323,24 @@ async function runCommandBody(
     timeout,
     argv.name !== '' ? argv.name : '?',
   )
+  if (procSubStderr.length > 0) {
+    const stderr = await materialize(io.stderr)
+    io.stderr = concatBytes([...procSubStderr, stderr])
+    execNode.stderr = io.stderr
+  }
+  return [stdout, io, execNode]
+}
+
+function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+  let total = 0
+  for (const chunk of chunks) total += chunk.byteLength
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out
 }
 
 async function runArgv(

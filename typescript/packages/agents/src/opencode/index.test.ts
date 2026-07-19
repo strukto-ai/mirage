@@ -86,6 +86,31 @@ describe('opencode mirageTools.write', () => {
     await callTool(mirageTools(ws).write, { filePath: '/a/b/c.txt', content: 'x' })
     expect(await ws.fs.readFileText('/a/b/c.txt')).toBe('x')
   })
+
+  it('rejects an overwrite after the file changed since the session read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/out.txt', 'original')
+    const tools = mirageTools(ws)
+    await callTool(tools.read, { filePath: '/out.txt' })
+    await ws.fs.writeFile('/out.txt', 'changed elsewhere')
+
+    const out = await callTool(tools.write, { filePath: '/out.txt', content: 'replacement' })
+
+    expect(out).toContain('File changed since it was last read')
+    expect(await ws.fs.readFileText('/out.txt')).toBe('changed elsewhere')
+  })
+
+  it('can disable stale write protection', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/out.txt', 'original')
+    const tools = mirageTools(ws, { staleWriteProtection: false })
+    await callTool(tools.read, { filePath: '/out.txt' })
+    await ws.fs.writeFile('/out.txt', 'changed elsewhere')
+
+    await callTool(tools.write, { filePath: '/out.txt', content: 'replacement' })
+
+    expect(await ws.fs.readFileText('/out.txt')).toBe('replacement')
+  })
 })
 
 describe('opencode mirageTools.edit', () => {
@@ -134,6 +159,23 @@ describe('opencode mirageTools.edit', () => {
       newString: 'X',
     })
     expect(out).toContain('string not found')
+  })
+
+  it('rejects an edit after the file changed since the session read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const tools = mirageTools(ws)
+    await callTool(tools.read, { filePath: '/f.txt' })
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    const out = await callTool(tools.edit, {
+      filePath: '/f.txt',
+      oldString: 'changed',
+      newString: 'updated',
+    })
+
+    expect(out).toContain('File changed since it was last read')
+    expect(await ws.fs.readFileText('/f.txt')).toBe('changed elsewhere')
   })
 })
 
@@ -220,5 +262,22 @@ describe('opencode resolver (per-session workspace)', () => {
 
     expect(await exec(tools.read)({ filePath: '/note.txt' }, ctxA)).toBe('alice')
     expect(await exec(tools.read)({ filePath: '/note.txt' }, ctxB)).toBe('bob')
+  })
+
+  it('keeps stale-read state isolated between sessions sharing a workspace', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/note.txt', 'one')
+    const tools = mirageTools(ws)
+    const exec = (t: unknown) =>
+      (t as { execute: (a: unknown, c: unknown) => Promise<string> }).execute
+    const ctxA = { sessionID: 'a', messageID: 'm', agent: '', abort: new AbortController().signal }
+    const ctxB = { sessionID: 'b', messageID: 'm', agent: '', abort: new AbortController().signal }
+
+    await exec(tools.read)({ filePath: '/note.txt' }, ctxA)
+    await exec(tools.write)({ filePath: '/note.txt', content: 'two' }, ctxB)
+    const out = await exec(tools.write)({ filePath: '/note.txt', content: 'three' }, ctxA)
+
+    expect(out).toContain('File changed since it was last read')
+    expect(await ws.fs.readFileText('/note.txt')).toBe('two')
   })
 })

@@ -23,6 +23,12 @@ export {
   type WorkspaceConfigRaw,
 } from './config.ts'
 export {
+  buildWorkspaceFromConfig,
+  resolveWorkspaceConfig,
+  WORKSPACE_CONFIG_CANDIDATES,
+  type WorkspaceConfigResolutionOptions,
+} from './workspace_config.ts'
+export {
   AuthMode,
   ENV_AUTH_MODE,
   ENV_AUTH_TOKEN,

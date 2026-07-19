@@ -19,3 +19,4 @@ export const GWS_DRIVE_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCo
 export const GWS_DOCS_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCommands('docs')
 export const GWS_SHEETS_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCommands('sheets')
 export const GWS_SLIDES_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCommands('slides')
+export const GWS_GMAIL_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCommands('gmail')

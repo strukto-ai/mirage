@@ -69,6 +69,7 @@ class NodeType(StrEnum):
     HEREDOC_BODY = "heredoc_body"
     HEREDOC_START = "heredoc_start"
     HEREDOC_END = "heredoc_end"
+    HEREDOC_CONTENT = "heredoc_content"
     HERESTRING_REDIRECT = "herestring_redirect"
     FILE_DESCRIPTOR = "file_descriptor"
     ARRAY = "array"

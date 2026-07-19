@@ -286,12 +286,17 @@ export async function handleRead(
     ]
   }
   const variables = parse.operands.length > 0 ? parse.operands : ['REPLY']
-  if (session.stdinBuffer === null && stdin !== null) {
+  // A NEW stdin source replaces any leftover buffer (a previous
+  // command's exhausted herestring/pipe must not shadow this one); the
+  // SAME source object reuses the buffer so sequential reads advance
+  // through its lines.
+  if (stdin !== null && (session.stdinBuffer === null || session.stdinSource !== stdin)) {
     if (stdin instanceof Uint8Array) {
       session.stdinBuffer = new AsyncLineIterator(asyncChain(stdin))
     } else {
       session.stdinBuffer = new AsyncLineIterator(stdin)
     }
+    session.stdinSource = stdin
   }
   let lineBytes: Uint8Array | null = null
   if (session.stdinBuffer !== null) {
@@ -300,6 +305,8 @@ export async function handleRead(
   if (lineBytes === null) {
     for (const v of variables) {
       session.env[v] = ''
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.arrays[v]
     }
     return [
       null,
@@ -346,6 +353,10 @@ export async function handleRead(
     const name = variables[i]
     if (name === undefined) continue
     session.env[name] = parts[i] ?? ''
+    // A scalar write replaces any array of the same name, matching
+    // the variable_assignment path.
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.arrays[name]
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'read', exitCode: 0 })]
 }

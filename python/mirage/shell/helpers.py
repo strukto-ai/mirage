@@ -134,15 +134,125 @@ def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     return list(node.named_children)
 
 
+_REDIRECT_NODE_TYPES = frozenset({
+    NT.FILE_REDIRECT,
+    NT.HEREDOC_REDIRECT,
+    NT.HERESTRING_REDIRECT,
+})
+
+_TARGET_TYPES = frozenset({
+    NT.WORD,
+    NT.CONCATENATION,
+    NT.SIMPLE_EXPANSION,
+    NT.EXPANSION,
+    NT.COMMAND_SUBSTITUTION,
+    NT.STRING,
+    NT.PROCESS_SUBSTITUTION,
+})
+
+
+def _parse_file_redirect(child: tree_sitter.Node) -> Redirect:
+    """Parse a single file_redirect node into a Redirect."""
+    fd = 1
+    target: str | int = ""
+    target_node = None
+    kind = RedirectKind.STDOUT
+    append = False
+    dup_fd = None
+
+    for c in child.children:
+        if c.type == NT.FILE_DESCRIPTOR:
+            fd = int(get_text(c))
+        elif c.type == NT.REDIRECT_OUT:
+            pass
+        elif c.type == NT.REDIRECT_APPEND:
+            append = True
+        elif c.type == NT.REDIRECT_IN:
+            kind = RedirectKind.STDIN
+            fd = 0
+        elif c.type == NT.REDIRECT_STDERR:
+            kind = RedirectKind.STDERR_TO_STDOUT
+        elif c.type == NT.REDIRECT_BOTH:
+            kind = RedirectKind.STDOUT
+            fd = -1
+        elif c.type == NT.REDIRECT_BOTH_APPEND:
+            kind = RedirectKind.STDOUT
+            fd = -1
+            append = True
+        elif c.type == NT.NUMBER:
+            dup_fd = int(get_text(c))
+
+    for c in child.named_children:
+        if c.type in _TARGET_TYPES:
+            target = get_text(c)
+            target_node = c
+            break
+
+    if dup_fd is not None and kind == RedirectKind.STDERR_TO_STDOUT:
+        if fd == 2 and dup_fd == 1:
+            kind = RedirectKind.STDERR_TO_STDOUT
+            target = dup_fd
+        elif fd == 1 and dup_fd == 2:
+            kind = RedirectKind.STDOUT
+            fd = 1
+            target = 2
+        else:
+            target = dup_fd
+
+    if fd == -1:
+        return Redirect(fd=-1,
+                        target=target,
+                        target_node=target_node,
+                        kind=RedirectKind.STDOUT,
+                        append=append)
+
+    if fd == 2 and kind != RedirectKind.STDERR_TO_STDOUT:
+        kind = RedirectKind.STDERR
+
+    return Redirect(fd=fd,
+                    target=target,
+                    target_node=target_node,
+                    kind=kind,
+                    append=append)
+
+
+def _parse_herestring_redirect(child: tree_sitter.Node) -> Redirect:
+    content = ""
+    target_node = None
+    for candidate in child.named_children:
+        if candidate.type in _TARGET_TYPES:
+            content = get_text(candidate)
+            target_node = candidate
+            break
+    return Redirect(fd=0,
+                    target=content,
+                    target_node=target_node,
+                    kind=RedirectKind.HERESTRING)
+
+
 def get_redirects(
         node: tree_sitter.Node,  # noqa: E125
-) -> tuple[tree_sitter.Node, list[Redirect]]:
-    """Parse all redirects from a redirected_statement."""
+) -> tuple[tree_sitter.Node | None, list[Redirect]]:
+    """Parse all redirects from a redirected_statement.
+
+    Returns (command, redirects); command is None for a bare redirect
+    like `> file` (bash runs the empty command and applies redirects,
+    creating/truncating the file).
+    """
     nc = node.named_children
-    command = nc[0]
+    command = nc[0] if nc and nc[0].type not in _REDIRECT_NODE_TYPES else None
     redirects: list[Redirect] = []
 
-    for child in nc[1:]:
+    if command is not None and command.type == NT.COMMAND:
+        for child in command.named_children:
+            if child.type == NT.HERESTRING_REDIRECT:
+                redirects.append(_parse_herestring_redirect(child))
+
+    recover_herestring = False
+    for child in nc if command is None else nc[1:]:
+        if child.type == "ERROR" and get_text(child) == "<<":
+            recover_herestring = True
+            continue
         if child.type == NT.HEREDOC_REDIRECT:
             body, _, quoted = get_heredoc_meta(child)
             pipe_node = None
@@ -153,97 +263,32 @@ def get_redirects(
             redirects.append(
                 Redirect(fd=0,
                          target=body,
+                         target_node=child,
                          kind=RedirectKind.HEREDOC,
                          pipeline=pipe_node,
                          expand_vars=not quoted))
+            # A file redirect written before the heredoc body starts
+            # (`cat <<END > out.txt`) parses INSIDE the
+            # heredoc_redirect node; hoist it to a sibling.
+            for hc in child.named_children:
+                if hc.type == NT.FILE_REDIRECT:
+                    redirects.append(_parse_file_redirect(hc))
             continue
 
         if child.type == NT.HERESTRING_REDIRECT:
-            content = ""
-            for sc in child.children:
-                if sc.is_named and sc.type != "<<<":
-                    content = get_text(sc)
-                    break
-            redirects.append(
-                Redirect(fd=0, target=content, kind=RedirectKind.HERESTRING))
+            redirects.append(_parse_herestring_redirect(child))
+            recover_herestring = False
             continue
 
         if child.type != NT.FILE_REDIRECT:
+            recover_herestring = False
             continue
 
-        fd = 1
-        target: str | int = ""
-        target_node = None
-        kind = RedirectKind.STDOUT
-        append = False
-        dup_fd = None
-
-        for c in child.children:
-            if c.type == NT.FILE_DESCRIPTOR:
-                fd = int(get_text(c))
-            elif c.type == NT.REDIRECT_OUT:
-                pass
-            elif c.type == NT.REDIRECT_APPEND:
-                append = True
-            elif c.type == NT.REDIRECT_IN:
-                kind = RedirectKind.STDIN
-                fd = 0
-            elif c.type == NT.REDIRECT_STDERR:
-                kind = RedirectKind.STDERR_TO_STDOUT
-            elif c.type == NT.REDIRECT_BOTH:
-                kind = RedirectKind.STDOUT
-                fd = -1
-            elif c.type == NT.REDIRECT_BOTH_APPEND:
-                kind = RedirectKind.STDOUT
-                fd = -1
-                append = True
-            elif c.type == NT.NUMBER:
-                dup_fd = int(get_text(c))
-
-        _TARGET_TYPES = frozenset({
-            NT.WORD,
-            NT.CONCATENATION,
-            NT.SIMPLE_EXPANSION,
-            NT.EXPANSION,
-            NT.COMMAND_SUBSTITUTION,
-            NT.STRING,
-        })
-        for c in child.named_children:
-            if c.type in _TARGET_TYPES:
-                target = get_text(c)
-                target_node = c
-                break
-
-        if dup_fd is not None and kind == RedirectKind.STDERR_TO_STDOUT:
-            if fd == 2 and dup_fd == 1:
-                kind = RedirectKind.STDERR_TO_STDOUT
-                target = dup_fd
-            elif fd == 1 and dup_fd == 2:
-                kind = RedirectKind.STDOUT
-                fd = 1
-                target = 2
-            else:
-                target = dup_fd
-
-        if fd == -1:
-            kind = RedirectKind.STDOUT
-            redirects.append(
-                Redirect(fd=-1,
-                         target=target,
-                         target_node=target_node,
-                         kind=kind,
-                         append=append))
-            continue
-
-        if fd == 2 and kind != RedirectKind.STDERR_TO_STDOUT:
-            kind = RedirectKind.STDERR
-
-        redirects.append(
-            Redirect(fd=fd,
-                     target=target,
-                     target_node=target_node,
-                     kind=kind,
-                     append=append))
+        if recover_herestring:
+            redirects.append(_parse_herestring_redirect(child))
+        else:
+            redirects.append(_parse_file_redirect(child))
+        recover_herestring = False
 
     return command, redirects
 
@@ -367,9 +412,9 @@ def get_heredoc_meta(
     - quoted: True if delimiter was wrapped in quotes (no var expansion)
     """
     delimiter, body = get_heredoc_parts(redirect_node)
-    quoted = (delimiter.startswith("'")
-              and delimiter.endswith("'")) or (delimiter.startswith('"')
-                                               and delimiter.endswith('"'))
+    # Any quoting anywhere in the delimiter (even partial, `EN'D'`)
+    # disables expansion, matching bash.
+    quoted = "'" in delimiter or '"' in delimiter or "\\" in delimiter
     dash = False
     for c in redirect_node.children:
         if c.type == "<<-":
@@ -377,7 +422,27 @@ def get_heredoc_meta(
             break
     if dash and body:
         body = "\n".join(line.lstrip("\t") for line in body.split("\n"))
+    body = normalize_heredoc_body(body, delimiter)
     return body, dash, quoted
+
+
+def normalize_heredoc_body(body: str, delimiter: str) -> str:
+    """Repair tree-sitter quirks on concatenated delimiters (<<EN'D').
+
+    tree-sitter sometimes fails to match the closing line against a
+    concatenated delimiter: the body swallows the delimiter line, or
+    loses its final newline to heredoc_end. Bash strips quoting from
+    the delimiter before matching and bodies always end with a newline.
+    """
+    clean = delimiter.replace("'", "").replace('"', "")
+    suffix = clean + "\n"
+    if body.endswith(suffix):
+        head = body[:-len(suffix)]
+        if not head or head.endswith("\n"):
+            body = head
+    if body and not body.endswith("\n"):
+        body += "\n"
+    return body
 
 
 def get_process_sub_direction(
@@ -395,6 +460,13 @@ def get_process_sub_direction(
     if open_token == ">(":
         return ProcessSubDirection.OUTPUT
     return None
+
+
+def get_process_sub_body(node: tree_sitter.Node) -> str:
+    text = get_text(node)
+    if text.startswith(("<(", ">(")) and text.endswith(")"):
+        return text[2:-1]
+    return text
 
 
 def get_function_name(node: tree_sitter.Node) -> str:

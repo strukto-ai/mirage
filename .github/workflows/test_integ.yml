@@ -326,6 +326,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      greenmail:
+        image: greenmail/standalone:2.1.3
+        ports:
+          - 3025:3025
+          - 3143:3143
+          - 8080:8080
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.all
+            -Dgreenmail.users=integ:secret@example.com
+            -Dgreenmail.users.login=email
+            -Dgreenmail.hostname=0.0.0.0
       mongodb:
         image: mongo:8
         ports:
@@ -337,6 +349,7 @@ jobs:
           --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379/0
+      EMAIL_HOST: localhost
       MONGODB_URI: mongodb://localhost:27017
     steps:
       - uses: actions/checkout@v7
@@ -424,6 +437,13 @@ jobs:
           done
           cat /tmp/hfsrv.log
           echo "HF_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
+
+      - name: Wait for GreenMail
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf -X POST http://localhost:8080/api/service/reset && break
+            sleep 2
+          done
 
       - name: Start fake Box API for the typescript host
         run: |

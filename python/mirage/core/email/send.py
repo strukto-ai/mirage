@@ -22,13 +22,16 @@ from mirage.resource.secrets import reveal_secret
 
 
 async def _smtp_send(config: EmailConfig, msg: EmailMessage) -> None:
+    # start_tls=None upgrades opportunistically when the server advertises
+    # STARTTLS and stays plaintext otherwise, mirroring nodemailer's
+    # behavior in the TS backend (which only forces TLS on port 465).
     await aiosmtplib.send(
         msg,
         hostname=config.smtp_host,
         port=config.smtp_port,
         username=config.username,
         password=reveal_secret(config.password),
-        start_tls=True,
+        start_tls=None,
     )
 
 

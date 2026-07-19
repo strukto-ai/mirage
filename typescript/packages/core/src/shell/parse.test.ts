@@ -145,6 +145,7 @@ describe('findSyntaxError', () => {
     'for x in a b; do echo $x; done',
     'if true; then echo y; fi',
     'cat /tmp/x | sort',
+    "cat <<EN'D'\n$v\nEND",
     'echo bg &; echo fg',
     'for x in; do echo $x; done',
   ])('returns null for valid / recoverable %j', (cmd) => {

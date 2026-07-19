@@ -20,6 +20,7 @@ export default defineConfig({
     'src/openai/index.ts',
     'src/langchain/index.ts',
     'src/pi/index.ts',
+    'src/mcp/index.ts',
     'src/vercel/index.ts',
     'src/mastra/index.ts',
     'src/opencode/index.ts',

@@ -613,6 +613,49 @@
           "backend": "gslides"
         }
       ]
+    },
+    {
+      "id": "gmail",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "epoch": "2026-02-01T00:00:00Z",
+      "mail": "gmail/v1",
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "gmail",
+          "backend": "gmail"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "email",
+      "mail": "email/v1",
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "email",
+          "backend": "email"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
     }
   ]
 }

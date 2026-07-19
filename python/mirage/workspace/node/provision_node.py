@@ -123,9 +123,12 @@ async def _provision_redirected(
     ]
     result = await handle_redirect_provision(recurse, registry, command,
                                              targets, session, namespace)
-    if any(r.target_node is not None
-           and has_command_substitution(r.target_node) for r in redirects):
-        # A suppressed substitution hid the real redirect target.
+    if any(r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING) and r.
+           target_node is not None and has_command_substitution(r.target_node)
+           for r in redirects):
+        # A suppressed substitution hid the real redirect target
+        # (heredoc bodies carry their node too, but their target is
+        # stdin, not a hidden file).
         result.precision = Precision.UNKNOWN
     if pipe_node is not None:
         return rollup_pipe([result, await recurse(pipe_node, session)])
@@ -247,7 +250,7 @@ async def provision_node(
 
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        if command.type == NT.LIST:
+        if command is not None and command.type == NT.LIST:
             # Mirror the executor: a trailing redirect hoisted over an
             # &&/|| list binds to the last command.
             left, op, right = get_list_parts(command)

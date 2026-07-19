@@ -38,7 +38,7 @@ SPEC = CommandSpec(
 )
 
 
-@command("gws-gmail-send", resource="gmail", spec=SPEC, write=True)
+@command("gws gmail +send", resource="gmail", spec=SPEC, write=True)
 async def gws_gmail_send(
     accessor: GmailAccessor,
     paths: list[PathSpec],

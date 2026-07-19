@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  FileType,
   IOResult,
   PathSpec,
   ResourceName,
@@ -27,9 +28,11 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
+  type FileStat,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
+import { stat as emailStat } from '../../../core/email/stat.ts'
 import { EMAIL_IO } from './io.ts'
 import { metadataProvision } from './provision.ts'
 import { fnmatch } from '@struktoai/mirage-core'
@@ -53,16 +56,23 @@ async function walk(
   }
   const results: string[] = []
   for (const child of children) {
-    const isFolder = child.endsWith('/')
-    const trimmed = isFolder ? rstripSlash(child) : child
+    const trimmed = rstripSlash(child)
     results.push(trimmed)
-    if (isFolder) {
-      const childSpec = new PathSpec({
-        virtual: trimmed,
-        directory: trimmed,
-        resolved: false,
-        resourcePath: mountKey(trimmed, mountPrefixOf(path.virtual, path.resourcePath)),
-      })
+    const childSpec = new PathSpec({
+      virtual: trimmed,
+      directory: trimmed,
+      resolved: false,
+      resourcePath: mountKey(trimmed, mountPrefixOf(path.virtual, path.resourcePath)),
+    })
+    // readdir emits plain names, so directory-ness comes from stat (served
+    // from the index entries the readdir above just wrote).
+    let st: FileStat
+    try {
+      st = await emailStat(accessor, childSpec, index ?? undefined)
+    } catch {
+      continue
+    }
+    if (st.type === FileType.DIRECTORY) {
       const sub = await walk(accessor, childSpec, index, maxDepth, depth + 1)
       results.push(...sub)
     }

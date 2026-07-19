@@ -25,17 +25,33 @@ from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
+_TO_STDOUT = object()
+_TO_STDERR = object()
+
 
 async def handle_redirect(
     execute_node,
     dispatch,
-    command: tree_sitter.Node,
+    command: tree_sitter.Node | None,
     redirects: list[Redirect],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Handle all redirect patterns: >, >>, <, 2>, 2>&1, &>, >&2, <<<."""
+    """Handle all redirect patterns: >, >>, <, 2>, 2>&1, &>, >&2, <<<.
+
+    File-descriptor routing follows bash's left-to-right fd table:
+    each redirect updates where fd1/fd2 point at that moment, so
+    `cmd > f 2>&1` sends both streams to f while `cmd 2>&1 > f`
+    sends stderr to the original stdout. Output files are created (and
+    truncated unless appending) when the redirect is processed, even
+    if the stream ends up empty — including the command-less
+    `> file` form (command is None).
+
+    Deliberate divergence from bash: when both streams route to the
+    same destination they are concatenated stdout-then-stderr, not
+    temporally interleaved (streams are materialized buffers).
+    """
     cmd_stdin = stdin
     for r in redirects:
         if r.kind == RedirectKind.STDIN:
@@ -56,88 +72,92 @@ async def handle_redirect(
             else:
                 cmd_stdin = text
 
-    stdout, io, exec_node = await execute_node(command, session, cmd_stdin,
-                                               call_stack)
+    if command is None:
+        stdout_data = b""
+        stderr_data = b""
+        io = IOResult(exit_code=0)
+    else:
+        stdout, io, _ = await execute_node(command, session, cmd_stdin,
+                                           call_stack)
+        barriered = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+        if isinstance(barriered, memoryview):
+            barriered = bytes(barriered)
+        stdout_data = await materialize(barriered) or b""
+        stderr_data = await materialize(io.stderr) or b""
 
-    barriered = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-    if isinstance(barriered, memoryview):
-        barriered = bytes(barriered)
-    stdout_data = await materialize(barriered)
-
-    stderr_data = await materialize(io.stderr)
-
-    result_stdout: bytes | None = stdout_data
-    result_stderr: bytes | None = stderr_data
+    fd1: object = _TO_STDOUT
+    fd2: object = _TO_STDERR
+    file_bufs: dict[str, bytearray] = {}
+    file_scopes: dict[str, PathSpec] = {}
 
     for r in redirects:
-        stream = r.kind
-        append = r.append
-        fd = r.fd
-
-        if stream in (RedirectKind.STDIN, RedirectKind.HEREDOC,
+        if r.kind in (RedirectKind.STDIN, RedirectKind.HEREDOC,
                       RedirectKind.HERESTRING):
             continue
 
-        # 2>&1 — merge stderr into stdout
-        if stream == RedirectKind.STDERR_TO_STDOUT and isinstance(
+        # 2>&1 — fd2 follows wherever fd1 points right now
+        if r.kind == RedirectKind.STDERR_TO_STDOUT and isinstance(
                 r.target, int):
-            result_stdout = (result_stdout or b"") + (result_stderr or b"")
-            result_stderr = None
+            fd2 = fd1
             continue
 
-        # >&2 or 1>&2 — stdout to stderr
-        if fd == 1 and isinstance(r.target, int) and r.target == 2:
-            result_stderr = (result_stderr or b"") + (result_stdout or b"")
-            result_stdout = None
+        # >&2 or 1>&2 — fd1 follows wherever fd2 points right now
+        if r.fd == 1 and isinstance(r.target, int) and r.target == 2:
+            fd1 = fd2
+            continue
+
+        # other numeric dups (3>&1, ...) are not simulated
+        if isinstance(r.target, int):
             continue
 
         scope = _ensure_scope(r.target)
         path = scope.virtual
+        file_scopes[path] = scope
+        if r.append:
+            if path not in file_bufs:
+                file_bufs[path] = bytearray(await
+                                            _read_existing(dispatch, scope))
+        else:
+            file_bufs[path] = bytearray()
 
-        # &> or &>> — both stdout+stderr to file
-        if fd == -1:
-            combined = (result_stdout or b"") + (result_stderr or b"")
-            if append:
-                combined = await _append_existing(dispatch, scope, combined)
-            await dispatch("write", scope, data=combined)
-            io.writes[path] = combined
-            result_stdout = None
-            result_stderr = None
-            continue
+        if r.fd == -1:  # &> / &>>
+            fd1 = path
+            fd2 = path
+        elif r.kind == RedirectKind.STDERR:
+            fd2 = path
+        else:
+            fd1 = path
 
-        # 2> file — stderr to file
-        if stream == RedirectKind.STDERR:
-            data = result_stderr or b""
-            if append:
-                data = await _append_existing(dispatch, scope, data)
-            if data:
-                await dispatch("write", scope, data=data)
-                io.writes[path] = data
-            result_stderr = None
-            continue
+    out_stdout = bytearray()
+    out_stderr = bytearray()
+    for data, dest in ((stdout_data, fd1), (stderr_data, fd2)):
+        if dest is _TO_STDOUT:
+            out_stdout += data
+        elif dest is _TO_STDERR:
+            out_stderr += data
+        elif isinstance(dest, str):
+            file_bufs[dest] += data
 
-        # > or >> — stdout to file
-        data = result_stdout or b""
-        if append:
-            data = await _append_existing(dispatch, scope, data)
-        await dispatch("write", scope, data=data)
+    for path, buf in file_bufs.items():
+        data = bytes(buf)
+        await dispatch("write", file_scopes[path], data=data)
         io.writes[path] = data
-        result_stdout = None
 
-    io.stderr = result_stderr
+    result_stdout = bytes(out_stdout)
+    io.stderr = bytes(out_stderr) if out_stderr else None
     exec_node = ExecutionNode(command="redirect", exit_code=io.exit_code)
     return result_stdout if result_stdout else None, io, exec_node
 
 
-async def _append_existing(dispatch, scope, data):
+async def _read_existing(dispatch, scope) -> bytes:
     try:
         existing, _ = await dispatch("read", scope)
         if isinstance(existing, bytes):
-            return existing + data
+            return existing
     except FileNotFoundError:
         # appending to a missing file starts from empty
         pass
-    return data
+    return b""
 
 
 def _ensure_scope(target):

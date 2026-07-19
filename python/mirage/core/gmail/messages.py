@@ -15,8 +15,7 @@
 import base64
 from typing import Any
 
-from mirage.core.google._client import (GMAIL_API_BASE, TokenManager,
-                                        google_get, google_post)
+from mirage.core.google._client import TokenManager, gmail_base, google_get
 
 
 async def list_messages(
@@ -41,23 +40,9 @@ async def list_messages(
         params["labelIds"] = label_id
     if query:
         params["q"] = query
-    url = f"{GMAIL_API_BASE}/users/me/messages"
+    url = f"{gmail_base(token_manager)}/users/me/messages"
     data = await google_get(token_manager, url, params=params)
     return data.get("messages", [])
-
-
-async def trash_message(
-    token_manager: TokenManager,
-    message_id: str,
-) -> None:
-    """Move a Gmail message to Trash.
-
-    Args:
-        token_manager (TokenManager): manages OAuth2 tokens.
-        message_id (str): Gmail message ID.
-    """
-    url = f"{GMAIL_API_BASE}/users/me/messages/{message_id}/trash"
-    await google_post(token_manager, url, json={})
 
 
 async def get_message_raw(
@@ -73,7 +58,8 @@ async def get_message_raw(
     Returns:
         dict: full message resource.
     """
-    url = f"{GMAIL_API_BASE}/users/me/messages/{message_id}?format=full"
+    url = (f"{gmail_base(token_manager)}/users/me/messages"
+           f"/{message_id}?format=full")
     return await google_get(token_manager, url)
 
 
@@ -126,7 +112,7 @@ async def get_attachment(
     Returns:
         bytes: decoded attachment content.
     """
-    url = (f"{GMAIL_API_BASE}/users/me/messages"
+    url = (f"{gmail_base(token_manager)}/users/me/messages"
            f"/{message_id}/attachments/{attachment_id}")
     data = await google_get(token_manager, url)
     raw = data.get("data", "")

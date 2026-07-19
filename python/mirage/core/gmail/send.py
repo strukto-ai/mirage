@@ -18,8 +18,7 @@ from typing import Any
 
 from mirage.core.gmail.messages import (_extract_header, get_message_processed,
                                         get_message_raw)
-from mirage.core.google._client import (GMAIL_API_BASE, TokenManager,
-                                        google_post)
+from mirage.core.google._client import TokenManager, gmail_base, google_post
 
 
 async def send_message(
@@ -43,7 +42,7 @@ async def send_message(
     msg["To"] = to
     msg["Subject"] = subject
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    url = f"{GMAIL_API_BASE}/users/me/messages/send"
+    url = f"{gmail_base(token_manager)}/users/me/messages/send"
     return await google_post(token_manager, url, {"raw": raw})
 
 
@@ -82,7 +81,7 @@ async def reply_message(
     payload: dict[str, Any] = {"raw": raw}
     if thread_id:
         payload["threadId"] = thread_id
-    url = f"{GMAIL_API_BASE}/users/me/messages/send"
+    url = f"{gmail_base(token_manager)}/users/me/messages/send"
     return await google_post(token_manager, url, payload)
 
 
@@ -127,7 +126,7 @@ async def reply_all_message(
     payload: dict[str, Any] = {"raw": raw}
     if thread_id:
         payload["threadId"] = thread_id
-    url = f"{GMAIL_API_BASE}/users/me/messages/send"
+    url = f"{gmail_base(token_manager)}/users/me/messages/send"
     return await google_post(token_manager, url, payload)
 
 

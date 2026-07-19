@@ -29,7 +29,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("email-send", resource="email", spec=SPEC, write=True)
+@command("himalaya message send", resource="email", spec=SPEC, write=True)
 async def email_send(
     accessor: EmailAccessor,
     paths: list[PathSpec],

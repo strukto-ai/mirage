@@ -50,6 +50,10 @@
       "types": "./dist/pi/index.d.ts",
       "import": "./dist/pi/index.js"
     },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "import": "./dist/mcp/index.js"
+    },
     "./vercel": {
       "types": "./dist/vercel/index.d.ts",
       "import": "./dist/vercel/index.js"
@@ -76,8 +80,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@struktoai/mirage-core": "workspace:*",
-    "picomatch": "^4.0.4"
+    "picomatch": "^4.0.4",
+    "zod": "^4.0.0"
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.215",
@@ -86,8 +92,7 @@
     "@opencode-ai/plugin": "^1.18.3",
     "@openai/agents": "^0.13.5",
     "ai": "^7.0.31",
-    "deepagents": "^1.11.1",
-    "zod": "^4.0.0"
+    "deepagents": "^1.11.1"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
@@ -110,9 +115,6 @@
     },
     "deepagents": {
       "optional": true
-    },
-    "zod": {
-      "optional": true
     }
   },
   "devDependencies": {
@@ -132,7 +134,6 @@
     "langchain": "^1.5.0",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^3.2.6",
-    "zod": "^4.0.0"
+    "vitest": "^3.2.6"
   }
 }

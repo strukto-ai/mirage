@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mirage Filesystem"
+  short_description: "Work with Mirage-mounted data safely"
+  default_prompt: "Use $mirage-filesystem to inspect and edit mounted data."

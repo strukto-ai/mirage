@@ -48,8 +48,13 @@ async def rg(
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
     max_count = fl.as_int("m")
+    # Output-shaping flags need real per-line matching, which the search-API
+    # push-down cannot emulate; fall through to the generic rg over
+    # rendered files instead.
+    shaping = (fl.as_bool("args_l") or fl.as_bool("c") or fl.as_bool("n")
+               or fl.as_bool("o") or fl.as_bool("v"))
 
-    if paths and "\n" not in pattern_str:
+    if paths and "\n" not in pattern_str and not shaping:
         scope = detect_scope(paths[0])
         if scope.use_native:
             file_prefix = mount_prefix_of(paths[0].virtual,

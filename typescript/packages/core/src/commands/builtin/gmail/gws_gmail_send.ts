@@ -66,7 +66,7 @@ async function gwsGmailSendCommand(
 }
 
 export const GMAIL_GWS_SEND = command({
-  name: 'gws-gmail-send',
+  name: 'gws gmail +send',
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailSendCommand,

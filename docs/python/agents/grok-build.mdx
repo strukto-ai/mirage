@@ -1,0 +1,35 @@
+---
+title: Grok Build
+description: Run Grok Build against any Python Mirage workspace by mounting it as a real filesystem via FUSE.
+icon: terminal
+---
+
+[Grok Build](https://x.ai/cli) can use Mirage through either an installable [TypeScript plugin](/typescript/agents/grok-build) or a FUSE mount. The Python integration [FUSE-mounts](/python/setup/fuse) a workspace as a normal host directory, so Grok's built-in filesystem and shell tools operate on Mirage without a separate tool server.
+
+## Install
+
+```bash
+uv add 'mirage-ai[fuse]'
+```
+
+Install Grok Build separately.
+
+## Usage
+
+```python
+from mirage import Mount, MountMode, Workspace
+from mirage.resource.ram import RAMResource
+
+with Workspace(
+    {"/": Mount(RAMResource(), mode=MountMode.WRITE, fuse=True)}) as ws:
+    print(f"cd {ws.fuse_mountpoint} && grok")
+    input("Press Enter when done...")
+```
+
+The mountpoint behaves like a regular directory. Start `grok` there and its built-in file and shell tools dispatch through Mirage's ops layer.
+
+## FUSE or plugin?
+
+Use Python FUSE when you want Grok's built-in tools to see Mirage as an ordinary directory. This requires an OS FUSE driver and does not add Mirage's agent-level stale-write check.
+
+Use the [TypeScript plugin](/typescript/agents/grok-build) when you want named Mirage tools, Pi-style stale-write protection, and Grok plugin installation. The plugin uses Mirage's standard MCP adapter internally.

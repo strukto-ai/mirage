@@ -22,8 +22,8 @@ def test_prompt_includes_path_anatomy_and_processed_shape():
     assert "after:/before:" in rendered
     assert "mirage-processed" in rendered
     assert ".body_text" in rendered
-    assert "gws-gmail-read" in rendered
-    assert "gws-gmail-triage" in rendered
+    assert "gws gmail +read" in rendered
+    assert "gws gmail +triage" in rendered
 
 
 def test_prompt_documents_file_per_message_layout():
@@ -41,13 +41,13 @@ def test_prompt_mentions_grep_skips_binary_attachments():
 
 
 def test_write_prompt_examples_match_actual_signatures():
-    assert "gws-gmail-send" in WRITE_PROMPT
+    assert "gws gmail +send" in WRITE_PROMPT
     assert "--to" in WRITE_PROMPT
     assert "--subject" in WRITE_PROMPT
     assert "--body" in WRITE_PROMPT
-    assert "gws-gmail-reply" in WRITE_PROMPT
-    assert "gws-gmail-reply-all" in WRITE_PROMPT
-    assert "gws-gmail-forward" in WRITE_PROMPT
+    assert "gws gmail +reply" in WRITE_PROMPT
+    assert "gws gmail +reply-all" in WRITE_PROMPT
+    assert "gws gmail +forward" in WRITE_PROMPT
     assert "--message-id" in WRITE_PROMPT
 
 

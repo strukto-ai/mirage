@@ -18,7 +18,7 @@ from mirage.accessor.email import EmailAccessor
 from mirage.commands.registry import command
 from mirage.commands.spec.types import CommandSpec, OperandKind, Option
 from mirage.core.email._client import fetch_message
-from mirage.core.email.send import reply_message
+from mirage.core.email.send import reply_all_message, reply_message
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -27,10 +27,11 @@ SPEC = CommandSpec(options=(
     Option(long="--uid", value_kind=OperandKind.TEXT),
     Option(long="--folder", value_kind=OperandKind.TEXT),
     Option(long="--body", value_kind=OperandKind.TEXT),
+    Option(long="--all"),
 ), )
 
 
-@command("email-reply", resource="email", spec=SPEC, write=True)
+@command("himalaya message reply", resource="email", spec=SPEC, write=True)
 async def email_reply(
     accessor: EmailAccessor,
     paths: list[PathSpec],
@@ -47,7 +48,10 @@ async def email_reply(
     if not body or not isinstance(body, str):
         raise ValueError("--body is required")
     original = await fetch_message(accessor, folder, uid)
-    result = await reply_message(accessor.config, original, body)
+    if _extra.get("all"):
+        result = await reply_all_message(accessor.config, original, body)
+    else:
+        result = await reply_message(accessor.config, original, body)
     out = json.dumps(result, ensure_ascii=False,
                      separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from mirage import MountMode, RAMResource, Workspace
 from mirage.io.stream import materialize
 from mirage.shell.errors import ExitSignal
 from mirage.workspace.executor.builtins.vars import (handle_exit, handle_read,
@@ -137,3 +138,27 @@ async def test_whoami_errors_without_identity():
     assert io.exit_code == 1
     assert out is None
     assert io.stderr == b"whoami: cannot find name for user ID\n"
+
+
+async def _read_ws() -> Workspace:
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.execute("mkdir -p /data")
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_read_replaces_stale_stdin_buffer():
+    # A previous read's exhausted herestring buffer must not shadow a
+    # new command's stdin.
+    ws = await _read_ws()
+    await ws.execute("read -r x <<< first")
+    io = await ws.execute('read -r y <<< second\necho "y=$y"')
+    assert (io.stdout or b"") == b"y=second\n"
+
+
+@pytest.mark.asyncio
+async def test_read_scalar_replaces_array():
+    ws = await _read_ws()
+    await ws.execute("a=(x y z)")
+    io = await ws.execute('read -r a b <<< "one two"\necho "a=$a b=$b"')
+    assert (io.stdout or b"") == b"a=one b=two\n"

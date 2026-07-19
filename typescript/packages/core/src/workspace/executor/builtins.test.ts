@@ -475,6 +475,36 @@ describe('handleRead', () => {
     await handleRead(['L'], s, gen())
     expect(s.env.L).toBe('streamed line')
   })
+
+  it('a NEW stdin source replaces a stale exhausted buffer', async () => {
+    const s = new Session({ sessionId: 'test' })
+    const first = new TextEncoder().encode('first\n')
+    await handleRead(['X'], s, first)
+    await handleRead(['X2'], s, first)
+    expect(s.env.X2).toBe('')
+    const second = new TextEncoder().encode('second\n')
+    const [, io] = await handleRead(['Y'], s, second)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.Y).toBe('second')
+  })
+
+  it('the SAME stdin source keeps advancing through lines', async () => {
+    const s = new Session({ sessionId: 'test' })
+    const shared = new TextEncoder().encode('a\nb\n')
+    await handleRead(['P'], s, shared)
+    await handleRead(['Q'], s, shared)
+    expect(s.env.P).toBe('a')
+    expect(s.env.Q).toBe('b')
+  })
+
+  it('a scalar read replaces an array of the same name', async () => {
+    const s = new Session({ sessionId: 'test' })
+    s.arrays.A = ['x', 'y']
+    const stdin = new TextEncoder().encode('one\n')
+    await handleRead(['A'], s, stdin)
+    expect(s.env.A).toBe('one')
+    expect(s.arrays.A).toBeUndefined()
+  })
 })
 
 describe('handleSource', () => {

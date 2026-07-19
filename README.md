@@ -60,7 +60,7 @@ await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
 - **Around 50 built-in backends:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH, and more, mounted side-by-side under a single root.
 - **Portable workspaces:** clone, snapshot, and version a workspace; agent runs move between machines without restarting or reconfiguring the system.
 - **Embeddable:** the Python and TypeScript SDKs run in-process inside FastAPI, Express, browser apps, or any async runtime; no separate process required.
-- **Agent integrations:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, and OpenHands via the SDKs; coding agents like Claude Code and Codex via the lightweight CLI + daemon.
+- **Agent integrations:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, and OpenHands via the SDKs; coding agents through native adapters, installable plugins, MCP, or FUSE.
 
 ## Architecture
 
@@ -159,7 +159,7 @@ Mirage plugs into agent frameworks as a sandbox or tool layer. POSIX operations 
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Python        | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno) |
 | TypeScript    | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                         |
-| Coding agents | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/python/agents/codex), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi)                                                                                                                                                     |
+| Coding agents | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/typescript/agents/codex), [Grok Build](https://docs.mirage.strukto.ai/typescript/agents/grok-build), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi)                                                                      |
 
 ## Cache
 

@@ -101,3 +101,90 @@ async def test_stdin_redirect_binds_last_command():
     await ws.execute("printf 'l1\\nl2\\n' | tee /data/seed > /dev/null")
     out = await _out(ws, "echo lead && wc -l < /data/seed")
     assert out == "lead\n2\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_table_file_then_merge():
+    # `> f 2>&1` — fd2 follows fd1 into the file (canonical idiom).
+    ws = await _workspace()
+    io = await ws.execute("{ echo out; ls /data/missing; } > /data/both 2>&1")
+    assert (io.stdout or b"") == b""
+    assert io.stderr is None
+    both = await _out(ws, "cat /data/both")
+    assert both.startswith("out\n")
+    assert "missing" in both
+
+
+@pytest.mark.asyncio
+async def test_fd_table_merge_then_file():
+    # `2>&1 > f` — fd2 keeps the ORIGINAL stdout; only stdout hits f.
+    ws = await _workspace()
+    io = await ws.execute("{ echo out; ls /data/missing; } 2>&1 > /data/only")
+    assert b"missing" in (io.stdout or b"")
+    assert await _out(ws, "cat /data/only") == "out\n"
+
+
+@pytest.mark.asyncio
+async def test_fd_table_stdout_dup_then_stderr_file():
+    # `>&2 2>> f` — fd1 points at the ORIGINAL stderr before fd2 moves.
+    ws = await _workspace()
+    io = await ws.execute("echo a >&2 2>> /data/elog")
+    assert (io.stdout or b"") == b""
+    assert (io.stderr or b"") == b"a\n"
+    assert await _out(ws, "cat /data/elog") == ""
+
+
+@pytest.mark.asyncio
+async def test_multiple_stdout_redirects_truncate_all_write_last():
+    ws = await _workspace()
+    await ws.execute("echo body > /data/m1 > /data/m2")
+    assert await _out(ws, "cat /data/m1") == ""
+    assert await _out(ws, "cat /data/m2") == "body\n"
+
+
+@pytest.mark.asyncio
+async def test_bare_redirect_creates_empty_file():
+    ws = await _workspace()
+    io = await ws.execute("> /data/bare")
+    assert io.exit_code == 0
+    io = await ws.execute("test -f /data/bare")
+    assert io.exit_code == 0
+    assert await _out(ws, "cat /data/bare") == ""
+
+
+@pytest.mark.asyncio
+async def test_stderr_redirect_creates_file_even_when_empty():
+    ws = await _workspace()
+    await ws.execute("echo fine 2> /data/errs")
+    io = await ws.execute("test -f /data/errs")
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_both_redirect_append():
+    ws = await _workspace()
+    await ws.execute("echo one &> /data/acc")
+    await ws.execute("ls /data/nope &>> /data/acc")
+    await ws.execute("echo three &>> /data/acc")
+    acc = await _out(ws, "cat /data/acc")
+    assert acc.startswith("one\n")
+    assert acc.endswith("three\n")
+    assert "nope" in acc
+
+
+@pytest.mark.asyncio
+async def test_heredoc_with_file_redirect():
+    # `cat <<END > f` — the file redirect parses INSIDE the heredoc
+    # node and must still be applied.
+    ws = await _workspace()
+    io = await ws.execute("cat <<END > /data/hd\nwritten\nEND")
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b""
+    assert await _out(ws, "cat /data/hd") == "written\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_from_process_substitution():
+    ws = await _workspace()
+    out = await _out(ws, "wc -l < <(printf 'x\\ny\\n')")
+    assert out.strip() == "2"

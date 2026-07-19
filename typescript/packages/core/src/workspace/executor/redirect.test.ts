@@ -17,6 +17,7 @@ import { IOResult } from '../../io/types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
+import { makeIntegrationWS, run, runExit, runResult } from '../fixtures/integration_fixture.ts'
 import { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from './cross_mount.ts'
@@ -140,7 +141,36 @@ describe('handleRedirect <<< (herestring)', () => {
 })
 
 describe('handleRedirect 2>&1', () => {
-  it('merges stderr into stdout in the final write', async () => {
+  it('merges stderr into the file when 2>&1 follows the file redirect', async () => {
+    // `cmd > f 2>&1` — fd2 follows fd1 into the file.
+    const writes: { data: Uint8Array }[] = []
+    const dispatch = vi.fn<DispatchFn>((op, _p, args) => {
+      if (op === 'write') writes.push({ data: args?.[0] as Uint8Array })
+      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+    })
+    const execute: ExecuteNodeFn = () =>
+      Promise.resolve([
+        encode('out-'),
+        new IOResult({ stderr: encode('err-') }),
+        new ExecutionNode(),
+      ])
+    const redirects = [
+      new Redirect({ fd: 1, target: '/ram/combined', kind: RedirectKind.STDOUT }),
+      new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }),
+    ]
+    await handleRedirect(
+      execute,
+      dispatch,
+      STUB_NODE,
+      redirects,
+      new Session({ sessionId: 'test' }),
+    )
+    expect(decode(writes[0]?.data ?? null)).toBe('out-err-')
+  })
+
+  it('keeps stderr on the original stdout when 2>&1 precedes the file redirect', async () => {
+    // `cmd 2>&1 > f` — fd2 was pointed at the ORIGINAL stdout before
+    // fd1 moved to the file; only stdout lands in the file.
     const writes: { data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, _p, args) => {
       if (op === 'write') writes.push({ data: args?.[0] as Uint8Array })
@@ -154,16 +184,17 @@ describe('handleRedirect 2>&1', () => {
       ])
     const redirects = [
       new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }),
-      new Redirect({ fd: 1, target: '/ram/combined', kind: RedirectKind.STDOUT }),
+      new Redirect({ fd: 1, target: '/ram/only', kind: RedirectKind.STDOUT }),
     ]
-    await handleRedirect(
+    const [stdout] = await handleRedirect(
       execute,
       dispatch,
       STUB_NODE,
       redirects,
       new Session({ sessionId: 'test' }),
     )
-    expect(decode(writes[0]?.data ?? null)).toBe('out-err-')
+    expect(decode(writes[0]?.data ?? null)).toBe('out-')
+    expect(decode((stdout as Uint8Array | null) ?? null)).toBe('err-')
   })
 })
 
@@ -208,5 +239,75 @@ describe('handleRedirect accepts PathSpec targets', () => {
       new Session({ sessionId: 'test' }),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('ok')
+  })
+})
+
+describe('fd-table routing end-to-end', () => {
+  it('bare > file creates an empty file', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(await runExit(ws, '> /data/bare')).toBe(0)
+      expect(await runExit(ws, 'test -f /data/bare')).toBe(0)
+      expect(await run(ws, 'cat /data/bare')).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('multiple stdout redirects truncate all, write last', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute('echo body > /data/m1 > /data/m2')
+      expect(await run(ws, 'cat /data/m1')).toBe('')
+      expect(await run(ws, 'cat /data/m2')).toBe('body\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('2> file creates the file even when stderr is empty', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute('echo fine 2> /data/errs')
+      expect(await runExit(ws, 'test -f /data/errs')).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('>&2 before 2>> keeps stdout on the original stderr', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'echo a >&2 2>> /data/elog')
+      expect(exit).toBe(0)
+      expect(out).toBe('')
+      expect(err).toBe('a\n')
+      expect(await run(ws, 'cat /data/elog')).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('applies the file redirect nested inside a heredoc', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out] = await runResult(ws, 'cat <<END > /data/hd\nwritten\nEND')
+      expect(exit).toBe(0)
+      expect(out).toBe('')
+      expect(await run(ws, 'cat /data/hd')).toBe('written\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('&>> appends both streams', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute('echo one &> /data/acc')
+      await ws.execute('echo three &>> /data/acc')
+      expect(await run(ws, 'cat /data/acc')).toBe('one\nthree\n')
+    } finally {
+      await ws.close()
+    }
   })
 })

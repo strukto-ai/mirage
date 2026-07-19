@@ -37,7 +37,7 @@ import {
   getWhileParts,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table.ts'
-import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
+import { ERREXIT_EXEMPT_TYPES, NodeType as NT, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
@@ -74,6 +74,12 @@ import { executeProgram } from './program.ts'
 import { executeCommand } from './command_dispatch.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
+type Recurse = (
+  node: TSNodeLike,
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+) => Promise<Result>
 
 // Array-literal elements behave like any other shell word list: command
 // substitutions word-split and globs resolve to matches
@@ -95,6 +101,85 @@ async function expandArrayItems(
   )
   const resolved = await resolveGlobs(classified, registry)
   return resolved.map((w) => wordText(w))
+}
+
+async function recurseReassociated(
+  recurse: Recurse,
+  dispatch: DispatchFn,
+  executeFn: ExecuteFn,
+  registry: MountRegistry,
+  redirects: readonly Redirect[],
+  right: TSNodeLike,
+  node: TSNodeLike,
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+): Promise<Result> {
+  if (node !== right) return recurse(node, session, stdin, callStack)
+  const [expanded, pipeNode] = await expandRedirects(
+    redirects,
+    session,
+    executeFn,
+    registry,
+    callStack,
+  )
+  let [stdout, io, execNode] = await handleRedirect(
+    recurse,
+    dispatch,
+    right,
+    expanded,
+    session,
+    stdin,
+    callStack,
+  )
+  if (pipeNode !== null && stdout !== null) {
+    const [stdout2, io2, execNode2] = await recurse(pipeNode, session, stdout, callStack)
+    stdout = stdout2
+    io = await io.merge(io2)
+    execNode = execNode2
+  }
+  return [stdout, io, execNode]
+}
+
+async function recursePipeStderr(
+  recurse: Recurse,
+  dispatch: DispatchFn,
+  executeFn: ExecuteFn,
+  registry: MountRegistry,
+  targets: readonly TSNodeLike[],
+  node: TSNodeLike,
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+): Promise<Result> {
+  if (!targets.includes(node) || nodeKind(node) !== NodeKind.REDIRECT) {
+    return recurse(node, session, stdin, callStack)
+  }
+  const [command, redirects] = getRedirects(node)
+  redirects.push(new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }))
+  const [expanded, pipeNode] = await expandRedirects(
+    redirects,
+    session,
+    executeFn,
+    registry,
+    callStack,
+  )
+  let [stdout, io, execNode] = await handleRedirect(
+    recurse,
+    dispatch,
+    command,
+    expanded,
+    session,
+    stdin,
+    callStack,
+  )
+  if (pipeNode !== null && stdout !== null) {
+    const [stdout2, io2, execNode2] = await recurse(pipeNode, session, stdout, callStack)
+    stdout = stdout2
+    io = await io.merge(io2)
+    execNode = execNode2
+  }
+  return [stdout, io, execNode]
 }
 
 export interface ExecuteNodeDeps {
@@ -164,6 +249,11 @@ export async function executeNode(
 
   if (kind === NodeKind.PIPELINE) {
     const [commands, stderrFlags] = getPipelineCommands(node)
+    if (stderrFlags.some(Boolean)) {
+      const targets = commands.filter((_, i) => stderrFlags[i] === true)
+      const wrapped = recursePipeStderr.bind(null, recurse, dispatch, executeFn, registry, targets)
+      return handlePipe(wrapped, commands, stderrFlags, session, stdin, callStack)
+    }
     return handlePipe(recurse, commands, stderrFlags, session, stdin, callStack)
   }
 
@@ -174,7 +264,7 @@ export async function executeNode(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    if (command.type === NT.LIST) {
+    if (command !== null && command.type === NT.LIST) {
       // tree-sitter hoists a trailing redirect over the whole &&/||
       // list; bash binds it to the last command:
       //   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
@@ -182,27 +272,31 @@ export async function executeNode(
       // `cd /x && echo hi > f` writes under /x. Compound and subshell
       // bodies keep the whole-body redirect (bash group semantics).
       const [left, op, right] = getListParts(command)
-      const wrapped: typeof recurse = async (n, sess, sin, cstack) => {
-        if (n !== right) return recurse(n, sess, sin, cstack)
-        const [expanded, pipe] = await expandRedirects(redirects, sess, executeFn, registry, cstack)
-        let [rStdout, rIo, rExec] = await handleRedirect(
-          recurse,
-          dispatch,
-          right,
-          expanded,
-          sess,
-          sin,
-          cstack,
-        )
-        if (pipe !== null && rStdout !== null) {
-          const [s2, io2, e2] = await recurse(pipe, sess, rStdout, cstack)
-          rStdout = s2
-          rIo = await rIo.merge(io2)
-          rExec = e2
-        }
-        return [rStdout, rIo, rExec]
-      }
+      const wrapped = recurseReassociated.bind(
+        null,
+        recurse,
+        dispatch,
+        executeFn,
+        registry,
+        redirects,
+        right,
+      )
       return handleConnection(wrapped, left, op, right, session, stdin, callStack)
+    }
+    if (command !== null && command.type === NT.PIPELINE) {
+      const [commands, stderrFlags] = getPipelineCommands(command)
+      const right = commands[commands.length - 1]
+      if (right === undefined) throw new Error('redirected pipeline: missing command')
+      const wrapped = recurseReassociated.bind(
+        null,
+        recurse,
+        dispatch,
+        executeFn,
+        registry,
+        redirects,
+        right,
+      )
+      return handlePipe(wrapped, commands, stderrFlags, session, stdin, callStack)
     }
     const [expandedRedirects, pipeNode] = await expandRedirects(
       redirects,

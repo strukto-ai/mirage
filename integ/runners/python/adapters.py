@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
+import imaplib
 import importlib.util
 import json
 import logging
@@ -20,6 +22,9 @@ import shutil
 import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from types import ModuleType
 
@@ -35,10 +40,14 @@ from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.box import BoxConfig, BoxResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
+from mirage.resource.email.config import EmailConfig
+from mirage.resource.email.email import EmailResource
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
 from mirage.resource.gdrive.gdrive import GoogleDriveResource
+from mirage.resource.gmail.config import GmailConfig
+from mirage.resource.gmail.gmail import GmailResource
 from mirage.resource.gridfs import GridFSConfig, GridFSResource
 from mirage.resource.gsheets.config import GSheetsConfig
 from mirage.resource.gsheets.gsheets import GSheetsResource
@@ -54,6 +63,11 @@ from mirage.resource.sharepoint.sharepoint import SharePointResource
 from mirage.resource.ssh import SSHConfig, SSHResource
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
+EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
+EMAIL_API_PORT = int(os.environ.get("EMAIL_API_PORT", "8080"))
+EMAIL_USERNAME = "integ@example.com"
+EMAIL_PASSWORD = "secret"
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
@@ -63,6 +77,37 @@ S3_SECRET = os.environ.get("AWS_SECRET_ACCESS_KEY", "testing")
 
 async def _noop() -> None:
     return None
+
+
+def manifest_mime(entry: dict) -> MIMEText | MIMEMultipart:
+    """Build the constrained RFC822 shape shared mail manifests describe.
+
+    Args:
+        entry (dict): manifest row with from/to/cc/subject/date/body and
+            optional attachments.
+
+    Returns:
+        MIMEText | MIMEMultipart: single text part, or multipart/mixed with
+        text attachments.
+    """
+    if entry.get("attachments"):
+        mime: MIMEText | MIMEMultipart = MIMEMultipart("mixed")
+        mime.attach(MIMEText(entry["body"], "plain", "utf-8"))
+        for att in entry["attachments"]:
+            part = MIMEText(att["content"], "plain", "utf-8")
+            part.add_header("Content-Disposition",
+                            "attachment",
+                            filename=att["filename"])
+            mime.attach(part)
+    else:
+        mime = MIMEText(entry["body"], "plain", "utf-8")
+    mime["From"] = entry["from"]
+    mime["To"] = entry["to"]
+    if entry.get("cc"):
+        mime["Cc"] = ", ".join(entry["cc"])
+    mime["Subject"] = entry["subject"]
+    mime["Date"] = entry["date"]
+    return mime
 
 
 class S3Service:
@@ -321,6 +366,12 @@ class GwsService:
                 ).parents[2] / "fixtures" / f"{apps}.json"
                 await cls._seed_apps(session, url,
                                      json.loads(manifest.read_text()))
+            mail = target.get("mail")
+            if mail:
+                manifest = Path(__file__).resolve(
+                ).parents[2] / "fixtures" / f"{mail}.json"
+                await cls._seed_mail(session, url,
+                                     json.loads(manifest.read_text()))
         return cls(url, folder_ids)
 
     @staticmethod
@@ -368,6 +419,25 @@ class GwsService:
                 raise ValueError(f"unknown google-apps kind: {kind}")
 
     @staticmethod
+    async def _seed_mail(session: aiohttp.ClientSession, url: str,
+                         entries: list[dict]) -> None:
+        # Messages are API objects: each manifest entry becomes an RFC822
+        # payload inserted through messages.insert with
+        # internalDateSource=dateHeader, so date dirs come from the
+        # manifest, not the server clock.
+        for entry in entries:
+            raw = base64.urlsafe_b64encode(
+                manifest_mime(entry).as_bytes()).decode()
+            async with session.post(
+                    f"{url}/gmail/v1/users/me/messages",
+                    params={"internalDateSource": "dateHeader"},
+                    json={
+                        "raw": raw,
+                        "labelIds": entry.get("labels", []),
+                    }) as resp:
+                resp.raise_for_status()
+
+    @staticmethod
     async def _folder(session: aiohttp.ClientSession, url: str, name: str,
                       parent: str) -> str:
         query = (f"name='{name}' and '{parent}' in parents "
@@ -411,6 +481,70 @@ class GwsService:
             GSlidesConfig(client_id="integ",
                           refresh_token="integ",
                           api_base=self.url))
+
+    def gmail_resource(self) -> GmailResource:
+        return GmailResource(
+            GmailConfig(client_id="integ",
+                        refresh_token="integ",
+                        api_base=self.url))
+
+    async def teardown(self) -> None:
+        return None
+
+
+class EmailService:
+    """Points the email mount at a GreenMail IMAP+SMTP server.
+
+    The server is external (a greenmail/standalone container) and shared
+    across runs; its REST API /api/service/reset purges every mailbox.
+    Seeding appends RFC822 payloads over IMAP so folder UIDs are the append
+    order (1, 2, ...) and date dirs come from the manifest Date headers.
+    """
+
+    def __init__(self, host: str) -> None:
+        self.host = host
+
+    @classmethod
+    async def create(cls, run_id: str, target: dict) -> "EmailService":
+        host = os.environ["EMAIL_HOST"]
+        api = f"http://{host}:{EMAIL_API_PORT}/api/service/reset"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(api) as resp:
+                resp.raise_for_status()
+        mail = target.get("mail")
+        if mail:
+            manifest = Path(
+                __file__).resolve().parents[2] / "fixtures" / f"{mail}.json"
+            cls._seed_imap(host, json.loads(manifest.read_text()))
+        return cls(host)
+
+    @staticmethod
+    def _seed_imap(host: str, entries: list[dict]) -> None:
+        # Sync imaplib is fine here: this is test scaffolding running
+        # before the workspace opens, not backend code.
+        imap = imaplib.IMAP4(host, EMAIL_IMAP_PORT)
+        imap.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+        known = {"INBOX"}
+        for entry in entries:
+            folder = entry["folder"]
+            if folder not in known:
+                imap.create(folder)
+                known.add(folder)
+            flags = "(\\Seen)" if entry.get("seen") else None
+            date = imaplib.Time2Internaldate(
+                parsedate_to_datetime(entry["date"]))
+            imap.append(folder, flags, date, manifest_mime(entry).as_bytes())
+        imap.logout()
+
+    def resource(self, mount: dict) -> EmailResource:
+        return EmailResource(
+            EmailConfig(imap_host=self.host,
+                        imap_port=EMAIL_IMAP_PORT,
+                        smtp_host=self.host,
+                        smtp_port=EMAIL_SMTP_PORT,
+                        username=EMAIL_USERNAME,
+                        password=EMAIL_PASSWORD,
+                        use_ssl=False))
 
     async def teardown(self) -> None:
         return None
@@ -695,6 +829,20 @@ def build_gslides(
     return service.gslides_resource(), _noop
 
 
+def build_email(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, EmailService)
+    return service.resource(mount), _noop
+
+
+def build_gmail(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GwsService)
+    return service.gmail_resource(), _noop
+
+
 def build_nextcloud(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -716,6 +864,8 @@ BUILDERS = {
     "gdocs": build_gdocs,
     "gsheets": build_gsheets,
     "gslides": build_gslides,
+    "gmail": build_gmail,
+    "email": build_email,
     "hf": build_hf,
     "box": build_box,
     "dropbox": build_dropbox,
@@ -740,6 +890,8 @@ async def open_target(
         service = await NextcloudService.create(run_id, target)
     elif target.get("service") == "gws":
         service = await GwsService.create(run_id, target)
+    elif target.get("service") == "email":
+        service = await EmailService.create(run_id, target)
     elif target.get("service") == "hf":
         service = await HfService.create(run_id)
     elif target.get("service") == "box":

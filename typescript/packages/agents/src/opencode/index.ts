@@ -15,12 +15,19 @@
 import { tool, type Plugin, type ToolContext, type ToolDefinition } from '@opencode-ai/plugin'
 import type { Workspace } from '@struktoai/mirage-node'
 import { encodeBase64, gnuDirname } from '@struktoai/mirage-core'
+import { FileVersionTracker } from '../file-version.ts'
 import { readWorkspaceFile } from '../read-file.ts'
 
 const z = tool.schema
 
 export type WsResolver = (ctx: ToolContext) => Workspace | Promise<Workspace>
 export type WsLike = Workspace | WsResolver
+
+export interface MirageOpenCodeOptions {
+  staleWriteProtection?: boolean
+}
+
+type SessionTrackers = Map<string, FileVersionTracker>
 
 function isResolver(ws: WsLike): ws is WsResolver {
   return typeof ws === 'function'
@@ -46,7 +53,31 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
+function trackerFor(
+  trackers: WeakMap<Workspace, SessionTrackers>,
+  ws: Workspace,
+  ctx: ToolContext,
+  enabled: boolean,
+): FileVersionTracker {
+  let sessions = trackers.get(ws)
+  if (sessions === undefined) {
+    sessions = new Map<string, FileVersionTracker>()
+    trackers.set(ws, sessions)
+  }
+  let tracker = sessions.get(ctx.sessionID)
+  if (tracker === undefined) {
+    tracker = new FileVersionTracker(ws, enabled)
+    sessions.set(ctx.sessionID, tracker)
+  }
+  return tracker
+}
+
+export function mirageTools(
+  ws: WsLike,
+  options: MirageOpenCodeOptions = {},
+): Record<string, ToolDefinition> {
+  const trackers = new WeakMap<Workspace, SessionTrackers>()
+  const staleWriteProtection = options.staleWriteProtection ?? true
   const read = tool({
     description:
       'Read a file. Returns UTF-8 text for source/data files, attaches PDFs and images for multimodal models, and returns metadata for other binary files.',
@@ -55,8 +86,9 @@ export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
     },
     execute: async ({ filePath }, ctx) => {
       const w = await resolveWs(ws, ctx)
+      const versions = trackerFor(trackers, w, ctx, staleWriteProtection)
       try {
-        const result = await readWorkspaceFile(w, filePath)
+        const result = await readWorkspaceFile(w, filePath, versions.read.bind(versions))
         if (result.kind === 'text') return result.content
         if (result.kind === 'image' || result.kind === 'file') {
           const filename = result.path.split('/').pop() ?? result.path
@@ -87,9 +119,14 @@ export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
     },
     execute: async ({ filePath, content }, ctx) => {
       const w = await resolveWs(ws, ctx)
-      await ensureParent(w, filePath)
-      await w.fs.writeFile(filePath, content)
-      return `Wrote ${String(content.length)} bytes to ${filePath}`
+      const versions = trackerFor(trackers, w, ctx, staleWriteProtection)
+      try {
+        await ensureParent(w, filePath)
+        await versions.write(filePath, content)
+        return `Wrote ${String(content.length)} bytes to ${filePath}`
+      } catch (err) {
+        return `Error: ${errMsg(err)}`
+      }
     },
   })
 
@@ -107,10 +144,12 @@ export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
     },
     execute: async ({ filePath, oldString, newString, replaceAll }, ctx) => {
       const w = await resolveWs(ws, ctx)
+      const versions = trackerFor(trackers, w, ctx, staleWriteProtection)
       let current: string
       try {
-        current = await w.fs.readFileText(filePath)
-      } catch {
+        current = (await versions.readForEdit(filePath)).toString('utf8')
+      } catch (err) {
+        if (await w.fs.exists(filePath)) return `Error: ${errMsg(err)}`
         return `Error: file '${filePath}' not found`
       }
       const count = current.split(oldString).length - 1
@@ -124,7 +163,11 @@ export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
         replaceAll === true
           ? current.split(oldString).join(newString)
           : current.replace(oldString, newString)
-      await w.fs.writeFile(filePath, next)
+      try {
+        await versions.writeEdit(filePath, next)
+      } catch (err) {
+        return `Error: ${errMsg(err)}`
+      }
       const occurrences = replaceAll === true ? count : 1
       return `Edited ${filePath} (${String(occurrences)} occurrence${occurrences === 1 ? '' : 's'})`
     },
@@ -199,6 +242,8 @@ export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
   return { read, write, edit, ls, bash, glob, grep }
 }
 
-export function miragePlugin(ws: WsLike): Plugin {
-  return () => Promise.resolve({ tool: mirageTools(ws) })
+export function miragePlugin(ws: WsLike, options: MirageOpenCodeOptions = {}): Plugin {
+  return () => Promise.resolve({ tool: mirageTools(ws, options) })
 }
+
+export { StaleMirageFileError } from '../file-version.ts'
