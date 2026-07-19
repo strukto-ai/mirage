@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { encodeBase64, gnuDirname, type Workspace } from '@struktoai/mirage-core'
-import { tool } from 'ai'
+import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import { readWorkspaceFile } from '../read-file.ts'
 
@@ -62,7 +62,7 @@ async function readFileResult(ws: Workspace, path: string): Promise<ReadFileResu
   }
 }
 
-export function mirageTools(ws: Workspace) {
+export function mirageTools(ws: Workspace): ToolSet {
   return {
     execute: tool({
       description:
@@ -99,7 +99,11 @@ export function mirageTools(ws: Workspace) {
                 type: 'text',
                 text: `[${out.path}] ${out.mimeType} (${String(out.bytes)} bytes)`,
               },
-              { type: 'media', data: out.base64, mediaType: out.mimeType },
+              {
+                type: 'file',
+                data: { type: 'data', data: out.base64 },
+                mediaType: out.mimeType,
+              },
             ],
           }
         }

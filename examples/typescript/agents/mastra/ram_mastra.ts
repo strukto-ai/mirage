@@ -48,17 +48,20 @@ const agent = new Agent({
 const task =
   "Create /hello.txt with the content 'Hello from Mirage!'. " +
   'Then create /data/numbers.csv with columns name,value and 3 sample rows. ' +
-  'Finally, list all files under / and read each one back.'
+  'Finally, list and read /hello.txt and every file under /data. Do not inspect /dev.'
 
 const result = await agent.generate(task, { maxSteps: 20 })
 console.log(result.text)
 
 console.log('\n--- Verifying files in workspace ---')
 const findAll = await ws.execute('find / -type f')
-const findOut = findAll.stdoutText
-console.log(findOut)
+const paths = findAll.stdoutText
+  .trim()
+  .split('\n')
+  .filter((path) => path.length > 0 && !path.startsWith('/dev/'))
+console.log(paths.join('\n'))
 
-for (const path of findOut.trim().split('\n').filter(Boolean)) {
+for (const path of paths) {
   const content = await ws.fs.readFileText(path)
   console.log(`cat ${path}:\n${content}`)
 }

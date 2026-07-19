@@ -58,7 +58,7 @@ const ws = new Workspace({ '/s3/': s3 }, { mode: MountMode.READ, ops })
 const agent = createDeepAgent({
   model: new ChatAnthropic({ model: 'claude-sonnet-4-6' }),
   systemPrompt: buildSystemPrompt({
-    mountInfo: { '/s3/': 'S3 bucket (CSV, Parquet, JSONL)' },
+    mountInfo: { '/s3/': 'S3 bucket (CSV, Parquet, HDF5, JSONL)' },
   }),
   backend: new LangchainWorkspace(ws),
 })
@@ -69,16 +69,16 @@ const result = await agent.invoke({
   messages: [{ role: 'user', content: task }],
 })
 
-for (const text of extractText(result.messages)) {
+for (const text of extractText(result.messages.slice(-1))) {
   console.log(text)
 }
 
-const task2 = 'How many rows are in the parquet, orc, and h5 files under /s3/data/? '
+const task2 = 'How many rows are in the parquet and h5 files under /s3/data/? '
 const result2 = await agent.invoke({
   messages: [{ role: 'user', content: task2 }],
 })
 
-for (const text of extractText(result2.messages)) {
+for (const text of extractText(result2.messages.slice(-1))) {
   console.log(text)
 }
 

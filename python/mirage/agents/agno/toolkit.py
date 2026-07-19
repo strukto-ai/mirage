@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import shlex
+from posixpath import dirname
 from typing import Any, Callable
 
 try:
@@ -99,6 +100,10 @@ class MirageToolkit(Toolkit):
         return self._run(self.awrite(path, content))
 
     async def awrite(self, path: str, content: str) -> str:
+        parent = dirname(path) or "/"
+        mkdir = await self._ws.execute(f"mkdir -p {shlex.quote(parent)}")
+        if mkdir.exit_code != 0:
+            return io_to_str(mkdir)
         io = await self._ws.execute(f"tee {shlex.quote(path)}",
                                     stdin=content.encode("utf-8"))
         return io_to_str(io)

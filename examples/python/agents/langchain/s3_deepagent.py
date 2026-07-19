@@ -36,9 +36,9 @@ s3 = S3Resource(config)
 ws = Workspace({"/s3/": s3}, mode=MountMode.READ)
 
 agent = create_deep_agent(
-    model=ChatAnthropic(model="claude-sonnet-4-20250514"),
+    model=ChatAnthropic(model="claude-sonnet-4-6"),
     system_prompt=build_system_prompt(
-        mount_info={"/s3/": "S3 bucket (CSV, Parquet, JSONL)"}, ),
+        mount_info={"/s3/": "S3 bucket (CSV, Parquet, ORC, HDF5, JSONL)"}, ),
     backend=LangchainWorkspace(ws),
 )
 
@@ -46,14 +46,14 @@ task = ("Explore and summarize the data in /s3/data/."
         " Use head command for large files.")
 result = agent.invoke({"messages": [{"role": "user", "content": task}]})
 
-for text in extract_text(result["messages"]):
+for text in extract_text(result["messages"][-1:]):
     print(text)
 
 task2 = ("How many rows are in the parquet, orc, and h5 files"
          " under /s3/data/? ")
 result2 = agent.invoke({"messages": [{"role": "user", "content": task2}]})
 
-for text in extract_text(result2["messages"]):
+for text in extract_text(result2["messages"][-1:]):
     print(text)
 
 records = ws.ops.records

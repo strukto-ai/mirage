@@ -12,29 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { tool, type Plugin, type ToolContext, type ToolDefinition } from '@opencode-ai/plugin'
 import type { Workspace } from '@struktoai/mirage-node'
-import { z } from 'zod'
-import { gnuDirname } from '@struktoai/mirage-core'
+import { encodeBase64, gnuDirname } from '@struktoai/mirage-core'
+import { readWorkspaceFile } from '../read-file.ts'
 
-export interface ToolContext {
-  sessionID: string
-  messageID: string
-  agent: string
-  abort: AbortSignal
-}
+const z = tool.schema
 
 export type WsResolver = (ctx: ToolContext) => Workspace | Promise<Workspace>
 export type WsLike = Workspace | WsResolver
-
-interface ToolDefinition<Args extends z.ZodRawShape = z.ZodRawShape> {
-  description: string
-  args: Args
-  execute(args: z.infer<z.ZodObject<Args>>, context: ToolContext): Promise<string>
-}
-
-function tool<Args extends z.ZodRawShape>(input: ToolDefinition<Args>): ToolDefinition<Args> {
-  return input
-}
 
 function isResolver(ws: WsLike): ws is WsResolver {
   return typeof ws === 'function'
@@ -56,55 +42,6 @@ async function ensureParent(ws: Workspace, path: string): Promise<void> {
   }
 }
 
-const TEXT_EXTS = new Set([
-  'txt',
-  'md',
-  'json',
-  'jsonl',
-  'yaml',
-  'yml',
-  'csv',
-  'tsv',
-  'xml',
-  'html',
-  'htm',
-  'js',
-  'mjs',
-  'cjs',
-  'ts',
-  'tsx',
-  'jsx',
-  'py',
-  'rb',
-  'rs',
-  'go',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'hpp',
-  'sh',
-  'bash',
-  'zsh',
-  'sql',
-  'log',
-  'env',
-  'ini',
-  'toml',
-  'conf',
-  'cfg',
-])
-
-function extOf(path: string): string {
-  const dot = path.lastIndexOf('.')
-  if (dot < 0) return ''
-  return path.slice(dot + 1).toLowerCase()
-}
-
-function isLikelyText(path: string): boolean {
-  return TEXT_EXTS.has(extOf(path))
-}
-
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -112,22 +49,33 @@ function errMsg(err: unknown): string {
 export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
   const read = tool({
     description:
-      'Read a file. Returns UTF-8 text for source/data files; for binary files returns a metadata stub. Use the bash tool to inspect binaries.',
+      'Read a file. Returns UTF-8 text for source/data files, attaches PDFs and images for multimodal models, and returns metadata for other binary files.',
     args: {
       filePath: z.string().describe('Absolute path of the file to read.'),
     },
     execute: async ({ filePath }, ctx) => {
       const w = await resolveWs(ws, ctx)
-      let bytes: Uint8Array
       try {
-        bytes = await w.fs.readFile(filePath)
+        const result = await readWorkspaceFile(w, filePath)
+        if (result.kind === 'text') return result.content
+        if (result.kind === 'image' || result.kind === 'file') {
+          const filename = result.path.split('/').pop() ?? result.path
+          return {
+            output: `${result.path} (${result.mimeType}, ${String(result.bytes)} bytes)`,
+            attachments: [
+              {
+                type: 'file' as const,
+                mime: result.mimeType,
+                url: `data:${result.mimeType};base64,${encodeBase64(result.data)}`,
+                filename,
+              },
+            ],
+          }
+        }
+        return result.note
       } catch (err) {
         return `Error: ${errMsg(err)}`
       }
-      if (isLikelyText(filePath)) {
-        return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-      }
-      return `Binary file ${filePath} (${String(bytes.length)} bytes). Use the bash tool with head/file/wc/od to inspect.`
     },
   })
 
@@ -251,12 +199,6 @@ export function mirageTools(ws: WsLike): Record<string, ToolDefinition> {
   return { read, write, edit, ls, bash, glob, grep }
 }
 
-interface Hooks {
-  tool?: Record<string, ToolDefinition>
-}
-
-type PluginFn = (input: unknown) => Promise<Hooks>
-
-export function miragePlugin(ws: WsLike): PluginFn {
+export function miragePlugin(ws: WsLike): Plugin {
   return () => Promise.resolve({ tool: mirageTools(ws) })
 }
