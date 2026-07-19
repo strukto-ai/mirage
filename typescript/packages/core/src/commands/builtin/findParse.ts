@@ -125,6 +125,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   }
   let pos = 0
   let depth = 0
+  let mtimeSeen = false
   const peek = (): string | undefined => (pos < tokens.length ? tokens[pos] : undefined)
   const advance = (): string | undefined => {
     const t = peek()
@@ -154,7 +155,19 @@ export function parseFindExpression(tokens: string[]): FindExpr {
         ;[g.minSize, g.maxSize] = sizeArg(value)
         return { op: 'true' }
       }
-      ;[g.mtimeMin, g.mtimeMax] = mtimeArg(value)
+      // The flat window cannot evaluate -mtime per predicate node, so
+      // repeated -mtime flatten to the union of their windows: the
+      // tautology `-mtime +0 -o -mtime -1` imposes no bounds instead of
+      // last-wins dropping everything. An AND of disjoint windows
+      // over-matches (documented divergence from GNU).
+      const [mtLo, mtHi] = mtimeArg(value)
+      if (!mtimeSeen) {
+        ;[g.mtimeMin, g.mtimeMax] = [mtLo, mtHi]
+        mtimeSeen = true
+      } else {
+        g.mtimeMin = g.mtimeMin === null || mtLo === null ? null : Math.min(g.mtimeMin, mtLo)
+        g.mtimeMax = g.mtimeMax === null || mtHi === null ? null : Math.max(g.mtimeMax, mtHi)
+      }
       return { op: 'true' }
     }
     if (tok === '-empty') {

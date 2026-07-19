@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodeBase64, gnuDirname } from '@struktoai/mirage-core'
-import type { Workspace } from '@struktoai/mirage-node'
+import { encodeBase64, gnuDirname, type Workspace } from '@struktoai/mirage-core'
 import { tool } from 'ai'
 import { z } from 'zod'
+import { readWorkspaceFile } from '../read-file.ts'
 
 async function ensureParent(ws: Workspace, path: string): Promise<void> {
   const parent = gnuDirname(path)
@@ -27,78 +27,6 @@ async function ensureParent(ws: Workspace, path: string): Promise<void> {
   } catch (err) {
     if (!(await ws.fs.exists(parent))) throw err
   }
-}
-
-const TEXT_EXTS = new Set([
-  'txt',
-  'md',
-  'json',
-  'jsonl',
-  'yaml',
-  'yml',
-  'csv',
-  'tsv',
-  'xml',
-  'html',
-  'htm',
-  'js',
-  'mjs',
-  'cjs',
-  'ts',
-  'tsx',
-  'jsx',
-  'py',
-  'rb',
-  'rs',
-  'go',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'hpp',
-  'sh',
-  'bash',
-  'zsh',
-  'sql',
-  'log',
-  'env',
-  'ini',
-  'toml',
-  'conf',
-  'cfg',
-])
-
-const PRESENTABLE_BINARY = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-])
-
-function extOf(path: string): string {
-  const dot = path.lastIndexOf('.')
-  if (dot < 0) return ''
-  return path.slice(dot + 1).toLowerCase()
-}
-
-function mimeFor(path: string): string {
-  const ext = extOf(path)
-  if (ext === 'json' || ext === 'jsonl') return 'application/json'
-  if (ext === 'csv') return 'text/csv'
-  if (ext === 'html' || ext === 'htm') return 'text/html'
-  if (ext === 'md') return 'text/markdown'
-  if (TEXT_EXTS.has(ext)) return 'text/plain'
-  if (ext === 'png') return 'image/png'
-  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
-  if (ext === 'gif') return 'image/gif'
-  if (ext === 'webp') return 'image/webp'
-  if (ext === 'pdf') return 'application/pdf'
-  return 'application/octet-stream'
-}
-
-function isTextMime(mime: string): boolean {
-  return mime.startsWith('text/') || mime === 'application/json'
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -113,6 +41,25 @@ type ReadFileResult =
 
 function isError(r: ReadFileResult): r is { error: string } {
   return 'error' in r
+}
+
+async function readFileResult(ws: Workspace, path: string): Promise<ReadFileResult> {
+  try {
+    const result = await readWorkspaceFile(ws, path)
+    if (result.kind === 'text') return result
+    if (result.kind === 'image' || result.kind === 'file') {
+      return {
+        kind: 'media',
+        path: result.path,
+        mimeType: result.mimeType,
+        base64: bytesToBase64(result.data),
+        bytes: result.bytes,
+      }
+    }
+    return result
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 export function mirageTools(ws: Workspace) {
@@ -139,40 +86,7 @@ export function mirageTools(ws: Workspace) {
       inputSchema: z.object({
         path: z.string().describe('Absolute path inside the workspace.'),
       }),
-      execute: async ({ path }): Promise<ReadFileResult> => {
-        let bytes: Uint8Array
-        try {
-          bytes = await ws.fs.readFile(path)
-        } catch (err) {
-          return { error: err instanceof Error ? err.message : String(err) }
-        }
-        const mimeType = mimeFor(path)
-        if (isTextMime(mimeType)) {
-          return {
-            kind: 'text',
-            path,
-            mimeType,
-            content: new TextDecoder('utf-8', { fatal: false }).decode(bytes),
-            bytes: bytes.length,
-          }
-        }
-        if (PRESENTABLE_BINARY.has(mimeType)) {
-          return {
-            kind: 'media',
-            path,
-            mimeType,
-            base64: bytesToBase64(bytes),
-            bytes: bytes.length,
-          }
-        }
-        return {
-          kind: 'binary',
-          path,
-          mimeType,
-          bytes: bytes.length,
-          note: `Binary file ${path} (${mimeType}, ${String(bytes.length)} bytes). Use the execute tool with shell commands (head, file, wc, od) to inspect.`,
-        }
-      },
+      execute: async ({ path }): Promise<ReadFileResult> => readFileResult(ws, path),
       toModelOutput: ({ output }) => {
         const out: ReadFileResult = output
         if (isError(out)) return { type: 'error-text', value: out.error }

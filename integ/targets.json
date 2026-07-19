@@ -168,6 +168,69 @@
       ]
     },
     {
+      "id": "gridfs",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gridfs",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "data2"
+        },
+        {
+          "path": "/res",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "gridfs-prefix",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gridfs",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "shared",
+          "prefix": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "shared",
+          "prefix": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "shared",
+          "prefix": "team/reports/res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
       "id": "dropbox",
       "hosts": [
         "python",

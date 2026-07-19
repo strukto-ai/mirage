@@ -18,11 +18,12 @@ import type { FindOptions } from '../../resource/base.ts'
 import {
   optionsTree,
   prefixPathNodes,
+  treeHasEmpty,
   type FindEntry,
   keep,
 } from '../../commands/builtin/findEval.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
@@ -68,6 +69,31 @@ async function statEntry(
     if (isEnoent(err)) return null
     throw err
   }
+}
+
+async function isEmptyEntry(
+  deps: WalkFindDeps,
+  path: string,
+  isDir: boolean,
+  prefix: string,
+  index: IndexCacheStore | undefined,
+): Promise<boolean> {
+  if (isDir) {
+    const spec = new PathSpec({
+      virtual: path,
+      directory: path,
+      resolved: false,
+      resourcePath: mountKey(path, prefix),
+    })
+    try {
+      return (await deps.readdir(spec, index)).length === 0
+    } catch (err) {
+      if (isEnoent(err)) return false
+      throw err
+    }
+  }
+  const st = await statEntry(deps, path, prefix, index)
+  return st !== null && (st.size ?? 0) === 0
 }
 
 async function walk(
@@ -122,35 +148,43 @@ export async function walkFind(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const collected: WalkEntry[] = []
-  // GNU depth convention: the search root is depth 0, its children are
-  // depth 1, so the walk starts at 1 and -maxdepth 0 lists nothing.
-  await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  // GNU lists the search root itself at depth 0 (even for the mount
+  // root), so `-maxdepth 0` prints just the root and `-name` can match
+  // the root's own basename.
+  const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
+  let rootStat: FileStat | null = null
+  try {
+    rootStat = await deps.stat(path, index)
+  } catch (err) {
+    if (!isEnoent(err)) throw err
+  }
+  if (rootStat !== null) {
+    collected.push({ path: rootPath, depth: 0, file: rootStat.type !== FileType.DIRECTORY })
+  }
+  // GNU depth convention: the search root is depth 0, its children are
+  // depth 1, so the walk starts at 1 and -maxdepth 0 descends nowhere.
+  await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
   const results: string[] = []
   const tree = prefixPathNodes(optionsTree(options), prefix)
-  const searchKey = stripSlash(path.mountPath)
-  if (searchKey !== '' && (options.maxDepth == null || options.maxDepth >= 0)) {
-    let rootStat: FileStat | null = null
-    try {
-      rootStat = await deps.stat(path, index)
-    } catch (err) {
-      if (!isEnoent(err)) throw err
-    }
-    if (rootStat !== null) {
-      const rootPath = prefix !== '' ? `${prefix}/${searchKey}` : `/${searchKey}`
-      collected.push({ path: rootPath, depth: 0, file: rootStat.type !== FileType.DIRECTORY })
-    }
-  }
+  const needEmpty = treeHasEmpty(tree)
   collected.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   for (const entry of collected) {
     const name = entry.path.split('/').pop() ?? ''
-    const key =
+    const stripped =
       prefix !== '' && entry.path.startsWith(prefix) ? entry.path.slice(prefix.length) : entry.path
+    // The mount root strips to ''; its mount-relative key is '/'.
+    const key = stripped === '' ? '/' : stripped
+    let isEmpty: boolean | null = null
+    if (needEmpty) {
+      isEmpty = await isEmptyEntry(deps, entry.path, !entry.file, prefix, index)
+    }
     const findEntry: FindEntry = {
       key,
       name,
       kind: entry.file ? 'f' : 'd',
       depth: entry.depth,
+      isEmpty,
     }
     if (!keep(findEntry, tree, options.minDepth)) continue
     const needSize = options.minSize != null || options.maxSize != null

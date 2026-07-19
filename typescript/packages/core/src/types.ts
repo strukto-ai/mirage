@@ -157,6 +157,7 @@ export const ResourceName = Object.freeze({
   GMAIL: 'gmail',
   TRELLO: 'trello',
   MONGODB: 'mongodb',
+  GRIDFS: 'gridfs',
   NOTION: 'notion',
   LANGFUSE: 'langfuse',
   SSH: 'ssh',

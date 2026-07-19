@@ -95,6 +95,20 @@ describe('parseFindExpression', () => {
     expect([e.minSize, e.maxSize]).toEqual([2, 2])
   })
 
+  it('repeated -mtime windows merge to their union', () => {
+    // `-mtime +0 -o -mtime -1` is a tautology in GNU; the flat window
+    // must impose no bounds rather than keep only the last predicate.
+    let e = parseFindExpression(['-mtime', '+0', '-o', '-mtime', '-1'])
+    expect([e.mtimeMin, e.mtimeMax]).toEqual([null, null])
+    e = parseFindExpression(['-mtime', '-1'])
+    expect(e.mtimeMin).not.toBeNull()
+    expect(e.mtimeMax).toBeNull()
+    e = parseFindExpression(['-mtime', '1', '-o', '-mtime', '3'])
+    expect(e.mtimeMin).not.toBeNull()
+    expect(e.mtimeMax).not.toBeNull()
+    expect((e.mtimeMax ?? 0) - (e.mtimeMin ?? 0)).toBeCloseTo(3 * 86400, 0)
+  })
+
   it('size rounds up to the unit like GNU', () => {
     // GNU -size -1k keeps only empty files; 1k keeps 1..1024 bytes;
     // +1k excludes a file of exactly 1024 bytes.

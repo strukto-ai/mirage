@@ -15,9 +15,16 @@
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
-import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
-import { MirageEditor, MirageShell, buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import {
+  MountMode,
+  OpsRegistry,
+  RAMResource,
+  Workspace,
+  toStateDict,
+} from '@struktoai/mirage-node'
+import { Agent, run } from '@openai/agents'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { configureOpenAIExample } from './config.ts'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
@@ -31,19 +38,17 @@ function makeWorkspace(): Workspace {
 }
 
 const ws = makeWorkspace()
+const openAI = configureOpenAIExample(ws, 'gpt-5.5-mini')
 
 const agent = new Agent({
   name: 'Snapshot Demo',
-  model: 'gpt-5.5-mini',
+  model: openAI.model,
   instructions: buildSystemPrompt({
     workspace: ws,
     extraInstructions:
-      'Write a 3-line note about Mirage to /report.txt using the shell tool.',
+      'Write a 3-line note about Mirage to /report.txt using the shell or execute tool.',
   }),
-  tools: [
-    shellTool({ shell: new MirageShell(ws) }),
-    applyPatchTool({ editor: new MirageEditor(ws) }),
-  ],
+  tools: openAI.tools,
 })
 
 const result = await run(agent, 'Create the report.')
@@ -56,7 +61,7 @@ console.log('\n--- Original files ---')
 console.log(origFiles.join('\n'))
 
 console.log('\n--- Persisting snapshot ---')
-const state = await ws.toStateDict()
+const state = await toStateDict(ws)
 console.log(`snapshot mounts: ${state.mounts.length}`)
 
 console.log('\n--- Restoring into fresh workspace ---')

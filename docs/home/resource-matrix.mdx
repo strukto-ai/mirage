@@ -96,6 +96,7 @@ No external setup, these run locally or against a connection string you already 
 | Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | MongoDB | read | [MongoDB](/home/setup/mongodb) | [<Icon icon="python" />](/python/resource/mongodb) [<Icon icon="node-js" />](/typescript/setup/mongodb) [<Icon icon="globe" />](/typescript/setup/mongodb) | Collection-backed views |
+| GridFS | read, write | [GridFS](/home/setup/gridfs) | [<Icon icon="python" />](/python/resource/gridfs) [<Icon icon="node-js" />](/typescript/setup/gridfs) | File storage on MongoDB with revisions; find runs server-side |
 | Postgres | read | [Postgres](/home/setup/postgres) | [<Icon icon="python" />](/python/resource/postgres) [<Icon icon="node-js" />](/typescript/setup/postgres) [<Icon icon="globe" />](/typescript/setup/postgres) | SQL tables exposed as paths |
 | LanceDB | read | [LanceDB](/home/setup/lancedb) | [<Icon icon="python" />](/python/resource/lancedb) [<Icon icon="node-js" />](/typescript/setup/lancedb) | Label folders + semantic search command |
 | Qdrant | read | [Qdrant](/home/setup/qdrant) | [<Icon icon="python" />](/python/resource/qdrant) [<Icon icon="node-js" />](/typescript/setup/qdrant) [<Icon icon="globe" />](/typescript/setup/qdrant) | Collections as folders + semantic search command |
@@ -125,10 +126,10 @@ Mirage drops into the major agent application frameworks. Each adapter exposes a
 
 | Framework | Docs | Notes |
 | --- | --- | --- |
-| OpenAI Agents SDK | [<Icon icon="python" />](/python/agents/openai-agents) [<Icon icon="node-js" />](/typescript/agents/openai) [<Icon icon="globe" />](/typescript/agents/openai) | `MirageShell` and `MirageEditor` plug into `shellTool` and `applyPatchTool`. |
+| OpenAI Agents SDK | [<Icon icon="python" />](/python/agents/openai-agents) [<Icon icon="node-js" />](/typescript/agents/openai) [<Icon icon="globe" />](/typescript/agents/openai) | Shell, editor, and multimodal file-reading tools for Mirage workspaces. |
 | Vercel AI SDK | [<Icon icon="node-js" />](/typescript/agents/vercel) [<Icon icon="globe" />](/typescript/agents/vercel) | `mirageTools()` returns five typed tools for `generateText` / `streamText`. |
 | LangChain (deepagents) | [<Icon icon="python" />](/python/agents/langchain) [<Icon icon="node-js" />](/typescript/agents/langchain) | `LangchainWorkspace` backend for Python and Node deepagents. |
-| Pi Coding Agent | [<Icon icon="node-js" />](/typescript/agents/pi) | Mirage extension for `@mariozechner/pi-coding-agent`. Node only. |
+| Pi Coding Agent | [<Icon icon="node-js" />](/typescript/agents/pi) | Mirage extension for `@earendil-works/pi-coding-agent`. Node only. |
 | Mastra | [<Icon icon="node-js" />](/typescript/agents/mastra) | `mirageTools()` for Mastra `Agent` definitions. Node only. |
 | Pydantic AI | [<Icon icon="python" />](/python/agents/pydantic-ai) | For pydantic-ai and pydantic-deepagents. |
 | CAMEL-AI | [<Icon icon="python" />](/python/agents/camel) | For CAMEL `ChatAgent`. |

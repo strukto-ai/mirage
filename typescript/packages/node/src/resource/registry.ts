@@ -49,6 +49,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeS3Config } = await import('./s3/config.ts')
     return new S3Resource(normalizeS3Config(config))
   },
+  gridfs: async (config) => {
+    const { GridFSResource } = await import('./gridfs/gridfs.ts')
+    const { normalizeGridFSConfig } = await import('./gridfs/config.ts')
+    return new GridFSResource(normalizeGridFSConfig(config))
+  },
   gcs: async (config) => {
     const { GCSResource } = await import('./gcs/gcs.ts')
     const { normalizeGcsConfig } = await import('./gcs/config.ts')

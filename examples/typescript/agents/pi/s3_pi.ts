@@ -22,15 +22,16 @@ import {
   Workspace,
   type S3Config,
 } from '@struktoai/mirage-node'
-import { getModel } from '@mariozechner/pi-ai'
 import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
-} from '@mariozechner/pi-coding-agent'
+} from '@earendil-works/pi-coding-agent'
 import { buildSystemPrompt, mirageExtension } from '@struktoai/mirage-agents/pi'
+import { configurePiModel } from './config.ts'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
@@ -50,8 +51,6 @@ const s3Config: S3Config = {
   accessKeyId: requireEnv('AWS_ACCESS_KEY_ID'),
   secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
 }
-requireEnv('ANTHROPIC_API_KEY')
-
 const s3 = new S3Resource(s3Config)
 const ops = new OpsRegistry()
 for (const op of s3.ops()) ops.register(op)
@@ -73,8 +72,11 @@ const resourceLoader = new DefaultResourceLoader({
 })
 await resourceLoader.reload()
 
+const modelRuntime = await ModelRuntime.create()
+const model = await configurePiModel(modelRuntime)
 const { session } = await createAgentSession({
-  model: getModel('anthropic', 'claude-sonnet-4-6'),
+  model,
+  modelRuntime,
   resourceLoader,
   sessionManager: SessionManager.inMemory(),
 })

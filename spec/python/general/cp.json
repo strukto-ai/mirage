@@ -9,6 +9,7 @@
       "disk",
       "dropbox",
       "gdrive",
+      "gridfs",
       "nextcloud",
       "onedrive",
       "ram",
