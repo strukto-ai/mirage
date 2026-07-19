@@ -404,7 +404,8 @@
               "typescript/agents/opencode",
               "typescript/agents/claude-code",
               "typescript/agents/claude-agent-sdk",
-              "typescript/agents/codex"
+              "typescript/agents/codex",
+              "typescript/agents/grok-build"
             ]
           },
           {

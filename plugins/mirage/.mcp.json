@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mirage": {
+      "command": "npx",
+      "args": ["-y", "@struktoai/mirage-cli", "mcp"]
+    }
+  }
+}

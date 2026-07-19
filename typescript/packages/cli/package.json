@@ -45,6 +45,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@struktoai/mirage-agents": "workspace:*",
+    "@struktoai/mirage-node": "workspace:*",
     "@struktoai/mirage-server": "workspace:*",
     "commander": "^14.0.0",
     "yaml": "^2.6.0"

@@ -271,12 +271,18 @@ importers:
 
   packages/agents:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       '@struktoai/mirage-core':
         specifier: workspace:*
         version: link:../core
       picomatch:
         specifier: ^4.0.4
         version: 4.0.4
+      zod:
+        specifier: ^4.0.0
+        version: 4.3.6
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.215
@@ -329,9 +335,6 @@ importers:
       vitest:
         specifier: ^3.2.6
         version: 3.2.6(@types/debug@4.1.13)(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
-      zod:
-        specifier: ^4.0.0
-        version: 4.3.6
 
   packages/browser:
     dependencies:
@@ -363,6 +366,12 @@ importers:
 
   packages/cli:
     dependencies:
+      '@struktoai/mirage-agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@struktoai/mirage-node':
+        specifier: workspace:*
+        version: link:../node
       '@struktoai/mirage-server':
         specifier: workspace:*
         version: link:../server
