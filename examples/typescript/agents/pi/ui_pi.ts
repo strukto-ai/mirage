@@ -12,12 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { mirageExtension, type MirageExtensionOptions } from './extension.ts'
-export {
-  mirageOperations,
-  StaleMirageFileError,
-  type MirageOperationsBundle,
-  type MirageOperationsOptions,
-} from './operations.ts'
-export { MIRAGE_SYSTEM_PROMPT, buildSystemPrompt } from '../prompt.ts'
-export type { BuildSystemPromptOptions } from '../prompt.ts'
+import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { main } from '@earendil-works/pi-coding-agent'
+import { mirageExtension } from '@struktoai/mirage-agents/pi'
+
+const ram = new RAMResource()
+const ops = new OpsRegistry()
+for (const op of ram.ops()) ops.register(op)
+const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+
+await main(process.argv.slice(2), {
+  extensionFactories: [mirageExtension(ws)],
+})

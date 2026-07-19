@@ -30,7 +30,7 @@ import {
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
-import { buildSystemPrompt, mirageExtension } from '@struktoai/mirage-agents/pi'
+import { mirageExtension } from '@struktoai/mirage-agents/pi'
 import { configurePiModel } from './config.ts'
 
 loadEnv({
@@ -60,9 +60,6 @@ const resourceLoader = new DefaultResourceLoader({
   cwd: process.cwd(),
   agentDir: getAgentDir(),
   settingsManager: SettingsManager.create(process.cwd(), getAgentDir()),
-  systemPrompt: buildSystemPrompt({
-    mountInfo: { '/s3/': 'S3 bucket (CSV, Parquet, JSONL)' },
-  }),
   extensionFactories: [mirageExtension(ws)],
   noExtensions: true,
   noSkills: true,
@@ -82,10 +79,7 @@ const { session } = await createAgentSession({
 })
 
 session.subscribe((event) => {
-  if (
-    event.type === 'message_update' &&
-    event.assistantMessageEvent.type === 'text_delta'
-  ) {
+  if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
     process.stdout.write(event.assistantMessageEvent.delta)
   }
 })
@@ -95,9 +89,7 @@ await session.prompt(
 )
 console.log()
 
-await session.prompt(
-  'How many rows are in the parquet, orc, and h5 files under /s3/data/?',
-)
+await session.prompt('How many rows are in the parquet, orc, and h5 files under /s3/data/?')
 console.log()
 
 const records = ws.records
