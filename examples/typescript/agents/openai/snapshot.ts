@@ -22,13 +22,9 @@ import {
   Workspace,
   toStateDict,
 } from '@struktoai/mirage-node'
-import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
-import {
-  MirageEditor,
-  MirageShell,
-  buildSystemPrompt,
-  mirageReadFileTool,
-} from '@struktoai/mirage-agents/openai'
+import { Agent, run } from '@openai/agents'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { configureOpenAIExample } from './config.ts'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
@@ -42,20 +38,17 @@ function makeWorkspace(): Workspace {
 }
 
 const ws = makeWorkspace()
+const openAI = configureOpenAIExample(ws, 'gpt-5.5-mini')
 
 const agent = new Agent({
   name: 'Snapshot Demo',
-  model: 'gpt-5.5-mini',
+  model: openAI.model,
   instructions: buildSystemPrompt({
     workspace: ws,
     extraInstructions:
-      'Write a 3-line note about Mirage to /report.txt using the shell tool.',
+      'Write a 3-line note about Mirage to /report.txt using the shell or execute tool.',
   }),
-  tools: [
-    mirageReadFileTool(ws),
-    shellTool({ shell: new MirageShell(ws) }),
-    applyPatchTool({ editor: new MirageEditor(ws) }),
-  ],
+  tools: openAI.tools,
 })
 
 const result = await run(agent, 'Create the report.')

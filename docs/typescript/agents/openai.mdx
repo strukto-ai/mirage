@@ -52,10 +52,13 @@ const agent = new Agent({
 await run(agent, "Create /hello.txt with 'hi from mirage' and cat it.")
 ```
 
+The examples also support OpenAI-compatible providers. Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL`; a custom base URL defaults to Chat Completions, uses `mirageExecuteTool`, and disables OpenAI tracing so the third-party key stays with that provider. Set `OPENAI_API=responses` when a compatible endpoint implements the Responses API and the examples will use OpenAI's hosted shell and editor tools instead.
+
 ## Exports
 
 | Symbol | Purpose |
 | --- | --- |
+| `mirageExecuteTool(ws)` | Adds an `execute` function tool backed by `ws`; works with Chat Completions and Responses. |
 | `mirageReadFileTool(ws)` | Adds a `read_file` function tool. Text becomes `input_text`, images become `input_image`, and PDFs become `input_file`. |
 | `MirageShell` | `Shell` implementation; pass to `shellTool({ shell })`. |
 | `MirageEditor` | `Editor` implementation; pass to `applyPatchTool({ editor })`. |

@@ -16,13 +16,9 @@ import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
-import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
-import {
-  MirageEditor,
-  MirageShell,
-  buildSystemPrompt,
-  mirageReadFileTool,
-} from '@struktoai/mirage-agents/openai'
+import { Agent, run } from '@openai/agents'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { configureOpenAIExample } from './config.ts'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
@@ -32,6 +28,7 @@ const ram = new RAMResource()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const openAI = configureOpenAIExample(ws, 'gpt-5.5-mini')
 
 const instructions = buildSystemPrompt({
   mountInfo: { '/': 'In-memory filesystem (read/write)' },
@@ -39,20 +36,16 @@ const instructions = buildSystemPrompt({
     'All file paths start from /. ' +
     'For example: /hello.txt, /data/numbers.csv. ' +
     'Use read_file to read text, images, and PDFs. ' +
-    'Use the shell tool to run commands like: ' +
+    'Use the shell or execute tool to run commands like: ' +
     "echo 'content' > /hello.txt, mkdir /data, " +
     'cat /hello.txt, ls /.',
 })
 
 const agent = new Agent({
   name: 'Mirage RAM Agent',
-  model: 'gpt-5.5-mini',
+  model: openAI.model,
   instructions,
-  tools: [
-    mirageReadFileTool(ws),
-    shellTool({ shell: new MirageShell(ws) }),
-    applyPatchTool({ editor: new MirageEditor(ws) }),
-  ],
+  tools: openAI.tools,
 })
 
 const task =
@@ -65,9 +58,9 @@ const result = await run(agent, task)
 console.log(result.finalOutput)
 
 console.log('\n--- Verifying files in workspace ---')
-const findAll = await ws.execute('find / -type f')
+const findAll = await ws.execute("find / -type f | grep -v '^/dev/'")
 const findOut = findAll.stdoutText
-console.log(`find / -type f:\n${findOut}`)
+console.log(`workspace files:\n${findOut}`)
 
 for (const path of findOut.trim().split('\n').filter(Boolean)) {
   const content = await ws.fs.readFileText(path)

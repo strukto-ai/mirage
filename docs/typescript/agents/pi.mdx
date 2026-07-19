@@ -58,6 +58,8 @@ const { session } = await createAgentSession({
 await session.prompt("Create /hello.txt with 'hi' and ls /.")
 ```
 
+The examples also accept `PI_PROVIDER`, `PI_MODEL`, `PI_BASE_URL`, and `PI_API_KEY`. This lets a built-in Pi provider and model run through a compatible gateway without writing credentials to Pi's configuration files.
+
 ## Exports
 
 | Symbol | Purpose |

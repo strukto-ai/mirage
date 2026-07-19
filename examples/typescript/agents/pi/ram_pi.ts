@@ -25,6 +25,7 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import { buildSystemPrompt, mirageExtension } from '@struktoai/mirage-agents/pi'
+import { configurePiModel } from './config.ts'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
@@ -52,7 +53,9 @@ const resourceLoader = new DefaultResourceLoader({
 await resourceLoader.reload()
 
 const modelRuntime = await ModelRuntime.create()
+const model = await configurePiModel(modelRuntime)
 const { session } = await createAgentSession({
+  model,
   modelRuntime,
   resourceLoader,
   sessionManager: SessionManager.inMemory(),
@@ -75,7 +78,7 @@ await session.prompt(task)
 console.log()
 
 console.log('\n--- Files in workspace ---')
-const findAll = await ws.execute('find / -type f')
+const findAll = await ws.execute("find / -type f | grep -v '^/dev/'")
 const findOut = findAll.stdoutText
 console.log(findOut)
 
