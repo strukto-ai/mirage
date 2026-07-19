@@ -206,10 +206,10 @@ export async function truncate(
   length: number,
 ): Promise<void> {
   const item = await resolveItem(accessor, pathParts(path))
-  let data = new Uint8Array(0)
-  if (item !== null && item.type === 'file') {
-    data = await downloadFile(accessor.tokenManager, item.id)
-  }
+  const data =
+    item !== null && item.type === 'file'
+      ? await downloadFile(accessor.tokenManager, item.id)
+      : new Uint8Array(0)
   let next: Uint8Array
   if (length <= data.length) {
     next = data.slice(0, length)
