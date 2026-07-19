@@ -9,6 +9,7 @@
       "disk",
       "dropbox",
       "gdrive",
+      "gridfs",
       "hf_buckets",
       "nextcloud",
       "onedrive",
