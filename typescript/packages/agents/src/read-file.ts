@@ -1,50 +1,16 @@
 import { detectFileType, FileType, type FileStat, type Workspace } from '@struktoai/mirage-core'
-
-const TEXT_EXTS = new Set([
-  'txt',
-  'md',
-  'json',
-  'jsonl',
-  'yaml',
-  'yml',
-  'csv',
-  'tsv',
-  'xml',
-  'svg',
-  'html',
-  'htm',
-  'js',
-  'mjs',
-  'cjs',
-  'ts',
-  'tsx',
-  'jsx',
-  'py',
-  'rb',
-  'rs',
-  'go',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'hpp',
-  'sh',
-  'bash',
-  'zsh',
-  'sql',
-  'log',
-  'env',
-  'ini',
-  'toml',
-  'conf',
-  'cfg',
-])
-
-const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+import {
+  MIME_FOR_EXTENSION,
+  MIME_FOR_FILE_TYPE,
+  MODEL_IMAGE_MIMES,
+  READ_FILE_MIME,
+  TEXT_FILE_EXTENSIONS,
+  type ReadFileMime,
+} from './read-file/constants.ts'
 
 interface WorkspaceFileBase {
   path: string
-  mimeType: string
+  mimeType: ReadFileMime
   bytes: number
 }
 
@@ -67,43 +33,30 @@ function filenameOf(path: string): string {
   return filename === '' ? 'file' : filename
 }
 
-function mimeForExtension(path: string): string | undefined {
+function mimeForExtension(path: string): ReadFileMime | undefined {
   const ext = extOf(path)
-  if (ext === 'json' || ext === 'jsonl') return 'application/json'
-  if (ext === 'csv') return 'text/csv'
-  if (ext === 'html' || ext === 'htm') return 'text/html'
-  if (ext === 'md') return 'text/markdown'
-  if (ext === 'svg') return 'image/svg+xml'
-  if (TEXT_EXTS.has(ext)) return 'text/plain'
-  if (ext === 'png') return 'image/png'
-  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
-  if (ext === 'gif') return 'image/gif'
-  if (ext === 'webp') return 'image/webp'
-  if (ext === 'pdf') return 'application/pdf'
-  return undefined
+  return (
+    MIME_FOR_EXTENSION[ext] ??
+    (TEXT_FILE_EXTENSIONS.has(ext) ? READ_FILE_MIME.PLAIN_TEXT : undefined)
+  )
 }
 
-function mimeForDetectedType(type: FileType): string {
-  if (type === FileType.JSON) return 'application/json'
-  if (type === FileType.CSV) return 'text/csv'
-  if (type === FileType.TEXT) return 'text/plain'
-  if (type === FileType.IMAGE_PNG) return 'image/png'
-  if (type === FileType.IMAGE_JPEG) return 'image/jpeg'
-  if (type === FileType.IMAGE_GIF) return 'image/gif'
-  if (type === FileType.PDF) return 'application/pdf'
-  return 'application/octet-stream'
+function mimeForDetectedType(type: FileType): ReadFileMime {
+  return MIME_FOR_FILE_TYPE[type] ?? READ_FILE_MIME.BINARY
 }
 
-function mimeFor(path: string, bytes: Uint8Array, stat: FileStat): string {
+function mimeFor(path: string, bytes: Uint8Array, stat: FileStat): ReadFileMime {
   const extensionMime = mimeForExtension(path)
   if (extensionMime !== undefined) return extensionMime
-  if (extOf(path) !== '') return 'application/octet-stream'
+  if (extOf(path) !== '') return READ_FILE_MIME.BINARY
   return mimeForDetectedType(detectFileType(bytes, stat))
 }
 
-function isTextMime(mimeType: string): boolean {
+function isTextMime(mimeType: ReadFileMime): boolean {
   return (
-    mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'image/svg+xml'
+    mimeType.startsWith('text/') ||
+    mimeType === READ_FILE_MIME.JSON ||
+    mimeType === READ_FILE_MIME.SVG
   )
 }
 
@@ -126,10 +79,10 @@ export async function readWorkspaceFile(
       content: new TextDecoder('utf-8', { fatal: false }).decode(data),
     }
   }
-  if (IMAGE_MIMES.has(mimeType)) {
+  if (MODEL_IMAGE_MIMES.has(mimeType)) {
     return { ...base, kind: 'image', data }
   }
-  if (mimeType === 'application/pdf') {
+  if (mimeType === READ_FILE_MIME.PDF) {
     return { ...base, kind: 'file', data, filename: filenameOf(path) }
   }
   return {
