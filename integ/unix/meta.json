@@ -258,7 +258,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -282,7 +283,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -306,7 +308,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad",
       "expect": {
@@ -330,7 +333,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "touch -h -t 202601021530 /data/metad/ln.txt && readlink /data/metad/ln.txt",
       "expect": {
@@ -489,7 +493,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm /data/metad/ln.txt && rm -r /data/metad",
       "expect": {

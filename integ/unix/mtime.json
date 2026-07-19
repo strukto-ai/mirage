@@ -70,7 +70,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "clear_cache": true,
       "command": "ls -l /data/mtimecheck/probe.txt | grep -c \"Jan  1 00:00\"",

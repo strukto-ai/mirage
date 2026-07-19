@@ -15,7 +15,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/g14/sub && cd /data/g14 && printf 'hello\n' | tee sub/a.txt > /dev/null && printf 'hello\n' | tee sub/b.txt > /dev/null",
       "expect": {
@@ -39,7 +40,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep -r hello sub",
       "expect": {
@@ -63,7 +65,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find sub -name '*.txt'",
       "expect": {
@@ -141,7 +144,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo ./sub/*.txt",
       "expect": {
@@ -165,7 +169,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "du -s sub/",
       "expect": {
@@ -189,7 +194,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14",
       "expect": {

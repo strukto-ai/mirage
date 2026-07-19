@@ -249,7 +249,8 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "mv /data/metao/f.txt /data/metao/g.txt",
       "check": {
@@ -275,7 +276,8 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "rm /data/metao/g.txt && echo fresh > /data/metao/g.txt",
       "check": {
@@ -300,7 +302,8 @@
         "s3",
         "s3-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "ln -s /data/metao/g.txt /data/metao/ln.txt && chmod 604 /data/metao/ln.txt",
       "check": {

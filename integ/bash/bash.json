@@ -17,7 +17,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep -v '^#' /.bash_history | tail -n 3",
       "expect": {

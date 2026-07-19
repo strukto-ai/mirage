@@ -310,7 +310,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "uniq",
       "expect": {
@@ -332,7 +333,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "uniq -f 2junk /data/dup.txt",
       "expect": {

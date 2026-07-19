@@ -121,7 +121,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "comm --check-order /data/a.txt /data/sorted_b.txt > /dev/null",
       "expect": {

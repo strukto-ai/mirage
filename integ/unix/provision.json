@@ -380,7 +380,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "du /data/a.txt",
       "provision": true,
@@ -853,7 +854,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/a.txt /data/sub",
       "provision": true,
@@ -1886,7 +1888,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "du /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -1911,7 +1914,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/rgm/d1/*.txt",
       "provision": true,
@@ -1964,7 +1968,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep -r hello /data/rgm",
       "provision": true,

@@ -1012,7 +1012,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/f4/sub1/skipme /data/f4/del && printf 'alpha inner\\n' > /data/f4/sub1/inner.txt && printf 'alpha skip\\n' > /data/f4/sub1/skipme/deep.txt && printf 'x\\n' > /data/f4/del/f1.tmp && printf 'y\\n' > /data/f4/del/f2.tmp && printf 'keep\\n' > /data/f4/del/keep.txt",
       "expect": {
@@ -1034,7 +1035,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -print",
       "expect": {
@@ -1056,7 +1058,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -print0",
       "expect": {
@@ -1078,7 +1081,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -print0",
       "expect": {
@@ -1100,7 +1104,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -a -name \"inner*\"",
       "expect": {
@@ -1122,7 +1127,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name inner.txt -and -name \"*.txt\"",
       "expect": {
@@ -1144,7 +1150,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 \\( -name inner.txt -o -name deep.txt \\)",
       "expect": {
@@ -1166,7 +1173,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -ls | awk '{print $NF}'",
       "expect": {
@@ -1188,7 +1196,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/del -name \"*.tmp\" -delete && ls /data/f4/del",
       "expect": {
@@ -1210,7 +1219,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/f4/del2 && printf 'x\\n' > /data/f4/del2/g.tmp && find /data/f4/del2 -name \"*.tmp\" -delete -print && ls /data/f4/del2",
       "expect": {
@@ -1232,7 +1242,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/f4/del3 && printf 'z\\n' > /data/f4/del3/h.txt && find /data/f4/del3 -delete && find /data/f4 -name del3",
       "expect": {
@@ -1254,7 +1265,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data -maxdepth 0 -delete; echo rc=$?; ls /data/f4/sub1",
       "expect": {

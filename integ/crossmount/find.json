@@ -42,7 +42,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/sub /data2 -name '*.txt'",
       "expect": {

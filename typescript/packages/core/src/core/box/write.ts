@@ -29,6 +29,7 @@ import {
   updateFolder,
   uploadFileVersion,
   uploadNewFile,
+  type BoxItem,
 } from './api.ts'
 import { vfsNameFor } from './readdir.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
@@ -155,17 +156,39 @@ export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec
   await invalidateAfterUnlink(src)
 }
 
-export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+function childSpec(parent: PathSpec, name: string): PathSpec {
+  const prefix = mountPrefixOf(parent.virtual, parent.resourcePath)
+  const virtual = `${rstripVirtual(parent.virtual)}/${name}`
+  return PathSpec.fromStrPath(virtual, mountKey(virtual, prefix))
+}
+
+async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
-  const item = await resolveItem(accessor, pathParts(src))
-  if (item === null) throw enoent(src.virtual)
   const dstParts = pathParts(dst)
+  const existing = await resolveItem(accessor, dstParts)
+  if (item.type === 'folder' && existing !== null && existing.type === 'folder') {
+    // Merge into an existing folder (GNU cp -r semantics): copy each child
+    // rather than replacing the folder, so pre-existing entries survive.
+    for (const child of await listFolderItems(tm, item.id)) {
+      await copyInto(accessor, child, childSpec(dst, vfsNameFor(child.name)))
+    }
+    return
+  }
   const dstParent = await resolveParentId(accessor, dstParts)
   if (dstParent === null) throw enoent(dst.virtual)
-  await clearDest(accessor, dstParts, item.id)
   const newName = dstParts[dstParts.length - 1] ?? ''
+  if (existing !== null && existing.id !== item.id) {
+    if (existing.type === 'folder') await deleteFolder(tm, existing.id, true)
+    else await deleteFile(tm, existing.id)
+  }
   if (item.type === 'folder') await copyFolder(tm, item.id, dstParent, newName)
   else await copyFile(tm, item.id, dstParent, newName)
+}
+
+export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+  const item = await resolveItem(accessor, pathParts(src))
+  if (item === null) throw enoent(src.virtual)
+  await copyInto(accessor, item, dst)
   await invalidateAfterWrite(dst)
 }
 

@@ -1309,7 +1309,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/g4/sub && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/g4/app.log && printf 'alpha\\nbeta\\ngamma\\nALPHA\\n' > /data/g4/notes.txt && printf 'alpha inner\\n' > /data/g4/sub/inner.txt",
       "expect": {
@@ -1331,7 +1332,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -q alpha /data/g4/notes.txt; echo rc=$?",
       "expect": {
@@ -1353,7 +1355,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -q zzz /data/g4/notes.txt; echo rc=$?",
       "expect": {
@@ -1375,7 +1378,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -q alpha /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
       "expect": {
@@ -1397,7 +1401,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -q zzz /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
       "expect": {
@@ -1419,7 +1424,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -qR alpha /data/g4; echo rc=$?",
       "expect": {
@@ -1441,7 +1447,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -ql alpha /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
       "expect": {
@@ -1463,7 +1470,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -qc zzz /data/g4/notes.txt /data/g4/app.log; echo rc=$?",
       "expect": {
@@ -1485,7 +1493,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -H alpha /data/g4/notes.txt",
       "expect": {
@@ -1507,7 +1516,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -Hn alpha /data/g4/notes.txt",
       "expect": {
@@ -1529,7 +1539,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -Hc alpha /data/g4/notes.txt",
       "expect": {
@@ -1551,7 +1562,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -C1 warning /data/g4/app.log",
       "expect": {
@@ -1573,7 +1585,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -C1 error /data/g4/app.log",
       "expect": {
@@ -1595,7 +1608,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -A1 -B2 timeout /data/g4/app.log",
       "expect": {
@@ -1617,7 +1631,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -nC1 warning /data/g4/app.log",
       "expect": {
@@ -1639,7 +1654,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -R alpha /data/g4 | sort",
       "expect": {
@@ -1661,7 +1677,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep -Rl alpha /data/g4 | sort",
       "expect": {
@@ -1683,7 +1700,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep --colour=auto alpha /data/g4/notes.txt",
       "expect": {
@@ -1705,7 +1723,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "grep --color=never alpha /data/g4/notes.txt",
       "expect": {

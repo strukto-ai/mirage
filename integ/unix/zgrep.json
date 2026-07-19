@@ -229,7 +229,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/z4 && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/z4/app.log && printf 'alpha\\nbeta\\ngamma\\nALPHA\\n' > /data/z4/notes.txt && gzip /data/z4/app.log /data/z4/notes.txt",
       "expect": {
@@ -251,7 +252,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -i ALPHA /data/z4/notes.txt.gz",
       "expect": {
@@ -273,7 +275,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -l alpha /data/z4/notes.txt.gz /data/z4/app.log.gz",
       "expect": {
@@ -295,7 +298,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -n error /data/z4/app.log.gz",
       "expect": {
@@ -317,7 +321,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -v error /data/z4/app.log.gz",
       "expect": {
@@ -339,7 +344,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -E \"err(or|ata)\" /data/z4/app.log.gz",
       "expect": {
@@ -361,7 +367,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -F \"info: all good\" /data/z4/app.log.gz",
       "expect": {
@@ -383,7 +390,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -H error /data/z4/app.log.gz",
       "expect": {
@@ -405,7 +413,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep error /data/z4/app.log.gz /data/z4/notes.txt.gz",
       "expect": {
@@ -427,7 +436,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -h error /data/z4/app.log.gz /data/z4/notes.txt.gz",
       "expect": {
@@ -449,7 +459,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -m2 o /data/z4/app.log.gz",
       "expect": {
@@ -471,7 +482,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -o \"err[a-z]*\" /data/z4/app.log.gz",
       "expect": {
@@ -493,7 +505,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -q error /data/z4/app.log.gz; echo rc=$?",
       "expect": {
@@ -515,7 +528,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -q zzz /data/z4/app.log.gz; echo rc=$?",
       "expect": {
@@ -537,7 +551,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -w alpha /data/z4/notes.txt.gz",
       "expect": {
@@ -559,7 +574,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -w alph /data/z4/notes.txt.gz; echo rc=$?",
       "expect": {
@@ -581,7 +597,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "zgrep -c error /data/z4/app.log.gz /data/z4/notes.txt.gz",
       "expect": {
@@ -603,7 +620,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo hi | gzip | zgrep -H hi",
       "expect": {

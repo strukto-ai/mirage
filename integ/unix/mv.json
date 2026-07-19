@@ -15,7 +15,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/sub/a.txt /data/sub/b.txt /data/sub/deep",
       "expect": {
@@ -39,7 +40,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/sub/deep/a.txt",
       "expect": {
@@ -63,7 +65,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/sub/deep/b.txt",
       "expect": {

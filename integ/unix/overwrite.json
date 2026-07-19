@@ -42,7 +42,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt",
       "expect": {
@@ -66,7 +67,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp -r /data/ow/s/t /data/ow && cat /data/ow/t/f.txt && ls /data/ow/t",
       "expect": {
@@ -90,7 +92,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt && ls /data/ow",
       "expect": {
@@ -114,7 +117,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/ow/t && ls /data/ow/t",
       "expect": {

@@ -13,7 +13,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo [$!]",
       "expect": {
@@ -35,7 +36,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "test $$ -gt 0 && echo pid-ok",
       "expect": {
@@ -57,7 +59,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(sleep 0.05 & wait $!) 2>/dev/null; echo waited=$?",
       "expect": {
@@ -79,7 +82,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo [$!]",
       "expect": {
@@ -101,7 +105,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "sleep 0.05 & echo bg=$! && wait $!",
       "expect": {
@@ -123,7 +128,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo a && exit 3",
       "expect": {
@@ -145,7 +151,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo a; exit 3; echo b",
       "expect": {
@@ -167,7 +174,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "false; exit",
       "expect": {
@@ -189,7 +197,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(exit 3); echo after code=$?",
       "expect": {
@@ -211,7 +220,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "exit 3 | cat; echo after code=$?",
       "expect": {
@@ -233,7 +243,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "f(){ exit 5; echo infn; }; f; echo no",
       "expect": {
@@ -255,7 +266,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "exit abc; echo hi",
       "expect": {
@@ -277,7 +289,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "exit 1 2; echo after code=$?",
       "expect": {
@@ -299,7 +312,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(exit 300); echo code=$?; (exit -1); echo code=$?",
       "expect": {
@@ -321,7 +335,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "for ((i=0;i<3;i++)); do echo $i; done",
       "expect": {

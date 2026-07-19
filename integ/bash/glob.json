@@ -150,7 +150,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo sub/*.txt && echo *.nope",
       "expect": {
@@ -174,7 +175,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "for f in sub/*.txt; do echo $f; done",
       "expect": {
@@ -198,7 +200,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12",
       "expect": {
@@ -249,7 +252,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -l s*/x.txt && grep -l hi sub/*.txt",
       "expect": {
@@ -273,7 +277,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls sub/*.txt && cd / && rm -r /data/g15",
       "expect": {

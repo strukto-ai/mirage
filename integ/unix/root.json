@@ -69,7 +69,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir /data/rootdir && find /data/rootdir -type d",
       "expect": {
