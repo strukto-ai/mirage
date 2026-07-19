@@ -33,7 +33,7 @@ const boxResolveGlob = resolveGlobOf(BOX_IO)
 // rg walk skips hidden files and never descends into hidden directories, but
 // explicit file operands bypass that pruning, so narrowed candidates are
 // filtered on every path segment below their (longest-matching) scope.
-function keepVisible(
+export function keepVisible(
   narrowed: PathSpec[],
   scopes: readonly PathSpec[],
   hidden: boolean,
