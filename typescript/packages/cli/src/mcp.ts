@@ -102,10 +102,7 @@ export async function buildMcpWorkspace(configPath: string): Promise<Workspace> 
   return workspace
 }
 
-async function runMcpServer(
-  config: string | undefined,
-  options: McpCommandOptions,
-): Promise<void> {
+async function runMcpServer(config: string | undefined, options: McpCommandOptions): Promise<void> {
   const configPath = resolveMcpConfig(config)
   const workspace = await buildMcpWorkspace(configPath)
   try {
