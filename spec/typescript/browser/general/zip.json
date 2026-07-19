@@ -7,6 +7,7 @@
     "resources": [
       "box",
       "databricks_volume",
+      "dropbox",
       "gdrive",
       "opfs",
       "ram",
