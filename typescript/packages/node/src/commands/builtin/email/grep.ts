@@ -14,29 +14,21 @@
 
 import {
   IOResult,
-  PathSpec,
   ResourceName,
   command,
   compilePattern,
-  exitOnEmpty,
-  formatRecords,
-  grepFilesOnly,
+  grepGeneric,
   grepLines,
-  grepStream,
-  mountKey,
   mountPrefixOf,
   prefixAggregate,
-  quietMatch,
   resolveGlobOf,
-  resolveSource,
   specOf,
-  type AsyncReadBytesFn,
-  type AsyncReaddirFn,
-  type AsyncStatFn,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  yieldBytes,
+  type FileStat,
+  type IndexCacheStore,
+  type PathSpec,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { read as emailRead } from '../../../core/email/read.ts'
@@ -50,7 +42,14 @@ import { fileReadProvision } from './provision.ts'
 const resolveGlob = resolveGlobOf(EMAIL_IO)
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+
+async function* emailStream(
+  accessor: EmailAccessor,
+  p: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await emailRead(accessor, p, index)
+}
 
 interface FlagSet {
   ignoreCase: boolean
@@ -98,11 +97,6 @@ function getPattern(
   throw new Error('grep: usage: grep [flags] pattern [path]')
 }
 
-function splitLinesNoTrailing(text: string): string[] {
-  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
-  return stripped === '' ? [] : stripped.split('\n')
-}
-
 async function grepCommand(
   accessor: EmailAccessor,
   paths: PathSpec[],
@@ -117,7 +111,6 @@ async function grepCommand(
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
   }
   const f = parseFlags(opts.flags)
-  const recursive = opts.flags.r === true || opts.flags.R === true
 
   if (paths.length > 0) {
     const first = paths[0]
@@ -144,118 +137,16 @@ async function grepCommand(
         return [out, new IOResult()]
       }
     }
-
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    if (resolved.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-    const filePrefix =
-      (resolved[0] === undefined
-        ? undefined
-        : mountPrefixOf(resolved[0].virtual, resolved[0].resourcePath)) ?? ''
-    const readdirFn: AsyncReaddirFn = async (path) => {
-      const spec = new PathSpec({
-        virtual: path,
-        directory: path,
-        resolved: false,
-        resourcePath: mountKey(path, filePrefix),
-      })
-      return emailReaddir(accessor, spec, opts.index ?? undefined)
-    }
-    const statFn: AsyncStatFn = async (path) => {
-      const spec = new PathSpec({
-        virtual: path,
-        directory: path,
-        resolved: false,
-        resourcePath: mountKey(path, filePrefix),
-      })
-      return emailStat(accessor, spec, opts.index ?? undefined)
-    }
-    const readBytesFn: AsyncReadBytesFn = async (path) => {
-      const spec = new PathSpec({
-        virtual: path,
-        directory: path,
-        resolved: true,
-        resourcePath: mountKey(path, filePrefix),
-      })
-      return emailRead(accessor, spec, opts.index ?? undefined)
-    }
-
-    if (f.filesOnly) {
-      const warnings: string[] = []
-      const firstResolved = resolved[0]
-      if (firstResolved === undefined) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const results = await grepFilesOnly(
-        readdirFn,
-        statFn,
-        readBytesFn,
-        firstResolved.virtual,
-        pattern,
-        {
-          recursive,
-          ignoreCase: f.ignoreCase,
-          invert: f.invert,
-          lineNumbers: f.lineNumbers,
-          countOnly: f.countOnly,
-          fixedString: f.fixedString,
-          onlyMatching: f.onlyMatching,
-          maxCount: f.maxCount,
-          wholeWord: f.wholeWord,
-        },
-        warnings,
-      )
-      const stderr = warnings.length > 0 ? formatRecords(warnings) : null
-      if (results.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr })]
-      const out: ByteSource = formatRecords(results)
-      return [out, new IOResult({ stderr })]
-    }
-
-    const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
-
-    if (resolved.length > 1) {
-      const allResults: string[] = []
-      for (const p of resolved) {
-        const data = splitLinesNoTrailing(
-          DEC.decode(await emailRead(accessor, p, opts.index ?? undefined)),
-        )
-        const hits = grepLines(p.virtual, data, pat, f)
-        if (f.countOnly) {
-          if (hits.length > 0) allResults.push(`${p.virtual}:${hits[0] ?? ''}`)
-        } else {
-          for (const h of hits) allResults.push(`${p.virtual}:${h}`)
-        }
-      }
-      if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const out: ByteSource = formatRecords(allResults)
-      return [out, new IOResult()]
-    }
-
-    const firstResolved = resolved[0]
-    if (firstResolved === undefined) return [null, new IOResult()]
-    const data = await emailRead(accessor, firstResolved, opts.index ?? undefined)
-    const source = yieldBytes(data)
-    const stream = grepStream(source, pat, f)
-    if (f.quiet) {
-      const io = new IOResult({ exitCode: 1 })
-      return [quietMatch(stream, io), io]
-    }
-    const io = new IOResult()
-    return [exitOnEmpty(stream, io), io]
   }
 
-  let source: AsyncIterable<Uint8Array>
-  try {
-    source = resolveSource(opts.stdin, 'grep: usage: grep [flags] pattern [path]')
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
-  }
-  const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
-  const stream = grepStream(source, pat, f)
-  if (f.quiet) {
-    const io = new IOResult({ exitCode: 1 })
-    return [quietMatch(stream, io), io]
-  }
-  const io = new IOResult()
-  return [exitOnEmpty(stream, io), io]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => emailStat(accessor, p, opts.index ?? undefined)
+  const readdir = (p: PathSpec): Promise<string[]> =>
+    emailReaddir(accessor, p, opts.index ?? undefined)
+  return grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
+    emailStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const EMAIL_GREP = command({

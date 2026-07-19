@@ -83,7 +83,9 @@ async def fetch_message(
 ) -> dict[str, Any]:
     imap = await accessor.get_imap()
     await imap.select(folder)
-    response = await imap.uid("fetch", uid, "(RFC822 FLAGS)")
+    # BODY.PEEK[] instead of RFC822: reading a rendered file must not flip
+    # \Seen on the mailbox, matching the imapflow client in the TS backend.
+    response = await imap.uid("fetch", uid, "(BODY.PEEK[] FLAGS)")
     raw_bytes = _extract_body(response)
     flags = _extract_flags(response)
     msg_dict = parse_rfc822(raw_bytes)
@@ -106,7 +108,11 @@ async def fetch_headers(
     for i in range(0, len(uids), batch_size):
         batch = uids[i:i + batch_size]
         uid_set = ",".join(batch)
-        response = await imap.uid("fetch", uid_set, "(BODY[HEADER] FLAGS UID)")
+        # Full BODY.PEEK[] rather than BODY[HEADER]: attachment names live
+        # in the MIME structure, and listings must surface attachment dirs
+        # without flipping \Seen (the gmail backend fetches full messages
+        # on readdir the same way).
+        response = await imap.uid("fetch", uid_set, "(BODY.PEEK[] FLAGS UID)")
         results.extend(_parse_multi_fetch(response, batch))
     return results
 
@@ -119,7 +125,7 @@ async def fetch_attachment(
 ) -> bytes | None:
     imap = await accessor.get_imap()
     await imap.select(folder)
-    response = await imap.uid("fetch", uid, "(RFC822)")
+    response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     raw_bytes = _extract_body(response)
     attachments = _parse_with_payloads(raw_bytes)
     for att in attachments:
@@ -195,7 +201,9 @@ def _parse_multi_fetch(response, uids: list[str]) -> list[dict[str, Any]]:
 
         if isinstance(item, (bytearray, )) and len(item) > 20:
             raw = bytes(item)
-            msg_dict = parse_rfc822(raw, headers_only=True)
+            # Full parse (not headers_only): listings need the MIME
+            # structure to surface attachment dirs.
+            msg_dict = parse_rfc822(raw)
             msg_dict["uid"] = current_uid or (uids[len(results)] if
                                               len(results) < len(uids) else "")
             msg_dict["flags"] = current_flags

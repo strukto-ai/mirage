@@ -60,6 +60,11 @@ def sheets_base(token_manager: "TokenManager") -> str:
     return f"{base}/v4" if base else SHEETS_API_BASE
 
 
+def gmail_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/gmail/v1" if base else GMAIL_API_BASE
+
+
 async def refresh_access_token(config: GoogleConfig, ) -> tuple[str, int]:
     """Exchange refresh token for a new access token.
 

@@ -326,8 +326,21 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      greenmail:
+        image: greenmail/standalone:2.1.3
+        ports:
+          - 3025:3025
+          - 3143:3143
+          - 8080:8080
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.all
+            -Dgreenmail.users=integ:secret@example.com
+            -Dgreenmail.users.login=email
+            -Dgreenmail.hostname=0.0.0.0
     env:
       REDIS_URL: redis://localhost:6379/0
+      EMAIL_HOST: localhost
     steps:
       - uses: actions/checkout@v7
 
@@ -414,6 +427,13 @@ jobs:
           done
           cat /tmp/hfsrv.log
           echo "HF_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
+
+      - name: Wait for GreenMail
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf -X POST http://localhost:8080/api/service/reset && break
+            sleep 2
+          done
 
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py

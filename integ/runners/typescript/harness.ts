@@ -37,6 +37,7 @@ export interface Target {
   service?: string
   epoch?: string
   apps?: string
+  mail?: string
   mounts: Mount[]
 }
 

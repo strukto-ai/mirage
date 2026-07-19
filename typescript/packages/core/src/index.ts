@@ -784,6 +784,7 @@ export {
   docsBase,
   driveBase,
   driveUploadBase,
+  gmailBase,
   sheetsBase,
   slidesBase,
   tokenUrl,

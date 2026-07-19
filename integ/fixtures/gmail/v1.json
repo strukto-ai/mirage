@@ -1,0 +1,59 @@
+[
+  {
+    "from": "lila@example.com",
+    "to": "integ@example.com",
+    "subject": "Q2 Budget Review",
+    "date": "Mon, 05 Jan 2026 09:30:00 +0000",
+    "body": "please find the budget attached\nfinal numbers due friday",
+    "labels": ["INBOX", "UNREAD"],
+    "attachments": [
+      {
+        "filename": "budget.csv",
+        "content": "amount,category\n120,travel\n80,meals\n"
+      },
+      {
+        "filename": "notes.txt",
+        "content": "travel spend trending up since march\n"
+      }
+    ]
+  },
+  {
+    "from": "marcus@example.com",
+    "to": "integ@example.com",
+    "subject": "Standup notes",
+    "date": "Mon, 05 Jan 2026 14:00:00 +0000",
+    "body": "yesterday shipped the parser\ntoday reviewing the budget forecast",
+    "labels": ["INBOX"]
+  },
+  {
+    "from": "ops@example.com",
+    "to": "integ@example.com",
+    "cc": ["marcus@example.com"],
+    "subject": "Server alert: worker-3",
+    "date": "Wed, 07 Jan 2026 03:15:00 +0000",
+    "body": "disk usage at 91 percent on worker-3",
+    "labels": ["INBOX", "UNREAD"]
+  },
+  {
+    "from": "integ@example.com",
+    "to": "lila@example.com",
+    "subject": "Re: onboarding",
+    "date": "Tue, 06 Jan 2026 11:00:00 +0000",
+    "body": "welcome aboard, the handbook is on its way",
+    "labels": ["SENT"]
+  },
+  {
+    "from": "billing@vendor.example",
+    "to": "integ@example.com",
+    "subject": "Invoice 4471",
+    "date": "Wed, 07 Jan 2026 08:45:00 +0000",
+    "body": "invoice 4471 attached, total 240 usd",
+    "labels": ["INBOX", "expenses"],
+    "attachments": [
+      {
+        "filename": "invoice-4471.txt",
+        "content": "invoice 4471\ntotal: 240 usd\n"
+      }
+    ]
+  }
+]

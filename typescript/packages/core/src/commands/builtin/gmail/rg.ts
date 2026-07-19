@@ -55,8 +55,12 @@ async function rgCommand(
     ]
   }
   const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
+  // Output-shaping flags need real per-line matching, which the search-API
+  // push-down cannot emulate; fall through to the generic rg over rendered
+  // files instead.
+  const shaping = ['args_l', 'l', 'c', 'n', 'o', 'v'].some((flag) => opts.flags[flag] === true)
 
-  if (paths.length > 0 && !pattern.includes('\n')) {
+  if (paths.length > 0 && !pattern.includes('\n') && !shaping) {
     const first = paths[0]
     if (first !== undefined) {
       const scope = detectScope(first)

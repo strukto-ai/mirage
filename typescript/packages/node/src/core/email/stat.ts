@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
-import { FileStat, FileType, mountPrefixOf } from '@struktoai/mirage-core'
+import type { IndexCacheStore } from '@struktoai/mirage-core'
+import { FileStat, FileType, PathSpec, mountKey, mountPrefixOf } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { listFolders } from './folders.ts'
+import { readdir } from './readdir.ts'
 
 function guessType(name: string): FileType {
   const lower = name.toLowerCase()
@@ -50,14 +51,32 @@ export async function stat(
 
   if (index === undefined) throw enoent(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-  const result = await index.get(virtualKey)
+  let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
     if (!key.includes('/')) {
       const folders = await listFolders(accessor)
       if (folders.includes(key)) return new FileStat({ name: key, type: FileType.DIRECTORY })
       throw enoent(path.virtual)
     }
-    throw enoent(path.virtual)
+    // Cold index: populate by listing the parent, mirroring the python
+    // backend's stat fallback.
+    const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
+    try {
+      await readdir(
+        accessor,
+        new PathSpec({
+          virtual: parentVirtual,
+          directory: parentVirtual,
+          resolved: false,
+          resourcePath: mountKey(parentVirtual, prefix),
+        }),
+        index,
+      )
+    } catch {
+      throw enoent(path.virtual)
+    }
+    result = await index.get(virtualKey)
+    if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
   }
   const rt = result.entry.resourceType
   const vfsName = result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name
