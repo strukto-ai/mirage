@@ -247,7 +247,7 @@ async def provision_node(
 
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        if command.type == NT.LIST:
+        if command is not None and command.type == NT.LIST:
             # Mirror the executor: a trailing redirect hoisted over an
             # &&/|| list binds to the last command.
             left, op, right = get_list_parts(command)

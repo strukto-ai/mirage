@@ -212,7 +212,7 @@ async def execute_node(
     # ── redirected statement ────────────────────
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        if command.type == NT.LIST:
+        if command is not None and command.type == NT.LIST:
             # tree-sitter hoists a trailing redirect over the whole
             # &&/|| list; bash binds it to the last command:
             #   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
