@@ -36,37 +36,26 @@ jobs:
               - 'typescript/**'
               - '.github/workflows/test_install.yml'
 
-  python-minimal:
+  python-install:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: Install base package only (no extras)
+      - name: Base install (no extras) on 3.11 and 3.12
         working-directory: python
         run: |
-          uv venv .venv-min
-          uv pip install --python .venv-min/bin/python .
-
-      - name: Verify optional dependencies stay out of the base install
-        working-directory: python
-        run: |
-          .venv-min/bin/python - <<'PY'
+          for ver in 3.11 3.12; do
+            rm -rf .venv-min
+            uv venv --python "$ver" .venv-min
+            uv pip install --python .venv-min/bin/python .
+            .venv-min/bin/python - <<'PY'
           import importlib.util
           banned = ["numpy", "pypdfium2", "PIL", "mfusepy", "opendal", "aioboto3",
                     "pandas", "redis", "asyncssh", "motor", "asyncpg", "av"]
@@ -74,11 +63,7 @@ jobs:
           assert not present, f"optional deps leaked into base install: {present}"
           print("OK: no optional deps in base install")
           PY
-
-      - name: Core workspace smoke test on base install
-        working-directory: python
-        run: |
-          .venv-min/bin/python - <<'PY'
+            .venv-min/bin/python - <<'PY'
           import asyncio
 
           import mirage
@@ -96,66 +81,64 @@ jobs:
 
           asyncio.run(main())
           PY
+            .venv-min/bin/mirage --help > /dev/null
+            echo "OK: base install on $ver"
+          done
 
-      - name: CLI entry point works on base install
-        working-directory: python
-        run: .venv-min/bin/mirage --help > /dev/null
-
-  python-extra:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { extra: s3, module: mirage.resource.s3 }
-          - { extra: ssh, module: mirage.resource.ssh }
-          - { extra: mongodb, module: mirage.resource.mongodb }
-          - { extra: postgres, module: mirage.resource.postgres }
-          - { extra: redis, module: mirage.resource.redis }
-          - { extra: email, module: mirage.resource.email }
-          - { extra: fuse, module: mirage.fuse.mount }
-          - { extra: pdf, module: mirage.core.filetype.pdf }
-          - { extra: parquet, module: mirage.core.filetype.parquet }
-          - { extra: hdf5, module: mirage.core.filetype.hdf5 }
-          - { extra: nextcloud, module: mirage.resource.nextcloud }
-          - { extra: hf, module: mirage.resource.hf_buckets }
-          - { extra: langfuse, module: mirage.resource.langfuse }
-          - { extra: chroma, module: mirage.resource.chroma }
-          - { extra: lancedb, module: mirage.resource.lancedb }
-          - { extra: qdrant, module: mirage.resource.qdrant }
-          - { extra: databricks, module: mirage.resource.databricks_volume }
-          - { extra: pydantic-ai, module: mirage.agents.pydantic_ai }
-          - { extra: openai, module: mirage.agents.openai_agents }
-          - { extra: agno, module: mirage.agents.agno }
-          - { extra: deepagents, module: mirage.agents.langchain }
-          - { extra: openhands, module: mirage.agents.openhands, python: "3.12" }
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python || '3.11' }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install base package + single extra
+      - name: Install each extra into a fresh venv and import its entry module
         working-directory: python
         run: |
-          uv venv .venv-x
-          uv pip install --python .venv-x/bin/python ".[${{ matrix.extra }}]"
+          set -u
+          # extra:module[:python] — each gets its own venv so an extra that
+          # silently depends on another extra's packages fails here.
+          entries=(
+            "s3:mirage.resource.s3"
+            "ssh:mirage.resource.ssh"
+            "mongodb:mirage.resource.mongodb"
+            "gridfs:mirage.resource.gridfs"
+            "postgres:mirage.resource.postgres"
+            "redis:mirage.resource.redis"
+            "email:mirage.resource.email"
+            "fuse:mirage.fuse.mount"
+            "pdf:mirage.core.filetype.pdf"
+            "parquet:mirage.core.filetype.parquet"
+            "hdf5:mirage.core.filetype.hdf5"
+            "nextcloud:mirage.resource.nextcloud"
+            "hf:mirage.resource.hf_buckets"
+            "langfuse:mirage.resource.langfuse"
+            "chroma:mirage.resource.chroma"
+            "lancedb:mirage.resource.lancedb"
+            "qdrant:mirage.resource.qdrant"
+            "databricks:mirage.resource.databricks_volume"
+            "pydantic-ai:mirage.agents.pydantic_ai"
+            "openai:mirage.agents.openai_agents"
+            "agno:mirage.agents.agno"
+            "deepagents:mirage.agents.langchain"
+            "openhands:mirage.agents.openhands:3.12"
+          )
+          failed=()
+          for entry in "${entries[@]}"; do
+            IFS=: read -r extra module pyver <<< "$entry"
+            pyver="${pyver:-3.11}"
+            echo "::group::${extra} (${pyver})"
+            rm -rf .venv-x
+            if uv venv --python "$pyver" .venv-x \
+                && uv pip install --python .venv-x/bin/python ".[${extra}]" \
+                && .venv-x/bin/python -c "import importlib; importlib.import_module('${module}'); print('OK: ${module}')"; then
+              :
+            else
+              echo "FAIL: ${extra}"
+              failed+=("$extra")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "failed extras: ${failed[*]}"
+            exit 1
+          fi
+          echo "OK: all ${#entries[@]} extras install and import in isolation"
 
-      - name: Import the extra's entry module
-        working-directory: python
-        run: |
-          .venv-x/bin/python -c "import importlib; importlib.import_module('${{ matrix.module }}'); print('OK: ${{ matrix.module }}')"
-
-  ts-minimal:
+  ts-install:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
@@ -225,7 +208,7 @@ jobs:
   gate:
     name: test-install-gate
     runs-on: ubuntu-latest
-    needs: [changes, python-minimal, python-extra, ts-minimal]
+    needs: [changes, python-install, ts-install]
     if: always()
     steps:
       - name: Check required jobs

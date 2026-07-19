@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Workspace } from '@struktoai/mirage-core'
+import type { ExecuteResult, Workspace } from '@struktoai/mirage-core'
 import type {
   BashOperations,
   EditOperations,
@@ -21,7 +21,7 @@ import type {
   LsOperations,
   ReadOperations,
   WriteOperations,
-} from '@mariozechner/pi-coding-agent'
+} from '@earendil-works/pi-coding-agent'
 import picomatch from 'picomatch'
 import { rstripSlash } from '@struktoai/mirage-core'
 
@@ -108,11 +108,35 @@ export function mirageOperations(ws: Workspace): MirageOperationsBundle {
   }
 
   const bash: BashOperations = {
-    exec: async (command, _cwd, options) => {
-      const result = await ws.execute(command)
-      const combined = result.stdoutText + result.stderrText
-      if (combined.length > 0) {
-        options.onData(Buffer.from(combined))
+    exec: async (command, cwd, options) => {
+      const timeoutSignal =
+        options.timeout !== undefined && options.timeout > 0
+          ? AbortSignal.timeout(options.timeout * 1000)
+          : undefined
+      const signal =
+        options.signal !== undefined && timeoutSignal !== undefined
+          ? AbortSignal.any([options.signal, timeoutSignal])
+          : (options.signal ?? timeoutSignal)
+      let result: ExecuteResult
+      try {
+        result =
+          signal === undefined
+            ? await ws.execute(command, { cwd })
+            : await ws.execute(command, { cwd, signal })
+      } catch (error) {
+        if (options.signal?.aborted === true) {
+          throw new Error('aborted')
+        }
+        if (timeoutSignal?.aborted === true) {
+          throw new Error('timeout:' + String(options.timeout))
+        }
+        throw error
+      }
+      if (result.stdout.length > 0) {
+        options.onData(Buffer.from(result.stdout))
+      }
+      if (result.stderr.length > 0) {
+        options.onData(Buffer.from(result.stderr))
       }
       return { exitCode: result.exitCode }
     },

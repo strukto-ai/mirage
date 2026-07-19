@@ -167,6 +167,7 @@
                 "icon": "database",
                 "pages": [
                   "home/setup/mongodb",
+                  "home/setup/gridfs",
                   "home/setup/postgres",
                   "home/setup/chroma",
                   "home/setup/lancedb",
@@ -334,6 +335,7 @@
                 "icon": "database",
                 "pages": [
                   "python/resource/mongodb",
+                  "python/resource/gridfs",
                   "python/resource/postgres",
                   "python/resource/chroma",
                   "python/resource/lancedb",
@@ -493,6 +495,7 @@
                 "icon": "database",
                 "pages": [
                   "typescript/setup/mongodb",
+                  "typescript/setup/gridfs",
                   "typescript/setup/postgres",
                   "typescript/setup/chroma",
                   "typescript/setup/lancedb",

@@ -264,6 +264,7 @@ class ResourceName(str, Enum):
     GMAIL = "gmail"
     TRELLO = "trello"
     MONGODB = "mongodb"
+    GRIDFS = "gridfs"
     POSTGRES = "postgres"
     NOTION = "notion"
     LANGFUSE = "langfuse"

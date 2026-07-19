@@ -118,12 +118,9 @@ describe('gdocs core find', () => {
     const files = await find(makeAccessor(), ROOT, { type: 'f' })
     expect(files).toEqual(['/owned/Big__d2.gdoc.json', '/owned/Doc_A__d1.gdoc.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
-    // The start-point stat ENOENTs in this mock, so the root is not emitted.
     expect(dirs).toEqual(['/owned', '/shared'])
-    // Only the start point is statted (to emit the search root); children
-    // classify from the readdir slash convention.
-    const statted = [...new Set(vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual))]
-    expect(statted).toEqual(['/'])
+    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
+    expect([...new Set(statted)]).toEqual(['/'])
   })
 
   it('treats a null size as 0 for size filters, dirs contribute 0 too', async () => {

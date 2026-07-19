@@ -74,6 +74,7 @@ class _State:
     tokens: list[str]
     pos: int = 0
     depth: int = 0
+    mtime_seen: bool = False
     expr: FindExpr = field(default_factory=lambda: FindExpr(tree=TrueNode()))
 
 
@@ -147,7 +148,22 @@ def _parse_primary(state: _State) -> PredNode:
         if tok == "-size":
             state.expr.min_size, state.expr.max_size = _size_arg(value)
             return TrueNode()
-        state.expr.mtime_min, state.expr.mtime_max = _mtime_arg(value)
+        # The flat window cannot evaluate -mtime per predicate node, so
+        # repeated -mtime flatten to the union of their windows: the
+        # tautology `-mtime +0 -o -mtime -1` imposes no bounds instead
+        # of last-wins dropping everything. An AND of disjoint windows
+        # over-matches (documented divergence from GNU).
+        mt_lo, mt_hi = _mtime_arg(value)
+        if not state.mtime_seen:
+            state.expr.mtime_min, state.expr.mtime_max = mt_lo, mt_hi
+            state.mtime_seen = True
+        else:
+            state.expr.mtime_min = (None if state.expr.mtime_min is None
+                                    or mt_lo is None else min(
+                                        state.expr.mtime_min, mt_lo))
+            state.expr.mtime_max = (None if state.expr.mtime_max is None
+                                    or mt_hi is None else max(
+                                        state.expr.mtime_max, mt_hi))
         return TrueNode()
     if tok == "-empty":
         state.expr.uses_empty = True

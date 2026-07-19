@@ -41,6 +41,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "s3":
     ResourceEntry("mirage.resource.s3:S3Resource",
                   "mirage.resource.s3:S3Config"),
+    "gridfs":
+    ResourceEntry("mirage.resource.gridfs:GridFSResource",
+                  "mirage.resource.gridfs:GridFSConfig"),
     "r2":
     ResourceEntry("mirage.resource.r2:R2Resource",
                   "mirage.resource.r2:R2Config"),

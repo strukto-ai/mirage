@@ -95,6 +95,13 @@ export function treeHasType(node: PredNode): boolean {
   return false
 }
 
+export function treeHasEmpty(node: PredNode): boolean {
+  if (node.op === 'empty') return true
+  if (node.op === 'not') return treeHasEmpty(node.kid)
+  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasEmpty)
+  return false
+}
+
 export function keep(
   entry: FindEntry,
   tree: PredNode,
@@ -102,13 +109,6 @@ export function keep(
 ): boolean {
   if (minDepth !== null && minDepth !== undefined && entry.depth < minDepth) return false
   return evalPredicate(tree, entry)
-}
-
-export function treeHasEmpty(node: PredNode): boolean {
-  if (node.op === 'empty') return true
-  if (node.op === 'not') return treeHasEmpty(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasEmpty)
-  return false
 }
 
 // Basename of a find start path, as GNU prints and matches it. Single source

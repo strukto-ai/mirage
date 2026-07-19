@@ -92,9 +92,58 @@ describe('walkFind', () => {
     await expect(walkFind(ROOT, limited)).rejects.toThrow('rate limited')
   })
 
-  it('lists nothing for maxDepth 0 per the GNU depth convention', async () => {
-    const deps = makeDeps({ '/': ['/a.txt'] }, { '/a.txt': { size: 1 } })
-    expect(await walkFind(ROOT, deps, { maxDepth: 0 })).toEqual([])
+  it('emits only the start path for maxDepth 0 per the GNU depth convention', async () => {
+    let readdirCalls = 0
+    const base = makeDeps({ '/': ['/a.txt'] }, { '/': {}, '/a.txt': { size: 1 } })
+    const deps: WalkFindDeps = {
+      ...base,
+      readdir: (spec, i) => {
+        readdirCalls += 1
+        return base.readdir(spec, i)
+      },
+    }
+    expect(await walkFind(ROOT, deps, { maxDepth: 0 })).toEqual(['/'])
+    expect(readdirCalls).toBe(0)
+  })
+
+  it('emits the start path at depth 0 when it exists', async () => {
+    const deps = makeDeps({ '/': ['/a.txt'] }, { '/': {}, '/a.txt': { size: 1 } })
+    expect(await walkFind(ROOT, deps)).toEqual(['/', '/a.txt'])
+    expect(await walkFind(ROOT, deps, { type: 'd' })).toEqual(['/'])
+    expect(await walkFind(ROOT, deps, { minDepth: 1 })).toEqual(['/a.txt'])
+  })
+
+  it('matches the start path basename against -name', async () => {
+    const deps = makeDeps(
+      { '/mnt/x': ['/mnt/x/a.txt'] },
+      { '/mnt/x': {}, '/mnt/x/a.txt': { size: 1 } },
+    )
+    const root = new PathSpec({
+      virtual: '/mnt/x',
+      directory: '/mnt/x',
+      resourcePath: mountKey('/mnt/x', '/mnt/x'),
+    })
+    expect(await walkFind(root, deps, { name: 'x' })).toEqual(['/'])
+  })
+
+  it('matches empty files and dirs for -empty', async () => {
+    const deps = makeDeps(
+      {
+        '/': ['/empty-dir', '/empty.txt', '/full-dir', '/full.txt'],
+        '/empty-dir': [],
+        '/full-dir': ['/full-dir/a.txt'],
+      },
+      {
+        '/': {},
+        '/empty.txt': { size: 0 },
+        '/full.txt': { size: 1 },
+        '/empty-dir': {},
+        '/full-dir': {},
+        '/full-dir/a.txt': { size: 1 },
+      },
+    )
+    const withHint: WalkFindDeps = { ...deps, isDirName: (child) => child.endsWith('dir') }
+    expect(await walkFind(ROOT, withHint, { empty: true })).toEqual(['/empty-dir', '/empty.txt'])
   })
 
   it('strips the mount prefix from returned keys', async () => {

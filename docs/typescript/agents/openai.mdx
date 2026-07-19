@@ -1,10 +1,10 @@
 ---
 title: OpenAI Agents SDK
-description: Run @openai/agents against a Mirage workspace using MirageShell and MirageEditor.
+description: Run @openai/agents against a Mirage workspace with shell, editor, and multimodal file-reading tools.
 icon: /images/openai-logo.svg
 ---
 
-The OpenAI Agents SDK ([@openai/agents](https://github.com/openai/openai-agents-js)) ships `shellTool` and `applyPatchTool` primitives that take pluggable `Shell` and `Editor` backends. Mirage provides `MirageShell` and `MirageEditor` implementations that route every command and patch through your `Workspace` instead of the host shell.
+The OpenAI Agents SDK ([@openai/agents](https://github.com/openai/openai-agents-js)) ships `shellTool` and `applyPatchTool` primitives that take pluggable `Shell` and `Editor` backends. Mirage provides `MirageShell` and `MirageEditor` implementations that route every command and patch through your `Workspace` instead of the host shell. `mirageReadFileTool` adds agent-initiated file reads with structured model input for text, images, and PDFs.
 
 ## Install
 
@@ -24,7 +24,12 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-browser @openai/agents
 ```ts
 import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
 import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
-import { MirageEditor, MirageShell, buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import {
+  MirageEditor,
+  MirageShell,
+  buildSystemPrompt,
+  mirageReadFileTool,
+} from '@struktoai/mirage-agents/openai'
 
 const ram = new RAMResource()
 const ops = new OpsRegistry()
@@ -38,6 +43,7 @@ const agent = new Agent({
     mountInfo: { '/': 'In-memory filesystem (read/write)' },
   }),
   tools: [
+    mirageReadFileTool(ws),
     shellTool({ shell: new MirageShell(ws) }),
     applyPatchTool({ editor: new MirageEditor(ws) }),
   ],
@@ -46,14 +52,20 @@ const agent = new Agent({
 await run(agent, "Create /hello.txt with 'hi from mirage' and cat it.")
 ```
 
+The examples also support OpenAI-compatible providers. Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL`; a custom base URL defaults to Chat Completions, uses `mirageExecuteTool`, and disables OpenAI tracing so the third-party key stays with that provider. Set `OPENAI_API=responses` when a compatible endpoint implements the Responses API and the examples will use OpenAI's hosted shell and editor tools instead.
+
 ## Exports
 
 | Symbol | Purpose |
 | --- | --- |
+| `mirageExecuteTool(ws)` | Adds an `execute` function tool backed by `ws`; works with Chat Completions and Responses. |
+| `mirageReadFileTool(ws)` | Adds a `read_file` function tool. Text becomes `input_text`, images become `input_image`, and PDFs become `input_file`. |
 | `MirageShell` | `Shell` implementation; pass to `shellTool({ shell })`. |
 | `MirageEditor` | `Editor` implementation; pass to `applyPatchTool({ editor })`. |
 | `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
 | `MIRAGE_SYSTEM_PROMPT` | The default system prompt template (used by `buildSystemPrompt`). |
+
+Unsupported binary formats return a metadata description instead of being decoded as corrupt text. The tool reads raw workspace bytes, so files mounted from RAM, S3, and other Mirage resources use the same model-input path.
 
 ## Examples
 

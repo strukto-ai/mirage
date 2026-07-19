@@ -1,33 +1,33 @@
 ---
 title: Pi Coding Agent
-description: Run @mariozechner/pi-coding-agent with all 7 built-in tools wired to a Mirage workspace.
+description: Run @earendil-works/pi-coding-agent with all 7 built-in tools wired to a Mirage workspace.
 icon: /images/pi-logo.svg
 ---
 
-[Pi Coding Agent](https://github.com/mariozechner/pi) is a TypeScript coding agent with seven built-in tools (read, write, edit, bash, grep, find, ls). Mirage provides an extension factory that swaps Pi's host-backed operations for `Workspace` operations.
+[Pi Coding Agent](https://github.com/earendil-works/pi) is a TypeScript coding agent with seven built-in tools (read, write, edit, bash, grep, find, ls). Mirage provides an extension factory that swaps Pi's host-backed operations for `Workspace` operations.
 
 <Note>
-  Node only. Pi is a CLI agent; it uses `process.cwd()`, agent directories, and other Node-only APIs.
+  Node 22.19 or newer only. Pi is a CLI agent; it uses `process.cwd()`, agent directories, and other Node-only APIs.
 </Note>
 
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node @mariozechner/pi-coding-agent @mariozechner/pi-ai
+pnpm add @struktoai/mirage-agents @struktoai/mirage-node @earendil-works/pi-coding-agent
 ```
 
 ## Usage
 
 ```ts
 import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
-import { getModel } from '@mariozechner/pi-ai'
 import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
-} from '@mariozechner/pi-coding-agent'
+} from '@earendil-works/pi-coding-agent'
 import { buildSystemPrompt, mirageExtension } from '@struktoai/mirage-agents/pi'
 
 const ram = new RAMResource()
@@ -48,14 +48,17 @@ const resourceLoader = new DefaultResourceLoader({
 })
 await resourceLoader.reload()
 
+const modelRuntime = await ModelRuntime.create()
 const { session } = await createAgentSession({
-  model: getModel('anthropic', 'claude-sonnet-4-6'),
+  modelRuntime,
   resourceLoader,
   sessionManager: SessionManager.inMemory(),
 })
 
 await session.prompt("Create /hello.txt with 'hi' and ls /.")
 ```
+
+The examples also accept `PI_PROVIDER`, `PI_MODEL`, `PI_BASE_URL`, and `PI_API_KEY`. This lets a built-in Pi provider and model run through a compatible gateway without writing credentials to Pi's configuration files.
 
 ## Exports
 

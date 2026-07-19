@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
-import type { ExtensionAPI, ToolDefinition } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { mirageExtension } from './extension.ts'
 
 function mkWs(): Workspace {

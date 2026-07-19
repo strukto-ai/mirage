@@ -91,6 +91,40 @@ describe('mirageOperations.bash', () => {
     const result = await ops.bash.exec('false', '/', { onData: noop })
     expect(result.exitCode).not.toBe(0)
   })
+
+  it('runs commands from the cwd supplied by Pi', async () => {
+    const ws = mkWs()
+    await ws.fs.mkdir('/nested')
+    const ops = mirageOperations(ws)
+    const chunks: Buffer[] = []
+    await ops.bash.exec('pwd', '/nested', {
+      onData: (data) => chunks.push(data),
+    })
+    expect(Buffer.concat(chunks).toString()).toBe('/nested\n')
+    expect(ws.cwd).toBe('/')
+  })
+
+  it('maps Pi cancellation to its expected aborted error', async () => {
+    const ops = mirageOperations(mkWs())
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      ops.bash.exec('echo never', '/', {
+        onData: () => undefined,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('aborted')
+  })
+
+  it('maps Pi timeouts to its expected timeout error', async () => {
+    const ops = mirageOperations(mkWs())
+    await expect(
+      ops.bash.exec('sleep 1', '/', {
+        onData: () => undefined,
+        timeout: 0.01,
+      }),
+    ).rejects.toThrow('timeout:0.01')
+  })
 })
 
 describe('mirageOperations.grep', () => {
