@@ -105,6 +105,9 @@ describe('lancedb core find', () => {
   beforeEach(() => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
+    // walkFind stats the start path to decide whether to emit it; no
+    // fixture entry for '/' keeps these walks root-less.
+    mockStats({})
   })
 
   it('walks recursively classifying row files by extension', async () => {
@@ -117,10 +120,13 @@ describe('lancedb core find', () => {
     expect(dirs).toEqual(['/tbl', '/tbl/grp'])
   })
 
-  it('never stats entries for classification', async () => {
+  it('stats only the start path, never entries for classification', async () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT)
-    expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
+    const statted = vi
+      .mocked(statMod.stat)
+      .mock.calls.map((c) => (typeof c[1] === 'string' ? c[1] : c[1].virtual))
+    expect([...new Set(statted)]).toEqual(['/'])
   })
 
   it('sorts by codepoint, not locale', async () => {

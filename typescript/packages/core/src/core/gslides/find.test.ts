@@ -86,6 +86,11 @@ describe('gslides core find', () => {
   beforeEach(() => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
+    // walkFind stats the start path to decide whether to emit it; no
+    // fixture entry for '/' keeps these walks root-less.
+    vi.mocked(statMod.stat).mockImplementation((_accessor, spec) =>
+      Promise.reject(enoent(spec.virtual)),
+    )
     mockTree(TREE)
   })
 
@@ -94,7 +99,8 @@ describe('gslides core find', () => {
     expect(files).toEqual(['/owned/Deck_A__p1.gslide.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
     expect(dirs).toEqual(['/owned', '/shared'])
-    expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
+    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
+    expect([...new Set(statted)]).toEqual(['/'])
   })
 
   it('matches names with globs', async () => {
