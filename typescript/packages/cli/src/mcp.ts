@@ -12,22 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
 import { serveMirageMcp } from '@struktoai/mirage-agents/mcp'
-import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
-import { Workspace, newWorkspaceId } from '@struktoai/mirage-node'
-import { configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-server'
+import type { Workspace } from '@struktoai/mirage-node'
+import { buildWorkspaceFromConfig, resolveWorkspaceConfig } from '@struktoai/mirage-server'
 import type { Command } from 'commander'
-
-const CONFIG_CANDIDATES = [
-  '.mirage/workspace.yaml',
-  '.mirage/workspace.yml',
-  'workspace.yaml',
-  'workspace.yml',
-  'mirage.yaml',
-  'mirage.yml',
-]
 
 export interface McpConfigResolutionOptions {
   cwd?: string
@@ -38,74 +26,22 @@ interface McpCommandOptions {
   staleWriteProtection: boolean
 }
 
-function requireConfig(path: string): string {
-  if (!existsSync(path)) throw new Error(`Mirage workspace config not found: ${path}`)
-  return path
-}
-
 export function resolveMcpConfig(
   config: string | undefined,
   options: McpConfigResolutionOptions = {},
 ): string {
-  const cwd = resolve(options.cwd ?? process.cwd())
-  const env = options.env ?? process.env
-  if (config !== undefined) return requireConfig(resolve(cwd, config))
-  if (env.MIRAGE_MCP_CONFIG !== undefined) {
-    return requireConfig(resolve(cwd, env.MIRAGE_MCP_CONFIG))
-  }
-
-  let dir: string | undefined = cwd
-  while (dir !== undefined) {
-    for (const candidate of CONFIG_CANDIDATES) {
-      const path = resolve(dir, candidate)
-      if (existsSync(path)) return path
-    }
-    const parent = dirname(dir)
-    dir = parent === dir ? undefined : parent
-  }
-  throw new Error(
-    'No Mirage workspace config found. Pass one to `mirage mcp <config>` or set MIRAGE_MCP_CONFIG.',
-  )
+  return resolveWorkspaceConfig(config, {
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    ...(options.env !== undefined ? { env: options.env } : {}),
+    envNames: ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG'],
+  })
 }
 
 export async function buildMcpWorkspace(configPath: string): Promise<Workspace> {
-  const config = loadWorkspaceConfigFile(configPath)
-  const args = await configToWorkspaceArgs(config)
-  const resources: Record<string, MountSpec> = {}
-  const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
-  for (const [prefix, [resource, mode, safeguards]] of Object.entries(args.resources)) {
-    resources[prefix] = [resource, mode]
-    if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
-  }
-  const workspace = new Workspace(resources, {
-    mode: args.options.mode,
-    consistency: args.options.consistency,
-    ...(args.options.sessionId !== undefined ? { sessionId: args.options.sessionId } : {}),
-    ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
-    workspaceId: args.options.workspaceId ?? newWorkspaceId(),
-    ...(args.options.store !== undefined ? { store: args.options.store } : {}),
-    ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
-    ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
-    ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-    ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
-    ...(args.options.route !== undefined ? { route: args.options.route } : {}),
-  })
-  try {
-    for (const [prefix, target] of Object.entries(args.fuseMounts)) {
-      const mountpoint = typeof target === 'string' ? target : undefined
-      await workspace.addFuseMount(prefix, mountpoint)
-    }
-  } catch (error) {
-    await workspace.close()
-    throw error
-  }
-  return workspace
+  return buildWorkspaceFromConfig(configPath)
 }
 
-async function runMcpServer(
-  config: string | undefined,
-  options: McpCommandOptions,
-): Promise<void> {
+async function runMcpServer(config: string | undefined, options: McpCommandOptions): Promise<void> {
   const configPath = resolveMcpConfig(config)
   const workspace = await buildMcpWorkspace(configPath)
   try {

@@ -20,6 +20,8 @@ export type WorkspaceFileReadResult =
   | (WorkspaceFileBase & { kind: 'file'; data: Uint8Array; filename: string })
   | (WorkspaceFileBase & { kind: 'binary'; note: string })
 
+export type WorkspaceFileReader = (path: string) => Promise<Uint8Array>
+
 function extOf(path: string): string {
   const dot = path.lastIndexOf('.')
   const slash = path.lastIndexOf('/')
@@ -63,12 +65,13 @@ function isTextMime(mimeType: ReadFileMime): boolean {
 export async function readWorkspaceFile(
   ws: Workspace,
   path: string,
+  reader?: WorkspaceFileReader,
 ): Promise<WorkspaceFileReadResult> {
   const stat = await ws.fs.stat(path)
   if (stat.type === FileType.DIRECTORY) {
     throw new Error(`Cannot read directory as a file: ${path}`)
   }
-  const data = await ws.fs.readFile(path, { raw: true })
+  const data = reader === undefined ? await ws.fs.readFile(path, { raw: true }) : await reader(path)
   const mimeType = mimeFor(path, data, stat)
   const base = { path, mimeType, bytes: data.byteLength }
 

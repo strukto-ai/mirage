@@ -1,0 +1,63 @@
+{
+  "name": "@struktoai/mirage-opencode",
+  "version": "0.0.0",
+  "description": "Native Mirage filesystem tools for OpenCode",
+  "keywords": [
+    "mirage",
+    "opencode",
+    "ai-agents",
+    "virtual-filesystem"
+  ],
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/opencode"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "engines": {
+    "opencode": ">=1.18.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@struktoai/mirage-agents": "workspace:*",
+    "@struktoai/mirage-server": "workspace:*"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.18.3"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.3",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0",
+    "vitest": "^3.2.6"
+  }
+}
