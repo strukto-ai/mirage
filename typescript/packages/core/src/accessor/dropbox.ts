@@ -15,11 +15,26 @@
 import { Accessor } from './base.ts'
 import type { DropboxTokenManager } from '../core/dropbox/_client.ts'
 
+/**
+ * Normalize a subfolder-mount root to the Dropbox API convention:
+ * `''` for the account root (the API rejects `'/'`), otherwise
+ * `/seg/seg` with no trailing slash.
+ */
+export function normalizeDropboxRootPath(value: string | undefined): string {
+  const parts = (value ?? '').split('/').filter((p) => p !== '' && p !== '.')
+  if (parts.some((p) => p === '..')) {
+    throw new Error("rootPath must not contain '..' segments")
+  }
+  return parts.length === 0 ? '' : '/' + parts.join('/')
+}
+
 export class DropboxAccessor extends Accessor {
   readonly tokenManager: DropboxTokenManager
+  readonly rootPath: string
 
-  constructor(opts: { tokenManager: DropboxTokenManager }) {
+  constructor(opts: { tokenManager: DropboxTokenManager; rootPath?: string }) {
     super()
     this.tokenManager = opts.tokenManager
+    this.rootPath = normalizeDropboxRootPath(opts.rootPath)
   }
 }

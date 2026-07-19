@@ -9,6 +9,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -38,6 +40,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -65,6 +69,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -91,6 +97,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -118,6 +126,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -145,6 +155,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -172,6 +184,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -198,6 +212,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -224,6 +240,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -248,6 +266,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -275,6 +295,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -301,6 +323,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -327,6 +351,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -353,6 +379,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -373,6 +401,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"
@@ -393,6 +423,8 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "box"

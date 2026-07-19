@@ -95,6 +95,43 @@ describe('dropbox readdir', () => {
     expect(out).toContain('/docs/note.md')
   })
 
+  it('scopes listings under a subfolder mount root', async () => {
+    vi.mocked(api.listFolder).mockImplementation((_tm, p: string) => {
+      if (p === '/Team/data') {
+        return Promise.resolve([
+          { '.tag': 'folder', id: 'id:docs', name: 'docs', path_display: '/Team/data/docs' },
+        ])
+      }
+      if (p === '/Team/data/docs') {
+        return Promise.resolve([
+          {
+            '.tag': 'file',
+            id: 'id:n1',
+            name: 'note.md',
+            path_display: '/Team/data/docs/note.md',
+            size: 12,
+          },
+        ])
+      }
+      throw new Error(`unexpected path=${p}`)
+    })
+
+    const accessor = new DropboxAccessor({ tokenManager: STUB_TM, rootPath: '/Team/data' })
+    const index = new RAMIndexCacheStore()
+    const root = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      index,
+    )
+    expect(root).toEqual(['/docs/'])
+    const nested = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
+      index,
+    )
+    expect(nested).toEqual(['/docs/note.md'])
+  })
+
   it('honors prefix when constructing virtual path', async () => {
     vi.mocked(api.listFolder).mockResolvedValue([
       { '.tag': 'file', id: 'id:f', name: 'a.txt', path_display: '/a.txt', size: 1 },

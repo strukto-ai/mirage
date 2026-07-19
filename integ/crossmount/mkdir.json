@@ -10,6 +10,8 @@
         "opfs",
         "s3",
         "s3-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",

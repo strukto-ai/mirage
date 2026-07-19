@@ -17,4 +17,8 @@ import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const DROPBOX_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.DROPBOX, DROPBOX_IO)
+export const DROPBOX_OPS: readonly RegisteredOp[] = makeGenericOps(
+  ResourceName.DROPBOX,
+  DROPBOX_IO,
+  { emulateTruncate: true },
+)

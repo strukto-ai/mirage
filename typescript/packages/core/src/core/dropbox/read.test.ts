@@ -69,6 +69,33 @@ describe('dropbox read', () => {
     expect(client.dropboxDownload).toHaveBeenCalledWith(STUB_TM, '/note.txt')
   })
 
+  it('downloads through the subfolder mount root', async () => {
+    vi.mocked(api.listFolder).mockResolvedValue([
+      {
+        '.tag': 'file',
+        id: 'id:1',
+        name: 'note.txt',
+        path_display: '/Team/data/note.txt',
+        size: 5,
+      },
+    ])
+    vi.mocked(client.dropboxDownload).mockResolvedValue(new Uint8Array([104, 105]))
+
+    const accessor = new DropboxAccessor({ tokenManager: STUB_TM, rootPath: 'Team/data' })
+    const index = new RAMIndexCacheStore()
+    const data = await read(
+      accessor,
+      new PathSpec({
+        virtual: '/dropbox/note.txt',
+        directory: '/dropbox',
+        resourcePath: mountKey('/dropbox/note.txt', '/dropbox'),
+      }),
+      index,
+    )
+    expect(data).toEqual(new Uint8Array([104, 105]))
+    expect(client.dropboxDownload).toHaveBeenCalledWith(STUB_TM, '/Team/data/note.txt')
+  })
+
   it('throws EISDIR when path resolves to a folder', async () => {
     vi.mocked(api.listFolder).mockResolvedValue([
       { '.tag': 'folder', id: 'id:f', name: 'docs', path_display: '/docs' },

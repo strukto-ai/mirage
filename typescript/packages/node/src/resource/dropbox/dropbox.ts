@@ -56,9 +56,13 @@ export class DropboxResource extends BaseResource implements Resource {
       clientId: config.clientId,
       clientSecret: config.clientSecret,
       refreshToken: config.refreshToken,
+      ...(config.endpoint !== undefined ? { endpoint: config.endpoint } : {}),
       ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
     })
-    this.accessor = new DropboxAccessor({ tokenManager: tm })
+    this.accessor = new DropboxAccessor({
+      tokenManager: tm,
+      ...(config.rootPath !== undefined ? { rootPath: config.rootPath } : {}),
+    })
   }
 
   open(): Promise<void> {

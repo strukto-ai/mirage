@@ -16,6 +16,9 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { DropboxApiError } from './_client.ts'
+import { getMetadata, type DropboxEntry } from './api.ts'
+import { dropboxPathOf } from './paths.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -38,17 +41,54 @@ function guessType(name: string): FileType {
   return FileType.BINARY
 }
 
+function statFromEntry(entry: DropboxEntry): FileStat {
+  const modified = entry.server_modified ?? entry.client_modified ?? ''
+  if (entry['.tag'] === 'folder') {
+    return new FileStat({
+      name: entry.name,
+      type: FileType.DIRECTORY,
+      modified,
+      extra: { dropbox_id: entry.id ?? entry.path_display ?? entry.name },
+    })
+  }
+  return new FileStat({
+    name: entry.name,
+    size: typeof entry.size === 'number' && entry.size > 0 ? entry.size : null,
+    type: guessType(entry.name),
+    modified,
+    fingerprint: modified !== '' ? modified : null,
+    extra: {
+      dropbox_id: entry.id ?? entry.path_display ?? entry.name,
+      resource_type: 'dropbox/file',
+    },
+  })
+}
+
+// API-truthful stat for index-less callers (unlink/rmdir classification,
+// the wired find core): get_metadata resolves the entry directly.
+async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
+  let entry: DropboxEntry
+  try {
+    entry = await getMetadata(accessor.tokenManager, dropboxPathOf(accessor, path))
+  } catch (err) {
+    if (err instanceof DropboxApiError && err.status === 409) {
+      throw enoent(path.virtual)
+    }
+    throw err
+  }
+  return statFromEntry(entry)
+}
+
 export async function stat(
   accessor: DropboxAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  void accessor
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const key = path.resourcePath
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
 
-  if (index === undefined) throw enoent(path.virtual)
+  if (index === undefined) return statFromApi(accessor, path)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {

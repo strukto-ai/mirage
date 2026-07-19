@@ -80,6 +80,18 @@ OPS_INVENTORY = {
         ("unlink", "disk", "", True),
         ("write", "disk", "", True),
     ],
+    "dropbox": [
+        ("create", "dropbox", "", True),
+        ("mkdir", "dropbox", "", True),
+        ("read", "dropbox", "", False),
+        ("readdir", "dropbox", "", False),
+        ("rename", "dropbox", "", True),
+        ("rmdir", "dropbox", "", True),
+        ("stat", "dropbox", "", False),
+        ("truncate", "dropbox", "", True),
+        ("unlink", "dropbox", "", True),
+        ("write", "dropbox", "", True),
+    ],
     "email": [
         ("read", "email", "", False),
         ("readdir", "email", "", False),

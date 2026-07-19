@@ -101,6 +101,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "box":
     ResourceEntry("mirage.resource.box:BoxResource",
                   "mirage.resource.box:BoxConfig"),
+    "dropbox":
+    ResourceEntry("mirage.resource.dropbox:DropboxResource",
+                  "mirage.resource.dropbox:DropboxConfig"),
     "github":
     ResourceEntry("mirage.resource.github:GitHubResource",
                   "mirage.resource.github:GitHubConfig"),

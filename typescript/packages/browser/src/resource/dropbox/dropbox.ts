@@ -56,9 +56,13 @@ export class DropboxResource implements Resource {
       clientId: config.clientId,
       ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
       refreshToken: config.refreshToken,
+      ...(config.endpoint !== undefined ? { endpoint: config.endpoint } : {}),
       ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
     })
-    this.accessor = new DropboxAccessor({ tokenManager: tm })
+    this.accessor = new DropboxAccessor({
+      tokenManager: tm,
+      ...(config.rootPath !== undefined ? { rootPath: config.rootPath } : {}),
+    })
     this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }
 

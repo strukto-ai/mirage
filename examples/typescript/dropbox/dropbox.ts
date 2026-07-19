@@ -27,7 +27,8 @@ function buildConfig(): DropboxConfig {
   if (clientId === '' || clientSecret === '' || refreshToken === '') {
     throw new Error('DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN are required')
   }
-  return { clientId, clientSecret, refreshToken }
+  const rootPath = process.env.DROPBOX_ROOT_PATH ?? ''
+  return { clientId, clientSecret, refreshToken, ...(rootPath !== '' ? { rootPath } : {}) }
 }
 
 async function show(ws: Workspace, cmd: string, max = 600): Promise<string> {

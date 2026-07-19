@@ -67,6 +67,7 @@ EXPECTED_RESOURCES = {
     "chroma",
     "onedrive",
     "box",
+    "dropbox",
 }
 
 
