@@ -234,7 +234,8 @@
               "python/agents/agno",
               "python/agents/claude-code",
               "python/agents/claude-agent-sdk",
-              "python/agents/codex"
+              "python/agents/codex",
+              "python/agents/grok-build"
             ]
           },
           {
