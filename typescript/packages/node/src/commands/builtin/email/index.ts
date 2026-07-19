@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type RegisteredCommand,
-  ResourceName,
-  makeGenericCommands,
-  withAliases,
-} from '@struktoai/mirage-core'
+import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { EMAIL_FIND } from './find.ts'
 import { EMAIL_FORWARD } from './email_forward.ts'
@@ -43,11 +38,4 @@ export const EMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...EMAIL_FORWARD,
   ...EMAIL_TRIAGE,
   ...EMAIL_READ,
-  // himalaya aliases dispatch to the same handlers as the canonical
-  // `email <verb>` commands above.
-  ...withAliases(EMAIL_SEND, 'himalaya message send'),
-  ...withAliases(EMAIL_REPLY, 'himalaya message reply'),
-  ...withAliases(EMAIL_FORWARD, 'himalaya message forward'),
-  ...withAliases(EMAIL_TRIAGE, 'himalaya envelope list'),
-  ...withAliases(EMAIL_READ, 'himalaya message read'),
 ]

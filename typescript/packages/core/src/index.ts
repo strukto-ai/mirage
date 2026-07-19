@@ -548,7 +548,6 @@ export {
   type ProvisionFn,
   RegisteredCommand,
   type RegisteredCommandInit,
-  withAliases,
 } from './commands/config.ts'
 export {
   COMPOUND_EXTENSIONS,

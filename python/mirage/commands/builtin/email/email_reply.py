@@ -31,7 +31,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("email reply", resource="email", spec=SPEC, write=True)
+@command("himalaya message reply", resource="email", spec=SPEC, write=True)
 async def email_reply(
     accessor: EmailAccessor,
     paths: list[PathSpec],

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { command, crossCommand, RegisteredCommand, withAliases } from './config.ts'
+import { command, crossCommand, RegisteredCommand } from './config.ts'
 import { CommandSpec, Operand, OperandKind } from './spec/types.ts'
 
 const STUB_SPEC = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) })
@@ -81,34 +81,5 @@ describe('crossCommand()', () => {
     expect(rc.resource).toBe('ram->disk')
     expect(rc.src).toBe('ram')
     expect(rc.dst).toBe('disk')
-  })
-})
-
-describe('withAliases()', () => {
-  it('appends alias registrations that share the handler', () => {
-    const base = command({
-      name: 'email send',
-      resource: 'email',
-      spec: STUB_SPEC,
-      fn: STUB_FN,
-      write: true,
-    })
-    const out = withAliases(base, 'himalaya message send')
-    expect(out.map((c) => c.name)).toEqual(['email send', 'himalaya message send'])
-    expect(out[1]?.fn).toBe(out[0]?.fn)
-    expect(out[1]?.resource).toBe('email')
-    expect(out[1]?.write).toBe(true)
-  })
-
-  it('supports multiple aliases across multiple base registrations', () => {
-    const base = command({
-      name: 'email list',
-      resource: ['email', 'mail'],
-      spec: STUB_SPEC,
-      fn: STUB_FN,
-    })
-    const out = withAliases(base, 'himalaya envelope list')
-    expect(out).toHaveLength(4)
-    expect(out.filter((c) => c.name === 'himalaya envelope list')).toHaveLength(2)
   })
 })

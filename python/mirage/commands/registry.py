@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.config import (RegisteredCommand, add_aliases, command,
-                                    cross_command)
+from mirage.commands.config import RegisteredCommand, command, cross_command
 
 __all__ = [
     "RegisteredCommand",
-    "add_aliases",
     "command",
     "cross_command",
 ]

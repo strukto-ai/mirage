@@ -98,22 +98,6 @@ def command(
     return decorator
 
 
-def add_aliases(fn: Callable[..., Any], *names: str) -> Callable[..., Any]:
-    """Register extra command names that dispatch to the same handler.
-
-    Args:
-        fn (Callable): a command produced by ``command(...)``.
-        names (str): additional names (aliases) for the command.
-    """
-    base = list(getattr(fn, "_registered_commands"))
-    extended = list(base)
-    for name in names:
-        for rc in base:
-            extended.append(replace(rc, name=name))
-    setattr(fn, "_registered_commands", extended)
-    return fn
-
-
 def cross_command(
     name: str,
     *,

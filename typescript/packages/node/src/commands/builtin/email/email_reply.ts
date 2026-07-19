@@ -67,7 +67,7 @@ async function emailReplyCommand(
 }
 
 export const EMAIL_REPLY = command({
-  name: 'email reply',
+  name: 'himalaya message reply',
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailReplyCommand,

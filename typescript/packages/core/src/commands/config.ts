@@ -189,33 +189,6 @@ export function command<A extends Accessor = Accessor>(
   )
 }
 
-// Register extra command names that dispatch to the same handlers. The
-// original names stay canonical; each alias clones the registration with a
-// new name (e.g. himalaya aliases for the `email` commands).
-export function withAliases(cmds: RegisteredCommand[], ...names: string[]): RegisteredCommand[] {
-  return [
-    ...cmds,
-    ...names.flatMap((name) =>
-      cmds.map(
-        (c) =>
-          new RegisteredCommand({
-            name,
-            spec: c.spec,
-            resource: c.resource,
-            filetype: c.filetype,
-            fn: c.fn,
-            provisionFn: c.provisionFn,
-            aggregate: c.aggregate,
-            src: c.src,
-            dst: c.dst,
-            write: c.write,
-            safeguard: c.safeguard,
-          }),
-      ),
-    ),
-  ]
-}
-
 export interface CrossCommandOptions {
   name: string
   src: string
