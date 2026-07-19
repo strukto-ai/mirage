@@ -76,6 +76,22 @@ export async function getMetadata(tm: DropboxTokenManager, path: string): Promis
   return (await dropboxRpc(tm, '/files/get_metadata', { path })) as DropboxEntry
 }
 
+export async function createFolder(tm: DropboxTokenManager, path: string): Promise<void> {
+  await dropboxRpc(tm, '/files/create_folder_v2', { path, autorename: false })
+}
+
+export async function deletePath(tm: DropboxTokenManager, path: string): Promise<void> {
+  await dropboxRpc(tm, '/files/delete_v2', { path })
+}
+
+export async function movePath(tm: DropboxTokenManager, from: string, to: string): Promise<void> {
+  await dropboxRpc(tm, '/files/move_v2', { from_path: from, to_path: to, autorename: false })
+}
+
+export async function copyPath(tm: DropboxTokenManager, from: string, to: string): Promise<void> {
+  await dropboxRpc(tm, '/files/copy_v2', { from_path: from, to_path: to, autorename: false })
+}
+
 export async function searchFiles(
   tm: DropboxTokenManager,
   query: string,

@@ -304,6 +304,7 @@
                 "group": "Cloud Files",
                 "icon": "folder-open",
                 "pages": [
+                  "python/resource/dropbox",
                   "python/resource/nextcloud",
                   "python/resource/databricks_volume"
                 ]

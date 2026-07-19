@@ -1,7 +1,7 @@
 ---
 title: Dropbox
 icon: dropbox
-description: Mount Dropbox as a MIRAGE resource from Node or the browser via OAuth2.
+description: Mount Dropbox as a read/write MIRAGE resource from Node or the browser via OAuth2.
 ---
 
 Mirage ships `DropboxResource` in **two runtimes**:
@@ -11,9 +11,11 @@ Mirage ships `DropboxResource` in **two runtimes**:
 - `@struktoai/mirage-browser`, supports the same refresh token via PKCE (no client secret in the bundle).
 
 Both runtimes hit the same [Dropbox v2 HTTP API](https://www.dropbox.com/developers/documentation/http/documentation):
-`/2/files/list_folder` for directories, `/2/files/download` for content, and `/2/files/search_v2`
-for search. Credentials are obtained the same way in both runtimes, see
-[Dropbox Credentials](/home/setup/dropbox).
+`/2/files/list_folder` for directories, `/2/files/download` for content, and
+`/2/files/upload` / `create_folder_v2` / `delete_v2` / `move_v2` / `copy_v2` for writes
+(single-call uploads cap at ~150 MB). Credentials are obtained the same way in both runtimes, see
+[Dropbox Credentials](/home/setup/dropbox). The Python package ships the same
+backend, see [Dropbox (Python)](/python/resource/dropbox).
 
 ## Node (server-side)
 
@@ -37,6 +39,28 @@ console.log(res.stdoutText)
 
 The `DropboxTokenManager` caches the access token in memory and refreshes it ~5 minutes before
 expiry, so cold-start API calls don't pay the refresh round-trip.
+
+## Mount a subfolder
+
+Pass `rootPath` to expose a single Dropbox folder as the mount root instead of the whole
+account. Every command and FUSE/VFS op is scoped to that folder; paths outside it are
+unreachable.
+
+```ts
+const dropbox = new DropboxResource({
+  clientId: process.env.DROPBOX_APP_KEY!,
+  clientSecret: process.env.DROPBOX_APP_SECRET!,
+  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
+  rootPath: '/Team/data',
+})
+
+const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
+await ws.execute('ls /dropbox/') // lists the contents of /Team/data
+```
+
+`rootPath` accepts `Team/data`, `/Team/data`, or `/Team/data/` (all normalized the same way);
+`..` segments are rejected. Config dictionaries (e.g. via the resource registry) may spell it
+`root_path`. Omitting it (or passing `/`) mounts the account root as before.
 
 ## Browser (PKCE, no client secret)
 
@@ -117,6 +141,8 @@ Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
 
 - **Filesystem**: `ls`, `cat`, `head`, `tail`, `nl`, `wc`, `stat`, `find`, `tree`, `du`, `file`,
   `realpath`, `basename`, `dirname`
+- **Write** (on a `WRITE` mount): `tee`, `touch`, `mkdir`, `rm`, `rmdir`, `mv`, `cp`, `truncate`,
+  shell redirection (`>` / `>>`)
 - **Search/text**: `grep`, `rg`, `awk`, `sed`, `sort`, `uniq`, `cut`, `diff`, `cmp`, `jq`
 - **Encoding**: `base64`
 - **Format-aware**: `cat_parquet`, `cat_feather`, `cat_hdf5`, `head_parquet`, `head_feather`,

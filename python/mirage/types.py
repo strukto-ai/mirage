@@ -282,6 +282,7 @@ class ResourceName(str, Enum):
     NEXTCLOUD = "nextcloud"
     LANCEDB = "lancedb"
     ONEDRIVE = "onedrive"
+    DROPBOX = "dropbox"
     QDRANT = "qdrant"
     SHAREPOINT = "sharepoint"
 

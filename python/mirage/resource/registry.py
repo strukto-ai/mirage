@@ -98,6 +98,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "onedrive":
     ResourceEntry("mirage.resource.onedrive:OneDriveResource",
                   "mirage.resource.onedrive:OneDriveConfig"),
+    "dropbox":
+    ResourceEntry("mirage.resource.dropbox:DropboxResource",
+                  "mirage.resource.dropbox:DropboxConfig"),
     "github":
     ResourceEntry("mirage.resource.github:GitHubResource",
                   "mirage.resource.github:GitHubConfig"),

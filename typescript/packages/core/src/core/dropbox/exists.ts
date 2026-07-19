@@ -12,8 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stat } from '../../../core/dropbox/stat.ts'
-import { makeFileReadProvision } from '../generic_bind/provision.ts'
+import type { DropboxAccessor } from '../../accessor/dropbox.ts'
+import type { PathSpec } from '../../types.ts'
+import { DropboxApiError } from './_client.ts'
+import { getMetadata } from './api.ts'
+import { dropboxPathOf } from './paths.ts'
 
-export const fileReadProvision = makeFileReadProvision(stat)
-export { exactZeroProvision as metadataProvision } from '../generic_bind/provision.ts'
+export async function exists(accessor: DropboxAccessor, path: PathSpec): Promise<boolean> {
+  const apiPath = dropboxPathOf(accessor, path)
+  if (apiPath === accessor.rootPath) return true
+  try {
+    await getMetadata(accessor.tokenManager, apiPath)
+    return true
+  } catch (err) {
+    if (err instanceof DropboxApiError && err.status === 409) return false
+    throw err
+  }
+}

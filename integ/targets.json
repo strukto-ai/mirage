@@ -168,6 +168,69 @@
       ]
     },
     {
+      "id": "dropbox",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "dropbox",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "data2"
+        },
+        {
+          "path": "/res",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "dropbox-root",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "dropbox",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "shared",
+          "root": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "shared",
+          "root": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "shared",
+          "root": "team/reports/res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
       "id": "onedrive",
       "hosts": [
         "python"

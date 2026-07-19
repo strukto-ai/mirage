@@ -99,9 +99,16 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'discord', '', false],
   ],
   dropbox: [
+    ['create', 'dropbox', '', true],
+    ['mkdir', 'dropbox', '', true],
     ['read', 'dropbox', '', false],
     ['readdir', 'dropbox', '', false],
+    ['rename', 'dropbox', '', true],
+    ['rmdir', 'dropbox', '', true],
     ['stat', 'dropbox', '', false],
+    ['truncate', 'dropbox', '', true],
+    ['unlink', 'dropbox', '', true],
+    ['write', 'dropbox', '', true],
   ],
   gdocs: [
     ['read', 'gdocs', '.gdoc.json', false],

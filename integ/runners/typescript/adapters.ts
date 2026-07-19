@@ -25,6 +25,7 @@ import {
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import {
   DiskResource,
+  DropboxResource,
   EmailResource,
   GDocsResource,
   GDriveResource,
@@ -41,6 +42,7 @@ import {
 } from '@struktoai/mirage-node'
 import { ImapFlow } from 'imapflow'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
+import { startFakeDropbox, type FakeDropbox } from '../../server/dropbox.ts'
 import { integRoot } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
 
@@ -241,6 +243,35 @@ async function openHf(target: Target): Promise<Open> {
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+async function openDropbox(target: Target): Promise<Open> {
+  // Mounts sharing a `bucket` share one fake account (the -root target
+  // mounts three rootPath subfolders of a single account, mirroring
+  // s3-prefix's shared bucket); distinct buckets get isolated accounts.
+  const accounts = new Map<string, FakeDropbox>()
+  const mounts: Record<string, DropboxResource> = {}
+  for (const m of target.mounts) {
+    const account = String(m.bucket ?? m.path)
+    let fake = accounts.get(account)
+    if (fake === undefined) {
+      fake = await startFakeDropbox()
+      accounts.set(account, fake)
+    }
+    mounts[m.path] = new DropboxResource({
+      clientId: 'integ-client',
+      clientSecret: 'integ-secret',
+      refreshToken: 'integ-refresh',
+      endpoint: fake.endpoint,
+      ...(m.root !== undefined ? { rootPath: m.root } : {}),
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    for (const fake of accounts.values()) fake.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
 async function adminExec(ws: Workspace, command: string): Promise<void> {
@@ -504,4 +535,5 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   gmail: openGws,
   email: openEmail,
   hf: openHf,
+  dropbox: openDropbox,
 }

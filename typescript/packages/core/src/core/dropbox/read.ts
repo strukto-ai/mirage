@@ -16,7 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { dropboxDownload, dropboxDownloadStream } from './_client.ts'
+import { DropboxApiError, dropboxDownload, dropboxDownloadStream } from './_client.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -27,11 +27,11 @@ function eisdir(p: string): Error {
   return e
 }
 
-function dropboxPathFromVirtual(virtualKey: string, prefix: string): string {
+function dropboxPathFromVirtual(root: string, virtualKey: string, prefix: string): string {
   let key = virtualKey
   if (prefix !== '' && key.startsWith(prefix)) key = key.slice(prefix.length)
   key = stripSlash(key)
-  return key === '' ? '' : `/${key}`
+  return key === '' ? root : `${root}/${key}`
 }
 
 export async function read(
@@ -46,24 +46,32 @@ export async function read(
   if (key === '') throw eisdir(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
 
-  let entry = index !== undefined ? (await index.get(virtualKey)).entry : null
-  if (entry === undefined || entry === null) {
-    if (index !== undefined) {
-      const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-      if (parentKey !== virtualKey) {
-        const parentPath = PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix))
-        try {
-          await readdir(accessor, parentPath, index)
-          entry = (await index.get(virtualKey)).entry ?? null
-        } catch {
-          // parent refresh failed; fall through to ENOENT
-        }
+  const dropboxPath = dropboxPathFromVirtual(accessor.rootPath, virtualKey, prefix)
+  if (index === undefined) {
+    // Index-less callers (the ops factory's emulated truncate) download
+    // directly; the API 409s on missing paths and folders.
+    try {
+      return await dropboxDownload(accessor.tokenManager, dropboxPath)
+    } catch (err) {
+      if (err instanceof DropboxApiError && err.status === 409) throw enoent(path.virtual)
+      throw err
+    }
+  }
+  let entry = (await index.get(virtualKey)).entry ?? null
+  if (entry === null) {
+    const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
+    if (parentKey !== virtualKey) {
+      const parentPath = PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix))
+      try {
+        await readdir(accessor, parentPath, index)
+        entry = (await index.get(virtualKey)).entry ?? null
+      } catch {
+        // parent refresh failed; fall through to ENOENT
       }
     }
-    if (entry === undefined || entry === null) throw enoent(path.virtual)
+    if (entry === null) throw enoent(path.virtual)
   }
   if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
-  const dropboxPath = dropboxPathFromVirtual(virtualKey, prefix)
   return dropboxDownload(accessor.tokenManager, dropboxPath)
 }
 
@@ -96,7 +104,7 @@ export async function* stream(
     if (entry === undefined || entry === null) throw enoent(path.virtual)
   }
   if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
-  const dropboxPath = dropboxPathFromVirtual(virtualKey, prefix)
+  const dropboxPath = dropboxPathFromVirtual(accessor.rootPath, virtualKey, prefix)
   for await (const chunk of dropboxDownloadStream(accessor.tokenManager, dropboxPath)) {
     yield chunk
   }

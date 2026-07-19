@@ -13,19 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
+import { read as dropboxRead } from '../../../core/dropbox/read.ts'
+import { stat as dropboxStat } from '../../../core/dropbox/stat.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
+import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DROPBOX_IO } from './io.ts'
-import { fileReadProvision, metadataProvision } from './provision.ts'
 
 export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DropboxAccessor>(ResourceName.DROPBOX, DROPBOX_IO, {
-    provisionOverrides: {
-      grep: fileReadProvision as ProvisionFn,
-      rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-      du: metadataProvision as ProvisionFn,
-    },
+  ...makeFiletypeCommands<DropboxAccessor>({
+    resource: ResourceName.DROPBOX,
+    readBytes: dropboxRead,
+    statEntry: dropboxStat,
   }),
+  ...makeGenericCommands<DropboxAccessor>(ResourceName.DROPBOX, DROPBOX_IO),
 ]
