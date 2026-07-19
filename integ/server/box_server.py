@@ -125,6 +125,19 @@ class FakeBox:
         item["modified_at"] = MODIFIED
         return item
 
+    def remove(self, item_id: str) -> None:
+        for kid in list(self.children(item_id)):
+            self.remove(kid["id"])
+        self.items.pop(item_id, None)
+
+    def copy_tree(self, src: dict, parent_id: str, name: str) -> dict:
+        if src["type"] == "folder":
+            new = self.add_folder(parent_id, name)
+            for kid in self.children(src["id"]):
+                self.copy_tree(kid, new["id"], kid["name"])
+            return new
+        return self.add_file(parent_id, name, src["content"])
+
     def seed_path(self, path: str, content: bytes) -> dict:
         # Creates intermediate folders along a slash path, then the file.
         # Convenience for adapters; the wire equivalents are POST /2.0/folders
@@ -333,6 +346,75 @@ class BoxServer:
             "entries": [self.state.render(item)]
         })
 
+    async def delete_file(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return _error(401, "unauthorized", "missing bearer token")
+        item = self.state.items.get(request.match_info["file_id"])
+        if item is None or item["type"] != "file":
+            return _error(404, "not_found", "file not found")
+        self.state.remove(item["id"])
+        return web.Response(status=204)
+
+    async def delete_folder(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return _error(401, "unauthorized", "missing bearer token")
+        item = self.state.items.get(request.match_info["folder_id"])
+        if item is None or item["type"] != "folder":
+            return _error(404, "not_found", "folder not found")
+        recursive = request.query.get("recursive", "false") == "true"
+        if self.state.children(item["id"]) and not recursive:
+            return _error(409, "folder_not_empty", "folder is not empty")
+        self.state.remove(item["id"])
+        return web.Response(status=204)
+
+    async def _move(self, request: web.Request, kind: str,
+                    key: str) -> web.Response:
+        if not self._authed(request):
+            return _error(401, "unauthorized", "missing bearer token")
+        item = self.state.items.get(request.match_info[key])
+        if item is None or item["type"] != kind:
+            return _error(404, "not_found", f"{kind} not found")
+        body = await request.json()
+        new_name = body.get("name", item["name"])
+        new_parent = body.get("parent", {}).get("id", item["parent"])
+        other = self.state.child_by_name(new_parent, new_name)
+        if other is not None and other["id"] != item["id"]:
+            return _error(409, "item_name_in_use",
+                          f"{new_name} already exists")
+        item["name"] = new_name
+        item["parent"] = new_parent
+        item["modified_at"] = MODIFIED
+        return web.json_response(self.state.render(item))
+
+    async def update_file(self, request: web.Request) -> web.Response:
+        return await self._move(request, "file", "file_id")
+
+    async def update_folder(self, request: web.Request) -> web.Response:
+        return await self._move(request, "folder", "folder_id")
+
+    async def _copy(self, request: web.Request, kind: str,
+                    key: str) -> web.Response:
+        if not self._authed(request):
+            return _error(401, "unauthorized", "missing bearer token")
+        item = self.state.items.get(request.match_info[key])
+        if item is None or item["type"] != kind:
+            return _error(404, "not_found", f"{kind} not found")
+        body = await request.json()
+        parent_id = body.get("parent", {}).get("id", "")
+        name = body.get("name", item["name"])
+        if self.state.items.get(parent_id) is None:
+            return _error(404, "not_found", "parent folder not found")
+        if self.state.child_by_name(parent_id, name) is not None:
+            return _error(409, "item_name_in_use", f"{name} already exists")
+        new = self.state.copy_tree(item, parent_id, name)
+        return web.json_response(self.state.render(new), status=201)
+
+    async def copy_file(self, request: web.Request) -> web.Response:
+        return await self._copy(request, "file", "file_id")
+
+    async def copy_folder(self, request: web.Request) -> web.Response:
+        return await self._copy(request, "folder", "folder_id")
+
     async def search(self, request: web.Request) -> web.Response:
         if not self._authed(request):
             return _error(401, "unauthorized", "missing bearer token")
@@ -363,6 +445,12 @@ def build_app(server: BoxServer) -> web.Application:
     app.router.add_get("/2.0/files/{file_id}/content", server.download)
     app.router.add_post("/2.0/files/content", server.upload)
     app.router.add_post("/2.0/files/{file_id}/content", server.upload_version)
+    app.router.add_post("/2.0/files/{file_id}/copy", server.copy_file)
+    app.router.add_post("/2.0/folders/{folder_id}/copy", server.copy_folder)
+    app.router.add_put("/2.0/files/{file_id}", server.update_file)
+    app.router.add_put("/2.0/folders/{folder_id}", server.update_folder)
+    app.router.add_delete("/2.0/files/{file_id}", server.delete_file)
+    app.router.add_delete("/2.0/folders/{folder_id}", server.delete_folder)
     app.router.add_get("/2.0/search", server.search)
     app.router.add_get("/dl/{file_id}", server.dl)
     app.router.add_get("/rep/{file_id}/extracted_text", server.rep_text)

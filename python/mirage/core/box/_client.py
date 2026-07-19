@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -254,3 +255,72 @@ async def box_get_stream(
                                   resp.status)
             async for chunk in resp.content.iter_chunked(chunk_size):
                 yield chunk
+
+
+async def box_post_json(
+    tm: BoxTokenManager,
+    url: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    headers = await box_auth_headers(tm)
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=body) as resp:
+            if resp.status >= 400:
+                text = await resp.text()
+                raise BoxApiError(f"Box POST {url} -> {resp.status} {text}",
+                                  resp.status)
+            return await resp.json()
+
+
+async def box_put_json(
+    tm: BoxTokenManager,
+    url: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    headers = await box_auth_headers(tm)
+    async with aiohttp.ClientSession() as session:
+        async with session.put(url, headers=headers, json=body) as resp:
+            if resp.status >= 400:
+                text = await resp.text()
+                raise BoxApiError(f"Box PUT {url} -> {resp.status} {text}",
+                                  resp.status)
+            return await resp.json()
+
+
+async def box_delete(
+    tm: BoxTokenManager,
+    url: str,
+    params: dict[str, Any] | None = None,
+) -> None:
+    headers = await box_auth_headers(tm)
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(url,
+                                  headers=headers,
+                                  params=_str_params(params)) as resp:
+            if resp.status >= 400:
+                text = await resp.text()
+                raise BoxApiError(f"Box DELETE {url} -> {resp.status} {text}",
+                                  resp.status)
+
+
+async def box_upload_multipart(
+    tm: BoxTokenManager,
+    url: str,
+    attributes: dict[str, Any],
+    filename: str,
+    data: bytes,
+) -> dict[str, Any]:
+    headers = await box_auth_headers(tm)
+    form = aiohttp.FormData()
+    form.add_field("attributes", json.dumps(attributes))
+    form.add_field("file",
+                   data,
+                   filename=filename,
+                   content_type="application/octet-stream")
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, data=form) as resp:
+            if resp.status >= 400:
+                text = await resp.text()
+                raise BoxApiError(f"Box upload {url} -> {resp.status} {text}",
+                                  resp.status)
+            return await resp.json()

@@ -13,18 +13,46 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.box.api import get_folder_info
 from mirage.core.box.readdir import ROOT_FOLDER_ID
 from mirage.core.box.readdir import readdir as _readdir
+from mirage.core.box.readdir import resource_type_for, vfs_name_for
+from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
+
+
+def _stat_from_item(item: dict[str, Any]) -> FileStat:
+    vfs_name = vfs_name_for(item["name"])
+    rt = resource_type_for(item)
+    if rt == "box/folder":
+        return FileStat(
+            name=vfs_name,
+            type=FileType.DIRECTORY,
+            modified=item.get("modified_at") or "",
+            extra={"box_id": item["id"]},
+        )
+    size = item.get("size")
+    remote_time = item.get("modified_at") or ""
+    return FileStat(
+        name=vfs_name,
+        size=size if size else None,
+        type=guess_type(vfs_name),
+        modified=remote_time,
+        fingerprint=remote_time or None,
+        extra={
+            "box_id": item["id"],
+            "resource_type": rt,
+        },
+    )
 
 
 async def stat(
@@ -63,7 +91,13 @@ async def stat(
             logger.debug("stat populate failed for %s: %s", virtual, exc)
         result = await index.get(virtual_key)
         if result.entry is None:
-            raise enoent(virtual)
+            # The write-family builders (rm/mv/cp) call stat without a
+            # threaded index, so the readdir above populates a NULL store
+            # that can't be read back. Resolve the id directly instead.
+            item = await resolve_item(accessor, path_parts(path))
+            if item is None:
+                raise enoent(virtual)
+            return _stat_from_item(item)
     if result.entry.resource_type == "box/folder":
         return FileStat(
             name=result.entry.vfs_name or result.entry.name,

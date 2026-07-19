@@ -17,7 +17,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "paste /data/a.txt /data/b.txt",
       "expect": {
@@ -43,7 +44,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "paste -s /data/b.txt",
       "expect": {
@@ -69,7 +71,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "paste -d , /data/a.txt /data/b.txt",
       "expect": {

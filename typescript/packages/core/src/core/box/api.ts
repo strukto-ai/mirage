@@ -12,7 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BoxApiError, boxAuthHeaders, boxGet, boxGetBytes, boxGetStream } from './_client.ts'
+import {
+  BoxApiError,
+  boxAuthHeaders,
+  boxDelete,
+  boxGet,
+  boxGetBytes,
+  boxGetStream,
+  boxPostJson,
+  boxPutJson,
+  boxUploadMultipart,
+} from './_client.ts'
 import type { BoxTokenManager } from './_client.ts'
 
 export type BoxItemType = 'file' | 'folder' | 'web_link'
@@ -133,4 +143,103 @@ export async function getExtractedText(tm: BoxTokenManager, fileId: string): Pro
   const r2 = await fetch(contentUrl, { headers })
   if (!r2.ok) return ''
   return r2.text()
+}
+
+export async function uploadNewFile(
+  tm: BoxTokenManager,
+  parentId: string,
+  name: string,
+  data: Uint8Array,
+): Promise<BoxItem> {
+  return (await boxUploadMultipart(
+    tm,
+    `${tm.apiBase}/files/content`,
+    { name, parent: { id: parentId } },
+    name,
+    data,
+  )) as BoxItem
+}
+
+export async function uploadFileVersion(
+  tm: BoxTokenManager,
+  fileId: string,
+  name: string,
+  data: Uint8Array,
+): Promise<BoxItem> {
+  return (await boxUploadMultipart(
+    tm,
+    `${tm.apiBase}/files/${fileId}/content`,
+    { name },
+    name,
+    data,
+  )) as BoxItem
+}
+
+export async function createFolder(
+  tm: BoxTokenManager,
+  parentId: string,
+  name: string,
+): Promise<BoxItem> {
+  return (await boxPostJson(tm, `${tm.apiBase}/folders`, {
+    name,
+    parent: { id: parentId },
+  })) as BoxItem
+}
+
+export async function deleteFile(tm: BoxTokenManager, fileId: string): Promise<void> {
+  await boxDelete(tm, `${tm.apiBase}/files/${fileId}`)
+}
+
+export async function deleteFolder(
+  tm: BoxTokenManager,
+  folderId: string,
+  recursive = true,
+): Promise<void> {
+  await boxDelete(tm, `${tm.apiBase}/folders/${folderId}`, {
+    recursive: recursive ? 'true' : 'false',
+  })
+}
+
+export async function updateFile(
+  tm: BoxTokenManager,
+  fileId: string,
+  opts: { name?: string; parentId?: string },
+): Promise<BoxItem> {
+  const body: Record<string, unknown> = {}
+  if (opts.name !== undefined) body.name = opts.name
+  if (opts.parentId !== undefined) body.parent = { id: opts.parentId }
+  return (await boxPutJson(tm, `${tm.apiBase}/files/${fileId}`, body)) as BoxItem
+}
+
+export async function updateFolder(
+  tm: BoxTokenManager,
+  folderId: string,
+  opts: { name?: string; parentId?: string },
+): Promise<BoxItem> {
+  const body: Record<string, unknown> = {}
+  if (opts.name !== undefined) body.name = opts.name
+  if (opts.parentId !== undefined) body.parent = { id: opts.parentId }
+  return (await boxPutJson(tm, `${tm.apiBase}/folders/${folderId}`, body)) as BoxItem
+}
+
+export async function copyFile(
+  tm: BoxTokenManager,
+  fileId: string,
+  parentId: string,
+  name?: string,
+): Promise<BoxItem> {
+  const body: Record<string, unknown> = { parent: { id: parentId } }
+  if (name !== undefined) body.name = name
+  return (await boxPostJson(tm, `${tm.apiBase}/files/${fileId}/copy`, body)) as BoxItem
+}
+
+export async function copyFolder(
+  tm: BoxTokenManager,
+  folderId: string,
+  parentId: string,
+  name?: string,
+): Promise<BoxItem> {
+  const body: Record<string, unknown> = { parent: { id: parentId } }
+  if (name !== undefined) body.name = name
+  return (await boxPostJson(tm, `${tm.apiBase}/folders/${folderId}/copy`, body)) as BoxItem
 }

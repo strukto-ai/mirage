@@ -40,7 +40,7 @@ function specialResourceType(name: string): string | null {
   return null
 }
 
-function vfsNameFor(name: string): string {
+export function vfsNameFor(name: string): string {
   const lower = name.toLowerCase()
   for (const src of Object.keys(SPECIAL_EXT_TO_RT)) {
     if (lower.endsWith(src)) return name + '.json'
@@ -48,7 +48,7 @@ function vfsNameFor(name: string): string {
   return name
 }
 
-function resourceTypeFor(item: BoxItem): string {
+export function resourceTypeFor(item: BoxItem): string {
   if (item.type === 'folder') return 'box/folder'
   if (item.type === 'web_link') return 'box/weblink'
   const specialRt = specialResourceType(item.name)

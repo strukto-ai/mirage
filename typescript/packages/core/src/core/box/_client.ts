@@ -292,3 +292,71 @@ export async function* boxGetStream(
     yield value
   }
 }
+
+export async function boxPostJson(
+  tm: BoxTokenManager,
+  url: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const headers = await boxAuthHeaders(tm)
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box POST ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}
+
+export async function boxPutJson(
+  tm: BoxTokenManager,
+  url: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const headers = await boxAuthHeaders(tm)
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box PUT ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}
+
+export async function boxDelete(
+  tm: BoxTokenManager,
+  url: string,
+  params?: Record<string, string | number>,
+): Promise<void> {
+  const headers = await boxAuthHeaders(tm)
+  const r = await fetch(buildUrl(url, params), { method: 'DELETE', headers })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box DELETE ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+}
+
+export async function boxUploadMultipart(
+  tm: BoxTokenManager,
+  url: string,
+  attributes: Record<string, unknown>,
+  filename: string,
+  data: Uint8Array,
+): Promise<unknown> {
+  const headers = await boxAuthHeaders(tm)
+  const form = new FormData()
+  form.set('attributes', JSON.stringify(attributes))
+  form.set('file', new Blob([data as BlobPart]), filename)
+  const r = await fetch(url, { method: 'POST', headers, body: form })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box upload ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}

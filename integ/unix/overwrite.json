@@ -17,7 +17,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/ow/t /data/ow/s/t && printf old | tee /data/ow/dst.txt > /dev/null && printf new | tee /data/ow/src.txt > /dev/null && printf keep | tee /data/ow/t/f.old > /dev/null && printf merged | tee /data/ow/s/t/f.txt > /dev/null && echo seeded",
       "expect": {
@@ -139,7 +140,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm -r /data/ow && echo cleaned",
       "expect": {

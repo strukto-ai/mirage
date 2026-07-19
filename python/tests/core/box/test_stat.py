@@ -106,6 +106,10 @@ async def test_stat_missing_raises(accessor, index):
             "mirage.core.box.readdir.list_folder_items",
             new_callable=AsyncMock,
             return_value=[],
+    ), patch(
+            "mirage.core.box.resolve.list_folder_items",
+            new_callable=AsyncMock,
+            return_value=[],
     ):
         with pytest.raises(FileNotFoundError):
             await stat(

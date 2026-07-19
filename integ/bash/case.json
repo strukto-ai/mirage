@@ -17,7 +17,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "case x in x) echo one; echo two;; esac",
       "expect": {
@@ -43,7 +44,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "case y in x) echo one;; *) echo fall; echo through;; esac",
       "expect": {
@@ -67,7 +69,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "case foo in f[^x]o) echo yes;; *) echo no;; esac",
       "expect": {
@@ -91,7 +94,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "case foo in f[!x]o) echo yes;; *) echo no;; esac",
       "expect": {

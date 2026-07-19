@@ -89,7 +89,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat sub/missing.txt 2>&1",
       "expect": {
@@ -115,7 +116,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep hello sub/missing.txt 2>&1",
       "expect": {

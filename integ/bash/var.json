@@ -17,7 +17,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "E=echo; $E hi",
       "expect": {
@@ -43,7 +44,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "C=cat; $C /data/a.txt",
       "expect": {
@@ -67,7 +69,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "vf1() { echo \"$*\"; }; vf1 a b c",
       "expect": {
@@ -91,7 +94,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "vf2() { for x in \"$@\"; do echo \"[$x]\"; done; }; vf2 'a b' c",
       "expect": {
@@ -115,7 +119,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "vf3() { for x in \"$*\"; do echo \"[$x]\"; done; }; vf3 'a b' c",
       "expect": {
@@ -139,7 +144,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "vf4() { for x in $@; do echo \"[$x]\"; done; }; vf4 'a b' c",
       "expect": {
@@ -163,7 +169,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "vf5() { for x in $*; do echo \"[$x]\"; done; }; vf5 'a b' c",
       "expect": {
@@ -187,7 +194,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo $0",
       "expect": {
@@ -211,7 +219,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo `echo hi`",
       "expect": {
@@ -235,7 +244,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "vb1=`printf 'a\\nb'`; echo \"$vb1\"",
       "expect": {
@@ -259,7 +269,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo \"`echo hi` there\"",
       "expect": {

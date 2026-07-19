@@ -96,7 +96,8 @@ async def test_du_all_on_file_returns_empty(accessor, index):
 
 @pytest.mark.asyncio
 async def test_du_missing_path_is_zero(accessor, index):
-    with patch("mirage.core.box.readdir.list_folder_items", new=_fake_list):
+    with patch("mirage.core.box.readdir.list_folder_items", new=_fake_list), \
+         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list):
         total = await du(
             accessor,
             PathSpec(resource_path="ghost", virtual="/ghost", directory="/"),

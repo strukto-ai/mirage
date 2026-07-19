@@ -10,7 +10,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "mkdir -p /data/metao && echo alpha > /data/metao/f.txt && touch -t 202601021530 /data/metao/f.txt",
       "check": {
@@ -38,7 +39,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "chmod 601 /data/metao/f.txt",
       "check": {
@@ -64,7 +66,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "chmod u+x,go-r /data/metao/f.txt",
       "check": {
@@ -89,7 +92,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "chown 500:dev /data/metao/f.txt",
       "check": {
@@ -115,7 +119,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "chown alice /data/metao/f.txt",
       "check": {
@@ -141,7 +146,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "touch -t 202601021530 /data/metao/new.txt",
       "check": {
@@ -167,7 +173,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "touch -c /data/metao/ghost.txt",
       "check": {
@@ -192,7 +199,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "touch -t 202603041200 /data/metao/f.txt",
       "check": {
@@ -217,7 +225,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "chmod 750 /data/metao",
       "check": {
@@ -316,7 +325,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "touch -t 202601021530 /data/metao/g.txt && touch -h -t 202603041200 /data/metao/ln.txt",
       "check": {
@@ -341,7 +351,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "chmod 644 /data/metao/missing.txt 2>&1",
       "expect": {
@@ -360,7 +371,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "touch -t 99 /data/metao/g.txt 2>&1",
       "expect": {
@@ -379,7 +391,8 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+        "box"
       ],
       "command": "rm /data/metao/ln.txt && rm -r /data/metao",
       "expect": {

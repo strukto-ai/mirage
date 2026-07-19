@@ -16,8 +16,9 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { getFolderInfo } from './api.ts'
-import { readdir as coreReaddir } from './readdir.ts'
+import { getFolderInfo, type BoxItem } from './api.ts'
+import { readdir as coreReaddir, resourceTypeFor, vfsNameFor } from './readdir.ts'
+import { pathParts, resolveItem } from './resolve.ts'
 import { enoent } from '../../utils/errors.ts'
 
 function guessType(name: string): FileType {
@@ -42,6 +43,29 @@ function guessType(name: string): FileType {
   return FileType.BINARY
 }
 
+function statFromItem(item: BoxItem): FileStat {
+  const vfsName = vfsNameFor(item.name)
+  const rt = resourceTypeFor(item)
+  if (rt === 'box/folder') {
+    return new FileStat({
+      name: vfsName,
+      type: FileType.DIRECTORY,
+      modified: item.modified_at ?? '',
+      extra: { box_id: item.id },
+    })
+  }
+  const size = typeof item.size === 'number' && item.size > 0 ? item.size : null
+  return new FileStat({
+    name: vfsName,
+    size,
+    type: guessType(vfsName),
+    modified: item.modified_at ?? '',
+    fingerprint:
+      item.modified_at !== undefined && item.modified_at !== '' ? item.modified_at : null,
+    extra: { box_id: item.id, resource_type: rt },
+  })
+}
+
 export async function stat(
   accessor: BoxAccessor,
   path: PathSpec,
@@ -62,7 +86,13 @@ export async function stat(
     })
   }
 
-  if (index === undefined) throw enoent(path.virtual)
+  if (index === undefined) {
+    // The write-family builders and provision estimation call stat without a
+    // threaded index; resolve the id directly rather than ENOENT.
+    const item = await resolveItem(accessor, pathParts(path))
+    if (item === null) throw enoent(path.virtual)
+    return statFromItem(item)
+  }
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
@@ -85,7 +115,9 @@ export async function stat(
     }
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {
-      throw enoent(path.virtual)
+      const item = await resolveItem(accessor, pathParts(path))
+      if (item === null) throw enoent(path.virtual)
+      return statFromItem(item)
     }
   }
   if (result.entry.resourceType === 'box/folder') {

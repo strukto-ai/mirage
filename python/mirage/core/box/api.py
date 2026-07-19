@@ -18,8 +18,10 @@ from typing import Any
 import aiohttp
 
 from mirage.core.box._client import (BoxApiError, BoxTokenManager,
-                                     box_auth_headers, box_get, box_get_bytes,
-                                     box_get_stream)
+                                     box_auth_headers, box_delete, box_get,
+                                     box_get_bytes, box_get_stream,
+                                     box_post_json, box_put_json,
+                                     box_upload_multipart)
 
 LIST_FIELDS = "id,name,type,size,modified_at,etag,sha1,parent"
 
@@ -139,3 +141,97 @@ async def get_extracted_text(tm: BoxTokenManager, file_id: str) -> str:
             if resp.status >= 400:
                 return ""
             return await resp.text()
+
+
+async def upload_new_file(tm: BoxTokenManager, parent_id: str, name: str,
+                          data: bytes) -> dict[str, Any]:
+    return await box_upload_multipart(
+        tm,
+        f"{tm.api_base}/files/content",
+        {
+            "name": name,
+            "parent": {
+                "id": parent_id
+            }
+        },
+        name,
+        data,
+    )
+
+
+async def upload_file_version(tm: BoxTokenManager, file_id: str, name: str,
+                              data: bytes) -> dict[str, Any]:
+    return await box_upload_multipart(
+        tm,
+        f"{tm.api_base}/files/{file_id}/content",
+        {"name": name},
+        name,
+        data,
+    )
+
+
+async def create_folder(tm: BoxTokenManager, parent_id: str,
+                        name: str) -> dict[str, Any]:
+    return await box_post_json(tm, f"{tm.api_base}/folders", {
+        "name": name,
+        "parent": {
+            "id": parent_id
+        }
+    })
+
+
+async def delete_file(tm: BoxTokenManager, file_id: str) -> None:
+    await box_delete(tm, f"{tm.api_base}/files/{file_id}")
+
+
+async def delete_folder(tm: BoxTokenManager,
+                        folder_id: str,
+                        recursive: bool = True) -> None:
+    await box_delete(tm,
+                     f"{tm.api_base}/folders/{folder_id}",
+                     params={"recursive": "true" if recursive else "false"})
+
+
+async def update_file(tm: BoxTokenManager,
+                      file_id: str,
+                      name: str | None = None,
+                      parent_id: str | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    if name is not None:
+        body["name"] = name
+    if parent_id is not None:
+        body["parent"] = {"id": parent_id}
+    return await box_put_json(tm, f"{tm.api_base}/files/{file_id}", body)
+
+
+async def update_folder(tm: BoxTokenManager,
+                        folder_id: str,
+                        name: str | None = None,
+                        parent_id: str | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    if name is not None:
+        body["name"] = name
+    if parent_id is not None:
+        body["parent"] = {"id": parent_id}
+    return await box_put_json(tm, f"{tm.api_base}/folders/{folder_id}", body)
+
+
+async def copy_file(tm: BoxTokenManager,
+                    file_id: str,
+                    parent_id: str,
+                    name: str | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {"parent": {"id": parent_id}}
+    if name is not None:
+        body["name"] = name
+    return await box_post_json(tm, f"{tm.api_base}/files/{file_id}/copy", body)
+
+
+async def copy_folder(tm: BoxTokenManager,
+                      folder_id: str,
+                      parent_id: str,
+                      name: str | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {"parent": {"id": parent_id}}
+    if name is not None:
+        body["name"] = name
+    return await box_post_json(tm, f"{tm.api_base}/folders/{folder_id}/copy",
+                               body)
