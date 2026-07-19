@@ -148,10 +148,16 @@ async function provisionRedirected(
   )
   if (
     redirects.some(
-      (r) => r.targetNode !== null && hasCommandSubstitution(r.targetNode as TSNodeLike),
+      (r) =>
+        r.kind !== RedirectKind.HEREDOC &&
+        r.kind !== RedirectKind.HERESTRING &&
+        r.targetNode !== null &&
+        hasCommandSubstitution(r.targetNode as TSNodeLike),
     )
   ) {
-    // A suppressed substitution hid the real redirect target.
+    // A suppressed substitution hid the real redirect target (heredoc
+    // bodies carry their node too, but their target is stdin, not a
+    // hidden file).
     result.precision = Precision.UNKNOWN
   }
   if (pipeNode !== null) {
@@ -237,7 +243,7 @@ export async function provisionNode(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    if ((command as TSNodeLike & { type: string }).type === NT.LIST) {
+    if (command !== null && (command as TSNodeLike & { type: string }).type === NT.LIST) {
       // Mirror the executor: a trailing redirect hoisted over an
       // &&/|| list binds to the last command.
       const [left, op, right] = getListParts(command)

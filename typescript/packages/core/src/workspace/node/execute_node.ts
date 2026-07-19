@@ -174,7 +174,7 @@ export async function executeNode(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    if (command.type === NT.LIST) {
+    if (command !== null && command.type === NT.LIST) {
       // tree-sitter hoists a trailing redirect over the whole &&/||
       // list; bash binds it to the last command:
       //   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))

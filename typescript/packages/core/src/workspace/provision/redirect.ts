@@ -41,7 +41,9 @@ export async function handleRedirectProvision(
   session: Session,
   namespace: Namespace | null = null,
 ): Promise<ProvisionResult> {
-  const inner = await provisionNode(command, session)
+  // command is null for the bare `> file` form: nothing to run, only
+  // the redirect targets cost anything.
+  const inner = command === null ? new ProvisionResult({}) : await provisionNode(command, session)
   if (targets.length === 0) return inner
   const children: ProvisionResult[] = [inner]
   for (const [kind, target] of targets) {
