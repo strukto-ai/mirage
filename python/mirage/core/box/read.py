@@ -12,45 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 import logging
 import posixpath
 from collections.abc import AsyncIterator
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.core.box._client import BoxTokenManager
-from mirage.core.box.api import (download_file, download_file_stream,
-                                 get_extracted_text)
+from mirage.core.box.api import download_file, download_file_stream
 from mirage.core.box.readdir import readdir
-from mirage.core.filetype.boxcanvas import process_boxcanvas
-from mirage.core.filetype.boxnote import process_boxnote
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
-
-OFFICE_FORMAT_BY_RT = {
-    "box/gdoc": "docx",
-    "box/gsheet": "xlsx",
-    "box/gslides": "pptx",
-}
-
-
-async def _process_box_office(tm: BoxTokenManager, entry: IndexEntry,
-                              office_format: str) -> bytes:
-    body_text = await get_extracted_text(tm, entry.id)
-    envelope = {
-        "id": entry.id,
-        "name": entry.vfs_name or entry.name,
-        "format": office_format,
-        "size": entry.size,
-        "modified_at": entry.remote_time,
-        "body_text": body_text,
-    }
-    return (json.dumps(envelope, indent=2, ensure_ascii=False) +
-            "\n").encode("utf-8")
 
 
 async def _resolve_entry(
@@ -91,17 +65,7 @@ async def read(
     index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     entry = await _resolve_entry(accessor, path, index)
-    rt = entry.resource_type
-    office_format = OFFICE_FORMAT_BY_RT.get(rt)
-    if office_format is not None:
-        return await _process_box_office(accessor.token_manager, entry,
-                                         office_format)
-    raw = await download_file(accessor.token_manager, entry.id)
-    if rt == "box/boxnote":
-        return process_boxnote(raw)
-    if rt == "box/boxcanvas":
-        return process_boxcanvas(raw)
-    return raw
+    return await download_file(accessor.token_manager, entry.id)
 
 
 async def stream(
@@ -110,19 +74,5 @@ async def stream(
     index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
     entry = await _resolve_entry(accessor, path, index)
-    rt = entry.resource_type
-    office_format = OFFICE_FORMAT_BY_RT.get(rt)
-    if office_format is not None:
-        yield await _process_box_office(accessor.token_manager, entry,
-                                        office_format)
-        return
-    if rt in ("box/boxnote", "box/boxcanvas"):
-        # Box-native JSON formats are tiny; fetch all then process --
-        # streaming the raw JSON would force callers to parse partial
-        # bytes anyway.
-        raw = await download_file(accessor.token_manager, entry.id)
-        yield (process_boxnote(raw)
-               if rt == "box/boxnote" else process_boxcanvas(raw))
-        return
     async for chunk in download_file_stream(accessor.token_manager, entry.id):
         yield chunk

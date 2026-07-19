@@ -15,7 +15,6 @@
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { PathSpec } from '../../types.ts'
 import { listFolderItems, type BoxItem } from './api.ts'
-import { vfsNameFor } from './readdir.ts'
 
 export function pathParts(path: PathSpec): string[] {
   return path.resourcePath.split('/').filter((p) => p !== '')
@@ -24,15 +23,13 @@ export function pathParts(path: PathSpec): string[] {
 // Box has no path-addressing endpoint, so writes resolve ids by listing each
 // level from the mount root. Returns the Box item for the full path, or null
 // if any component is missing (or a non-final component is not a folder).
-// Matches vfs names so paths spelled with the `.json` suffix on box-native
-// files still resolve.
 export async function resolveItem(accessor: BoxAccessor, parts: string[]): Promise<BoxItem | null> {
   const tm = accessor.tokenManager
   let curId = accessor.rootFolderId
   let cur: BoxItem | null = null
   for (let i = 0; i < parts.length; i++) {
     const children = await listFolderItems(tm, curId)
-    const match = children.find((c) => vfsNameFor(c.name) === parts[i])
+    const match = children.find((c) => c.name === parts[i])
     if (match === undefined) return null
     cur = match
     if (i < parts.length - 1) {

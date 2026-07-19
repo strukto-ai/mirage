@@ -19,7 +19,11 @@ import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
+import { BOX_GREP } from './grep.ts'
 import { BOX_IO } from './io.ts'
+import { BOX_RG } from './rg.ts'
+
+const BOX_OVERRIDES = new Set(['grep', 'rg'])
 
 export const BOX_COMMANDS: readonly RegisteredCommand[] = [
   ...makeFiletypeCommands<BoxAccessor>({
@@ -27,5 +31,9 @@ export const BOX_COMMANDS: readonly RegisteredCommand[] = [
     readBytes: boxRead,
     statEntry: boxStat,
   }),
-  ...makeGenericCommands<BoxAccessor>(ResourceName.BOX, BOX_IO),
+  ...makeGenericCommands<BoxAccessor>(ResourceName.BOX, BOX_IO, {
+    overrides: BOX_OVERRIDES,
+  }),
+  ...BOX_GREP,
+  ...BOX_RG,
 ]

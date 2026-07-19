@@ -162,87 +162,21 @@ of `/box/foo/bar/anyfile.json` hit the cache instead of re-walking.
 
 The cache TTL defaults to 24h. To force re-resolution, recreate the `BoxResource`.
 
-## Special file types
+## Box-native file types
 
-Five Box-specific file types get a `.json` suffix appended in the vfs and return clean,
-agent-friendly JSON when you `cat` them. The Box file ID is unchanged, the suffix is
-purely a vfs hint that `cat` returns JSON, mirroring Google Drive's `.gdoc.json` style.
+Every Box item is served as its **raw bytes**, keeping its real name (no `.json` suffix).
+Box has no API to edit these formats from a structured payload, so Mirage does not render
+them, it hands back exactly what Box stores:
 
-In `ls /box/`:
+- `.boxnote` / `.boxcanvas`, Box's native Notes and Canvas, stored as ProseMirror-style
+  JSON. They are text, so `cat foo.boxnote | jq .` works if you want to poke at the structure.
+- `.gdoc` / `.gsheet` / `.gslides`, Box's V2 Google-format files, stored as Office Open XML
+  zips (`.docx` / `.xlsx` / `.pptx`). These are opaque binary, like any other Office document
+  on a Mirage mount.
 
-```
-hihi.gdoc.json           # Box's Google Doc (backing bytes are .docx)
-gsheet.gsheet.json       # Box's Google Sheet (.xlsx)
-hihihi.gslides.json      # Box's Google Slides (.pptx)
-test.boxnote.json        # Box Note
-test canvas.boxcanvas.json
-```
-
-### `.boxnote.json`, Box Notes
-
-```json
-{
-  "id": "...",
-  "body_text": "paragraphs joined by \n",
-  "paragraphs": [{ "text": "...", "authors": ["..."] }],
-  "authors": { "<id>": "Author Name" },
-  "last_edit_at": "..."
-}
-```
-
-```bash
-cat /box/foo.boxnote.json | jq -r .body_text   # plain text
-cat /box/foo.boxnote.json | jq .authors        # who wrote it
-```
-
-### `.boxcanvas.json`, Box Canvas (whiteboards)
-
-```json
-{
-  "id": "...",
-  "widget_count": 11,
-  "widgets_by_type": { "shape": 6, "link": 5 },
-  "body_text": "shape labels joined by \n",
-  "widgets": [{ "id": "...", "type": "shape", "text": "..." }],
-  "authors": ["..."]
-}
-```
-
-```bash
-cat "/box/foo.boxcanvas.json" | jq -r .body_text
-cat "/box/foo.boxcanvas.json" | jq .widgets_by_type
-```
-
-### `.gdoc.json` / `.gsheet.json` / `.gslides.json`, Box's V2 Google files
-
-Box's V2 G Suite integration stores Google-format files as Office Open XML zips (`.docx` /
-`.xlsx` / `.pptx`). On `cat`, Mirage uses Box's
-[`representations` API](https://developer.box.com/reference/get-files-id/#param-representations)
-with `X-Rep-Hints: [extracted_text]` to fetch Box's auto-extracted plain-text version, then
-returns a JSON envelope:
-
-```json
-{
-  "id": "...",
-  "name": "hihi.gdoc.json",
-  "format": "docx",
-  "size": 8921,
-  "modified_at": "...",
-  "body_text": "auto-extracted plain text"
-}
-```
-
-```bash
-cat /box/hihi.gdoc.json | jq -r .body_text
-cat /box/gsheet.gsheet.json | jq .format       # "xlsx"
-```
-
-This is **different from Google Drive's `.gdoc.json`**, Box uses its own API + extracted-text
-representation; Google Drive uses Google's full Documents API and returns the rich Document
-structure (paragraphs, named styles, lists, etc.). For real edits to the underlying Google
-Doc, mount Google Drive separately with Google credentials and use the
-[GDocs / GSheets / GSlides resources](/home/setup/google), `gws docs ...` commands won't work
-on Box because the file IDs are in different namespaces.
+For a rich, editable view of Google-format documents, mount them through
+[Google Drive](/home/setup/google) with Google credentials instead, the `gws docs ...`
+commands operate on Google file IDs and do not apply to Box.
 
 ## Available commands
 
@@ -265,7 +199,5 @@ End-to-end runnable scripts are in
 
 - [`box.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box.ts), `Workspace.execute('ls/stat/cat/tree …')` shell demo
 - [`box_parquet.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_parquet.ts), parquet preview through `cat`
-- [`box_boxnote.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_boxnote.ts), `.boxnote.json` decoded into clean JSON
-- [`box_office.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_office.ts), `.gdoc.json` / `.gsheet.json` / `.gslides.json` via Box's extracted_text representation
 - [`box_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
 - [`box_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_fuse.ts), FUSE mount with shell access in another terminal

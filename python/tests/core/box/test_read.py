@@ -46,58 +46,21 @@ async def test_read_plain_file_downloads_by_id(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_boxnote_is_processed(accessor, index):
+async def test_read_box_native_file_returns_raw_bytes(accessor, index):
     await index.put(
-        "/n.boxnote.json",
+        "/n.boxnote",
         IndexEntry(id="300",
-                   name="n.boxnote.json",
-                   resource_type="box/boxnote",
-                   vfs_name="n.boxnote.json"))
-    raw = json.dumps({
-        "doc": {
-            "content": [{
-                "type": "paragraph",
-                "content": [{
-                    "type": "text",
-                    "text": "hi"
-                }]
-            }]
-        }
-    }).encode()
+                   name="n.boxnote",
+                   resource_type="box/file",
+                   vfs_name="n.boxnote"))
+    raw = json.dumps({"doc": {"content": []}}).encode()
     with patch(
             "mirage.core.box.read.download_file",
             new_callable=AsyncMock,
             return_value=raw,
     ):
-        out = await read(accessor, _spec("/n.boxnote.json"), index)
-    assert json.loads(out)["body_text"] == "hi"
-
-
-@pytest.mark.asyncio
-async def test_read_office_file_wraps_extracted_text(accessor, index):
-    await index.put(
-        "/d.gdoc.json",
-        IndexEntry(id="400",
-                   name="d.gdoc.json",
-                   resource_type="box/gdoc",
-                   remote_time="2026-04-01T00:00:00+00:00",
-                   vfs_name="d.gdoc.json",
-                   size=12))
-    with patch(
-            "mirage.core.box.read.get_extracted_text",
-            new_callable=AsyncMock,
-            return_value="doc body",
-    ):
-        out = await read(accessor, _spec("/d.gdoc.json"), index)
-    envelope = json.loads(out)
-    assert envelope == {
-        "id": "400",
-        "name": "d.gdoc.json",
-        "format": "docx",
-        "size": 12,
-        "modified_at": "2026-04-01T00:00:00+00:00",
-        "body_text": "doc body",
-    }
+        out = await read(accessor, _spec("/n.boxnote"), index)
+    assert out == raw
 
 
 @pytest.mark.asyncio

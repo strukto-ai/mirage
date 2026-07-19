@@ -154,6 +154,45 @@ class FakeBox:
             return self.update_file(existing, content)
         return self.add_file(folder_id, parts[-1], content)
 
+    def ancestors(self, item_id: str) -> list[dict]:
+        # Ancestor chain from the account root down to the immediate parent,
+        # excluding the item itself (Box's path_collection shape).
+        chain: list[dict] = []
+        cur = self.items.get(item_id)
+        while cur is not None and cur["parent"] is not None:
+            parent = self.items.get(cur["parent"])
+            if parent is None:
+                break
+            chain.append(parent)
+            cur = parent
+        chain.reverse()
+        return chain
+
+    def is_descendant(self, item_id: str, folder_id: str) -> bool:
+        cur = self.items.get(item_id)
+        while cur is not None and cur["parent"] is not None:
+            if cur["parent"] == folder_id:
+                return True
+            cur = self.items.get(cur["parent"])
+        return False
+
+    def search_entry(self, item: dict) -> dict:
+        chain = self.ancestors(item["id"])
+        return {
+            "type": item["type"],
+            "id": item["id"],
+            "name": item["name"],
+            "path_collection": {
+                "total_count":
+                len(chain),
+                "entries": [{
+                    "type": "folder",
+                    "id": a["id"],
+                    "name": a["name"]
+                } for a in chain],
+            },
+        }
+
     def render(self, item: dict) -> dict:
         out = {
             "type": item["type"],
@@ -420,18 +459,42 @@ class BoxServer:
             return _error(401, "unauthorized", "missing bearer token")
         query = request.query.get("query", "").lower()
         wanted = request.query.get("type")
+        content_types = request.query.get("content_types", "name,file_content")
+        ancestors = request.query.get("ancestor_folder_ids")
+        offset = int(request.query.get("offset", "0"))
         limit = int(request.query.get("limit", "100"))
-        hits = [
-            it for it in self.state.items.values()
-            if it["id"] != ROOT_ID and query in it["name"].lower() and (
-                wanted is None or it["type"] == wanted)
-        ]
+        scope_ids = ({s
+                      for s in ancestors.split(",")
+                      if s} if ancestors else None)
+        match_name = "name" in content_types
+        match_content = "file_content" in content_types
+        hits = []
+        for it in self.state.items.values():
+            if it["id"] == ROOT_ID:
+                continue
+            if wanted is not None and it["type"] != wanted:
+                continue
+            if scope_ids is not None and not any(
+                    self.state.is_descendant(it["id"], sid)
+                    for sid in scope_ids):
+                continue
+            matched = match_name and query in it["name"].lower()
+            if not matched and match_content and it["type"] == "file":
+                text = it["content"].decode("utf-8", "ignore").lower()
+                matched = query in text
+            if matched:
+                hits.append(it)
         hits.sort(key=lambda it: it["name"])
-        hits = hits[:limit]
+        total = len(hits)
+        page = hits[offset:offset + limit]
         return web.json_response({
             "total_count":
-            len(hits),
-            "entries": [self.state.render(it) for it in hits],
+            total,
+            "entries": [self.state.search_entry(it) for it in page],
+            "offset":
+            offset,
+            "limit":
+            limit,
         })
 
 

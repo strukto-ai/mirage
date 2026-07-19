@@ -18,7 +18,6 @@ from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import (copy_file, copy_folder, delete_file,
                                  delete_folder, list_folder_items)
-from mirage.core.box.readdir import vfs_name_for
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -41,8 +40,7 @@ async def _copy_into(accessor: BoxAccessor, item: dict[str, Any],
         # Merge into an existing folder (GNU cp -r semantics): copy each child
         # rather than replacing the folder, so pre-existing entries survive.
         for child in await list_folder_items(tm, item["id"]):
-            await _copy_into(accessor, child,
-                             _child_spec(dst, vfs_name_for(child["name"])))
+            await _copy_into(accessor, child, _child_spec(dst, child["name"]))
         return
     dst_parent = await resolve_parent_id(accessor, dst_parts)
     if dst_parent is None:

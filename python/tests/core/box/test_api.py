@@ -17,7 +17,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.core.box._client import BoxTokenManager
-from mirage.core.box.api import LIST_FIELDS, list_folder_items, search_items
+from mirage.core.box.api import (SEARCH_FIELDS, list_folder_items,
+                                 search_content)
 from mirage.core.box.config import BoxConfig
 
 
@@ -79,7 +80,7 @@ async def test_list_folder_items_stops_on_empty_page(tm):
 
 
 @pytest.mark.asyncio
-async def test_search_items_passes_type_filter(tm):
+async def test_search_content_scopes_and_matches_content(tm):
     with patch(
             "mirage.core.box.api.box_get",
             new_callable=AsyncMock,
@@ -92,8 +93,32 @@ async def test_search_items_passes_type_filter(tm):
                 }]
             },
     ) as mock_get:
-        items = await search_items(tm, "hit", item_type="file")
+        items, truncated = await search_content(tm, "needle", "42")
     assert items[0]["id"] == "9"
+    assert truncated is False
     _, kwargs = mock_get.await_args
+    assert kwargs["params"]["ancestor_folder_ids"] == "42"
+    assert kwargs["params"]["content_types"] == "name,file_content"
     assert kwargs["params"]["type"] == "file"
-    assert kwargs["params"]["fields"] == LIST_FIELDS
+    assert kwargs["params"]["fields"] == SEARCH_FIELDS
+
+
+@pytest.mark.asyncio
+async def test_search_content_flags_truncation_at_ceiling(tm):
+    page = {
+        "total_count":
+        20_000,
+        "entries": [{
+            "id": str(i),
+            "name": "f",
+            "type": "file"
+        } for i in range(200)],
+    }
+    with patch(
+            "mirage.core.box.api.box_get",
+            new_callable=AsyncMock,
+            return_value=page,
+    ):
+        items, truncated = await search_content(tm, "q", "0")
+    assert truncated is True
+    assert len(items) >= 10_000

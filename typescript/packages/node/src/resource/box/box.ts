@@ -67,6 +67,7 @@ export class BoxResource extends BaseResource implements Resource {
     this.accessor = new BoxAccessor({
       tokenManager: tm,
       ...(config.rootFolderId !== undefined ? { rootFolderId: config.rootFolderId } : {}),
+      ...(config.contentSearch !== undefined ? { contentSearch: config.contentSearch } : {}),
     })
   }
 

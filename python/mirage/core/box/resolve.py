@@ -16,7 +16,7 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.api import list_folder_items
-from mirage.core.box.readdir import ROOT_FOLDER_ID, vfs_name_for
+from mirage.core.box.readdir import ROOT_FOLDER_ID
 from mirage.types import PathSpec
 
 
@@ -35,8 +35,7 @@ async def resolve_item(accessor: BoxAccessor,
     Box has no path-addressing endpoint, so writes resolve ids by listing
     each level from the mount root. Returns the Box item dict for the full
     path, or None if any component is missing (or a non-final component is
-    not a folder). Matches vfs names so paths spelled with the ``.json``
-    suffix on box-native files still resolve.
+    not a folder).
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -47,8 +46,7 @@ async def resolve_item(accessor: BoxAccessor,
     cur: dict[str, Any] | None = None
     for i, name in enumerate(parts):
         children = await list_folder_items(tm, cur_id)
-        match = next((c for c in children if vfs_name_for(c["name"]) == name),
-                     None)
+        match = next((c for c in children if c["name"] == name), None)
         if match is None:
             return None
         cur = match

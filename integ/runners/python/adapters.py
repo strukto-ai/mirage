@@ -540,6 +540,9 @@ class BoxService:
                 access_token="integ-box-token",
                 endpoint=self.endpoint,
                 root_folder_id=folder["id"],
+                # The fake supports name+content search, so exercise grep/rg
+                # push-down narrowing in the battery.
+                content_search=True,
             ))
 
     async def teardown(self) -> None:

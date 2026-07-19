@@ -23,42 +23,12 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 ROOT_FOLDER_ID = "0"
 
-# File extensions that mirage post-processes into clean JSON. The vfs name
-# gets a `.json` suffix appended so consumers (and the AI) see at a glance
-# that cat returns JSON; the underlying Box file ID is the same regardless.
-SPECIAL_EXT_TO_RT = {
-    ".boxnote": "box/boxnote",
-    ".boxcanvas": "box/boxcanvas",
-    ".gdoc": "box/gdoc",
-    ".gsheet": "box/gsheet",
-    ".gslides": "box/gslides",
-}
-
-
-def special_resource_type(name: str) -> str | None:
-    lower = name.lower()
-    for src, rt in SPECIAL_EXT_TO_RT.items():
-        if lower.endswith(src):
-            return rt
-    return None
-
-
-def vfs_name_for(name: str) -> str:
-    lower = name.lower()
-    for src in SPECIAL_EXT_TO_RT:
-        if lower.endswith(src):
-            return name + ".json"
-    return name
-
 
 def resource_type_for(item: dict[str, Any]) -> str:
     if item.get("type") == "folder":
         return "box/folder"
     if item.get("type") == "web_link":
         return "box/weblink"
-    special_rt = special_resource_type(item.get("name", ""))
-    if special_rt is not None:
-        return special_rt
     return "box/file"
 
 
@@ -106,7 +76,7 @@ async def readdir(
     entries: list[tuple[str, IndexEntry, bool]] = []
     for it in items:
         is_dir = it.get("type") == "folder"
-        filename = vfs_name_for(it["name"])
+        filename = it["name"]
         size = it.get("size")
         entry = IndexEntry(
             id=it["id"],

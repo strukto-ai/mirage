@@ -20,7 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.box.api import get_folder_info
 from mirage.core.box.readdir import ROOT_FOLDER_ID
 from mirage.core.box.readdir import readdir as _readdir
-from mirage.core.box.readdir import resource_type_for, vfs_name_for
+from mirage.core.box.readdir import resource_type_for
 from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _stat_from_item(item: dict[str, Any]) -> FileStat:
-    vfs_name = vfs_name_for(item["name"])
+    vfs_name = item["name"]
     rt = resource_type_for(item)
     if rt == "box/folder":
         return FileStat(

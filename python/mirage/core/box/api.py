@@ -15,15 +15,17 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-import aiohttp
-
-from mirage.core.box._client import (BoxApiError, BoxTokenManager,
-                                     box_auth_headers, box_delete, box_get,
+from mirage.core.box._client import (BoxTokenManager, box_delete, box_get,
                                      box_get_bytes, box_get_stream,
                                      box_post_json, box_put_json,
                                      box_upload_multipart)
 
 LIST_FIELDS = "id,name,type,size,modified_at,etag,sha1,parent"
+SEARCH_FIELDS = "id,name,type,path_collection"
+SEARCH_PAGE = 200
+# Box search serves at most 10,000 matches across all pages; a result set
+# that reaches the ceiling may be incomplete and must not narrow a scan.
+MAX_SEARCH_MATCHES = 10_000
 
 
 async def list_folder_items(
@@ -72,75 +74,51 @@ def download_file_stream(tm: BoxTokenManager,
     return box_get_stream(tm, f"{tm.api_base}/files/{file_id}/content")
 
 
-async def search_items(
+async def search_content(
     tm: BoxTokenManager,
     query: str,
-    limit: int = 100,
-    item_type: str | None = None,
-) -> list[dict[str, Any]]:
-    """Search Box by name/content substring.
+    ancestor_folder_id: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Name+content search scoped to a folder subtree.
+
+    Pages Box `/search` with `ancestor_folder_ids` scoping and
+    `content_types=name,file_content` so the query matches file names and the
+    server-indexed body text. Each returned item carries `path_collection`
+    (its ancestor chain) for mount-relative path reconstruction.
 
     Args:
         tm (BoxTokenManager): token manager.
-        query (str): search query.
-        limit (int): maximum results.
-        item_type (str | None): "file" or "folder" to restrict the type.
+        query (str): literal search query.
+        ancestor_folder_id (str): folder id scoping the search to a subtree.
+
+    Returns:
+        tuple[list[dict[str, Any]], bool]: matched file items and whether the
+            result reached the 10,000-match ceiling (a truncated set is not a
+            trustworthy superset of a full walk).
     """
-    params: dict[str, Any] = {
-        "query": query,
-        "fields": LIST_FIELDS,
-        "limit": limit,
-    }
-    if item_type is not None:
-        params["type"] = item_type
-    data = await box_get(tm, f"{tm.api_base}/search", params=params)
-    entries: list[dict[str, Any]] = data.get("entries", [])
-    return entries
-
-
-async def get_extracted_text(tm: BoxTokenManager, file_id: str) -> str:
-    """Fetch the auto-extracted plain-text representation of a Box file.
-
-    Box transcodes .docx / .xlsx / .pptx (and many other formats)
-    server-side into plain text, exposed via the representations API.
-    Returns "" if the representation isn't ready or doesn't exist for
-    this file type.
-
-    Args:
-        tm (BoxTokenManager): token manager.
-        file_id (str): Box file id.
-    """
-    headers = await box_auth_headers(tm)
-    meta_url = f"{tm.api_base}/files/{file_id}?fields=representations"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(meta_url,
-                               headers={
-                                   **headers, "X-Rep-Hints": "[extracted_text]"
-                               }) as resp:
-            if resp.status >= 400:
-                text = await resp.text()
-                raise BoxApiError(
-                    f"Box GET extracted_text meta -> {resp.status} {text}",
-                    resp.status,
-                )
-            data = await resp.json()
-        entries = (data.get("representations") or {}).get("entries") or []
-        entry = next(
-            (e
-             for e in entries if e.get("representation") == "extracted_text"),
-            None)
-        if entry is None:
-            return ""
-        if (entry.get("status") or {}).get("state") != "success":
-            return ""
-        tmpl = (entry.get("content") or {}).get("url_template")
-        if not tmpl:
-            return ""
-        content_url = tmpl.replace("{+asset_path}", "")
-        async with session.get(content_url, headers=headers) as resp:
-            if resp.status >= 400:
-                return ""
-            return await resp.text()
+    out: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        data = await box_get(
+            tm,
+            f"{tm.api_base}/search",
+            params={
+                "query": query,
+                "ancestor_folder_ids": ancestor_folder_id,
+                "content_types": "name,file_content",
+                "type": "file",
+                "fields": SEARCH_FIELDS,
+                "limit": SEARCH_PAGE,
+                "offset": offset,
+            },
+        )
+        entries = data.get("entries", [])
+        out.extend(entries)
+        offset += len(entries)
+        if len(out) >= MAX_SEARCH_MATCHES:
+            return out, True
+        if offset >= data.get("total_count", 0) or not entries:
+            return out, False
 
 
 async def upload_new_file(tm: BoxTokenManager, parent_id: str, name: str,

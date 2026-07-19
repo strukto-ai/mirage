@@ -279,6 +279,9 @@ async function openBox(target: Target): Promise<Open> {
       accessToken: 'integ-box-token',
       endpoint,
       rootFolderId: folderId,
+      // The fake supports name+content search, so exercise grep/rg push-down
+      // narrowing in the battery.
+      contentSearch: true,
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })

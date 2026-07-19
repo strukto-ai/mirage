@@ -17,15 +17,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.config import IndexEntry
-from mirage.core.box.readdir import is_dir_name, readdir, vfs_name_for
+from mirage.core.box.readdir import is_dir_name, readdir
 from mirage.types import PathSpec
-
-
-def test_vfs_name_appends_json_for_special_files():
-    assert vfs_name_for("notes.boxnote") == "notes.boxnote.json"
-    assert vfs_name_for("Plan.BOXCANVAS") == "Plan.BOXCANVAS.json"
-    assert vfs_name_for("doc.gdoc") == "doc.gdoc.json"
-    assert vfs_name_for("plain.txt") == "plain.txt"
 
 
 def test_is_dir_name_only_trusts_trailing_slash():
@@ -71,7 +64,7 @@ async def test_readdir_root_lists_folder_zero(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_special_files_surface_with_json_suffix(accessor, index):
+async def test_readdir_box_native_files_surface_raw(accessor, index):
     items = [{
         "id": "300",
         "name": "meeting.boxnote",
@@ -87,10 +80,10 @@ async def test_readdir_special_files_surface_with_json_suffix(accessor, index):
         result = await readdir(
             accessor, PathSpec(resource_path="", virtual="/", directory="/"),
             index)
-    assert result == ["/meeting.boxnote.json"]
-    entry = (await index.get("/meeting.boxnote.json")).entry
+    assert result == ["/meeting.boxnote"]
+    entry = (await index.get("/meeting.boxnote")).entry
     assert entry is not None
-    assert entry.resource_type == "box/boxnote"
+    assert entry.resource_type == "box/file"
 
 
 @pytest.mark.asyncio

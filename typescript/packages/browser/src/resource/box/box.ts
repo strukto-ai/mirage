@@ -66,6 +66,7 @@ export class BoxResource implements Resource {
     this.accessor = new BoxAccessor({
       tokenManager: tm,
       ...(config.rootFolderId !== undefined ? { rootFolderId: config.rootFolderId } : {}),
+      ...(config.contentSearch !== undefined ? { contentSearch: config.contentSearch } : {}),
     })
     this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }

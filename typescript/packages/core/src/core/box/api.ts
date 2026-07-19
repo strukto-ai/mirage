@@ -13,8 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  BoxApiError,
-  boxAuthHeaders,
   boxDelete,
   boxGet,
   boxGetBytes,
@@ -46,6 +44,24 @@ interface ListItemsResponse {
 }
 
 const LIST_FIELDS = 'id,name,type,size,modified_at,etag,sha1,parent'
+const SEARCH_FIELDS = 'id,name,type,path_collection'
+const SEARCH_PAGE = 200
+// Box search serves at most 10,000 matches across all pages; a result set
+// that reaches the ceiling may be incomplete and must not narrow a scan.
+const MAX_SEARCH_MATCHES = 10_000
+
+interface BoxPathCollectionEntry {
+  type: 'folder'
+  id: string
+  name: string
+}
+
+export interface BoxSearchItem {
+  type: BoxItemType
+  id: string
+  name: string
+  path_collection?: { total_count: number; entries: BoxPathCollectionEntry[] }
+}
 
 export async function listFolderItems(
   tm: BoxTokenManager,
@@ -89,60 +105,41 @@ export async function* downloadFileStream(
 
 interface SearchResponse {
   total_count: number
-  entries: BoxItem[]
-}
-
-export async function searchItems(
-  tm: BoxTokenManager,
-  query: string,
-  opts: { limit?: number; type?: 'file' | 'folder' } = {},
-): Promise<BoxItem[]> {
-  const params: Record<string, string | number> = {
-    query,
-    fields: LIST_FIELDS,
-    limit: opts.limit ?? 100,
-  }
-  if (opts.type !== undefined) params.type = opts.type
-  const data = (await boxGet(tm, `${tm.apiBase}/search`, params)) as SearchResponse
-  return data.entries
-}
-
-interface RepresentationsResponse {
-  representations?: {
-    entries?: {
-      representation?: string
-      status?: { state?: 'success' | 'pending' | 'none' | 'error' }
-      content?: { url_template?: string }
-    }[]
-  }
+  entries: BoxSearchItem[]
 }
 
 /**
- * Fetches the auto-extracted plain-text representation of a Box file.
- * Box transcodes .docx / .xlsx / .pptx (and many other formats) server-side
- * into plain text, exposed via the `representations` API. Returns "" if the
- * representation isn't ready or doesn't exist for this file type.
+ * Name+content search scoped to a folder subtree. Pages Box `/search` with
+ * `ancestor_folder_ids` scoping and `content_types=name,file_content` so the
+ * query matches file names and the server-indexed body text. Each returned
+ * item carries `path_collection` (its ancestor chain) for mount-relative path
+ * reconstruction. The boolean is true when the result reached the
+ * 10,000-match ceiling (a truncated set is not a trustworthy superset).
  */
-export async function getExtractedText(tm: BoxTokenManager, fileId: string): Promise<string> {
-  const headers = await boxAuthHeaders(tm)
-  const metaUrl = `${tm.apiBase}/files/${fileId}?fields=representations`
-  const r = await fetch(metaUrl, {
-    headers: { ...headers, 'X-Rep-Hints': '[extracted_text]' },
-  })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new BoxApiError(`Box GET extracted_text meta → ${String(r.status)} ${text}`, r.status)
+export async function searchContent(
+  tm: BoxTokenManager,
+  query: string,
+  ancestorFolderId: string,
+): Promise<{ items: BoxSearchItem[]; truncated: boolean }> {
+  const out: BoxSearchItem[] = []
+  let offset = 0
+  for (;;) {
+    const data = (await boxGet(tm, `${tm.apiBase}/search`, {
+      query,
+      ancestor_folder_ids: ancestorFolderId,
+      content_types: 'name,file_content',
+      type: 'file',
+      fields: SEARCH_FIELDS,
+      limit: SEARCH_PAGE,
+      offset,
+    })) as SearchResponse
+    out.push(...data.entries)
+    offset += data.entries.length
+    if (out.length >= MAX_SEARCH_MATCHES) return { items: out, truncated: true }
+    if (offset >= data.total_count || data.entries.length === 0) {
+      return { items: out, truncated: false }
+    }
   }
-  const data = (await r.json()) as RepresentationsResponse
-  const entry = data.representations?.entries?.find((e) => e.representation === 'extracted_text')
-  if (entry === undefined) return ''
-  if (entry.status?.state !== 'success') return ''
-  const tmpl = entry.content?.url_template
-  if (tmpl === undefined) return ''
-  const contentUrl = tmpl.replace('{+asset_path}', '')
-  const r2 = await fetch(contentUrl, { headers })
-  if (!r2.ok) return ''
-  return r2.text()
 }
 
 export async function uploadNewFile(

@@ -15,7 +15,6 @@
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import create_folder, list_folder_items
-from mirage.core.box.readdir import vfs_name_for
 from mirage.core.box.resolve import path_parts, resolve_parent_id, root_id
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -48,8 +47,7 @@ async def mkdir(accessor: BoxAccessor,
         cur_id = root_id(accessor)
         for name in parts:
             children = await list_folder_items(tm, cur_id)
-            match = next(
-                (c for c in children if vfs_name_for(c["name"]) == name), None)
+            match = next((c for c in children if c["name"] == name), None)
             if match is not None:
                 if match.get("type") != "folder":
                     raise NotADirectoryError(path.virtual)

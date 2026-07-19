@@ -17,23 +17,19 @@ root is folder id `0`). Mirage resolves each path to its id by listing folders
 level by level and caches the path → id mapping, so nested directories cost
 one API call per level on first access.
 
-Box-native documents are decoded to clean JSON on read: `.boxnote` and
-`.boxcanvas` surface as `<name>.boxnote.json` / `<name>.boxcanvas.json`, and
-Box's Google-Workspace files (`.gdoc` / `.gsheet` / `.gslides`) surface as
-`<name>.<kind>.json` with the server-extracted text in `body_text`.
+Every Box item is served as its raw bytes, keeping its real name. Box's native
+`.boxnote` / `.boxcanvas` come back as their stored ProseMirror-style JSON
+(text, so `cat foo.boxnote | jq .` works), and Box's Google-Workspace files
+(`.gdoc` / `.gsheet` / `.gslides`) come back as the Office Open XML zips
+(`docx` / `xlsx` / `pptx`) Box stores them as, opaque binary like any other
+Office document.
 
 <Note>
-Box's `.gdoc.json` shares the vfs suffix with Google Drive's, but the payload
-is different. Box stores these files as Office Open XML (`docx` / `xlsx` /
-`pptx`) and Mirage reads them through Box's
-[representations API](https://developer.box.com/reference/get-files-id/#param-representations)
-(`extracted_text`), returning a small envelope with `body_text`. Google Drive
-reads them through Google's Documents API and returns the full rich Document
-structure. The `gws` commands (`gws docs documents get` and friends) work only
-on Google mounts: the ids are Google ids, and Box exposes no Docs-style edit
-API for these files. On a Box mount, use `cat ... | jq -r .body_text` for the
-text; for rich reads or edits, mount the file's Google counterpart via
-[Google Drive](/python/resource/gdrive).
+Box exposes no API to edit these formats from a structured payload, so Mirage
+does not decode them, it hands back exactly what Box stores. For a rich,
+editable view of Google-format documents, mount them through
+[Google Drive](/python/resource/gdrive) with Google credentials instead; the
+`gws` commands operate on Google file ids and do not apply to Box.
 </Note>
 
 For credential setup, see the [Box Setup](/home/setup/box) guide. The
@@ -135,7 +131,8 @@ async def main() -> None:
     print(await r.stdout_str())
 
     # Plain text from a Box Note:
-    r = await ws.execute("cat /box/notes/standup.boxnote.json | jq -r .body_text")
+    # A Box Note comes back as raw ProseMirror JSON:
+    r = await ws.execute("cat /box/notes/standup.boxnote | jq .")
     print(await r.stdout_str())
 
     await ws.close()

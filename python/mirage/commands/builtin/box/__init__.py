@@ -13,14 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.box.du import du
+from mirage.commands.builtin.box.grep import grep
 from mirage.commands.builtin.box.io import IO as _IO
+from mirage.commands.builtin.box.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (make_file_read_provision,
                                                   make_generic_commands)
 from mirage.core.box.read import read as _read
 from mirage.core.box.stat import stat as _stat
 
-_BOX_OVERRIDES = {"du"}
+_BOX_OVERRIDES = {"du", "grep", "rg"}
 
 COMMANDS = [
     *make_filetype_commands("box",
@@ -34,4 +36,6 @@ COMMANDS = [
         overrides=_BOX_OVERRIDES,
     ),
     du,
+    grep,
+    rg,
 ]

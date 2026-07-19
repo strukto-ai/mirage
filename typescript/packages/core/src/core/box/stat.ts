@@ -17,15 +17,12 @@ import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { getFolderInfo, type BoxItem } from './api.ts'
-import { readdir as coreReaddir, resourceTypeFor, vfsNameFor } from './readdir.ts'
+import { readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
 import { pathParts, resolveItem } from './resolve.ts'
 import { enoent } from '../../utils/errors.ts'
 
 function guessType(name: string): FileType {
   const lower = name.toLowerCase()
-  // Box's .boxnote / .boxcanvas / .gdoc / .gsheet / .gslides files surface
-  // through the vfs with a `.json` suffix; the .json check below classifies
-  // them via mirage-processed JSON.
   if (lower.endsWith('.json')) return FileType.JSON
   if (lower.endsWith('.csv')) return FileType.CSV
   if (lower.endsWith('.png')) return FileType.IMAGE_PNG
@@ -44,7 +41,7 @@ function guessType(name: string): FileType {
 }
 
 function statFromItem(item: BoxItem): FileStat {
-  const vfsName = vfsNameFor(item.name)
+  const vfsName = item.name
   const rt = resourceTypeFor(item)
   if (rt === 'box/folder') {
     return new FileStat({

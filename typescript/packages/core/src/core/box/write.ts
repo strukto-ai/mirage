@@ -31,7 +31,6 @@ import {
   uploadNewFile,
   type BoxItem,
 } from './api.ts'
-import { vfsNameFor } from './readdir.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
 
 export async function write(
@@ -83,7 +82,7 @@ export async function mkdir(accessor: BoxAccessor, path: PathSpec, parents = fal
     let curId = accessor.rootFolderId
     for (const name of parts) {
       const children = await listFolderItems(tm, curId)
-      const match = children.find((c) => vfsNameFor(c.name) === name)
+      const match = children.find((c) => c.name === name)
       if (match !== undefined) {
         if (match.type !== 'folder') throw enotdir(path.virtual)
         curId = match.id
@@ -170,7 +169,7 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
     // Merge into an existing folder (GNU cp -r semantics): copy each child
     // rather than replacing the folder, so pre-existing entries survive.
     for (const child of await listFolderItems(tm, item.id)) {
-      await copyInto(accessor, child, childSpec(dst, vfsNameFor(child.name)))
+      await copyInto(accessor, child, childSpec(dst, child.name))
     }
     return
   }

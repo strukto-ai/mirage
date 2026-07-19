@@ -921,8 +921,7 @@ export {
   downloadFile as boxDownloadFile,
   downloadFileStream as boxDownloadFileStream,
   listFolderItems as boxListFolderItems,
-  searchItems as boxSearchItems,
-  getExtractedText as boxGetExtractedText,
+  searchContent as boxSearchContent,
 } from './core/box/api.ts'
 export { BoxAccessor } from './accessor/box.ts'
 export { BOX_COMMANDS } from './commands/builtin/box/index.ts'
@@ -931,16 +930,6 @@ export { read as boxRead, stream as boxStream } from './core/box/read.ts'
 export { readdir as boxReaddir } from './core/box/readdir.ts'
 export { stat as boxStat } from './core/box/stat.ts'
 export { BOX_PROMPT } from './resource/box/prompt.ts'
-export {
-  type BoxnoteParagraph,
-  type BoxnoteProcessed,
-  processBoxnote,
-} from './core/filetype/boxnote.ts'
-export {
-  type BoxcanvasProcessed,
-  type BoxcanvasProcessedWidget,
-  processBoxcanvas,
-} from './core/filetype/boxcanvas.ts'
 export { GmailAccessor } from './accessor/gmail.ts'
 export { GMAIL_COMMANDS } from './commands/builtin/gmail/index.ts'
 export { GMAIL_OPS } from './ops/gmail/index.ts'

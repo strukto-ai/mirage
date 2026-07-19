@@ -13,45 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 PROMPT = """{prefix}
-  Mirrors Box folder hierarchy. May contain:
-    <name>.boxnote.json     Box Note            (cat returns boxnote.json shape)
-    <name>.boxcanvas.json   Box Canvas          (cat returns boxcanvas.json shape)
-    <name>.gdoc.json        Box's Google Doc    (cat returns box-office.json shape)
-    <name>.gsheet.json      Box's Google Sheet  (cat returns box-office.json shape)
-    <name>.gslides.json     Box's Google Slides (cat returns box-office.json shape)
-    <other-files>           PDFs, images, parquet, etc. - cat returns raw bytes
+  Mirrors Box folder hierarchy. Every item is served as its raw bytes:
+    <name>.boxnote      Box Note    (raw ProseMirror-style JSON; pipe to jq)
+    <name>.boxcanvas    Box Canvas  (raw canvas JSON; pipe to jq)
+    <name>.gdoc/.gsheet/.gslides  Box's Google-Workspace files, stored as
+                        Office Open XML (docx/xlsx/pptx) - opaque binary
+    <other-files>       PDFs, images, parquet, etc. - raw bytes
 
   IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
   Box uses numeric folder IDs internally (root = 0); mirage caches the
   path -> id mapping, so nested dirs cost one API call per level on first
-  access. Use ls on the parent dir before constructing a path.
-
-  JSON shapes returned by cat for the special file types:
-
-  boxnote.json {
-    "id":           "...",
-    "body_text":    "paragraphs joined by \\n",
-    "paragraphs":   [ { "text": "...", "authors": ["..."] } ],
-    "authors":      { "<id>": "Author Name" },
-    "last_edit_at": "..."
-  }
-
-  boxcanvas.json {
-    "id":              "...",
-    "widget_count":    ...,
-    "widgets_by_type": { "shape": ..., "link": ... },
-    "body_text":       "shape labels joined by \\n",
-    "widgets":         [ { "id": "...", "type": "shape", "text": "..." } ],
-    "authors":         [ "..." ]
-  }
-
-  box-office.json {
-    "id":          "...",
-    "name":        "...",
-    "format":      "docx" | "xlsx" | "pptx",
-    "size":        ...,
-    "modified_at": "...",
-    "body_text":   "auto-extracted plain text"
-  }
-
-  For plain text from any of these: cat <path> | jq -r .body_text"""
+  access. Use ls on the parent dir before constructing a path."""

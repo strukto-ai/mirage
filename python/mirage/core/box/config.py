@@ -40,6 +40,12 @@ class BoxConfig(BaseModel):
     # the Box web URL (box.com/folder/<id>), so a subfolder mount survives
     # reorganization that a path prefix would not.
     root_folder_id: str | None = None
+    # Opt in to grep/rg content-search push-down: route recursive literal
+    # scans through Box `/search` (name + server-indexed body text) to narrow
+    # the file set before scanning locally, instead of walking the whole tree.
+    # Off by default because Box's search index lags recent writes, so a
+    # freshly-written mount would under-report until the index catches up.
+    content_search: bool = False
     refresh_fn: Callable[[str], Awaitable[tuple[str, str, int]]] | None = None
     # Box rotates the refresh token on each refresh. Set
     # on_refresh_token_rotated to persist the new token (e.g. write to disk

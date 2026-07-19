@@ -22,6 +22,10 @@ export interface BoxConfig {
   // the Box web URL (box.com/folder/<id>), so a subfolder mount survives
   // reorganization that a path prefix would not.
   rootFolderId?: string
+  // Opt in to grep/rg content-search push-down: route recursive literal
+  // scans through Box search to narrow the file set before scanning locally.
+  // Off by default because Box's search index lags recent writes.
+  contentSearch?: boolean
   clientId?: string
   clientSecret?: string
   refreshToken?: string
@@ -52,6 +56,7 @@ export interface BoxConfigRedacted {
 const BoxConfigSchema = z.object({
   endpoint: z.string().optional(),
   rootFolderId: z.string().optional(),
+  contentSearch: z.boolean().optional(),
   clientId: z.string().optional(),
   clientSecret: secretStr().optional(),
   refreshToken: secretStr().optional(),
@@ -67,6 +72,7 @@ export function normalizeBoxConfig(input: Record<string, unknown>): BoxConfig {
   return normalizeFields(input, {
     rename: {
       root_folder_id: 'rootFolderId',
+      content_search: 'contentSearch',
       client_id: 'clientId',
       client_secret: 'clientSecret',
       refresh_token: 'refreshToken',
