@@ -107,8 +107,7 @@ async def test_stdin_redirect_binds_last_command():
 async def test_fd_table_file_then_merge():
     # `> f 2>&1` — fd2 follows fd1 into the file (canonical idiom).
     ws = await _workspace()
-    io = await ws.execute(
-        "{ echo out; ls /data/missing; } > /data/both 2>&1")
+    io = await ws.execute("{ echo out; ls /data/missing; } > /data/both 2>&1")
     assert (io.stdout or b"") == b""
     assert io.stderr is None
     both = await _out(ws, "cat /data/both")
@@ -120,8 +119,7 @@ async def test_fd_table_file_then_merge():
 async def test_fd_table_merge_then_file():
     # `2>&1 > f` — fd2 keeps the ORIGINAL stdout; only stdout hits f.
     ws = await _workspace()
-    io = await ws.execute(
-        "{ echo out; ls /data/missing; } 2>&1 > /data/only")
+    io = await ws.execute("{ echo out; ls /data/missing; } 2>&1 > /data/only")
     assert b"missing" in (io.stdout or b"")
     assert await _out(ws, "cat /data/only") == "out\n"
 

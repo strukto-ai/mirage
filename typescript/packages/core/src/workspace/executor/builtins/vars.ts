@@ -305,6 +305,7 @@ export async function handleRead(
   if (lineBytes === null) {
     for (const v of variables) {
       session.env[v] = ''
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.arrays[v]
     }
     return [
@@ -354,6 +355,7 @@ export async function handleRead(
     session.env[name] = parts[i] ?? ''
     // A scalar write replaces any array of the same name, matching
     // the variable_assignment path.
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete session.arrays[name]
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'read', exitCode: 0 })]

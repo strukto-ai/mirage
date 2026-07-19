@@ -25,7 +25,6 @@ from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
-
 _TO_STDOUT = object()
 _TO_STDERR = object()
 
@@ -136,7 +135,7 @@ async def handle_redirect(
             out_stdout += data
         elif dest is _TO_STDERR:
             out_stderr += data
-        else:
+        elif isinstance(dest, str):
             file_bufs[dest] += data
 
     for path, buf in file_bufs.items():

@@ -56,8 +56,7 @@ def unescape_heredoc(text: str) -> str:
     return text.replace("\x00", "\\")
 
 
-def _find_first(node: tree_sitter.Node,
-                ntype: str) -> tree_sitter.Node | None:
+def _find_first(node: tree_sitter.Node, ntype: str) -> tree_sitter.Node | None:
     if node.type == ntype:
         return node
     for child in node.named_children:

@@ -178,7 +178,7 @@ export async function expandNode(
       // text is reconstructed with `$`-refs substituted).
       const sub = tsNode.namedChildren
       const only = sub[0]
-      if (sub.length === 1 && only !== undefined && only.type === NT.SUBSHELL) {
+      if (sub.length === 1 && only?.type === NT.SUBSHELL) {
         const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack)
         const expr = parenExpr.slice(1, -1)
         try {

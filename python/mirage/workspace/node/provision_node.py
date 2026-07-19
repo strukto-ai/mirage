@@ -123,9 +123,9 @@ async def _provision_redirected(
     ]
     result = await handle_redirect_provision(recurse, registry, command,
                                              targets, session, namespace)
-    if any(r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
-           and r.target_node is not None
-           and has_command_substitution(r.target_node) for r in redirects):
+    if any(r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING) and r.
+           target_node is not None and has_command_substitution(r.target_node)
+           for r in redirects):
         # A suppressed substitution hid the real redirect target
         # (heredoc bodies carry their node too, but their target is
         # stdin, not a hidden file).

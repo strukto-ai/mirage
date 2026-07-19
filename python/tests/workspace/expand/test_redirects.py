@@ -114,8 +114,7 @@ async def test_heredoc_backslash_newline_joins_lines():
 @pytest.mark.asyncio
 async def test_heredoc_quoted_delimiter_disables_expansion():
     ws = await _workspace_at("/data")
-    out = await _stdout(ws,
-                        "v=zzz\ncat <<'END'\nraw=$v\nsub=$(echo x)\nEND")
+    out = await _stdout(ws, "v=zzz\ncat <<'END'\nraw=$v\nsub=$(echo x)\nEND")
     assert out == "raw=$v\nsub=$(echo x)\n"
 
 
@@ -130,8 +129,7 @@ async def test_heredoc_partially_quoted_delimiter_disables_expansion():
 @pytest.mark.asyncio
 async def test_heredoc_dash_strips_tabs_not_spaces():
     ws = await _workspace_at("/data")
-    out = await _stdout(ws,
-                        "cat <<-END\n\ttab-stripped\n   spaces-kept\nEND")
+    out = await _stdout(ws, "cat <<-END\n\ttab-stripped\n   spaces-kept\nEND")
     assert out == "tab-stripped\n   spaces-kept\n"
 
 

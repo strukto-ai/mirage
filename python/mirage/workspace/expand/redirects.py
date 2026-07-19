@@ -105,9 +105,8 @@ async def expand_heredoc_body(
         if child.type == NT.HEREDOC_CONTENT:
             pieces.append((get_text(child), True))
         else:
-            pieces.append(
-                (await expand_node(child, session, execute_fn,
-                                   call_stack), False))
+            pieces.append((await expand_node(child, session, execute_fn,
+                                             call_stack), False))
         for text, literal in pieces:
             if not text:
                 continue
@@ -189,16 +188,15 @@ async def expand_redirects(
             continue
         if (r.target_node is not None
                 and r.target_node.type == NT.PROCESS_SUBSTITUTION):
-            if (r.kind == RedirectKind.STDIN
-                    and get_process_sub_direction(r.target_node)
-                    == ProcessSubDirection.INPUT):
+            if (r.kind == RedirectKind.STDIN and get_process_sub_direction(
+                    r.target_node) == ProcessSubDirection.INPUT):
                 # `cmd < <(inner)` — run the inner command and feed its
                 # stdout as stdin, reusing the heredoc delivery path.
                 inner_data = b""
                 for c in r.target_node.named_children:
                     if c.type in _PROC_SUB_INNER:
-                        io_ps = await execute_fn(
-                            get_text(c), session_id=session.session_id)
+                        io_ps = await execute_fn(get_text(c),
+                                                 session_id=session.session_id)
                         inner_data = io_ps.stdout or b""
                         break
                 expanded.append(

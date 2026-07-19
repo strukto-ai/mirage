@@ -405,7 +405,7 @@ export function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, bool
  * loses its final newline to heredoc_end. Bash strips quoting from
  * the delimiter before matching and bodies always end with a newline.
  */
-export function normalizeHeredocBody(body: string, delimiter: string): string {
+function normalizeHeredocBody(body: string, delimiter: string): string {
   const clean = delimiter.replaceAll("'", '').replaceAll('"', '')
   const suffix = clean + '\n'
   let out = body

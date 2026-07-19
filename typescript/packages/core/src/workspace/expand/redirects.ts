@@ -38,11 +38,7 @@ const VAR_REF = /(?<!\\)\$([A-Za-z_][A-Za-z0-9_]*)/g
 
 const NUL = String.fromCharCode(0)
 
-function finishHeredocLiteral(
-  text: string,
-  session: Session,
-  callStack: CallStack | null,
-): string {
+function finishHeredocLiteral(text: string, session: Session, callStack: CallStack | null): string {
   let out = text
   if (out.includes('$')) {
     const masked = out.replaceAll('\\\\', NUL)
@@ -71,7 +67,7 @@ function stripHeredocTabs(text: string, atLineStart: boolean): string {
  * heredoc backslash escapes and `<<-` tab stripping; expansion nodes
  * route through expandNode.
  */
-export async function expandHeredocBody(
+async function expandHeredocBody(
   redirectNode: TSNodeLike,
   session: Session,
   executeFn: ExecuteFn,
@@ -193,7 +189,7 @@ export async function expandRedirects(
             const ioPs = await executeFn(getText(c), {
               sessionId: session.sessionId,
             })
-            innerData = (await materialize(ioPs.stdout)) ?? new Uint8Array()
+            innerData = await materialize(ioPs.stdout)
             break
           }
         }

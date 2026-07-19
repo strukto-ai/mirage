@@ -92,7 +92,7 @@ export async function handleRedirect(
     stdoutData =
       ((await applyBarrier(stdout, io, BarrierPolicy.VALUE)) as Uint8Array | null) ??
       new Uint8Array()
-    stderrData = (await materialize(io.stderr)) ?? new Uint8Array()
+    stderrData = await materialize(io.stderr)
   }
 
   let fd1: FdDest = TO_STDOUT
