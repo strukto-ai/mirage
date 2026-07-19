@@ -8,10 +8,10 @@ icon: /images/opencode-logo.svg
 
 ## Install
 
-`@struktoai/mirage-agents/opencode` is a tool factory plus a thin plugin shim. Pair it with `@struktoai/mirage-node` for any Node or Bun project.
+`@struktoai/mirage-agents/opencode` is a tool factory plus a thin plugin shim, typed against OpenCode's official plugin package. Pair it with `@struktoai/mirage-node` for any Node or Bun project.
 
 ```bash
-bun add @struktoai/mirage-agents @struktoai/mirage-node
+bun add @struktoai/mirage-agents @struktoai/mirage-node @opencode-ai/plugin
 ```
 
 OpenCode runs `bun install` on startup against `.opencode/package.json`, so this works whether you use bun, pnpm, or npm in the host project.
@@ -38,7 +38,8 @@ Add the dependencies to `.opencode/package.json` so OpenCode resolves them on st
 {
   "dependencies": {
     "@struktoai/mirage-agents": "*",
-    "@struktoai/mirage-node": "*"
+    "@struktoai/mirage-node": "*",
+    "@opencode-ai/plugin": "*"
   }
 }
 ```
@@ -54,11 +55,11 @@ Then run `opencode` in that directory. The agent's `read /hello.txt`, `bash 'fin
 
 ### Tool reference
 
-Each tool's `execute` returns a plain string (matching the OpenCode plugin contract).
+Tools return plain text except multimodal reads, which use OpenCode's official attachment result.
 
 | Tool | Input | Output |
 | --- | --- | --- |
-| `read` | `{ filePath }` | UTF-8 text, or a binary-stub note for non-text files |
+| `read` | `{ filePath }` | UTF-8 text; a PDF/image attachment; or metadata for other binaries |
 | `write` | `{ filePath, content }` | Confirmation line (auto-mkdirs parent) |
 | `edit` | `{ filePath, oldString, newString, replaceAll? }` | Confirmation line with occurrence count |
 | `ls` | `{ path }` | Newline-separated entries, dirs suffixed with `/` |

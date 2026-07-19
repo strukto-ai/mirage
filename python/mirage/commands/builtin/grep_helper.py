@@ -590,21 +590,31 @@ async def grep_files_only(
     compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
 
     if recursive:
-        return await grep_recursive(
-            readdir_fn,
-            stat_fn,
-            read_bytes_fn,
-            path,
-            compiled,
-            invert,
-            line_numbers,
-            count_only,
-            True,
-            only_matching,
-            max_count,
-            warnings,
-            read_stream_fn,
-        )
+        # GNU only walks directory operands; a file operand under -r takes
+        # the plain single-file scan (TS grepGeneric parity). Stat failures
+        # keep the walk so missing operands surface its error shape.
+        operand_is_file = False
+        try:
+            s = await stat_fn(path)
+            operand_is_file = s.type != FileType.DIRECTORY
+        except (FileNotFoundError, ValueError):
+            operand_is_file = False
+        if not operand_is_file:
+            return await grep_recursive(
+                readdir_fn,
+                stat_fn,
+                read_bytes_fn,
+                path,
+                compiled,
+                invert,
+                line_numbers,
+                count_only,
+                True,
+                only_matching,
+                max_count,
+                warnings,
+                read_stream_fn,
+            )
 
     try:
         data = await read_bytes_fn(path)

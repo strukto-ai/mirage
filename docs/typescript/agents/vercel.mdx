@@ -4,7 +4,7 @@ description: Wire mirage tools into the Vercel AI SDK via the @struktoai/mirage-
 icon: triangle
 ---
 
-The [Vercel AI SDK](https://sdk.vercel.ai) (`ai`) drives tool-calling agents around any provider in its registry. Mirage ships a tool factory that exposes a `Workspace` as five typed tools (`execute`, `readFile`, `writeFile`, `editFile`, `ls`) for `generateText` / `streamText` / agent loops.
+The [Vercel AI SDK](https://sdk.vercel.ai) (`ai`) drives tool-calling agents around any provider in its registry. Mirage ships an AI SDK 7 tool factory that exposes a `Workspace` as five typed tools (`execute`, `readFile`, `writeFile`, `editFile`, `ls`) for `generateText` / `streamText` / agent loops.
 
 ## Install
 
@@ -59,12 +59,14 @@ console.log(text)
 | Tool | Input | Output |
 | --- | --- | --- |
 | `execute` | `{ command: string }` | `{ stdout, stderr, exitCode }` |
-| `readFile` | `{ path: string }` | `{ content }` or `{ error }` |
+| `readFile` | `{ path: string }` | Text, multimodal PDF/image file parts, binary metadata, or an error |
 | `writeFile` | `{ path, content }` | `{ path }` (auto-mkdirs parent) |
 | `editFile` | `{ path, oldString, newString, replaceAll? }` | `{ path, occurrences }` or `{ error }` |
 | `ls` | `{ path: string }` | `{ files: { path, is_dir }[] }` or `{ error }` |
 
 `writeFile` always succeeds for new paths and overwrites existing ones; if you want create-only semantics (error when the file exists), wrap it yourself.
+
+`readFile` uses AI SDK 7's `toModelOutput`: UTF-8 source and data files become text, PDFs and supported images become file content parts, and unknown binary formats return a metadata note. The bytes stay in the Mirage workspace until the model requests the file.
 
 ## Examples
 

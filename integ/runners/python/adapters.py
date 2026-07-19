@@ -599,10 +599,13 @@ class DropboxService:
         account = mount.get("bucket") or mount["path"]
         fake = self.accounts[account]
         return DropboxResource(
+            # The fake supports full-text search_v2, so exercise grep/rg
+            # narrowing in the battery.
             DropboxConfig(client_id="integ-client",
                           client_secret="integ-secret",
                           refresh_token="integ-refresh",
                           endpoint=fake.endpoint,
+                          content_search=True,
                           root_path=mount.get("root") or "/"))
 
     async def teardown(self) -> None:

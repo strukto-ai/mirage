@@ -1,10 +1,10 @@
 ---
-title: pydantic-deepagents
-description: Implements pydantic-ai-backend's SandboxProtocol so pydantic-deepagents and any pydantic-ai agent can run inside a Mirage workspace.
+title: Pydantic AI
+description: Implement pydantic-ai-backend's SandboxProtocol so Pydantic AI agents can run inside a Mirage workspace.
 icon: /images/pydantic-logo.svg
 ---
 
-[pydantic-deepagents](https://github.com/vstorm-co/pydantic-deepagents) is a Claude Code–style deep agent harness built on [pydantic-ai](https://github.com/pydantic/pydantic-ai). It uses [`pydantic-ai-backend`](https://pypi.org/project/pydantic-ai-backend/)'s `SandboxProtocol` for filesystem, shell, grep, and edit operations, Mirage's `PydanticAIWorkspace` is a drop-in implementation of that protocol.
+[Pydantic AI](https://github.com/pydantic/pydantic-ai) agents can use [`pydantic-ai-backend`](https://pypi.org/project/pydantic-ai-backend/)'s `SandboxProtocol` for filesystem, shell, grep, and edit operations. Mirage's `PydanticAIWorkspace` is a drop-in implementation of that protocol and also works with higher-level harnesses such as [pydantic-deepagents](https://github.com/vstorm-co/pydantic-deepagents).
 
 ## Install
 
@@ -12,7 +12,7 @@ icon: /images/pydantic-logo.svg
 uv add 'mirage-ai[pydantic-ai]'
 ```
 
-This pulls in `pydantic-ai>=1.35` and `pydantic-ai-backend>=0.1.0`. To use it with [pydantic-deepagents](https://github.com/vstorm-co/pydantic-deepagents):
+This pulls in `pydantic-ai-slim[anthropic,openai]>=2.13.0` and `pydantic-ai-backend>=0.2.16`. To use it with [pydantic-deepagents](https://github.com/vstorm-co/pydantic-deepagents):
 
 ```bash
 uv add pydantic-deep
@@ -45,7 +45,12 @@ agent = Agent(
         mount_info={"/": "In-memory filesystem (read/write)"},
     ),
     deps_type=Deps,
-    toolsets=[create_console_toolset()],
+    toolsets=[
+        create_console_toolset(
+            image_support=True,
+            document_support=True,
+        )
+    ],
 )
 
 result = agent.run_sync(
@@ -62,9 +67,10 @@ print(result.output)
 | `PydanticAIWorkspace` | `SandboxProtocol` implementation backed by a Mirage workspace. |
 | `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
 
-`PydanticAIWorkspace` routes file operations through the Ops layer directly and shell operations through `Workspace.execute()` for full pipe and flag support. PDF reads are converted to images via `pages_to_images` so the agent can pass them as `BinaryContent`.
+`PydanticAIWorkspace` routes file operations through the Ops layer directly and shell operations through `Workspace.execute()` for full pipe and flag support. Enable `image_support` and `document_support` on the console toolset to pass images and PDFs from any Mirage mount to multimodal models as native `BinaryContent`.
 
 ## Examples
 
 - [`examples/python/agents/pydantic_ai/s3_agent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/pydantic_ai/s3_agent.py), read-only S3 exploration.
-- [`examples/python/agents/pydantic_ai/s3_pdf_agent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/pydantic_ai/s3_pdf_agent.py), PDF page-to-image pipeline.
+- [`examples/python/agents/pydantic_ai/s3_pdf_agent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/pydantic_ai/s3_pdf_agent.py), native PDF input from S3.
+- [`examples/python/agents/pydantic_ai/slack_pdf_agent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/pydantic_ai/slack_pdf_agent.py), native image and PDF reads from Slack.

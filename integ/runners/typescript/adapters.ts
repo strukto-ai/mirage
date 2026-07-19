@@ -370,6 +370,9 @@ async function openDropbox(target: Target): Promise<Open> {
       clientId: 'integ-client',
       clientSecret: 'integ-secret',
       refreshToken: 'integ-refresh',
+      // The fake supports full-text search_v2, so exercise grep/rg
+      // narrowing in the battery.
+      contentSearch: true,
       endpoint: fake.endpoint,
       ...(m.root !== undefined ? { rootPath: m.root } : {}),
     })

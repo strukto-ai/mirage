@@ -29,14 +29,16 @@ class FakeDropbox:
 
     Serves every endpoint the backend calls — /oauth2/token plus the
     /2/files RPCs (list_folder, get_metadata, download, upload,
-    create_folder_v2, delete_v2, move_v2, copy_v2) — on a single
-    origin, matching the DropboxConfig ``endpoint`` override. Mirrors
-    the TS fake in integ/server/dropbox.ts.
+    create_folder_v2, delete_v2, move_v2, copy_v2, search_v2 and
+    search/continue_v2) — on a single origin, matching the
+    DropboxConfig ``endpoint`` override. Mirrors the TS fake in
+    integ/server/dropbox.ts.
     """
 
     def __init__(self) -> None:
         self.folders: set[str] = set()
         self.files: dict[str, tuple[bytes, str]] = {}
+        self.search_cursors: dict[str, tuple[list, int, int]] = {}
         self.endpoint = ""
 
     def _add_ancestors(self, path: str) -> None:
@@ -215,6 +217,78 @@ class FakeDropbox:
     async def handle_copy(self, request: web.Request) -> web.Response:
         return await self._handle_relocate(request, move=False)
 
+    def _search_matches(self, query: str, scope: str,
+                        filename_only: bool) -> list[dict] | None:
+        # Case-insensitive substring over names and content: a superset of
+        # the real token-based matching, which is what grep/rg narrowing
+        # needs (the client still scans the candidates exactly).
+        if scope and self._entry_for(scope) is None:
+            return None
+        q = query.lower()
+        scope_lower = scope.lower()
+        prefix = f"{scope_lower}/" if scope_lower else "/"
+        out: list[dict] = []
+        for path in sorted(self.folders | set(self.files)):
+            lower = path.lower()
+            if scope_lower and lower != scope_lower and not lower.startswith(
+                    prefix):
+                continue
+            name_hit = q in path.rsplit("/", 1)[1].lower()
+            stored = self.files.get(path)
+            content_hit = (not filename_only and stored is not None
+                           and q in stored[0].decode(errors="replace").lower())
+            if not name_hit and not content_hit:
+                continue
+            tag = ("filename_and_content" if name_hit and content_hit else
+                   "filename" if name_hit else "file_content")
+            out.append({
+                "match_type": {
+                    ".tag": tag
+                },
+                "metadata": {
+                    ".tag": "metadata",
+                    "metadata": self._entry_for(path),
+                },
+            })
+        return out
+
+    def _search_page(self, matches: list, start: int,
+                     limit: int) -> web.Response:
+        page = matches[start:start + limit]
+        has_more = start + limit < len(matches)
+        resp: dict = {"matches": page, "has_more": has_more}
+        if has_more:
+            token = f"search-{len(self.search_cursors)}"
+            self.search_cursors[token] = (matches, start + limit, limit)
+            resp["cursor"] = token
+        return web.json_response(resp)
+
+    async def handle_search(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        query = body.get("query") or ""
+        if not query:
+            return web.json_response({"error_summary": "invalid_argument"},
+                                     status=400)
+        options = body.get("options") or {}
+        matches = self._search_matches(query,
+                                       options.get("path") or "",
+                                       bool(options.get("filename_only")))
+        if matches is None:
+            return web.json_response({"error_summary": "path/not_found/..."},
+                                     status=409)
+        return self._search_page(matches, 0,
+                                 int(options.get("max_results") or 100))
+
+    async def handle_search_continue(self,
+                                     request: web.Request) -> web.Response:
+        body = await request.json()
+        state = self.search_cursors.get(body.get("cursor") or "")
+        if state is None:
+            return web.json_response({"error_summary": "reset/..."},
+                                     status=409)
+        matches, start, limit = state
+        return self._search_page(matches, start, limit)
+
 
 async def start_fake_dropbox() -> tuple[FakeDropbox, web.AppRunner]:
     fake = FakeDropbox()
@@ -230,6 +304,9 @@ async def start_fake_dropbox() -> tuple[FakeDropbox, web.AppRunner]:
     app.router.add_post("/2/files/delete_v2", fake.handle_delete)
     app.router.add_post("/2/files/move_v2", fake.handle_move)
     app.router.add_post("/2/files/copy_v2", fake.handle_copy)
+    app.router.add_post("/2/files/search_v2", fake.handle_search)
+    app.router.add_post("/2/files/search/continue_v2",
+                        fake.handle_search_continue)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)

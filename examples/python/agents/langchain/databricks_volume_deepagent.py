@@ -49,7 +49,7 @@ task = ("Inspect /dbx/, identify the most relevant text or markdown files, "
         "and summarize their contents. Use head for large files.")
 result = agent.invoke({"messages": [{"role": "user", "content": task}]})
 
-for text in extract_text(result["messages"]):
+for text in extract_text(result["messages"][-1:]):
     print(text)
 
 records = ws.ops.records

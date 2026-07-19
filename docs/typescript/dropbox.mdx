@@ -62,6 +62,36 @@ await ws.execute('ls /dropbox/') // lists the contents of /Team/data
 `..` segments are rejected. Config dictionaries (e.g. via the resource registry) may spell it
 `root_path`. Omitting it (or passing `/`) mounts the account root as before.
 
+## Search push-down
+
+By default a recursive `grep`/`rg` walks the tree and downloads every file. With
+`contentSearch: true` (config dictionaries may spell it `content_search`), both commands
+first ask [`/2/files/search_v2`](https://www.dropbox.com/developers/documentation/http/documentation#files-search)
+which files contain the pattern's literal, then download and scan only those candidates —
+the output stays exactly GNU/ripgrep because the local scan still decides every match.
+Regex patterns narrow on an extracted required literal; flags whose output must see every
+file in scope (`grep -v`, `grep -c`, `rg -v`, `rg --type/--glob`) always take the full
+walk, as do file operands and multi-pattern (`-e`/`-f`) runs. An empty or failed search
+also falls back to the full walk.
+
+```ts
+const dropbox = new DropboxResource({
+  clientId: process.env.DROPBOX_APP_KEY!,
+  clientSecret: process.env.DROPBOX_APP_SECRET!,
+  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
+  contentSearch: true,
+})
+```
+
+The knob is off by default for two reasons: full-text content search is plan-gated
+(Dropbox Professional/Essentials/Business and up — on other plans `search_v2` silently
+matches file names only, so a narrowed scan would miss content matches), and Dropbox's
+search index lags recent writes by a short delay, so a push-down may miss files written
+moments earlier. Only enable it when the account's plan includes full-text search and
+slightly stale results are acceptable. See
+[Dropbox (Python) — Search push-down](/python/resource/dropbox#search-push-down) for the
+mirrored Python knob.
+
 ## Browser (PKCE, no client secret)
 
 ```bash

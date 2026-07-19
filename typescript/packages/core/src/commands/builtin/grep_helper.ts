@@ -462,7 +462,19 @@ export async function grepFilesOnly(
 ): Promise<string[]> {
   const compiled = compilePattern(pattern, opts.ignoreCase, opts.fixedString, opts.wholeWord)
   if (opts.recursive) {
-    return grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
+    // GNU only walks directory operands; a file operand under -r takes the
+    // plain single-file scan (python grep_files_only parity). Stat failures
+    // keep the walk so missing operands surface its error shape.
+    let operandIsFile = false
+    try {
+      const s = await statFn(path)
+      operandIsFile = s.type !== FileType.DIRECTORY
+    } catch {
+      operandIsFile = false
+    }
+    if (!operandIsFile) {
+      return grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
+    }
   }
   try {
     const data = await readBytesFn(path)

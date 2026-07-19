@@ -14,7 +14,6 @@
 
 import shlex
 
-from pydantic_ai import BinaryContent, ToolReturn
 from pydantic_ai_backends.protocol import SandboxProtocol
 from pydantic_ai_backends.types import (EditResult, ExecuteResponse, FileInfo,
                                         GrepMatch, WriteResult)
@@ -23,7 +22,6 @@ from mirage.agents.pydantic_ai._convert import (io_to_execute_response,
                                                 io_to_file_infos,
                                                 io_to_grep_matches)
 from mirage.bridge.sync import run_async_from_sync
-from mirage.core.filetype.pdf import pages_to_images
 from mirage.io.types import IOResult
 from mirage.workspace.workspace import Workspace
 
@@ -59,11 +57,27 @@ class PydanticAIWorkspace(SandboxProtocol):
         return result
 
     def _read_bytes(self, path: str) -> bytes:
-        return self._run(self._aread_bytes(path))
+        return self.read_bytes(path)
 
     async def _aread_bytes(self, path: str) -> bytes:
+        return await self.aread_bytes(path)
+
+    def read_bytes(self, path: str) -> bytes:
+        return self._run(self.aread_bytes(path))
+
+    async def aread_bytes(self, path: str) -> bytes:
         ops = self._ws.ops
         return await ops.read(path)
+
+    def exists(self, path: str) -> bool:
+        return self._run(self.aexists(path))
+
+    async def aexists(self, path: str) -> bool:
+        try:
+            await self._ws.ops.stat(path)
+        except (FileNotFoundError, ValueError):
+            return False
+        return True
 
     # -- execute -------------------------------------------------------
 
@@ -105,19 +119,14 @@ class PydanticAIWorkspace(SandboxProtocol):
 
     # -- read ----------------------------------------------------------
 
-    def read(self,
-             path: str,
-             offset: int = 0,
-             limit: int = 2000) -> str | ToolReturn:
+    def read(self, path: str, offset: int = 0, limit: int = 2000) -> str:
         return self._run(self.aread(path, offset, limit))
 
     async def aread(self,
                     path: str,
                     offset: int = 0,
-                    limit: int = 2000) -> str | ToolReturn:
+                    limit: int = 2000) -> str:
         ops = self._ws.ops
-        if path.lower().endswith(".pdf"):
-            return await self._aread_pdf(path)
         try:
             data = await ops.read(path)
         except (FileNotFoundError, ValueError) as exc:
@@ -129,24 +138,6 @@ class PydanticAIWorkspace(SandboxProtocol):
         for i, line in enumerate(sliced, start=offset + 1):
             numbered.append(f"{i:>6}\t{line}")
         return "".join(numbered)
-
-    async def _aread_pdf(self, path: str) -> str | ToolReturn:
-        ops = self._ws.ops
-        try:
-            raw = await ops.read(path)
-        except (FileNotFoundError, ValueError) as exc:
-            return f"Error: {exc}"
-        images = pages_to_images(raw)
-        filename = path.rsplit("/", 1)[-1]
-        content: list[str | BinaryContent] = []
-        for page_num, png_bytes in images:
-            content.append(f"Page {page_num}:")
-            content.append(
-                BinaryContent(data=png_bytes, media_type="image/png"))
-        return ToolReturn(
-            return_value=f"PDF: {filename} ({len(images)} pages)",
-            content=content,
-        )
 
     # -- write ---------------------------------------------------------
 

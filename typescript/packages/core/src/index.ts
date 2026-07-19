@@ -902,6 +902,7 @@ export { DROPBOX_OPS } from './ops/dropbox/index.ts'
 export { read as dropboxRead, stream as dropboxStream } from './core/dropbox/read.ts'
 export { readdir as dropboxReaddir } from './core/dropbox/readdir.ts'
 export { stat as dropboxStat } from './core/dropbox/stat.ts'
+export { narrowPaths as dropboxNarrowPaths } from './core/dropbox/search.ts'
 export { DROPBOX_PROMPT } from './resource/dropbox/prompt.ts'
 export {
   BOX_API_BASE,
