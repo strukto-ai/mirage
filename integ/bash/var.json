@@ -74,10 +74,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "vf1() { echo \"$*\"; }; vf1 a b c",
       "expect": {
@@ -100,10 +104,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "vf2() { for x in \"$@\"; do echo \"[$x]\"; done; }; vf2 'a b' c",
       "expect": {
@@ -126,10 +134,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "vf3() { for x in \"$*\"; do echo \"[$x]\"; done; }; vf3 'a b' c",
       "expect": {
@@ -152,10 +164,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "vf4() { for x in $@; do echo \"[$x]\"; done; }; vf4 'a b' c",
       "expect": {
@@ -178,10 +194,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "vf5() { for x in $*; do echo \"[$x]\"; done; }; vf5 'a b' c",
       "expect": {
@@ -204,10 +224,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo $0",
       "expect": {
@@ -230,10 +254,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo `echo hi`",
       "expect": {
@@ -256,10 +284,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "vb1=`printf 'a\\nb'`; echo \"$vb1\"",
       "expect": {
@@ -282,10 +314,14 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
+        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo \"`echo hi` there\"",
       "expect": {

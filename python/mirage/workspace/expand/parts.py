@@ -21,11 +21,17 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.types import PathSpec
+from mirage.utils.path import expand_tilde
+from mirage.workspace.expand.brace import (expand_template, make_inert,
+                                           substitute)
 from mirage.workspace.expand.classify import classify_word
-from mirage.workspace.expand.node import expand_node
+from mirage.workspace.expand.constants import (BRACE_LITERAL_TYPES,
+                                               BRACE_WORD_TYPES, SPLIT_TYPES)
+from mirage.workspace.expand.node import _unescape_unquoted, expand_node
 from mirage.workspace.expand.variable import _PARAM_OPS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
+from mirage.workspace.session.shell_dirs import home_dir
 
 
 def _has_at_expansion(node: tree_sitter.Node) -> bool:
@@ -105,10 +111,45 @@ def _get_positional_args(session: Session,
     return getattr(session, "positional_args", None) or []
 
 
-_SPLIT_TYPES = frozenset({
-    NT.SIMPLE_EXPANSION,
-    NT.EXPANSION,
-})
+async def _expand_brace_word(
+    node: tree_sitter.Node,
+    session: Session,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack | None,
+) -> list[str] | None:
+    """Brace-expand a concatenation or brace_expression into words.
+
+    Literal word tokens form the brace template; every other child
+    (expansions, strings, substitutions) expands first and joins as an
+    inert atom, so `{a,$v}` alternates on the expanded value while
+    `{1..$n}` stays literal, matching bash's brace-before-parameter
+    ordering. Deliberate divergence: bash rewrites `$v{a,b}` to
+    `$va $vb` before parameter expansion; here the prefix keeps its
+    own expansion (`prea preb`), which is the useful reading.
+
+    Args:
+        node (tree_sitter.Node): concatenation or brace_expression.
+        session (Session): shell session state.
+        execute_fn (Callable): evaluator for command substitutions.
+        call_stack (CallStack | None): shell call stack.
+    """
+    pieces: list[str] = []
+    values: list[str] = []
+    for child in node.children:
+        if not child.is_named or child.type in BRACE_LITERAL_TYPES:
+            pieces.append(get_text(child))
+        else:
+            values.append(await expand_node(child, session, execute_fn,
+                                            call_stack))
+            pieces.append(make_inert(len(values) - 1))
+    words = expand_template("".join(pieces))
+    if words is None:
+        return None
+    home = home_dir(session)
+    return [
+        substitute(expand_tilde(_unescape_unquoted(w), home), values)
+        for w in words
+    ]
 
 
 async def expand_parts(
@@ -130,13 +171,20 @@ async def expand_parts(
                                                     call_stack)
             result.extend(words)
             continue
+        if p.type in BRACE_WORD_TYPES:
+            brace_words = await _expand_brace_word(p, session, execute_fn,
+                                                   call_stack)
+            if brace_words is not None:
+                # Empty unquoted words vanish, like bash: {,x} -> x.
+                result.extend(w for w in brace_words if w)
+                continue
         expanded = await expand_node(p, session, execute_fn, call_stack)
         if p.type == NT.COMMAND_SUBSTITUTION:
             for word in expanded.split():
                 if word:
                     result.append(word)
             continue
-        elif p.type in _SPLIT_TYPES:
+        elif p.type in SPLIT_TYPES:
             for word in expanded.split():
                 if word:
                     result.append(word)
