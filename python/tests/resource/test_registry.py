@@ -24,6 +24,7 @@ EXPECTED_RESOURCES = {
     "disk",
     "redis",
     "s3",
+    "gridfs",
     "r2",
     "oci",
     "supabase",
@@ -66,6 +67,7 @@ EXPECTED_RESOURCES = {
     "dify",
     "chroma",
     "onedrive",
+    "box",
     "dropbox",
 }
 

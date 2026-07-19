@@ -97,6 +97,9 @@ fuse     = ["mfusepy>=1.0.0"]
 # --- mongodb ---
 mongodb  = ["pymongo>=4.9"]
 
+# --- gridfs ---
+gridfs   = ["pymongo>=4.9"]
+
 # --- postgres ---
 postgres = ["asyncpg>=0.30.0"]
 
@@ -125,32 +128,41 @@ qdrant   = ["qdrant-client[fastembed]>=1.18.0"]
 anthropic   = ["anthropic>=0.88"]
 
 # --- openai ---
-openai      = ["openai>=2.30.0", "openai-agents>=0.14.7"]
+openai      = ["openai>=2.46.0", "openai-agents>=0.18.3"]
 
 # --- pydantic-ai ---
 pydantic-ai = [
-    "pydantic-ai-slim>=1.56",
-    "pydantic-ai-backend>=0.1.0",
-    "mirage-ai[pdf]",
+    "pydantic-ai-slim[anthropic,openai]>=2.13.0",
+    "pydantic-ai-backend>=0.2.16",
 ]
 
 # --- deepagents ---
-deepagents  = ["deepagents>=0.4.12", "mirage-ai[pdf]"]
+deepagents  = [
+    "deepagents>=0.6.12",
+    "mirage-ai[pdf]",
+]
 
 # --- openhands ---
 openhands   = [
-    "openhands-sdk>=1.18.0; python_version >= '3.12'",
-    "openhands-tools>=1.18.0; python_version >= '3.12'",
+    "openhands-sdk>=1.36.1 ; python_full_version >= '3.12'",
+    "openhands-tools>=1.36.1 ; python_full_version >= '3.12'",
 ]
 
 # --- agno ---
-agno        = ["agno>=2.4.0"]
+agno        = [
+    "agno>=2.7.4",
+]
 
 # --- claude-agent-sdk ---
-claude-agent-sdk = ["claude-agent-sdk>=0.1.0"]
+claude-agent-sdk = [
+    "claude-agent-sdk>=0.2.123",
+]
 
 # --- camel ---
-camel       = ["camel-ai>=0.2.40,<0.3", "markitdown>=0.1.5"]
+camel       = [
+    "camel-ai>=0.2.90,<0.3",
+    "markitdown>=0.1.5",
+]
 
 # --- sandboxes ---
 daytona     = ["daytona>=0.176.0"]
@@ -167,6 +179,7 @@ all = [
     "mirage-ai[hf]",
     "mirage-ai[fuse]",
     "mirage-ai[mongodb]",
+    "mirage-ai[gridfs]",
     "mirage-ai[postgres]",
     "mirage-ai[redis]",
     "mirage-ai[email]",

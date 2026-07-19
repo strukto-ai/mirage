@@ -1,0 +1,20 @@
+{
+  "name": "mirage",
+  "interface": {
+    "displayName": "Mirage"
+  },
+  "plugins": [
+    {
+      "name": "mirage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mirage"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

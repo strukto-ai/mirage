@@ -30,6 +30,7 @@
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
+    "imapflow": "^1.3.2",
     "mongodb": "^6.0.0",
     "pg": "^8.0.0",
     "ssh2": "^1.16.0",

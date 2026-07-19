@@ -73,9 +73,19 @@ const TABLES = {
 
 const OPS_INVENTORY: Record<string, Row[]> = {
   box: [
+    ['create', 'box', '', true],
+    ['mkdir', 'box', '', true],
     ['read', 'box', '', false],
+    ['read', 'box', '.feather', false],
+    ['read', 'box', '.hdf5', false],
+    ['read', 'box', '.parquet', false],
     ['readdir', 'box', '', false],
+    ['rename', 'box', '', true],
+    ['rmdir', 'box', '', true],
     ['stat', 'box', '', false],
+    ['truncate', 'box', '', true],
+    ['unlink', 'box', '', true],
+    ['write', 'box', '', true],
   ],
   chroma: [
     ['read', 'chroma', '', false],

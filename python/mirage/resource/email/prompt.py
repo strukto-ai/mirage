@@ -21,10 +21,14 @@ PROMPT = """\
         <attachment-filename>
   Folders include: INBOX, Sent, Drafts, etc. cat shows email as JSON.
 
-  <subject> is sanitized — don't construct it; ls the date dir."""
+  <subject> is sanitized (don't construct it; ls the date dir).
+
+  Read commands:
+    himalaya envelope list --folder INBOX --unseen        # id/from/subject/date
+    himalaya message read --folder INBOX --uid <uid>     # one message as JSON"""
 
 WRITE_PROMPT = """\
   Write commands:
-    email-send "to@email.com" "subject" "body"
-    email-reply <email-path> "reply body"
-    email-forward <email-path> "to@email.com" """
+    himalaya message send --to "to@email.com" --subject "Hi" --body "..."
+    himalaya message reply --folder INBOX --uid <uid> --body "..." [--all]
+    himalaya message forward --folder INBOX --uid <uid> --to "to@email.com" """

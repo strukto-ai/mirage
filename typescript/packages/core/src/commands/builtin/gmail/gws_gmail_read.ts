@@ -49,7 +49,7 @@ async function gwsGmailReadCommand(
 }
 
 export const GMAIL_GWS_READ = command({
-  name: 'gws-gmail-read',
+  name: 'gws gmail +read',
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailReadCommand,

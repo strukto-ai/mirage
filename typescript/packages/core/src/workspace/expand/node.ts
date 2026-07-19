@@ -26,7 +26,7 @@ import { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
 
 export type ExecuteFn = (command: string, opts: { sessionId: string }) => Promise<IOResult>
 
-function unescapeUnquoted(text: string): string {
+export function unescapeUnquoted(text: string): string {
   if (!text.includes('\\')) return text
   const parts = shlexSplit(text)
   return parts[0] ?? text

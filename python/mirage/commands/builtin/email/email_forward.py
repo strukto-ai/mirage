@@ -30,7 +30,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("email-forward", resource="email", spec=SPEC, write=True)
+@command("himalaya message forward", resource="email", spec=SPEC, write=True)
 async def email_forward(
     accessor: EmailAccessor,
     paths: list[PathSpec],

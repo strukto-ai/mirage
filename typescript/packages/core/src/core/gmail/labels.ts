@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GMAIL_API_BASE, type TokenManager, googleGet } from '../google/_client.ts'
+import { type TokenManager, gmailBase, googleGet } from '../google/_client.ts'
 
 export interface GmailLabel {
   id: string
@@ -25,7 +25,7 @@ interface LabelsResponse {
 }
 
 export async function listLabels(tokenManager: TokenManager): Promise<GmailLabel[]> {
-  const url = `${GMAIL_API_BASE}/users/me/labels`
+  const url = `${gmailBase(tokenManager)}/users/me/labels`
   const data = (await googleGet(tokenManager, url)) as LabelsResponse
   return data.labels ?? []
 }

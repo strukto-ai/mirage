@@ -62,6 +62,7 @@ export class DropboxResource extends BaseResource implements Resource {
     this.accessor = new DropboxAccessor({
       tokenManager: tm,
       ...(config.rootPath !== undefined ? { rootPath: config.rootPath } : {}),
+      ...(config.contentSearch !== undefined ? { contentSearch: config.contentSearch } : {}),
     })
   }
 

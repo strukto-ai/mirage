@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GMAIL_API_BASE, type TokenManager, googleGet, googlePost } from '../google/_client.ts'
+import { type TokenManager, gmailBase, googleGet } from '../google/_client.ts'
 
 export interface GmailHeader {
   name?: string
@@ -102,7 +102,7 @@ export async function listMessages(
   if (opts.query !== undefined && opts.query !== null && opts.query !== '') {
     params.q = opts.query
   }
-  const url = `${GMAIL_API_BASE}/users/me/messages`
+  const url = `${gmailBase(tokenManager)}/users/me/messages`
   const data = (await googleGet(tokenManager, url, params)) as ListMessagesResponse
   return data.messages ?? []
 }
@@ -111,13 +111,8 @@ export async function getMessageRaw(
   tokenManager: TokenManager,
   messageId: string,
 ): Promise<GmailMessageRaw> {
-  const url = `${GMAIL_API_BASE}/users/me/messages/${messageId}?format=full`
+  const url = `${gmailBase(tokenManager)}/users/me/messages/${messageId}?format=full`
   return (await googleGet(tokenManager, url)) as GmailMessageRaw
-}
-
-export async function trashMessage(tokenManager: TokenManager, messageId: string): Promise<void> {
-  const url = `${GMAIL_API_BASE}/users/me/messages/${messageId}/trash`
-  await googlePost(tokenManager, url, {})
 }
 
 function base64UrlDecodeToBytes(input: string): Uint8Array {
@@ -177,7 +172,7 @@ export async function getAttachment(
   messageId: string,
   attachmentId: string,
 ): Promise<Uint8Array> {
-  const url = `${GMAIL_API_BASE}/users/me/messages/${messageId}/attachments/${attachmentId}`
+  const url = `${gmailBase(tokenManager)}/users/me/messages/${messageId}/attachments/${attachmentId}`
   const data = (await googleGet(tokenManager, url)) as { data?: string }
   const raw = data.data ?? ''
   return base64UrlDecodeToBytes(raw)

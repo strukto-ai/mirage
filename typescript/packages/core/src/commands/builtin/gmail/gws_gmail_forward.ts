@@ -62,7 +62,7 @@ async function gwsGmailForwardCommand(
 }
 
 export const GMAIL_GWS_FORWARD = command({
-  name: 'gws-gmail-forward',
+  name: 'gws gmail +forward',
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailForwardCommand,

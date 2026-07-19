@@ -1,0 +1,581 @@
+{
+ "cases": [
+  {
+   "id": "em_root_ls",
+   "seq": 540000,
+   "targets": [
+    "email"
+   ],
+   "clear_cache": true,
+   "command": "ls /mail",
+   "expect": {
+    "exit": 0,
+    "stdout": "Archive\nINBOX\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_folder_date_dirs",
+   "seq": 540001,
+   "targets": [
+    "email"
+   ],
+   "command": "ls /mail/INBOX",
+   "expect": {
+    "exit": 0,
+    "stdout": "2026-01-05\n2026-01-07\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_date_ls",
+   "seq": 540002,
+   "targets": [
+    "email"
+   ],
+   "command": "ls /mail/INBOX/2026-01-05",
+   "expect": {
+    "exit": 0,
+    "stdout": "Q2_Budget_Review__1\nQ2_Budget_Review__1.email.json\nStandup_notes__2.email.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_archive_ls",
+   "seq": 540003,
+   "targets": [
+    "email"
+   ],
+   "command": "ls /mail/Archive/2026-01-06",
+   "expect": {
+    "exit": 0,
+    "stdout": "Invoice_4471__1\nInvoice_4471__1.email.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_cat_headers",
+   "seq": 540004,
+   "targets": [
+    "email"
+   ],
+   "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r '.from.email + \" \" + .subject'",
+   "expect": {
+    "exit": 0,
+    "stdout": "lila@example.com Q2 Budget Review\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_cat_body",
+   "seq": 540005,
+   "targets": [
+    "email"
+   ],
+   "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .body_text",
+   "expect": {
+    "exit": 0,
+    "stdout": "please find the budget attached\nfinal numbers due friday\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_flags_unseen_preserved",
+   "seq": 540006,
+   "targets": [
+    "email"
+   ],
+   "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r '.flags | length'",
+   "expect": {
+    "exit": 0,
+    "stdout": "0\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_flags_seen",
+   "seq": 540007,
+   "targets": [
+    "email"
+   ],
+   "command": "cat /mail/INBOX/2026-01-05/Standup_notes__2.email.json | jq -r '.flags[0]'",
+   "expect": {
+    "exit": 0,
+    "stdout": "\\Seen\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_attachment_meta",
+   "seq": 540008,
+   "targets": [
+    "email"
+   ],
+   "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r '.attachments[].filename'",
+   "expect": {
+    "exit": 0,
+    "stdout": "budget.csv\nnotes.txt\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_attachment_dir_ls",
+   "seq": 540009,
+   "targets": [
+    "email"
+   ],
+   "command": "ls /mail/INBOX/2026-01-05/Q2_Budget_Review__1",
+   "expect": {
+    "exit": 0,
+    "stdout": "budget.csv\nnotes.txt\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_attachment_cat",
+   "seq": 540010,
+   "targets": [
+    "email"
+   ],
+   "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "amount,category\n120,travel\n80,meals\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_attachment_wc",
+   "seq": 540011,
+   "targets": [
+    "email"
+   ],
+   "command": "wc -c < /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt",
+   "expect": {
+    "exit": 0,
+    "stdout": "37\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_grep_message",
+   "seq": 540012,
+   "targets": [
+    "email"
+   ],
+   "command": "grep -c budget /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json",
+   "expect": {
+    "exit": 0,
+    "stdout": "1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_grep_files_only",
+   "seq": 540013,
+   "targets": [
+    "email"
+   ],
+   "command": "grep -l friday /mail/INBOX/2026-01-05/*.email.json",
+   "expect": {
+    "exit": 0,
+    "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_grep_folder_recursive",
+   "seq": 540014,
+   "targets": [
+    "email"
+   ],
+   "command": "grep -r 'worker-3' /mail/INBOX | sort",
+   "expect": {
+    "exit": 0,
+    "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json:{\"from\":{\"name\":\"\",\"email\":\"ops@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[{\"name\":\"\",\"email\":\"marcus@example.com\"}],\"subject\":\"Server alert: worker-3\",\"date\":\"Wed, 07 Jan 2026 03:15:00 +0000\",\"body_text\":\"disk usage at 91 percent on worker-3\",\"body_html\":\"\",\"snippet\":\"disk usage at 91 percent on worker-3\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":false,\"attachments\":[],\"uid\":\"3\",\"flags\":[]}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_grep_root_recursive",
+   "seq": 540015,
+   "targets": [
+    "email"
+   ],
+   "command": "grep -ri 'invoice 4471' /mail | sort",
+   "expect": {
+    "exit": 0,
+    "stdout": "/mail/Archive/2026-01-06/Invoice_4471__1.email.json:{\"from\":{\"name\":\"\",\"email\":\"billing@vendor.example\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Invoice 4471\",\"date\":\"Tue, 06 Jan 2026 08:45:00 +0000\",\"body_text\":\"invoice 4471 attached, total 240 usd\",\"body_html\":\"\",\"snippet\":\"invoice 4471 attached, total 240 usd\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":true,\"attachments\":[{\"filename\":\"invoice-4471.txt\",\"content_type\":\"text/plain\",\"size\":28}],\"uid\":\"1\",\"flags\":[\"\\\\Seen\"]}\n/mail/Archive/2026-01-06/Invoice_4471__1/invoice-4471.txt:invoice 4471\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_find_messages",
+   "seq": 540016,
+   "targets": [
+    "email"
+   ],
+   "command": "find /mail -name '*.email.json' | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "4\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_find_attachment",
+   "seq": 540017,
+   "targets": [
+    "email"
+   ],
+   "command": "find /mail/INBOX -name '*.csv'",
+   "expect": {
+    "exit": 0,
+    "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_rg_folder",
+   "seq": 540018,
+   "targets": [
+    "email"
+   ],
+   "command": "rg 'forecast' /mail/INBOX",
+   "expect": {
+    "exit": 0,
+    "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json:{\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"body_html\":\"\",\"snippet\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":false,\"attachments\":[],\"uid\":\"2\",\"flags\":[\"\\\\Seen\"]}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_triage_unseen",
+   "seq": 540019,
+   "targets": [
+    "email"
+   ],
+   "command": "himalaya envelope list --unseen | jq -r '.[].subject'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Q2 Budget Review\nServer alert: worker-3\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_triage_from",
+   "seq": 540020,
+   "targets": [
+    "email"
+   ],
+   "command": "himalaya envelope list --from billing@vendor.example --folder Archive | jq -r '.[].uid'",
+   "expect": {
+    "exit": 0,
+    "stdout": "1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_read_chain",
+   "seq": 540021,
+   "targets": [
+    "email"
+   ],
+   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message read --folder Archive --uid $U | jq -r .snippet",
+   "expect": {
+    "exit": 0,
+    "stdout": "invoice 4471 attached, total 240 usd\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_send",
+   "seq": 540022,
+   "targets": [
+    "email"
+   ],
+   "command": "himalaya message send --to integ@example.com --subject 'Ship update' --body 'departing tuesday'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"status\":\"sent\",\"to\":\"integ@example.com\",\"subject\":\"Ship update\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_send_visible",
+   "seq": 540023,
+   "targets": [
+    "email"
+   ],
+   "clear_cache": true,
+   "command": "find /mail/INBOX -name 'Ship_update*' | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_reply",
+   "seq": 540024,
+   "targets": [
+    "email"
+   ],
+   "clear_cache": true,
+   "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && himalaya message reply --folder INBOX --uid $U --body 'numbers look good' | jq -r .subject",
+   "expect": {
+    "exit": 0,
+    "stdout": "Re: Q2 Budget Review\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_forward",
+   "seq": 540025,
+   "targets": [
+    "email"
+   ],
+   "clear_cache": true,
+   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message forward --folder Archive --uid $U --to integ@example.com | jq -r .status",
+   "expect": {
+    "exit": 0,
+    "stdout": "sent\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_forward_visible",
+   "seq": 540026,
+   "targets": [
+    "email"
+   ],
+   "clear_cache": true,
+   "command": "find /mail/INBOX -name 'Fwd_*' | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_head",
+   "seq": 540100,
+   "targets": [
+    "email"
+   ],
+   "command": "head -1 /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "amount,category\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_tail",
+   "seq": 540101,
+   "targets": [
+    "email"
+   ],
+   "command": "tail -1 /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "80,meals\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_wc_full",
+   "seq": 540102,
+   "targets": [
+    "email"
+   ],
+   "command": "wc /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": " 3  3 36 /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_grep_n",
+   "seq": 540103,
+   "targets": [
+    "email"
+   ],
+   "command": "grep -n travel /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "2:120,travel\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_cut",
+   "seq": 540104,
+   "targets": [
+    "email"
+   ],
+   "command": "cut -d, -f2 /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "category\ntravel\nmeals\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_sort",
+   "seq": 540105,
+   "targets": [
+    "email"
+   ],
+   "command": "sort /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "120,travel\n80,meals\namount,category\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_file_txt",
+   "seq": 540106,
+   "targets": [
+    "email"
+   ],
+   "command": "file /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt",
+   "expect": {
+    "exit": 0,
+    "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt: text\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_file_csv",
+   "seq": 540107,
+   "targets": [
+    "email"
+   ],
+   "command": "file /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv: csv\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_du",
+   "seq": 540108,
+   "targets": [
+    "email"
+   ],
+   "command": "du -h /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "36B\t/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_ls_long",
+   "seq": 540109,
+   "targets": [
+    "email"
+   ],
+   "command": "ls -l /mail/INBOX/2026-01-05/Q2_Budget_Review__1",
+   "expect": {
+    "exit": 0,
+    "stdout": "-rw-r--r-- 1 user user 36 Jan  1 00:00 budget.csv\n-rw-r--r-- 1 user user 37 Jan  1 00:00 notes.txt\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_md5",
+   "seq": 540110,
+   "targets": [
+    "email"
+   ],
+   "command": "md5 /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt",
+   "expect": {
+    "exit": 0,
+    "stdout": "46481447a30e753660bd2101f8d3ee8a  /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_multi_cat",
+   "seq": 540111,
+   "targets": [
+    "email"
+   ],
+   "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "4\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_att_readonly_cp",
+   "seq": 540112,
+   "targets": [
+    "email"
+   ],
+   "command": "cp /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt /mail/x.txt",
+   "expect": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "cp: /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt: Operation not supported\n"
+   }
+  },
+  {
+   "id": "em_x_save_attachment",
+   "seq": 540200,
+   "targets": [
+    "email"
+   ],
+   "command": "cp /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt /scratch/notes.txt && cat /scratch/notes.txt",
+   "expect": {
+    "exit": 0,
+    "stdout": "travel spend trending up since march\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_x_save_att_dir",
+   "seq": 540201,
+   "targets": [
+    "email"
+   ],
+   "command": "cp -r /mail/INBOX/2026-01-05/Q2_Budget_Review__1 /scratch/saved && ls /scratch/saved",
+   "expect": {
+    "exit": 0,
+    "stdout": "budget.csv\nnotes.txt\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_x_saved_grep",
+   "seq": 540202,
+   "targets": [
+    "email"
+   ],
+   "command": "grep -n travel /scratch/saved/budget.csv",
+   "expect": {
+    "exit": 0,
+    "stdout": "2:120,travel\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_x_save_message",
+   "seq": 540203,
+   "targets": [
+    "email"
+   ],
+   "command": "cp /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json /scratch/msg.json && cat /scratch/msg.json | jq -r .subject",
+   "expect": {
+    "exit": 0,
+    "stdout": "Q2 Budget Review\n",
+    "stderr": ""
+   }
+  }
+ ]
+}

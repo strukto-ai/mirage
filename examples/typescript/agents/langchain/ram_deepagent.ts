@@ -49,7 +49,7 @@ const result = await agent.invoke({
   messages: [{ role: 'user', content: task }],
 })
 
-for (const text of extractText(result.messages)) {
+for (const text of extractText(result.messages.slice(-1))) {
   console.log(text)
 }
 

@@ -31,10 +31,18 @@ export function normalizeDropboxRootPath(value: string | undefined): string {
 export class DropboxAccessor extends Accessor {
   readonly tokenManager: DropboxTokenManager
   readonly rootPath: string
+  // Opt-in for grep/rg search push-down; full-text content search is
+  // plan-gated on Dropbox, so this must mirror the account's plan.
+  readonly contentSearch: boolean
 
-  constructor(opts: { tokenManager: DropboxTokenManager; rootPath?: string }) {
+  constructor(opts: {
+    tokenManager: DropboxTokenManager
+    rootPath?: string
+    contentSearch?: boolean
+  }) {
     super()
     this.tokenManager = opts.tokenManager
     this.rootPath = normalizeDropboxRootPath(opts.rootPath)
+    this.contentSearch = opts.contentSearch === true
   }
 }

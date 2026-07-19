@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.core.google._client import GMAIL_API_BASE, TokenManager, google_get
+from mirage.core.google._client import TokenManager, gmail_base, google_get
 
 
 async def list_labels(token_manager: TokenManager) -> list[dict[str, Any]]:
@@ -26,6 +26,6 @@ async def list_labels(token_manager: TokenManager) -> list[dict[str, Any]]:
     Returns:
         list[dict]: list of label objects.
     """
-    url = f"{GMAIL_API_BASE}/users/me/labels"
+    url = f"{gmail_base(token_manager)}/users/me/labels"
     data = await google_get(token_manager, url)
     return data.get("labels", [])

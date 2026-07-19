@@ -1,10 +1,10 @@
 ---
-title: LangChain (deepagents)
-description: Back deepagents and other LangGraph-style agents with a Mirage workspace via LangchainWorkspace.
+title: LangChain (Deep Agents)
+description: Back Deep Agents with a Mirage workspace via LangchainWorkspace.
 icon: /images/langchain-logo.svg
 ---
 
-[deepagents](https://github.com/langchain-ai/deepagents) is LangChain's framework for long-horizon coding agents. It accepts a pluggable `backend` for filesystem and shell operations, Mirage ships one.
+[Deep Agents](https://github.com/langchain-ai/deepagents) is LangChain's framework for long-horizon coding agents. It accepts a pluggable `backend` for filesystem and shell operations, and Mirage ships one.
 
 ## Install
 
@@ -12,7 +12,7 @@ icon: /images/langchain-logo.svg
 uv add 'mirage-ai[deepagents]' langchain-anthropic
 ```
 
-This pulls in `deepagents>=0.4.12`. Bring your own LangChain chat model (`langchain-anthropic`, `langchain-openai`, etc.).
+This pulls in `deepagents>=0.6.12`. Bring your own LangChain chat model (`langchain-anthropic`, `langchain-openai`, etc.).
 
 ## Usage
 
@@ -41,19 +41,24 @@ agent = create_deep_agent(
 result = agent.invoke({
     "messages": [{"role": "user", "content": "Create /report.md and summarize."}],
 })
-for text in extract_text(result["messages"]):
+for text in extract_text(result["messages"][-1:]):
     print(text)
 ```
+
+## Multimodal files
+
+`read_file` can pass images, PDFs, audio, video, PPT, and PPTX files from a Mirage mount to a model as multimodal content. The selected model and provider must support the corresponding input type. Text files continue to use line-based pagination.
 
 ## Exports
 
 | Symbol | Purpose |
 | --- | --- |
-| `LangchainWorkspace` | `Backend` implementation for deepagents, wires reads, writes, edits, and shell. |
+| `LangchainWorkspace` | `SandboxBackendProtocol` implementation for Deep Agents, wires reads, writes, edits, search, and shell. |
 | `extract_text` | Pulls the text content out of LangChain messages. |
 | `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
 
 ## Examples
 
+- [`examples/python/agents/langchain/ram_pdf_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/ram_pdf_deepagent.py), RAM-backed PDF reading with no external storage credentials.
 - [`examples/python/agents/langchain/s3_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/s3_deepagent.py), read-only S3 exploration.
 - [`examples/python/agents/langchain/databricks_volume_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/databricks_volume_deepagent.py), Databricks volume exploration inside Databricks Apps or local SDK-auth setups.

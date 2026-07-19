@@ -1,38 +1,87 @@
 ---
 title: OpenAI Codex
-description: Run OpenAI's Codex CLI against any Mirage workspace by mounting it as a real filesystem via FUSE.
+description: Install Mirage as a Codex plugin and use mounted data from the Codex CLI or app.
 icon: /images/openai-logo.svg
 ---
 
-[OpenAI Codex](https://github.com/openai/codex) is OpenAI's coding-agent CLI. Like [Claude Code](/typescript/agents/claude-code), it operates on a real filesystem and doesn't expose a pluggable backend, so Mirage integrates by [FUSE-mounting](/typescript/setup/fuse) a workspace and letting you point `codex` at the mountpoint.
+[OpenAI Codex](https://github.com/openai/codex) can load Mirage as a plugin. The plugin packages a Mirage guidance skill and six filesystem tools: `read`, `write`, `edit`, `ls`, `grep`, and `execute_command`.
 
-## Install
+<Note>
+  Codex can work on repositories in any programming language. The Mirage tool
+  server itself requires Node.js 20 or newer.
+</Note>
+
+## Install the plugin
+
+Add the Mirage repository as a Codex marketplace, then install the plugin:
 
 ```bash
-pnpm add @struktoai/mirage-node @zkochan/fuse-native
+codex plugin marketplace add strukto-ai/mirage
+codex plugin add mirage@mirage
 ```
 
-See [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDependencies` allow-list and macOS macFUSE 4 symlink workaround. Then install [OpenAI Codex](https://github.com/openai/codex) separately.
+For local development, replace `strukto-ai/mirage` with the path to a Mirage checkout.
 
-## Usage
+Start a new Codex task after installation so the plugin tools and skill are loaded.
+
+## Configure a workspace
+
+Add `.mirage/workspace.yaml` to the project where you start Codex:
+
+```yaml
+mounts:
+  /scratch:
+    resource: ram
+  /data:
+    resource: disk
+    config:
+      root: ${PWD}/data
+```
+
+Mirage searches the current directory and its parents for:
+
+- `.mirage/workspace.yaml` or `.mirage/workspace.yml`
+- `workspace.yaml` or `workspace.yml`
+- `mirage.yaml` or `mirage.yml`
+
+Set `MIRAGE_MCP_CONFIG` to an absolute path when the config lives elsewhere.
+
+## Use the Codex UI
+
+Open **Plugins** in the Codex app, or run `/plugins` in the Codex CLI, and confirm that Mirage is enabled. Then use the normal Codex conversation UI:
+
+```text
+List the files mounted in Mirage.
+Read /data/report.csv and summarize it.
+Create /scratch/notes.txt with the findings.
+```
+
+The plugin keeps Codex's existing UI, sessions, model selection, approvals, and authentication. Mirage only supplies the filesystem tools.
+
+## Stale-write protection
+
+The tool server records a content fingerprint when `read` returns a file. If that file changes before a later `edit`, the edit fails and tells Codex to read the file again. After the reread, Codex can reconsider the new content and retry.
+
+This follows the [Pi integration](/typescript/agents/pi). The current fallback hashes the returned bytes; a future Mirage revision API can replace that without changing the Codex plugin.
+
+## Run the server directly
+
+The plugin launches this command automatically:
+
+```bash
+npx -y @struktoai/mirage-cli mcp
+```
+
+You can also embed the transport in a Node application:
 
 ```ts
-import { Mount, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { createMirageMcpServer } from '@struktoai/mirage-agents/mcp'
 
-const ws = new Workspace({
-  '/': new Mount(new RAMResource(), { mode: MountMode.WRITE, fuse: true }),
-})
-await ws.fuseReady()
-
-console.log(`cd ${ws.fuseMountpoint} && codex`)
-// ... run codex in another terminal, then:
-await ws.close()
+const server = createMirageMcpServer(workspace)
 ```
 
-The mountpoint behaves like a regular directory. Codex's `read_file`, `write_file`, and `run_shell` tools all dispatch through Mirage's ops layer.
+## Why MCP instead of a Pi-style extension?
 
-## Why FUSE instead of an SDK integration?
+Pi exposes an in-process TypeScript API for registering tools. Codex plugins can package skills and tool integrations, but Codex does not expose an equivalent `registerTool` API. MCP is therefore the supported custom-tool transport, kept behind a thin adapter over Mirage's shared tool operations.
 
-The Codex CLI's tool surface isn't pluggable, it expects host file operations. FUSE makes those host operations *be* Mirage operations.
-
-You lose per-tool customization and Mirage's op-record telemetry; you gain zero integration effort and compatibility with every Codex feature. Same trade-off as [Claude Code](/typescript/agents/claude-code).
+If you want Codex's built-in file tools to see Mirage paths directly, use a [FUSE mount](/typescript/setup/fuse) instead. FUSE has no custom tool namespace, but requires host FUSE setup and does not provide Mirage's agent-level stale-write check.

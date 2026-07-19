@@ -50,9 +50,13 @@ async function grepCommand(
 ): Promise<CommandFnResult> {
   const pattern = patternArg(texts, opts.flags)
   const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
+  // Output-shaping flags need real per-line matching, which the search-API
+  // push-down cannot emulate; fall through to the generic grep over
+  // rendered files instead.
+  const shaping = ['args_l', 'l', 'c', 'n', 'o', 'v', 'q'].some((flag) => opts.flags[flag] === true)
 
   const first = paths[0]
-  if (first !== undefined && pattern !== null && !pattern.includes('\n')) {
+  if (first !== undefined && pattern !== null && !pattern.includes('\n') && !shaping) {
     const scope = detectScope(first)
     if (scope.useNative) {
       const filePrefix =

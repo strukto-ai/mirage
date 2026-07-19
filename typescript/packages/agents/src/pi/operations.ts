@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Workspace } from '@struktoai/mirage-core'
+import { rstripSlash, type ExecuteResult, type Workspace } from '@struktoai/mirage-core'
 import type {
   BashOperations,
   EditOperations,
@@ -21,9 +21,15 @@ import type {
   LsOperations,
   ReadOperations,
   WriteOperations,
-} from '@mariozechner/pi-coding-agent'
+} from '@earendil-works/pi-coding-agent'
 import picomatch from 'picomatch'
-import { rstripSlash } from '@struktoai/mirage-core'
+import { FileVersionTracker } from '../file-version.ts'
+
+export { StaleMirageFileError } from '../file-version.ts'
+
+export interface MirageOperationsOptions {
+  staleWriteProtection?: boolean
+}
 
 export interface MirageOperationsBundle {
   read: ReadOperations
@@ -62,12 +68,7 @@ async function walkDirectory(
   results: string[],
 ): Promise<void> {
   if (results.length >= opts.limit) return
-  let entries: string[]
-  try {
-    entries = await ws.fs.readdir(dir)
-  } catch {
-    return
-  }
+  const entries = await ws.fs.readdir(dir)
   for (const full of entries) {
     if (results.length >= opts.limit) return
     const rel = full.startsWith(cwdPrefix) ? full.slice(cwdPrefix.length) : full
@@ -78,21 +79,20 @@ async function walkDirectory(
   }
 }
 
-export function mirageOperations(ws: Workspace): MirageOperationsBundle {
+export function mirageOperations(
+  ws: Workspace,
+  options: MirageOperationsOptions = {},
+): MirageOperationsBundle {
+  const versions = new FileVersionTracker(ws, options.staleWriteProtection ?? true)
   const read: ReadOperations = {
-    readFile: async (absolutePath: string) => {
-      const bytes = await ws.fs.readFile(absolutePath, { raw: true })
-      return Buffer.from(bytes)
-    },
+    readFile: (absolutePath: string) => versions.read(absolutePath),
     access: async (absolutePath: string) => {
       await ws.fs.stat(absolutePath)
     },
   }
 
   const write: WriteOperations = {
-    writeFile: async (absolutePath: string, content: string) => {
-      await ws.fs.writeFile(absolutePath, content)
-    },
+    writeFile: (absolutePath: string, content: string) => versions.write(absolutePath, content),
     mkdir: async (dir: string) => {
       await ensureParent(ws, dir)
       if (!(await ws.fs.exists(dir))) {
@@ -102,17 +102,41 @@ export function mirageOperations(ws: Workspace): MirageOperationsBundle {
   }
 
   const edit: EditOperations = {
-    readFile: read.readFile,
-    writeFile: write.writeFile,
+    readFile: (absolutePath: string) => versions.readForEdit(absolutePath),
+    writeFile: (absolutePath: string, content: string) => versions.writeEdit(absolutePath, content),
     access: read.access,
   }
 
   const bash: BashOperations = {
-    exec: async (command, _cwd, options) => {
-      const result = await ws.execute(command)
-      const combined = result.stdoutText + result.stderrText
-      if (combined.length > 0) {
-        options.onData(Buffer.from(combined))
+    exec: async (command, cwd, options) => {
+      const timeoutSignal =
+        options.timeout !== undefined && options.timeout > 0
+          ? AbortSignal.timeout(options.timeout * 1000)
+          : undefined
+      const signal =
+        options.signal !== undefined && timeoutSignal !== undefined
+          ? AbortSignal.any([options.signal, timeoutSignal])
+          : (options.signal ?? timeoutSignal)
+      let result: ExecuteResult
+      try {
+        result =
+          signal === undefined
+            ? await ws.execute(command, { cwd })
+            : await ws.execute(command, { cwd, signal })
+      } catch (error) {
+        if (options.signal?.aborted === true) {
+          throw new Error('aborted')
+        }
+        if (timeoutSignal?.aborted === true) {
+          throw new Error('timeout:' + String(options.timeout))
+        }
+        throw error
+      }
+      if (result.stdout.length > 0) {
+        options.onData(Buffer.from(result.stdout))
+      }
+      if (result.stderr.length > 0) {
+        options.onData(Buffer.from(result.stderr))
       }
       return { exitCode: result.exitCode }
     },
@@ -120,7 +144,7 @@ export function mirageOperations(ws: Workspace): MirageOperationsBundle {
 
   const grep: GrepOperations = {
     isDirectory: async (absolutePath: string) => ws.fs.isDir(absolutePath),
-    readFile: async (absolutePath: string) => ws.fs.readFileText(absolutePath),
+    readFile: async (absolutePath: string) => (await versions.read(absolutePath)).toString('utf-8'),
   }
 
   const find: FindOperations = {

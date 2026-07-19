@@ -9,13 +9,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo ${ERRQ1:?}; echo after",
       "expect": {
@@ -33,13 +36,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo ${ERRQ2:?custom msg}",
       "expect": {
@@ -57,13 +63,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo ${ERRQ3?}",
       "expect": {
@@ -81,13 +90,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "ERRQ4=; echo start${ERRQ4?msg}end",
       "expect": {
@@ -105,13 +117,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "(echo ${ERRQ5:?}); echo after code=$?",
       "expect": {
@@ -129,13 +144,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo ${ERRQ6:?} | cat; echo after code=$?",
       "expect": {
@@ -153,13 +171,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "echo ${ERRA1:=def}; echo $ERRA1",
       "expect": {
@@ -177,13 +198,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "ERRA2=; echo ${ERRA2:=zz}; echo $ERRA2",
       "expect": {
@@ -201,13 +225,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "ERRA3=; echo start${ERRA3=def}end; echo [$ERRA3]",
       "expect": {
@@ -225,13 +252,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "f(){ local ERRA4=; echo ${ERRA4:=zz}; echo inner=$ERRA4; }; f; echo outer=[$ERRA4]",
       "expect": {

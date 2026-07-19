@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GMAIL_API_BASE, type TokenManager, googlePost } from '../google/_client.ts'
+import { type TokenManager, gmailBase, googlePost } from '../google/_client.ts'
 import { extractHeader, getMessageProcessed, getMessageRaw } from './messages.ts'
 
 const ENC = new TextEncoder()
@@ -46,7 +46,7 @@ export async function sendMessage(
 ): Promise<unknown> {
   const mime = buildMime({ To: to, Subject: subject }, body)
   const raw = base64UrlEncode(ENC.encode(mime))
-  const url = `${GMAIL_API_BASE}/users/me/messages/send`
+  const url = `${gmailBase(tokenManager)}/users/me/messages/send`
   return googlePost(tokenManager, url, { raw })
 }
 
@@ -72,7 +72,7 @@ export async function replyMessage(
   const raw = base64UrlEncode(ENC.encode(mime))
   const payload: Record<string, string> = { raw }
   if (threadId !== '') payload.threadId = threadId
-  const url = `${GMAIL_API_BASE}/users/me/messages/send`
+  const url = `${gmailBase(tokenManager)}/users/me/messages/send`
   return googlePost(tokenManager, url, payload)
 }
 
@@ -102,7 +102,7 @@ export async function replyAllMessage(
   const raw = base64UrlEncode(ENC.encode(mime))
   const payload: Record<string, string> = { raw }
   if (threadId !== '') payload.threadId = threadId
-  const url = `${GMAIL_API_BASE}/users/me/messages/send`
+  const url = `${gmailBase(tokenManager)}/users/me/messages/send`
   return googlePost(tokenManager, url, payload)
 }
 

@@ -1,0 +1,42 @@
+---
+title: GridFS
+icon: database
+description: Set up a MongoDB connection for the GridFS file-storage resource.
+---
+
+GridFS stores files inside MongoDB (metadata in `fs.files`, content chunks in `fs.chunks`). The GridFS resource only needs a MongoDB connection URI plus a database name; the connection is set up exactly like the [MongoDB resource](/home/setup/mongodb).
+
+## Credentials
+
+### 1. Get Your Connection URI
+
+#### Local MongoDB
+
+```bash
+# Default local instance
+MONGODB_URI=mongodb://localhost:27017
+```
+
+#### MongoDB Atlas (Cloud)
+
+1. Go to https://cloud.mongodb.com
+1. Select your cluster -> **Connect** -> **Drivers**
+1. Copy the connection string:
+   ```
+   mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/
+   ```
+
+#### Self-hosted with Authentication
+
+```bash
+MONGODB_URI=mongodb://username:password@host:27017/?authSource=admin
+```
+
+### 2. Set Environment Variables
+
+```bash
+# .env.development
+MONGODB_URI=mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/
+```
+
+For usage, see the [Python GridFS resource](/python/resource/gridfs) or the [TypeScript GridFS setup](/typescript/setup/gridfs).

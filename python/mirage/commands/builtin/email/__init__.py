@@ -15,7 +15,6 @@
 from mirage.commands.builtin.email.email_forward import email_forward
 from mirage.commands.builtin.email.email_read import email_read
 from mirage.commands.builtin.email.email_reply import email_reply
-from mirage.commands.builtin.email.email_reply_all import email_reply_all
 from mirage.commands.builtin.email.email_send import email_send
 from mirage.commands.builtin.email.email_triage import email_triage
 from mirage.commands.builtin.email.find import find
@@ -41,7 +40,6 @@ COMMANDS = [
     rg,
     email_send,
     email_reply,
-    email_reply_all,
     email_forward,
     email_triage,
     email_read,

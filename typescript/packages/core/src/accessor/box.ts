@@ -17,9 +17,12 @@ import type { BoxTokenManager } from '../core/box/_client.ts'
 
 export class BoxAccessor extends Accessor {
   readonly tokenManager: BoxTokenManager
+  // Box folder id mounted as the workspace root; "0" is the account root.
+  readonly rootFolderId: string
 
-  constructor(opts: { tokenManager: BoxTokenManager }) {
+  constructor(opts: { tokenManager: BoxTokenManager; rootFolderId?: string }) {
     super()
     this.tokenManager = opts.tokenManager
+    this.rootFolderId = opts.rootFolderId ?? '0'
   }
 }

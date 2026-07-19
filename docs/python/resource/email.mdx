@@ -174,12 +174,12 @@ async def main():
     print(await r.stdout_str())
 
     # Triage unread messages
-    r = await ws.execute("email-triage --folder INBOX --unseen --max 5")
+    r = await ws.execute("himalaya envelope list --folder INBOX --unseen --max 5")
     print(await r.stdout_str())
 
     # Send an email
     r = await ws.execute(
-        'email-send --to "user@example.com"'
+        'himalaya message send --to "user@example.com"'
         ' --subject "Hello from MIRAGE"'
         ' --body "This email was sent via the MIRAGE email resource."')
     print(await r.stdout_str())
@@ -200,8 +200,8 @@ ls /email/INBOX/2026-04-14/
 # -> Meeting_Notes__12345.email.json   <- uid = 12345
 
 # Read a message then reply
-email-read --uid 12345 --folder INBOX
-email-reply --uid 12345 --folder INBOX --body "Thanks for the notes"
+himalaya message read --uid 12345 --folder INBOX
+himalaya message reply --uid 12345 --folder INBOX --body "Thanks for the notes"
 ```
 
 ## Shell Commands
@@ -224,14 +224,22 @@ Standard commands available on the mounted email tree:
 | `realpath`      | Resolve path to absolute form              |
 | `nl`            | Number lines of output                     |
 
-Resource-specific commands:
+Resource-specific commands follow the
+[himalaya](https://github.com/pimalaya/himalaya) CLI command structure
+(`himalaya envelope ...` and `himalaya message ...`). Mirage keeps the
+message body as files in the tree, so these commands take `--uid` and
+`--folder` flags and return JSON rather than opening an interactive editor.
 
-### `email-send`
+The write commands (`send`, `reply`, `forward`) require the email mount to
+be mounted with write access; on a read-only mount they are rejected. The
+read commands (`list`, `read`) always work.
 
-Send a new email.
+### `himalaya message send`
+
+Send a new email. Requires write access.
 
 ```bash
-email-send --to "user@example.com" --subject "Hello" --body "Hi there"
+himalaya message send --to "user@example.com" --subject "Hello" --body "Hi there"
 ```
 
 | Option      | Required | Description             |
@@ -242,44 +250,31 @@ email-send --to "user@example.com" --subject "Hello" --body "Hi there"
 
 Returns the sent message status JSON.
 
-### `email-reply`
+### `himalaya message reply`
 
-Reply to a message.
+Reply to a message. Pass `--all` to reply to every recipient (To and CC).
+Requires write access.
 
 ```bash
-email-reply --uid 12345 --folder INBOX --body "Thanks for the update"
+himalaya message reply --uid 12345 --folder INBOX --body "Thanks for the update"
+himalaya message reply --uid 12345 --folder INBOX --body "Acknowledged" --all
 ```
 
-| Option     | Required | Description                  |
-| ---------- | -------- | ---------------------------- |
-| `--uid`    | yes      | Message UID                  |
-| `--folder` | no       | IMAP folder (default: INBOX) |
-| `--body`   | yes      | Reply body text              |
+| Option     | Required | Description                       |
+| ---------- | -------- | --------------------------------- |
+| `--uid`    | yes      | Message UID                       |
+| `--folder` | no       | IMAP folder (default: INBOX)      |
+| `--body`   | yes      | Reply body text                   |
+| `--all`    | no       | Reply to all recipients (To + CC) |
 
 Returns the sent reply JSON.
 
-### `email-reply-all`
+### `himalaya message forward`
 
-Reply-all to a message.
-
-```bash
-email-reply-all --uid 12345 --folder INBOX --body "Acknowledged by the team"
-```
-
-| Option     | Required | Description                  |
-| ---------- | -------- | ---------------------------- |
-| `--uid`    | yes      | Message UID                  |
-| `--folder` | no       | IMAP folder (default: INBOX) |
-| `--body`   | yes      | Reply body text              |
-
-Returns the sent reply JSON.
-
-### `email-forward`
-
-Forward a message to another recipient.
+Forward a message to another recipient. Requires write access.
 
 ```bash
-email-forward --uid 12345 --folder INBOX --to "colleague@example.com"
+himalaya message forward --uid 12345 --folder INBOX --to "colleague@example.com"
 ```
 
 | Option     | Required | Description                  |
@@ -290,12 +285,12 @@ email-forward --uid 12345 --folder INBOX --to "colleague@example.com"
 
 Returns the forwarded message JSON.
 
-### `email-triage`
+### `himalaya envelope list`
 
-Search and triage emails.
+List and triage messages in a folder.
 
 ```bash
-email-triage --folder INBOX --unseen --max 10
+himalaya envelope list --folder INBOX --unseen --max 10
 ```
 
 | Option     | Required | Description                  |
@@ -306,12 +301,12 @@ email-triage --folder INBOX --unseen --max 10
 
 Returns matching messages as JSON.
 
-### `email-read`
+### `himalaya message read`
 
 Read a message by its UID.
 
 ```bash
-email-read --uid 12345 --folder INBOX
+himalaya message read --uid 12345 --folder INBOX
 ```
 
 | Option     | Required | Description                  |

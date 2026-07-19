@@ -52,6 +52,11 @@ export function sheetsBase(tokenManager: TokenManager): string {
   return base !== undefined ? `${base}/v4` : SHEETS_API_BASE
 }
 
+export function gmailBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/gmail/v1` : GMAIL_API_BASE
+}
+
 export class GoogleApiError extends Error {
   readonly status: number
   constructor(message: string, status: number) {

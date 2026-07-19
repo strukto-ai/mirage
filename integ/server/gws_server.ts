@@ -13,20 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // Fake Google Workspace server for integ: Drive v3 + Docs v1 + Sheets v4 +
-// Slides v1 on one in-memory host, plus a fake OAuth /token and a /reset
-// for per-run isolation. Mirrors the real REST surface closely enough that
-// mirage's google backends and the gws passthrough commands run unmodified
-// against it (GoogleConfig.api_base points here). Deliberate simplifications,
-// all deterministic so both language runners see byte-identical responses:
+// Slides v1 + Gmail v1 on one in-memory host, plus a fake OAuth /token and
+// a /reset for per-run isolation. Mirrors the real REST surface closely
+// enough that mirage's google backends and the gws passthrough commands run
+// unmodified against it (GoogleConfig.api_base points here). Deliberate
+// simplifications, all deterministic so both language runners see
+// byte-identical responses:
 //   - ids and timestamps are counters over a fixed clock, not random
 //   - `fields` masks are ignored (full resources are returned)
 //   - sheets store literal values; formulas are not evaluated
 //   - list pagination is single-page (pageToken is never emitted)
+//   - Gmail search matches case-insensitive substrings, not word stems
 // Faithful behaviors that matter to the backends: Drive allows duplicate
 // sibling names, folder deletes are recursive, creating a file with a
 // google-apps MIME type auto-creates the linked Docs/Sheets/Slides resource
-// (and vice versa), and every content write records a revision that
-// /revisions can list and serve.
+// (and vice versa), every content write records a revision that /revisions
+// can list and serve, Gmail messages.insert honors
+// internalDateSource=dateHeader, and messages.trash swaps INBOX for TRASH.
 
 import { createHash } from 'node:crypto'
 import http from 'node:http'
@@ -87,23 +90,51 @@ interface Presentation {
   slides: SlidePage[]
 }
 
+interface GmailAttachment {
+  attachmentId: string
+  filename: string
+  mimeType: string
+  data: Buffer
+}
+
+interface GmailMessage {
+  id: string
+  threadId: string
+  labelIds: string[]
+  internalDate: number
+  headers: { name: string; value: string }[]
+  bodyText: string
+  attachments: GmailAttachment[]
+}
+
+interface GmailLabel {
+  id: string
+  name: string
+  type: string
+}
+
+const SYSTEM_LABELS = ['INBOX', 'SENT', 'UNREAD', 'TRASH']
+
 class GwsState {
   files = new Map<string, DriveItem>()
   drives = new Map<string, { id: string; name: string }>()
   docs = new Map<string, { title: string; text: string }>()
   sheets = new Map<string, Spreadsheet>()
   presentations = new Map<string, Presentation>()
+  messages = new Map<string, GmailMessage>()
+  labels = new Map<string, GmailLabel>()
   private counters = new Map<string, number>()
   private ticks = 0
   // Frozen at construction (i.e. per /reset) so find -mtime windows
   // relative to "now" behave like a live backend, while the +1s tick per
   // touch keeps ordering deterministic. /reset may pin an explicit epoch
   // instead: mounts that render timestamps into filenames (gdocs/gsheets/
-  // gslides date prefixes) need fully baked-in listings.
+  // gslides date prefixes, gmail date dirs) need fully baked-in listings.
   private readonly baseMs: number
 
   constructor(epoch?: string) {
     this.baseMs = epoch === undefined ? Date.now() : Date.parse(epoch)
+    for (const id of SYSTEM_LABELS) this.labels.set(id, { id, name: id, type: 'system' })
   }
 
   nextId(kind: string): string {
@@ -112,9 +143,13 @@ class GwsState {
     return `${kind}${String(n).padStart(4, '0')}`
   }
 
-  now(): string {
+  nowMs(): number {
     this.ticks += 1
-    return new Date(this.baseMs + this.ticks * 1000).toISOString()
+    return this.baseMs + this.ticks * 1000
+  }
+
+  now(): string {
+    return new Date(this.nowMs()).toISOString()
   }
 }
 
@@ -720,6 +755,347 @@ function slidesBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
   return [200, { presentationId: id, replies }]
 }
 
+// ---------------------------------------------------------------- gmail ---
+
+function b64url(data: Buffer): string {
+  return data.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function b64urlDecode(data: string): Buffer {
+  return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+}
+
+interface MimePart {
+  headers: Map<string, string>
+  body: Buffer
+}
+
+function splitMime(raw: Buffer): MimePart {
+  let sep = raw.indexOf('\r\n\r\n')
+  let sepLen = 4
+  if (sep === -1) {
+    sep = raw.indexOf('\n\n')
+    sepLen = 2
+  }
+  const headers = new Map<string, string>()
+  const head = sep === -1 ? raw.toString('utf-8') : raw.subarray(0, sep).toString('utf-8')
+  let lastKey = ''
+  for (const line of head.split(/\r?\n/)) {
+    if ((line.startsWith(' ') || line.startsWith('\t')) && lastKey !== '') {
+      headers.set(lastKey, `${headers.get(lastKey) ?? ''} ${line.trim()}`)
+      continue
+    }
+    const colon = line.indexOf(':')
+    if (colon === -1) continue
+    lastKey = line.slice(0, colon).trim().toLowerCase()
+    headers.set(lastKey, line.slice(colon + 1).trim())
+  }
+  return { headers, body: sep === -1 ? Buffer.alloc(0) : raw.subarray(sep + sepLen) }
+}
+
+function decodePartBody(part: MimePart): Buffer {
+  const cte = (part.headers.get('content-transfer-encoding') ?? '').toLowerCase()
+  if (cte === 'base64') {
+    return Buffer.from(part.body.toString('ascii').replace(/\s+/g, ''), 'base64')
+  }
+  // 7bit/8bit: trim the trailing CRLF the MIME serialization appends.
+  let body = part.body
+  while (body.length > 0 && (body[body.length - 1] === 10 || body[body.length - 1] === 13)) {
+    body = body.subarray(0, body.length - 1)
+  }
+  return body
+}
+
+function filenameOf(part: MimePart): string {
+  const disposition = part.headers.get('content-disposition') ?? ''
+  const m = /filename="?([^";]+)"?/.exec(disposition)
+  if (m !== null) return m[1] as string
+  const n = /name="?([^";]+)"?/.exec(part.headers.get('content-type') ?? '')
+  return n === null ? '' : (n[1] as string)
+}
+
+// Parses the constrained MIME the adapters and mirage's send path emit:
+// either a single text/plain message or multipart/mixed with one text part
+// and base64 attachment parts.
+function parseRfc822(raw: Buffer): {
+  headers: { name: string; value: string }[]
+  bodyText: string
+  attachments: { filename: string; mimeType: string; data: Buffer }[]
+} {
+  const top = splitMime(raw)
+  const wanted = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References']
+  const headers: { name: string; value: string }[] = []
+  for (const name of wanted) {
+    const value = top.headers.get(name.toLowerCase())
+    if (value !== undefined) headers.push({ name, value })
+  }
+  const contentType = top.headers.get('content-type') ?? 'text/plain'
+  if (!contentType.toLowerCase().startsWith('multipart/')) {
+    return { headers, bodyText: decodePartBody(top).toString('utf-8'), attachments: [] }
+  }
+  const m = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentType)
+  if (m === null) throw new Error('missing MIME boundary')
+  const boundary = `--${((m[1] ?? m[2]) as string).trim()}`
+  let bodyText = ''
+  const attachments: { filename: string; mimeType: string; data: Buffer }[] = []
+  const text = top.body
+  let from = text.indexOf(boundary)
+  while (from !== -1) {
+    const start = from + boundary.length
+    if (text.subarray(start, start + 2).toString() === '--') break
+    const next = text.indexOf(boundary, start)
+    if (next === -1) break
+    let chunk = text.subarray(start, next)
+    while (chunk.length > 0 && (chunk[0] === 10 || chunk[0] === 13)) chunk = chunk.subarray(1)
+    const part = splitMime(chunk)
+    const partType = (part.headers.get('content-type') ?? 'text/plain').split(';')[0]?.trim() ?? ''
+    const filename = filenameOf(part)
+    if (filename !== '') {
+      attachments.push({ filename, mimeType: partType, data: decodePartBody(part) })
+    } else if (partType === 'text/plain' || partType === '') {
+      bodyText = decodePartBody(part).toString('utf-8')
+    }
+    from = next
+  }
+  return { headers, bodyText, attachments }
+}
+
+function gmailHeader(msg: GmailMessage, name: string): string {
+  const found = msg.headers.find((h) => h.name.toLowerCase() === name.toLowerCase())
+  return found === undefined ? '' : found.value
+}
+
+function gmailSnippet(text: string): string {
+  const flat = text.split(/\s+/).filter((w) => w !== '').join(' ')
+  return flat.length > 100 ? flat.slice(0, 100) : flat
+}
+
+function gmailSizeEstimate(msg: GmailMessage): number {
+  return (
+    Buffer.byteLength(msg.bodyText, 'utf-8') +
+    msg.attachments.reduce((total, a) => total + a.data.length, 0)
+  )
+}
+
+function fmtGmailMessage(msg: GmailMessage): Record<string, unknown> {
+  const headers = msg.headers.map((h) => ({ name: h.name, value: h.value }))
+  const bodyData = Buffer.from(msg.bodyText, 'utf-8')
+  let payload: Record<string, unknown>
+  if (msg.attachments.length === 0) {
+    payload = {
+      partId: '',
+      mimeType: 'text/plain',
+      filename: '',
+      headers,
+      body: { size: bodyData.length, data: b64url(bodyData) },
+    }
+  } else {
+    const parts: Record<string, unknown>[] = [
+      {
+        partId: '0',
+        mimeType: 'text/plain',
+        filename: '',
+        headers: [],
+        body: { size: bodyData.length, data: b64url(bodyData) },
+      },
+    ]
+    msg.attachments.forEach((att, i) => {
+      parts.push({
+        partId: String(i + 1),
+        mimeType: att.mimeType,
+        filename: att.filename,
+        headers: [],
+        body: { attachmentId: att.attachmentId, size: att.data.length },
+      })
+    })
+    payload = { partId: '', mimeType: 'multipart/mixed', filename: '', headers, body: { size: 0 }, parts }
+  }
+  return {
+    id: msg.id,
+    threadId: msg.threadId,
+    labelIds: [...msg.labelIds],
+    snippet: gmailSnippet(msg.bodyText),
+    internalDate: String(msg.internalDate),
+    sizeEstimate: gmailSizeEstimate(msg),
+    payload,
+  }
+}
+
+function labelByName(name: string): GmailLabel | undefined {
+  const lower = name.toLowerCase()
+  return [...state.labels.values()].find(
+    (label) => label.name.toLowerCase() === lower || label.id.toLowerCase() === lower,
+  )
+}
+
+function gmailDateMs(token: string): number {
+  const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(token)
+  if (m === null) return NaN
+  return Date.UTC(parseInt(m[1] as string, 10), parseInt(m[2] as string, 10) - 1, parseInt(m[3] as string, 10))
+}
+
+// AND-only Gmail query subset: label:, from:, to:, subject:, is:unread,
+// is:read, after:YYYY/MM/DD, before:YYYY/MM/DD, and bare terms matching
+// subject or body as case-insensitive substrings.
+function matchGmailQuery(msg: GmailMessage, q: string): boolean {
+  for (const token of q.split(/\s+/)) {
+    if (token === '') continue
+    const lower = token.toLowerCase()
+    if (lower.startsWith('label:')) {
+      const label = labelByName(token.slice(6))
+      if (label === undefined || !msg.labelIds.includes(label.id)) return false
+    } else if (lower.startsWith('from:')) {
+      if (!gmailHeader(msg, 'From').toLowerCase().includes(lower.slice(5))) return false
+    } else if (lower.startsWith('to:')) {
+      if (!gmailHeader(msg, 'To').toLowerCase().includes(lower.slice(3))) return false
+    } else if (lower.startsWith('subject:')) {
+      if (!gmailHeader(msg, 'Subject').toLowerCase().includes(lower.slice(8))) return false
+    } else if (lower === 'is:unread') {
+      if (!msg.labelIds.includes('UNREAD')) return false
+    } else if (lower === 'is:read') {
+      if (msg.labelIds.includes('UNREAD')) return false
+    } else if (lower.startsWith('after:')) {
+      const ms = gmailDateMs(token.slice(6))
+      if (Number.isNaN(ms) || msg.internalDate < ms) return false
+    } else if (lower.startsWith('before:')) {
+      const ms = gmailDateMs(token.slice(7))
+      if (Number.isNaN(ms) || msg.internalDate >= ms) return false
+    } else {
+      const haystack = `${gmailHeader(msg, 'Subject')}\n${msg.bodyText}`.toLowerCase()
+      if (!haystack.includes(lower)) return false
+    }
+  }
+  return true
+}
+
+function ensureLabel(name: string): GmailLabel {
+  const existing = labelByName(name)
+  if (existing !== undefined) return existing
+  const label: GmailLabel = { id: state.nextId('label'), name, type: 'user' }
+  state.labels.set(label.id, label)
+  return label
+}
+
+function insertGmailMessage(
+  raw: Buffer,
+  labelIds: string[],
+  threadId: string | undefined,
+  useDateHeader: boolean,
+): GmailMessage {
+  const parsed = parseRfc822(raw)
+  const id = state.nextId('msg')
+  const dateHeader = parsed.headers.find((h) => h.name === 'Date')?.value
+  const headerMs = dateHeader === undefined ? NaN : Date.parse(dateHeader)
+  const msg: GmailMessage = {
+    id,
+    threadId: threadId !== undefined && threadId !== '' ? threadId : id,
+    labelIds: labelIds.map((name) => ensureLabel(name).id),
+    internalDate: useDateHeader && !Number.isNaN(headerMs) ? headerMs : state.nowMs(),
+    headers: parsed.headers,
+    bodyText: parsed.bodyText,
+    attachments: parsed.attachments.map((att) => ({
+      attachmentId: state.nextId('att'),
+      filename: att.filename,
+      mimeType: att.mimeType,
+      data: att.data,
+    })),
+  }
+  state.messages.set(id, msg)
+  return msg
+}
+
+function listGmailMessages(query: URLSearchParams): [number, object] {
+  const q = query.get('q')
+  const labelParam = query.get('labelIds')
+  const maxResults = parseInt(query.get('maxResults') ?? '100', 10)
+  let items = [...state.messages.values()]
+  if (labelParam !== null) {
+    items = items.filter((msg) => msg.labelIds.includes(labelParam))
+  } else if (q === null || !q.includes('label:TRASH')) {
+    // Real messages.list hides TRASH unless it is asked for explicitly.
+    items = items.filter((msg) => !msg.labelIds.includes('TRASH'))
+  }
+  if (q !== null && q.trim() !== '') {
+    items = items.filter((msg) => matchGmailQuery(msg, q))
+  }
+  items.sort((a, b) =>
+    a.internalDate === b.internalDate
+      ? b.id.localeCompare(a.id)
+      : b.internalDate - a.internalDate,
+  )
+  items = items.slice(0, maxResults)
+  const out: Record<string, unknown> = { resultSizeEstimate: items.length }
+  if (items.length > 0) {
+    out.messages = items.map((msg) => ({ id: msg.id, threadId: msg.threadId }))
+  }
+  return [200, out]
+}
+
+function routeGmail(ctx: Ctx): [number, object | Buffer | null, string?] | null {
+  const { method, path, query } = ctx
+
+  if (path === '/gmail/v1/users/me/labels' && method === 'GET') {
+    return [
+      200,
+      {
+        labels: [...state.labels.values()].map((label) => ({
+          id: label.id,
+          name: label.name,
+          type: label.type,
+        })),
+      },
+    ]
+  }
+  if (path === '/gmail/v1/users/me/messages' && method === 'GET') {
+    return listGmailMessages(query)
+  }
+  if (path === '/gmail/v1/users/me/messages' && method === 'POST') {
+    const body = json(ctx) as { raw?: string; labelIds?: string[]; threadId?: string }
+    if (typeof body.raw !== 'string') {
+      return googleError(400, "'raw' RFC822 payload is required.", 'INVALID_ARGUMENT')
+    }
+    const msg = insertGmailMessage(
+      b64urlDecode(body.raw),
+      body.labelIds ?? [],
+      body.threadId,
+      query.get('internalDateSource') === 'dateHeader',
+    )
+    return [200, { id: msg.id, threadId: msg.threadId, labelIds: [...msg.labelIds] }]
+  }
+  if (path === '/gmail/v1/users/me/messages/send' && method === 'POST') {
+    const body = json(ctx) as { raw?: string; threadId?: string }
+    if (typeof body.raw !== 'string') {
+      return googleError(400, "'raw' RFC822 payload is required.", 'INVALID_ARGUMENT')
+    }
+    const msg = insertGmailMessage(b64urlDecode(body.raw), ['SENT'], body.threadId, false)
+    return [200, { id: msg.id, threadId: msg.threadId, labelIds: [...msg.labelIds] }]
+  }
+  let m = /^\/gmail\/v1\/users\/me\/messages\/([^/]+)\/trash$/.exec(path)
+  if (m !== null && method === 'POST') {
+    const msg = state.messages.get(m[1] as string)
+    if (msg === undefined) return googleError(404, 'Requested entity was not found.', 'NOT_FOUND')
+    msg.labelIds = msg.labelIds.filter((id) => id !== 'INBOX' && id !== 'UNREAD')
+    msg.labelIds.push('TRASH')
+    return [200, { id: msg.id, threadId: msg.threadId, labelIds: [...msg.labelIds] }]
+  }
+  m = /^\/gmail\/v1\/users\/me\/messages\/([^/]+)\/attachments\/([^/]+)$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const msg = state.messages.get(m[1] as string)
+    const att = msg?.attachments.find((a) => a.attachmentId === m?.[2])
+    if (msg === undefined || att === undefined) {
+      return googleError(404, 'Requested entity was not found.', 'NOT_FOUND')
+    }
+    return [200, { size: att.data.length, data: b64url(att.data) }]
+  }
+  m = /^\/gmail\/v1\/users\/me\/messages\/([^/]+)$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const msg = state.messages.get(m[1] as string)
+    if (msg === undefined) return googleError(404, 'Requested entity was not found.', 'NOT_FOUND')
+    return [200, fmtGmailMessage(msg)]
+  }
+  return null
+}
+
 // ------------------------------------------------------------- routing ---
 
 function parseMultipartRelated(body: Buffer, contentType: string): { metadata: Record<string, unknown>; media: Buffer } {
@@ -777,6 +1153,11 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
     const body = ctx.body.length > 0 ? (json(ctx) as { epoch?: string }) : {}
     state = new GwsState(body.epoch)
     return [200, { ok: true }]
+  }
+
+  if (path.startsWith('/gmail/v1/')) {
+    const handled = routeGmail(ctx)
+    if (handled !== null) return handled
   }
 
   let m = /^\/upload\/drive\/v3\/files$/.exec(path)

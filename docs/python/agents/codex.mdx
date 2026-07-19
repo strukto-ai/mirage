@@ -4,7 +4,7 @@ description: Run OpenAI's Codex CLI against any Mirage workspace by mounting it 
 icon: /images/openai-logo.svg
 ---
 
-[OpenAI Codex](https://github.com/openai/codex) is OpenAI's coding-agent CLI. Like [Claude Code](/python/agents/claude-code), it operates on a real filesystem and doesn't expose a pluggable backend, so Mirage integrates by [FUSE-mounting](/python/setup/fuse) a workspace and letting you point `codex` at the mountpoint.
+[OpenAI Codex](https://github.com/openai/codex) can use Mirage through either an installable [TypeScript plugin](/typescript/agents/codex) or a FUSE mount. The Python integration [FUSE-mounts](/python/setup/fuse) a workspace as a normal host directory, so Codex's built-in filesystem and shell tools operate on Mirage without a separate tool server.
 
 ## Install
 
@@ -26,10 +26,10 @@ with Workspace(
     input("Press Enter when done...")
 ```
 
-The mountpoint behaves like a regular directory. Codex's `read_file`, `write_file`, and `run_shell` tools all dispatch through Mirage's ops layer.
+The mountpoint behaves like a regular directory. Codex's built-in file and shell tools all dispatch through Mirage's ops layer. For the Codex app, open the mountpoint as the project folder instead of starting `codex` from it.
 
-## Why FUSE instead of an SDK integration?
+## FUSE or plugin?
 
-The Codex CLI's tool surface isn't pluggable, it expects host file operations. FUSE makes those host operations *be* Mirage operations.
+Use Python FUSE when you want Codex's built-in filesystem tools to see Mirage as an ordinary directory. This works in the CLI and app, but requires an OS FUSE driver and does not add Mirage's agent-level stale-write check.
 
-You lose per-tool customization and Mirage's op-record telemetry; you gain zero integration effort and compatibility with every Codex feature. Same trade-off as [Claude Code](/python/agents/claude-code).
+Use the [TypeScript plugin](/typescript/agents/codex) when you want named Mirage tools, Pi-style stale-write protection, and plugin installation through Codex. The plugin uses Mirage's standard MCP adapter internally.

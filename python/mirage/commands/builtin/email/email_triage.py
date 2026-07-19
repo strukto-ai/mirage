@@ -37,7 +37,7 @@ SPEC = CommandSpec(options=(
 ))
 
 
-@command("email-triage", resource="email", spec=SPEC)
+@command("himalaya envelope list", resource="email", spec=SPEC)
 async def email_triage(
     accessor: EmailAccessor,
     paths: list[PathSpec],

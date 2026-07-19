@@ -43,13 +43,14 @@ memory, refreshing ~5 minutes before expiry.
 
 ### Config Reference
 
-| Field           | Required | Description                                                             |
-| --------------- | -------- | ----------------------------------------------------------------------- |
-| `client_id`     | Yes      | Dropbox app key                                                         |
-| `client_secret` | Yes      | Dropbox app secret                                                      |
-| `refresh_token` | Yes      | Long-lived OAuth2 refresh token                                         |
-| `root_path`     | No       | Mount a sub-folder of the account as the root (default `/`, the account root) |
-| `endpoint`      | No       | Base URL overriding the real Dropbox hosts (test fakes)                 |
+| Field            | Required | Description                                                             |
+| ---------------- | -------- | ----------------------------------------------------------------------- |
+| `client_id`      | Yes      | Dropbox app key                                                         |
+| `client_secret`  | Yes      | Dropbox app secret                                                      |
+| `refresh_token`  | Yes      | Long-lived OAuth2 refresh token                                         |
+| `root_path`      | No       | Mount a sub-folder of the account as the root (default `/`, the account root) |
+| `content_search` | No       | Let `grep`/`rg` narrow recursive scans via `/2/files/search_v2` (default `False`; see below) |
+| `endpoint`       | No       | Base URL overriding the real Dropbox hosts (test fakes)                 |
 
 ## Mount a subfolder
 
@@ -68,6 +69,36 @@ config = DropboxConfig(
 
 `root_path` accepts `Team/data`, `/Team/data`, or `/Team/data/` (all
 normalized the same way); `..` segments are rejected.
+
+## Search push-down
+
+By default a recursive `grep`/`rg` walks the tree and downloads every file.
+With `content_search=True`, both commands first ask
+[`/2/files/search_v2`](https://www.dropbox.com/developers/documentation/http/documentation#files-search)
+which files contain the pattern's literal, then download and scan only those
+candidates — the output stays exactly GNU because the local scan still decides
+every match. Regex patterns narrow on an extracted required literal; flags
+whose output must see every file in scope (`grep -v`, `grep -c`, `rg -v`,
+`rg --type/--glob`) always take the full walk, as do file operands and
+multi-pattern (`-e`/`-f`) runs. An empty or failed search also falls back to
+the full walk.
+
+```python
+config = DropboxConfig(
+    client_id=os.environ["DROPBOX_APP_KEY"],
+    client_secret=os.environ["DROPBOX_APP_SECRET"],
+    refresh_token=os.environ["DROPBOX_REFRESH_TOKEN"],
+    content_search=True,
+)
+```
+
+The knob is off by default for two reasons: full-text content search is
+plan-gated (Dropbox Professional/Essentials/Business and up — on other plans
+`search_v2` silently matches file names only, so a narrowed scan would miss
+content matches), and Dropbox's search index lags recent writes by a short
+delay, so a push-down may miss files written moments earlier. Only enable it
+when the account's plan includes full-text search and slightly stale results
+are acceptable.
 
 ## Cache
 

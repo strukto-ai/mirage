@@ -20,6 +20,13 @@ class DropboxConfig(BaseModel):
     client_secret: SecretStr
     refresh_token: SecretStr
     root_path: str = "/"
+    # Opt-in for grep/rg to narrow recursive scans via /files/search_v2
+    # instead of downloading every file. Full-text content search is
+    # plan-gated (Dropbox Professional/Essentials/Business and up); on other
+    # plans search_v2 silently matches file names only, which would make a
+    # narrowed scan miss content matches — so this stays off by default.
+    # Search indexing also lags recent writes by a short delay.
+    content_search: bool = False
     # Base URL overriding the real Dropbox hosts (integ fakes): one origin
     # serving /oauth2/token, the RPC API under /2, and content downloads
     # under /2. None means the production oauth/api/content hosts.

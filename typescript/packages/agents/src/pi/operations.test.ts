@@ -72,6 +72,59 @@ describe('mirageOperations.edit', () => {
     await ops.edit.writeFile('/f.txt', `${buf.toString()} + new`)
     expect(await ws.fs.readFileText('/f.txt')).toBe('old + new')
   })
+
+  it('rejects an edit after the file changed since the agent read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws)
+    await ops.read.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    await expect(ops.edit.readFile('/f.txt')).rejects.toThrow(
+      'File changed since it was last read: /f.txt',
+    )
+
+    await ops.read.readFile('/f.txt')
+    expect((await ops.edit.readFile('/f.txt')).toString()).toBe('changed elsewhere')
+  })
+
+  it('rejects a write when the file changes while an edit is in progress', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws)
+    await ops.edit.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    await expect(ops.edit.writeFile('/f.txt', 'replacement')).rejects.toThrow(
+      'Read the file again before modifying it',
+    )
+    expect(await ws.fs.readFileText('/f.txt')).toBe('changed elsewhere')
+  })
+})
+
+describe('mirageOperations stale write protection', () => {
+  it('rejects an overwrite after the file changed since the agent read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws)
+    await ops.read.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    await expect(ops.write.writeFile('/f.txt', 'replacement')).rejects.toThrow(
+      'Read the file again before modifying it',
+    )
+    expect(await ws.fs.readFileText('/f.txt')).toBe('changed elsewhere')
+  })
+
+  it('can disable stale write protection', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const ops = mirageOperations(ws, { staleWriteProtection: false })
+    await ops.read.readFile('/f.txt')
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+    await ops.write.writeFile('/f.txt', 'replacement')
+    expect(await ws.fs.readFileText('/f.txt')).toBe('replacement')
+  })
 })
 
 describe('mirageOperations.bash', () => {
@@ -90,6 +143,40 @@ describe('mirageOperations.bash', () => {
     const noop = (_: Buffer): void => undefined
     const result = await ops.bash.exec('false', '/', { onData: noop })
     expect(result.exitCode).not.toBe(0)
+  })
+
+  it('runs commands from the cwd supplied by Pi', async () => {
+    const ws = mkWs()
+    await ws.fs.mkdir('/nested')
+    const ops = mirageOperations(ws)
+    const chunks: Buffer[] = []
+    await ops.bash.exec('pwd', '/nested', {
+      onData: (data) => chunks.push(data),
+    })
+    expect(Buffer.concat(chunks).toString()).toBe('/nested\n')
+    expect(ws.cwd).toBe('/')
+  })
+
+  it('maps Pi cancellation to its expected aborted error', async () => {
+    const ops = mirageOperations(mkWs())
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      ops.bash.exec('echo never', '/', {
+        onData: () => undefined,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('aborted')
+  })
+
+  it('maps Pi timeouts to its expected timeout error', async () => {
+    const ops = mirageOperations(mkWs())
+    await expect(
+      ops.bash.exec('sleep 1', '/', {
+        onData: () => undefined,
+        timeout: 0.01,
+      }),
+    ).rejects.toThrow('timeout:0.01')
   })
 })
 

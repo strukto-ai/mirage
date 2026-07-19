@@ -5,6 +5,7 @@
     "has_provision": false,
     "has_write": true,
     "resources": [
+      "box",
       "databricks_volume",
       "disk",
       "dropbox",

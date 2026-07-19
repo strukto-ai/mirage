@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { MirageEditor } from './editor.ts'
+export { mirageExecuteTool } from './execute.ts'
+export { mirageReadFileTool, type MirageReadFileOutput } from './read-file.ts'
 export { MirageShell } from './shell.ts'
 export { MIRAGE_SYSTEM_PROMPT, buildSystemPrompt } from '../prompt.ts'
 export type { BuildSystemPromptOptions } from '../prompt.ts'

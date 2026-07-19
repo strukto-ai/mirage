@@ -41,6 +41,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "s3":
     ResourceEntry("mirage.resource.s3:S3Resource",
                   "mirage.resource.s3:S3Config"),
+    "gridfs":
+    ResourceEntry("mirage.resource.gridfs:GridFSResource",
+                  "mirage.resource.gridfs:GridFSConfig"),
     "r2":
     ResourceEntry("mirage.resource.r2:R2Resource",
                   "mirage.resource.r2:R2Config"),
@@ -98,6 +101,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "onedrive":
     ResourceEntry("mirage.resource.onedrive:OneDriveResource",
                   "mirage.resource.onedrive:OneDriveConfig"),
+    "box":
+    ResourceEntry("mirage.resource.box:BoxResource",
+                  "mirage.resource.box:BoxConfig"),
     "dropbox":
     ResourceEntry("mirage.resource.dropbox:DropboxResource",
                   "mirage.resource.dropbox:DropboxConfig"),

@@ -168,6 +168,69 @@
       ]
     },
     {
+      "id": "gridfs",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gridfs",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "data2"
+        },
+        {
+          "path": "/res",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "gridfs-prefix",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gridfs",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "shared",
+          "prefix": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "shared",
+          "prefix": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "gridfs",
+          "backend": "gridfs",
+          "bucket": "shared",
+          "prefix": "team/reports/res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
       "id": "dropbox",
       "hosts": [
         "python",
@@ -378,6 +441,36 @@
       ]
     },
     {
+      "id": "box",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "box",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "box",
+          "backend": "box",
+          "folder": "data",
+          "seed": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "box",
+          "backend": "box",
+          "folder": "data2"
+        },
+        {
+          "path": "/res",
+          "resource": "box",
+          "backend": "box",
+          "folder": "res",
+          "seed": "columnar/v1"
+        }
+      ]
+    },
+    {
       "id": "hf-prefix",
       "hosts": [
         "python",
@@ -518,6 +611,49 @@
           "path": "/slides",
           "resource": "gslides",
           "backend": "gslides"
+        }
+      ]
+    },
+    {
+      "id": "gmail",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "epoch": "2026-02-01T00:00:00Z",
+      "mail": "gmail/v1",
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "gmail",
+          "backend": "gmail"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "email",
+      "mail": "email/v1",
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "email",
+          "backend": "email"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
         }
       ]
     }

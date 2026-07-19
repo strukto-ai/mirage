@@ -1,0 +1,29 @@
+{
+  "name": "mirage",
+  "version": "0.1.0",
+  "description": "Use Mirage-mounted cloud, database, and local data as a virtual filesystem.",
+  "author": {
+    "name": "Strukto.AI",
+    "url": "https://github.com/strukto-ai"
+  },
+  "homepage": "https://docs.mirage.strukto.ai/typescript/agents/grok-build",
+  "repository": "https://github.com/strukto-ai/mirage",
+  "license": "Apache-2.0",
+  "keywords": ["mirage", "filesystem", "mcp", "coding-agent"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Mirage",
+    "shortDescription": "Use mounted data as a virtual filesystem.",
+    "longDescription": "Connect coding agents to cloud storage, databases, and local data through Mirage filesystem tools.",
+    "developerName": "Strukto.AI",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write", "Search", "Execute"],
+    "websiteURL": "https://docs.mirage.strukto.ai",
+    "defaultPrompt": [
+      "List the files mounted in Mirage.",
+      "Find files in Mirage that match this query.",
+      "Read and safely edit a file mounted in Mirage."
+    ]
+  }
+}

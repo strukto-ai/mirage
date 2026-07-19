@@ -72,7 +72,7 @@ async function gwsGmailTriageCommand(
 }
 
 export const GMAIL_GWS_TRIAGE = command({
-  name: 'gws-gmail-triage',
+  name: 'gws gmail +triage',
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailTriageCommand,

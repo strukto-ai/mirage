@@ -15,18 +15,7 @@
 import os
 from dataclasses import dataclass
 
-import anthropic.types.beta.beta_web_search_tool_20250305_param as _ws_mod
 from dotenv import load_dotenv
-
-if not hasattr(_ws_mod, "UserLocation"):
-
-    class _UserLocation:
-
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-
-    _ws_mod.UserLocation = _UserLocation
-
 from pydantic_ai import Agent
 from pydantic_ai_backends import create_console_toolset
 
@@ -55,11 +44,11 @@ class Deps:
 backend = PydanticAIWorkspace(ws)
 
 agent = Agent(
-    "anthropic:claude-sonnet-4-20250514",
+    "anthropic:claude-sonnet-4-6",
     system_prompt=build_system_prompt(
         mount_info={"/s3/": "S3 bucket with PDF documents"}),
     deps_type=Deps,
-    toolsets=[create_console_toolset()],
+    toolsets=[create_console_toolset(document_support=True)],
 )
 
 task = ("Read the PDF at /s3/data/example.pdf."

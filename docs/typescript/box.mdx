@@ -10,8 +10,15 @@ Mirage ships `BoxResource` in **two runtimes**:
 - `@struktoai/mirage-browser`, supports the same refresh token via PKCE (no client secret in the bundle)
 
 Both runtimes hit the same [Box v2 API](https://developer.box.com/reference/) endpoints
-(`/folders/{id}/items`, `/files/{id}/content`, `/search`). Credentials are obtained the same way
+(`/folders/{id}/items`, `/files/{id}/content`, `/search`, plus multipart upload, folder
+create, delete, rename/move, and copy for writes). Credentials are obtained the same way
 in both runtimes, see [Box Credentials](/home/setup/box).
+
+Both `READ` and `WRITE` modes are supported (mount with `{ mode: MountMode.WRITE }` to
+enable `tee`/`cp`/`mv`/`rm`/`mkdir`/`touch`). Pass `rootFolderId` to mount a single Box
+folder as the workspace root instead of the whole account; folder ids are stable across
+renames and moves. The Python package ships the same backend, see
+[Box (Python)](/python/resource/box).
 
 ## Quick start: developer token
 
@@ -243,6 +250,8 @@ on Box because the file IDs are in different namespaces.
 
 - **Filesystem**: `ls`, `cat`, `head`, `tail`, `nl`, `wc`, `stat`, `find`, `tree`, `du`, `file`,
   `realpath`, `basename`, `dirname`
+- **Writes** (in `WRITE` mode): `tee`, `cp`, `mv`, `rm` (`-r`), `mkdir` (`-p`), `touch`,
+  `truncate`
 - **Search/text**: `grep`, `rg`, `awk`, `sed`, `sort`, `uniq`, `cut`, `diff`, `cmp`, `jq`
 - **Encoding**: `base64`
 - **Format-aware**: `cat_parquet`, `cat_feather`, `cat_hdf5`, plus `head_*`/`grep_*`/`ls_*`/

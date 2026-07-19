@@ -167,6 +167,7 @@
                 "icon": "database",
                 "pages": [
                   "home/setup/mongodb",
+                  "home/setup/gridfs",
                   "home/setup/postgres",
                   "home/setup/chroma",
                   "home/setup/lancedb",
@@ -233,7 +234,8 @@
               "python/agents/agno",
               "python/agents/claude-code",
               "python/agents/claude-agent-sdk",
-              "python/agents/codex"
+              "python/agents/codex",
+              "python/agents/grok-build"
             ]
           },
           {
@@ -304,6 +306,7 @@
                 "group": "Cloud Files",
                 "icon": "folder-open",
                 "pages": [
+                  "python/resource/box",
                   "python/resource/dropbox",
                   "python/resource/nextcloud",
                   "python/resource/databricks_volume"
@@ -333,6 +336,7 @@
                 "icon": "database",
                 "pages": [
                   "python/resource/mongodb",
+                  "python/resource/gridfs",
                   "python/resource/postgres",
                   "python/resource/chroma",
                   "python/resource/lancedb",
@@ -401,7 +405,8 @@
               "typescript/agents/opencode",
               "typescript/agents/claude-code",
               "typescript/agents/claude-agent-sdk",
-              "typescript/agents/codex"
+              "typescript/agents/codex",
+              "typescript/agents/grok-build"
             ]
           },
           {
@@ -492,6 +497,7 @@
                 "icon": "database",
                 "pages": [
                   "typescript/setup/mongodb",
+                  "typescript/setup/gridfs",
                   "typescript/setup/postgres",
                   "typescript/setup/chroma",
                   "typescript/setup/lancedb",

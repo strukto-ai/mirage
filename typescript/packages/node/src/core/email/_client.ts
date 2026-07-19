@@ -185,11 +185,12 @@ export async function fetchHeaders(
   try {
     const results: FetchedMessage[] = []
     for (const uid of uids) {
-      const msg = await imap.fetchOne(uid, { headers: true, flags: true, uid: true }, { uid: true })
+      // Full source (not headers-only): listings need the MIME structure
+      // to surface attachment dirs, mirroring the python backend.
+      const msg = await imap.fetchOne(uid, { source: true, flags: true, uid: true }, { uid: true })
       if (msg === false) continue
-      const headers =
-        msg.headers instanceof Buffer ? new Uint8Array(msg.headers) : new Uint8Array(0)
-      const parsed = await parseRfc822(headers, true)
+      const source = msg.source instanceof Buffer ? new Uint8Array(msg.source) : new Uint8Array(0)
+      const parsed = await parseRfc822(source)
       results.push({
         ...parsed,
         uid,

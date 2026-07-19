@@ -12,14 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
-from typing import TYPE_CHECKING, Any
+import platform
+from typing import TYPE_CHECKING
 
 from openhands.sdk.llm import TextContent
-from openhands.sdk.tool import ToolExecutor, register_tool
+from openhands.sdk.tool import ToolAnnotations, ToolExecutor, register_tool
 from openhands.tools.terminal import TerminalTool
 from openhands.tools.terminal.definition import (TerminalAction,
                                                  TerminalObservation)
+from openhands.tools.terminal.descriptions import (UNIX_TOOL_DESCRIPTION,
+                                                   WINDOWS_TOOL_DESCRIPTION)
 from openhands.tools.terminal.metadata import CmdOutputMetadata
 
 from mirage.agents.openhands.workspace import MirageWorkspace
@@ -76,18 +78,6 @@ class MirageTerminalExecutor(ToolExecutor[TerminalAction,
         )
 
 
-def _mirage_terminal_factory(
-    workspace: MirageWorkspace,
-    *,
-    conv_state: Any,
-    **params: Any,
-) -> list[TerminalTool]:
-    executor = MirageTerminalExecutor(workspace)
-    return list(
-        TerminalTool.create(conv_state=conv_state, executor=executor,
-                            **params))
-
-
 def register_mirage_terminal(
     workspace: MirageWorkspace,
     name: str = "mirage_terminal",
@@ -103,5 +93,20 @@ def register_mirage_terminal(
         str: The registered tool name, ready to use as
         ``Tool(name=...)`` in the agent's tool list.
     """
-    register_tool(name, functools.partial(_mirage_terminal_factory, workspace))
+    description = (WINDOWS_TOOL_DESCRIPTION if platform.system() == "Windows"
+                   else UNIX_TOOL_DESCRIPTION)
+    terminal = TerminalTool(
+        action_type=TerminalAction,
+        observation_type=TerminalObservation,
+        description=description,
+        annotations=ToolAnnotations(
+            title="terminal",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+        executor=MirageTerminalExecutor(workspace),
+    )
+    register_tool(name, terminal)
     return name
