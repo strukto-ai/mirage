@@ -188,6 +188,7 @@ describe('box core find', () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT, { name: '*.md', minSize: 1024 })
     const statted = [...new Set(vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual))]
+    // '/' is the start-point stat that emits the search root itself.
     expect(statted.sort()).toEqual(['/', '/docs/inner/deep.md', '/docs/readme.md', '/notes.txt'])
   })
 

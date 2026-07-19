@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cut -c1 /data/a.txt /data2/xm.txt",
       "expect": {

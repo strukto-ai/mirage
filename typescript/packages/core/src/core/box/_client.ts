@@ -12,11 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '../../utils/slash.ts'
+
 export const BOX_TOKEN_URL = 'https://api.box.com/oauth2/token'
 export const BOX_API_BASE = 'https://api.box.com/2.0'
 const TOKEN_BUFFER_SECONDS = 300
 
 export interface BoxConfig {
+  // API origin override (e.g. an integ fake: http://127.0.0.1:5096). Token
+  // and API URLs derive from it; defaults to the real api.box.com endpoints.
+  endpoint?: string
   clientId?: string
   clientSecret?: string
   refreshToken?: string
@@ -37,6 +42,18 @@ export interface BoxConfig {
   // the next process restart starts from the latest token rather than the
   // original one (which is invalid after first use).
   onRefreshTokenRotated?: (newRefreshToken: string) => void | Promise<void>
+}
+
+function tokenUrlOf(config: BoxConfig): string {
+  return config.endpoint !== undefined && config.endpoint !== ''
+    ? `${rstripSlash(config.endpoint)}/oauth2/token`
+    : BOX_TOKEN_URL
+}
+
+function apiBaseOf(config: BoxConfig): string {
+  return config.endpoint !== undefined && config.endpoint !== ''
+    ? `${rstripSlash(config.endpoint)}/2.0`
+    : BOX_API_BASE
 }
 
 export class BoxApiError extends Error {
@@ -63,7 +80,7 @@ export async function refreshAccessToken(
   if (config.clientSecret !== undefined && config.clientSecret !== '') {
     body.set('client_secret', config.clientSecret)
   }
-  const r = await fetch(BOX_TOKEN_URL, {
+  const r = await fetch(tokenUrlOf(config), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
@@ -100,7 +117,7 @@ async function fetchCcgToken(
     box_subject_type: 'enterprise',
     box_subject_id: config.enterpriseId ?? '',
   })
-  const r = await fetch(BOX_TOKEN_URL, {
+  const r = await fetch(tokenUrlOf(config), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
@@ -114,6 +131,9 @@ async function fetchCcgToken(
 }
 
 export class BoxTokenManager {
+  // API base for all non-token calls; api.ts reads this instead of the
+  // BOX_API_BASE const so a config endpoint override reaches every request.
+  readonly apiBase: string
   private readonly config: BoxConfig
   private readonly devTokenMode: boolean
   private readonly ccgMode: boolean
@@ -124,6 +144,7 @@ export class BoxTokenManager {
 
   constructor(config: BoxConfig) {
     this.config = config
+    this.apiBase = apiBaseOf(config)
     this.devTokenMode = config.accessToken !== undefined && config.accessToken !== ''
     this.ccgMode =
       !this.devTokenMode && config.enterpriseId !== undefined && config.enterpriseId !== ''
@@ -270,4 +291,72 @@ export async function* boxGetStream(
     if (done) break
     yield value
   }
+}
+
+export async function boxPostJson(
+  tm: BoxTokenManager,
+  url: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const headers = await boxAuthHeaders(tm)
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box POST ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}
+
+export async function boxPutJson(
+  tm: BoxTokenManager,
+  url: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const headers = await boxAuthHeaders(tm)
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box PUT ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}
+
+export async function boxDelete(
+  tm: BoxTokenManager,
+  url: string,
+  params?: Record<string, string | number>,
+): Promise<void> {
+  const headers = await boxAuthHeaders(tm)
+  const r = await fetch(buildUrl(url, params), { method: 'DELETE', headers })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box DELETE ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+}
+
+export async function boxUploadMultipart(
+  tm: BoxTokenManager,
+  url: string,
+  attributes: Record<string, unknown>,
+  filename: string,
+  data: Uint8Array,
+): Promise<unknown> {
+  const headers = await boxAuthHeaders(tm)
+  const form = new FormData()
+  form.set('attributes', JSON.stringify(attributes))
+  form.set('file', new Blob([data as BlobPart]), filename)
+  const r = await fetch(url, { method: 'POST', headers, body: form })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new BoxApiError(`Box upload ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
 }

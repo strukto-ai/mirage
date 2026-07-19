@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/symd && echo alpha > /data/symd/t.txt",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ln -s /data/symd/t.txt /data/symd/l.txt",
       "expect": {
@@ -81,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/symd/l.txt",
       "expect": {
@@ -111,7 +114,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep alpha /data/symd/l.txt",
       "expect": {
@@ -141,7 +145,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo beta > /data/symd/l.txt && cat /data/symd/t.txt",
       "expect": {
@@ -171,7 +176,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls -F /data/symd",
       "expect": {
@@ -201,7 +207,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls -l /data/symd | grep -- '->'",
       "expect": {
@@ -231,7 +238,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ln -s /data/symd /data/dl && cat /data/dl/t.txt",
       "expect": {
@@ -261,7 +269,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/symd/l.txt /data/symd/m.txt && readlink /data/symd/m.txt",
       "expect": {
@@ -289,7 +298,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/symd/m.txt /data/symd/copy.txt && cat /data/symd/copy.txt",
       "expect": {
@@ -319,7 +329,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm /data/symd/m.txt && readlink /data/symd/m.txt 2>&1",
       "expect": {
@@ -349,7 +360,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ln -s /data/symd/none /data/symd/dangle && cat /data/symd/dangle 2>&1",
       "expect": {
@@ -379,7 +391,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ln -s /data/lp2 /data/lp1 && ln -s /data/lp1 /data/lp2 && cat /data/lp1 2>&1",
       "expect": {
@@ -409,7 +422,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm /data/symd/dangle /data/lp1 /data/lp2 /data/dl && rm -r /data/symd",
       "expect": {

@@ -1,7 +1,7 @@
 ---
 title: Box
 icon: box
-description: Set up Box OAuth2 credentials and obtain a refresh token (Node and browser).
+description: Set up Box OAuth2 credentials and obtain a refresh token (Python, Node, and browser).
 ---
 
 ## Overview
@@ -209,4 +209,16 @@ const box = new BoxResource({
   refreshToken: refreshTokenFromLocalStorage,
   onRefreshTokenRotated: (next) => localStorage.setItem('box-refresh', next),
 })
+```
+
+For Python usage (same credentials), see [Box (Python)](/python/resource/box):
+
+```python
+from mirage.resource.box import BoxConfig, BoxResource
+
+resource = BoxResource(BoxConfig(
+    client_id=os.environ["BOX_CLIENT_ID"],
+    client_secret=os.environ["BOX_CLIENT_SECRET"],
+    refresh_token=os.environ["BOX_REFRESH_TOKEN"],
+))
 ```

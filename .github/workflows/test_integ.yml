@@ -445,6 +445,16 @@ jobs:
             sleep 2
           done
 
+      - name: Start fake Box API for the typescript host
+        run: |
+          nohup ./python/.venv/bin/python integ/server/box_server.py --port 5096 > /tmp/boxsrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "BOX_ENDPOINT=" /tmp/boxsrv.log && break
+            sleep 1
+          done
+          cat /tmp/boxsrv.log
+          echo "BOX_ENDPOINT=http://127.0.0.1:5096" >> "$GITHUB_ENV"
+
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py
 

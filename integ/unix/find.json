@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -name \"*.txt\"",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -type f",
       "expect": {
@@ -81,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -mindepth 1 -type f",
       "expect": {
@@ -111,7 +114,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -maxdepth 1 -type f",
       "expect": {
@@ -141,7 +145,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -name \"*.txt\" -o -name \"*.json\"",
       "expect": {
@@ -171,7 +176,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -name \"*.txt\" | wc -l",
       "expect": {
@@ -201,7 +207,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -name \"*.txt\" | sort | head -n 2",
       "expect": {
@@ -229,7 +236,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -type d",
       "expect": {
@@ -259,7 +267,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -iname \"*.TXT\"",
       "expect": {
@@ -289,7 +298,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -size +10c",
       "expect": {
@@ -319,7 +329,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -name \"*.txt\"",
       "expect": {
@@ -349,7 +360,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -path \"*sub*\"",
       "expect": {
@@ -379,7 +391,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/sub -type f",
       "expect": {
@@ -407,7 +420,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -empty",
       "expect": {
@@ -435,7 +449,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -not -name \"*.txt\"",
       "expect": {
@@ -463,7 +478,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -name data",
       "expect": {
@@ -491,7 +507,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -maxdepth 0",
       "expect": {
@@ -519,7 +536,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -mindepth 0 -type d",
       "expect": {
@@ -547,7 +565,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -size -5c",
       "expect": {
@@ -577,7 +596,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -depth -type f",
       "expect": {
@@ -605,7 +625,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -mtime +0 -o -mtime -1",
       "expect": {
@@ -635,7 +656,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin && printf x > /data/fs/small.bin && find /data/fs -size +4c",
       "expect": {
@@ -665,7 +687,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/fs -size -4c",
       "expect": {
@@ -695,7 +718,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c",
       "expect": {
@@ -725,7 +749,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/fs -size -4c",
       "expect": {
@@ -755,7 +780,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/fs -size 4c",
       "expect": {
@@ -785,7 +811,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/fs -size -1k",
       "expect": {
@@ -815,7 +842,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/fs -path '*data/fs/sub*'",
       "expect": {
@@ -845,7 +873,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/fs -path '/data/fs/sub'",
       "expect": {
@@ -875,7 +904,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/fs -path '*sub*' -o -name small.bin",
       "expect": {
@@ -905,7 +935,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -maxdepth abc",
       "expect": {
@@ -935,7 +966,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -mindepth xx",
       "expect": {
@@ -965,7 +997,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -size abc",
       "expect": {
@@ -995,7 +1028,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -size ''",
       "expect": {
@@ -1025,7 +1059,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -mtime abc",
       "expect": {
@@ -1055,7 +1090,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -regex '.*deep.*'",
       "expect": {
@@ -1085,7 +1121,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -boguspredicate",
       "expect": {
@@ -1111,7 +1148,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/f4/sub1/skipme /data/f4/del && printf 'alpha inner\\n' > /data/f4/sub1/inner.txt && printf 'alpha skip\\n' > /data/f4/sub1/skipme/deep.txt && printf 'x\\n' > /data/f4/del/f1.tmp && printf 'y\\n' > /data/f4/del/f2.tmp && printf 'keep\\n' > /data/f4/del/keep.txt",
       "expect": {
@@ -1137,7 +1175,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -print",
       "expect": {
@@ -1163,7 +1202,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -print0",
       "expect": {
@@ -1189,7 +1229,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -print0",
       "expect": {
@@ -1215,7 +1256,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -a -name \"inner*\"",
       "expect": {
@@ -1241,7 +1283,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name inner.txt -and -name \"*.txt\"",
       "expect": {
@@ -1267,7 +1310,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 \\( -name inner.txt -o -name deep.txt \\)",
       "expect": {
@@ -1293,7 +1337,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/sub1 -name \"*.txt\" -ls | awk '{print $NF}'",
       "expect": {
@@ -1319,7 +1364,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data/f4/del -name \"*.tmp\" -delete && ls /data/f4/del",
       "expect": {
@@ -1345,7 +1391,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/f4/del2 && printf 'x\\n' > /data/f4/del2/g.tmp && find /data/f4/del2 -name \"*.tmp\" -delete -print && ls /data/f4/del2",
       "expect": {
@@ -1371,7 +1418,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/f4/del3 && printf 'z\\n' > /data/f4/del3/h.txt && find /data/f4/del3 -delete && find /data/f4 -name del3",
       "expect": {
@@ -1397,7 +1445,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "find /data -maxdepth 0 -delete; echo rc=$?; ls /data/f4/sub1",
       "expect": {
@@ -1426,6 +1475,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],

@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo /data/*.nope",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "test -f /data/one_b* && echo yes",
       "expect": {
@@ -81,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "f() { echo $1 $#; }; f /data/sorted_*.txt",
       "expect": {
@@ -111,7 +114,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo /data/sorted_*.txt",
       "expect": {
@@ -141,7 +145,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/g8 && printf 'x *.txt y\\n' | tee /data/g8/l1.txt > /dev/null && printf 'plain\\n' | tee /data/g8/l2.txt > /dev/null && cd /data/g8 && grep -F '*.txt' *.txt && cd / && rm -r /data/g8",
       "expect": {
@@ -169,7 +174,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo sub/*.txt && echo *.nope",
       "expect": {
@@ -197,7 +203,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "for f in sub/*.txt; do echo $f; done",
       "expect": {
@@ -225,7 +232,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12",
       "expect": {
@@ -255,7 +263,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat *.nope 2>&1",
       "expect": {
@@ -283,7 +292,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -l s*/x.txt && grep -l hi sub/*.txt",
       "expect": {
@@ -311,7 +321,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls sub/*.txt && cd / && rm -r /data/g15",
       "expect": {
@@ -341,7 +352,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ln -s /data/sorted_*.txt /data/lnk_multi",
       "expect": {
@@ -370,6 +382,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -400,6 +413,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -430,6 +444,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -460,6 +475,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -490,6 +506,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -520,6 +537,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -550,6 +568,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -580,6 +599,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],

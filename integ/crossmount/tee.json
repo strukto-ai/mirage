@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo dual | tee /data/xdual.txt /data2/xdual.txt && cat /data/xdual.txt /data2/xdual.txt && rm /data/xdual.txt /data2/xdual.txt",
       "expect": {

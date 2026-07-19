@@ -67,6 +67,7 @@ EXPECTED_RESOURCES = {
     "dify",
     "chroma",
     "onedrive",
+    "box",
     "dropbox",
 }
 

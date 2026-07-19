@@ -19,7 +19,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir /data/xd /data2/xd && ls /data2 && rm -r /data/xd /data2/xd",
       "expect": {

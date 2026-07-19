@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "E=echo; $E hi",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "C=cat; $C /data/a.txt",
       "expect": {
@@ -80,6 +82,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -110,6 +113,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -140,6 +144,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -170,6 +175,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -200,6 +206,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -230,6 +237,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -260,6 +268,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -290,6 +299,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -320,6 +330,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],

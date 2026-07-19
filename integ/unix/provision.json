@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt",
       "provision": true,
@@ -53,7 +54,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt /data/b.txt",
       "provision": true,
@@ -84,7 +86,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -l /data/a.txt",
       "provision": true,
@@ -115,7 +118,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort /data/numbers.txt",
       "provision": true,
@@ -146,7 +150,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "md5 /data/b.txt",
       "provision": true,
@@ -177,7 +182,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep world /data/a.txt",
       "provision": true,
@@ -208,7 +214,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep hello /data/a.txt /data/mixed.txt",
       "provision": true,
@@ -239,7 +246,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg world /data/a.txt",
       "provision": true,
@@ -270,7 +278,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "head /data/a.txt",
       "provision": true,
@@ -301,7 +310,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "head -c 5 /data/a.txt",
       "provision": true,
@@ -332,7 +342,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "tail -n 1 /data/a.txt",
       "provision": true,
@@ -363,7 +374,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls /data",
       "provision": true,
@@ -394,7 +406,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -name \"*.txt\"",
       "provision": true,
@@ -423,7 +436,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "du /data/a.txt",
       "provision": true,
@@ -454,7 +468,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "stat /data/a.txt",
       "provision": true,
@@ -485,7 +500,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "jq \".name\" /data/user.json",
       "provision": true,
@@ -516,7 +532,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "jq \".id\" /data/data.jsonl",
       "provision": true,
@@ -547,7 +564,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/missing.txt",
       "provision": true,
@@ -578,7 +596,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sed s/a/b/ /data/a.txt",
       "provision": true,
@@ -609,7 +628,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sed -i s/a/b/ /data/a.txt",
       "provision": true,
@@ -640,7 +660,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "tee /data/prov_out.txt",
       "provision": true,
@@ -671,7 +692,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt | head -c 4",
       "provision": true,
@@ -702,7 +724,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep world /data/a.txt | wc -l",
       "provision": true,
@@ -733,7 +756,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt && cat /data/b.txt",
       "provision": true,
@@ -764,7 +788,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt; cat /data/b.txt",
       "provision": true,
@@ -795,7 +820,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/b.txt || cat /data/a.txt",
       "provision": true,
@@ -826,7 +852,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "for i in 1 2 3; do cat /data/a.txt; done",
       "provision": true,
@@ -857,7 +884,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "while true; do cat /data/a.txt; done",
       "provision": true,
@@ -888,7 +916,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "file /data/a.txt",
       "provision": true,
@@ -919,7 +948,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "iconv -f utf-8 -t utf-8 /data/a.txt",
       "provision": true,
@@ -948,7 +978,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/a.txt /data/sub",
       "provision": true,
@@ -979,7 +1010,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "gzip /data/b.txt",
       "provision": true,
@@ -1010,7 +1042,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm /data/dup.txt",
       "provision": true,
@@ -1041,7 +1074,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm -r /data/guard",
       "provision": true,
@@ -1072,7 +1106,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir /data/provdir",
       "provision": true,
@@ -1103,7 +1138,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/a.txt /data/moved.txt",
       "provision": true,
@@ -1134,7 +1170,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "seq 3",
       "provision": true,
@@ -1165,7 +1202,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "date",
       "provision": true,
@@ -1196,7 +1234,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt | grep hello | wc -l",
       "provision": true,
@@ -1227,7 +1266,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt && cat /data/b.txt || cat /data/numbers.txt",
       "provision": true,
@@ -1258,7 +1298,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt || cat /data/b.txt && cat /data/numbers.txt",
       "provision": true,
@@ -1289,7 +1330,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "if true; then cat /data/a.txt; else cat /data/b.txt; fi",
       "provision": true,
@@ -1320,7 +1362,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "if grep -q hello /data/a.txt; then cat /data/b.txt; fi",
       "provision": true,
@@ -1351,7 +1394,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "case x in x) cat /data/a.txt;; *) cat /data/b.txt;; esac",
       "provision": true,
@@ -1382,7 +1426,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cat /data/a.txt; cat /data/b.txt)",
       "provision": true,
@@ -1413,7 +1458,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "{ cat /data/a.txt; cat /data/b.txt; }",
       "provision": true,
@@ -1444,7 +1490,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "! grep zzz /data/a.txt",
       "provision": true,
@@ -1475,7 +1522,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt > /data/prov_redir.txt",
       "provision": true,
@@ -1506,7 +1554,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "tee /data/prov_x.txt || cat /data/a.txt",
       "provision": true,
@@ -1537,7 +1586,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "for i in 1 2; do cat /data/a.txt | wc -l; done",
       "provision": true,
@@ -1568,7 +1618,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "for i in 1 2; do for j in 1 2; do cat /data/b.txt; done; done",
       "provision": true,
@@ -1599,7 +1650,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat $(echo /data/a.txt)",
       "provision": true,
@@ -1630,7 +1682,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "for i in 1 2; do cat /data/a.txt | wc -l && cat /data/b.txt; done",
       "provision": true,
@@ -1661,7 +1714,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "FOO=1 cat /data/a.txt",
       "provision": true,
@@ -1692,7 +1746,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "pfn() { cat /data/b.txt; }; pfn; pfn",
       "provision": true,
@@ -1723,7 +1778,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "prec() { prec; }; prec",
       "provision": true,
@@ -1754,7 +1810,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "eval 'cat /data/a.txt'",
       "provision": true,
@@ -1785,7 +1842,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "select x in a b; do cat /data/a.txt; done",
       "provision": true,
@@ -1816,7 +1874,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "until false; do cat /data/a.txt; done",
       "provision": true,
@@ -1847,7 +1906,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -l < /data/a.txt",
       "provision": true,
@@ -1878,7 +1938,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt > /dev/null",
       "provision": true,
@@ -1909,7 +1970,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data2/xm_link.txt",
       "provision": true,
@@ -1940,7 +2002,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep x /data/xm_rlink.txt",
       "provision": true,
@@ -1971,7 +2034,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -2002,7 +2066,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep s /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -2033,7 +2098,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt /data2/xm.txt | wc -c",
       "provision": true,
@@ -2064,7 +2130,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "md5 /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -2093,7 +2160,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "du /data/a.txt /data2/xm.txt",
       "provision": true,
@@ -2122,7 +2190,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/rgm/d1/*.txt",
       "provision": true,
@@ -2153,7 +2222,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/rgm/d1/*.nope",
       "provision": true,
@@ -2182,7 +2252,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "grep -r hello /data/rgm",
       "provision": true,
@@ -2213,7 +2284,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -l",
       "provision": true,
@@ -2244,7 +2316,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -c <<EOF\nhello\nEOF",
       "provision": true,
@@ -2275,7 +2348,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "for i in $(echo 1 2); do cat /data/a.txt; done",
       "provision": true,
@@ -2306,7 +2380,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt > $(echo /data/prov_out.txt)",
       "provision": true,

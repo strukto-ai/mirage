@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sed s/l/L/ /data/a.txt /data2/xm.txt",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo abc | tee /data/xi.txt /data2/xi.txt > /dev/null && sed -i s/b/B/ /data/xi.txt /data2/xi.txt && cat /data/xi.txt /data2/xi.txt && rm /data/xi.txt /data2/xi.txt",
       "expect": {

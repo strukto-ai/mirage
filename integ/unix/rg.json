@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg world /data/a.txt",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -i WORLD /data/mixed.txt",
       "expect": {
@@ -81,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -c hello /data/mixed.txt",
       "expect": {
@@ -111,7 +114,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt",
       "expect": {
@@ -141,7 +145,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -e world /data/a.txt",
       "expect": {
@@ -171,7 +176,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -e world -e bar /data/a.txt",
       "expect": {
@@ -201,7 +207,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -f /data/patterns.txt /data/a.txt",
       "expect": {
@@ -231,7 +238,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/rgm/d1",
       "expect": {
@@ -261,7 +269,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/rgm/d2",
       "expect": {
@@ -289,7 +298,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/a.txt /data/rgm/d1/f1.txt",
       "expect": {
@@ -317,7 +327,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/mixed.txt /data/rgm/d2/f2.txt",
       "expect": {
@@ -345,7 +356,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -i hello /data/rgm/d1 /data/rgm/d2",
       "expect": {
@@ -373,7 +385,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg -l hello /data/rgm/d1/f1.txt /data/rgm/d2/f2.txt",
       "expect": {
@@ -401,7 +414,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/a.txt /data/rgm/d1/skip.parquet",
       "expect": {
@@ -429,7 +443,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg world /data/rgm/d1",
       "expect": {
@@ -459,7 +474,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg",
       "expect": {
@@ -489,7 +505,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rg foo",
       "expect": {
@@ -515,7 +532,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/r4/sub && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/r4/app.log && printf 'alpha\\nbeta\\ngamma\\nALPHA\\n' > /data/r4/notes.txt && printf 'def main():\\n    return 42\\n' > /data/r4/code.py && printf 'function main() { return 42; }\\n' > /data/r4/code.js && printf 'secret alpha\\n' > /data/r4/.hidden.txt && printf 'alpha inner\\n' > /data/r4/sub/inner.txt",
       "expect": {
@@ -541,7 +559,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -v error /data/r4/app.log",
       "expect": {
@@ -567,7 +586,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -n alpha /data/r4/notes.txt",
       "expect": {
@@ -593,7 +613,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -w alpha /data/r4/notes.txt",
       "expect": {
@@ -619,7 +640,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -w alph /data/r4/notes.txt; echo rc=$?",
       "expect": {
@@ -645,7 +667,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -F \"main()\" /data/r4/code.py",
       "expect": {
@@ -671,7 +694,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -o \"err[a-z]*\" /data/r4/app.log",
       "expect": {
@@ -697,7 +721,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -H alpha /data/r4/notes.txt",
       "expect": {
@@ -723,7 +748,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -I alpha /data/r4/sub",
       "expect": {
@@ -749,7 +775,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -m1 error /data/r4/app.log",
       "expect": {
@@ -775,7 +802,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -A1 warning /data/r4/app.log",
       "expect": {
@@ -801,7 +829,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -B1 info /data/r4/app.log",
       "expect": {
@@ -827,7 +856,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -C1 warning /data/r4/app.log",
       "expect": {
@@ -853,7 +883,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -C1 error /data/r4/app.log",
       "expect": {
@@ -879,7 +910,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg -nA1 warning /data/r4/app.log",
       "expect": {
@@ -905,7 +937,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg alpha /data/r4 | sort",
       "expect": {
@@ -931,7 +964,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg --hidden alpha /data/r4 | sort",
       "expect": {
@@ -957,7 +991,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg --type py \"return\" /data/r4",
       "expect": {
@@ -983,7 +1018,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg --glob \"*.log\" error /data/r4",
       "expect": {
@@ -1009,7 +1045,8 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "rg --color=never alpha /data/r4/notes.txt",
       "expect": {

@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/mtimecheck && printf x | tee /data/mtimecheck/probe.txt > /dev/null && echo seeded",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "clear_cache": true,
       "command": "ls -l /data/mtimecheck/probe.txt | wc -l",
@@ -80,7 +82,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "clear_cache": true,
       "command": "ls -l /data/mtimecheck/probe.txt | grep -c \"Jan  1 00:00\"",
@@ -109,7 +112,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "clear_cache": true,
       "command": "ls -l /data | grep mtimecheck | grep -c \"Jan  1 00:00\"",
@@ -140,7 +144,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm -rf /data/mtimecheck && echo cleaned",
       "expect": {

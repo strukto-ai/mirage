@@ -14,9 +14,22 @@
 
 import type { BoxAccessor } from '../../../accessor/box.ts'
 import { du as boxDu, duAll as boxDuAll } from '../../../core/box/du.ts'
+import { find as boxFind } from '../../../core/box/find.ts'
 import { read as boxRead, stream as boxStream } from '../../../core/box/read.ts'
 import { isDirName, readdir as boxReaddir } from '../../../core/box/readdir.ts'
 import { stat as boxStat } from '../../../core/box/stat.ts'
+import {
+  copy as boxCopy,
+  create as boxCreate,
+  exists as boxExists,
+  mkdir as boxMkdir,
+  rename as boxRename,
+  rmR as boxRmR,
+  rmdir as boxRmdir,
+  truncate as boxTruncate,
+  unlink as boxUnlink,
+  write as boxWrite,
+} from '../../../core/box/write.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
 export const BOX_IO: CommandIO<BoxAccessor> = {
@@ -29,4 +42,16 @@ export const BOX_IO: CommandIO<BoxAccessor> = {
   local: false,
   duTotal: boxDu,
   duAll: boxDuAll,
+  write: boxWrite,
+  exists: boxExists,
+  mkdir: boxMkdir,
+  unlink: boxUnlink,
+  rmdir: boxRmdir,
+  rmR: boxRmR,
+  rename: boxRename,
+  copy: boxCopy,
+  dirCopy: boxCopy,
+  create: boxCreate,
+  truncate: boxTruncate,
+  find: boxFind,
 }

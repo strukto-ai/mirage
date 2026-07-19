@@ -13,11 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../../accessor/box.ts'
+import { read as boxRead } from '../../../core/box/read.ts'
+import { stat as boxStat } from '../../../core/box/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
+import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { BOX_IO } from './io.ts'
 
 export const BOX_COMMANDS: readonly RegisteredCommand[] = [
+  ...makeFiletypeCommands<BoxAccessor>({
+    resource: ResourceName.BOX,
+    readBytes: boxRead,
+    statEntry: boxStat,
+  }),
   ...makeGenericCommands<BoxAccessor>(ResourceName.BOX, BOX_IO),
 ]

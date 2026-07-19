@@ -286,6 +286,7 @@ class ResourceName(str, Enum):
     DROPBOX = "dropbox"
     QDRANT = "qdrant"
     SHAREPOINT = "sharepoint"
+    BOX = "box"
 
 
 @dataclass(frozen=True, init=False)

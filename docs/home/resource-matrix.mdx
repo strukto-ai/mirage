@@ -71,7 +71,7 @@ No external setup, these run locally or against a connection string you already 
 | --- | --- | --- | --- | --- |
 | Databricks Volume | read, write | [Databricks Volume](/home/setup/databricks) | [<Icon icon="python" />](/python/resource/databricks_volume) [<Icon icon="node-js" />](/typescript/setup/databricks_volume) | Unity Catalog volume subtree; mv/cp are non-atomic copies |
 | Dropbox | read, write | [Dropbox](/home/setup/dropbox) | [<Icon icon="python" />](/python/resource/dropbox) [<Icon icon="node-js" />](/typescript/dropbox) [<Icon icon="globe" />](/typescript/dropbox) | OAuth2 + PKCE; Python, Node, and browser; `root_path` mounts a subfolder |
-| Box | read | [Box](/home/setup/box) | [<Icon icon="node-js" />](/typescript/box) [<Icon icon="globe" />](/typescript/box) | OAuth2 + PKCE or developer token; `.boxnote.json` / `.boxcanvas.json` / `.gdoc.json` decoded |
+| Box | read, write | [Box](/home/setup/box) | [<Icon icon="python" />](/python/resource/box) [<Icon icon="node-js" />](/typescript/box) [<Icon icon="globe" />](/typescript/box) | OAuth2 + PKCE or developer token; Python, Node, and browser; `root_folder_id` mounts a subfolder; `.boxnote.json` / `.boxcanvas.json` / `.gdoc.json` decoded |
 | Nextcloud | read, write | [Nextcloud](/home/setup/nextcloud) | [<Icon icon="python" />](/python/resource/nextcloud) | Self-hosted Nextcloud / ownCloud / WebDAV; HTTP Basic auth with app password |
 
 ## Code & DevOps

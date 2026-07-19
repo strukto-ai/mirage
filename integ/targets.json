@@ -441,6 +441,36 @@
       ]
     },
     {
+      "id": "box",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "box",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "box",
+          "backend": "box",
+          "folder": "data",
+          "seed": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "box",
+          "backend": "box",
+          "folder": "data2"
+        },
+        {
+          "path": "/res",
+          "resource": "box",
+          "backend": "box",
+          "folder": "res",
+          "seed": "columnar/v1"
+        }
+      ]
+    },
+    {
       "id": "hf-prefix",
       "hosts": [
         "python",

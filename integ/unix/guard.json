@@ -19,7 +19,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/guard/g.txt /data/guard/g.txt",
       "expect": {
@@ -47,7 +48,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/guard/g.txt /data/guard/g.txt",
       "expect": {
@@ -77,7 +79,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/guard/g.txt",
       "expect": {
@@ -105,7 +108,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/guard/sub/s.txt /data/guard/sub",
       "expect": {
@@ -133,7 +137,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp -r /data/guard/sub /data/guard/sub",
       "expect": {
@@ -161,7 +166,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/guard /data/guard/sub",
       "expect": {
@@ -189,7 +195,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/missing.txt /data/guard/g.txt /data/guard/sub",
       "expect": {
@@ -217,7 +224,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data/guard -type f",
       "expect": {

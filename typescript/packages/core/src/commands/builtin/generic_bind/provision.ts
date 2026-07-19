@@ -351,11 +351,10 @@ export function makeJqProvision<A extends Accessor>(stat: StatOp<A>): ProvisionF
     }
     let fileStat
     try {
-      fileStat = await stat(accessor, p)
+      fileStat = await stat(accessor, p, opts.index ?? undefined)
     } catch {
       return new ProvisionResult({ command: 'jq', precision: Precision.UNKNOWN })
     }
-    void opts
     const rendered = `jq '${expr}' ${p.virtual}`
     if (fileStat.size === null) {
       return new ProvisionResult({

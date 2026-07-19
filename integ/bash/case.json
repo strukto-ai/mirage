@@ -21,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "case x in x) echo one; echo two;; esac",
       "expect": {
@@ -51,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "case y in x) echo one;; *) echo fall; echo through;; esac",
       "expect": {
@@ -80,6 +82,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
@@ -110,6 +113,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "box",
         "gdrive",
         "gdrive-folder"
       ],
