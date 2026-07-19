@@ -13,6 +13,7 @@
     "has_provision": true,
     "has_write": false,
     "resources": [
+      "box",
       "chroma",
       "databricks_volume",
       "dify",
