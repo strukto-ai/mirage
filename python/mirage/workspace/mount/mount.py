@@ -127,6 +127,11 @@ class MountEntry:
         self._cmds: dict[tuple[Any, ...], RegisteredCommand] = {}
         self._general_cmds: dict[str, RegisteredCommand] = {}
         self._cmd_specs: dict[str, CommandSpec] = {}
+        # first token -> descending token counts of multi-word command
+        # names (e.g. "gws docs documents get"); backs longest-prefix
+        # command resolution. None until first built; invalidated on
+        # register.
+        self._prefix_index: dict[str, list[int]] | None = None
         self.command_safeguards: dict[str, CommandSafeguard] = {}
         self._ops: dict[tuple[Any, ...], RegisteredOp] = {}
         self._general_ops: dict[str, RegisteredOp] = {}
@@ -149,6 +154,7 @@ class MountEntry:
         self._cmds[key] = cmd
         if cmd.spec is not None:
             self._cmd_specs[cmd.name] = cmd.spec
+        self._prefix_index = None
 
     def register_general(
         self,
@@ -162,6 +168,7 @@ class MountEntry:
         self._general_cmds[cmd.name] = cmd
         if cmd.spec is not None:
             self._cmd_specs[cmd.name] = cmd.spec
+        self._prefix_index = None
 
     def resolve_command(
         self,
@@ -183,6 +190,38 @@ class MountEntry:
         if cmd is not None:
             return cmd
         return self._general_cmds.get(cmd_name)
+
+    def longest_command_match(self, words: list[str]) -> int:
+        """How many leading words form a registered command name here.
+
+        Command names may span several words (``gws docs documents
+        get``), git-style. Returns the length of the longest registered
+        name that is a prefix of ``words``, or 1 (the bare first token) if
+        no multi-word name matches. 0 for no words.
+
+        Args:
+            words (list[str]): expanded leading words of a command line.
+        """
+        if not words:
+            return 0
+        if self._prefix_index is None:
+            index: dict[str, set[int]] = {}
+            names = (set(self._cmd_specs) | {n
+                                             for n, _ in self._cmds}
+                     | set(self._general_cmds))
+            for name in names:
+                tokens = name.split(" ")
+                if len(tokens) > 1:
+                    index.setdefault(tokens[0], set()).add(len(tokens))
+            self._prefix_index = {
+                k: sorted(v, reverse=True)
+                for k, v in index.items()
+            }
+        for length in self._prefix_index.get(words[0], ()):
+            if length <= len(words) and self.resolve_command(" ".join(
+                    words[:length])) is not None:
+                return length
+        return 1
 
     def spec_for(
         self,

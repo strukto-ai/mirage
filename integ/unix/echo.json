@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo hi -n",
       "expect": {
@@ -41,7 +42,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo -ne 'ab\\tcd'; echo",
       "expect": {
@@ -66,7 +68,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo -nq hi",
       "expect": {
@@ -91,7 +94,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo a '' b",
       "expect": {
@@ -116,7 +120,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo a \"\" b",
       "expect": {

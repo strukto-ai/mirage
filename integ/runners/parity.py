@@ -23,6 +23,7 @@ INTEG = Path(__file__).resolve().parents[1]
 SHARED_TARGETS = ["ram", "disk", "redis"]
 S3_TARGETS = ["s3", "s3-prefix"]
 SSH_TARGETS = ["ssh"]
+GDRIVE_TARGETS = ["gdrive", "gdrive-folder", "gdrive-shared", "gapps"]
 
 
 def load(path: str) -> dict[tuple[str, str], dict]:
@@ -65,6 +66,8 @@ def main() -> None:
         default_targets += S3_TARGETS
     if os.environ.get("SSH_HOST"):
         default_targets += SSH_TARGETS
+    if os.environ.get("GWS_URL"):
+        default_targets += GDRIVE_TARGETS
     targets = sys.argv[1:] or default_targets
     target_args: list[str] = []
     for t in targets:

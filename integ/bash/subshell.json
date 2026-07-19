@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(x=1; (x=2); echo $x)",
       "expect": {
@@ -41,7 +42,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(x=7; (echo $x))",
       "expect": {
@@ -66,7 +68,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(export Z=9); echo [$Z]",
       "expect": {
@@ -91,7 +94,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(f(){ echo A; }; (f(){ echo B; }); f)",
       "expect": {
@@ -116,7 +120,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(nofn(){ echo x; }); nofn 2>/dev/null || echo gone",
       "expect": {
@@ -141,7 +146,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(set -- a b c; (set -- x); echo $#)",
       "expect": {
@@ -166,7 +172,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(set -- a b; (echo $1 $2))",
       "expect": {
@@ -191,7 +198,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(cd /data); pwd",
       "expect": {
@@ -216,7 +224,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "(cd /data && (cd /data/sub) && pwd)",
       "expect": {

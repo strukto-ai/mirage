@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.google._client import TokenManager
+from mirage.core.google.config import GoogleConfig
 from mirage.ops.gdrive import OPS
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -37,7 +41,8 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
 
 @pytest.fixture
 def accessor():
-    return GDriveAccessor(config=None, token_manager=None)
+    config = GoogleConfig(client_id="cid", refresh_token="rt")
+    return GDriveAccessor(config=config, token_manager=TokenManager(config))
 
 
 @pytest.fixture
@@ -73,5 +78,14 @@ async def test_stat_indexed_file(accessor, index):
 @pytest.mark.asyncio
 async def test_stat_not_found(accessor, index):
     await index.set_dir("/", [])
-    with pytest.raises(FileNotFoundError):
-        await stat(accessor, _scope("/nonexistent.txt"), index=index)
+    with patch(
+            "mirage.core.gdrive.resolve.list_files",
+            new_callable=AsyncMock,
+            return_value=[],
+    ), patch(
+            "mirage.core.gdrive.resolve.list_shared_drives",
+            new_callable=AsyncMock,
+            return_value=[],
+    ):
+        with pytest.raises(FileNotFoundError):
+            await stat(accessor, _scope("/nonexistent.txt"), index=index)

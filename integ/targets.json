@@ -376,6 +376,117 @@
           "fixture": "columnar/v1"
         }
       ]
+    },
+    {
+      "id": "gdrive",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "xm2"
+        },
+        {
+          "path": "/res",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "gdrive-folder",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/reports/res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "gdrive-shared",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "drive": "eng",
+          "root": "team/data"
+        },
+        {
+          "path": "/data2",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "drive": "eng",
+          "root": "team/data2"
+        }
+      ]
+    },
+    {
+      "id": "gapps",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "epoch": "2026-01-01T00:00:00Z",
+      "apps": "google-apps/v1",
+      "mounts": [
+        {
+          "path": "/docs",
+          "resource": "gdocs",
+          "backend": "gdocs"
+        },
+        {
+          "path": "/sheets",
+          "resource": "gsheets",
+          "backend": "gsheets"
+        },
+        {
+          "path": "/slides",
+          "resource": "gslides",
+          "backend": "gslides"
+        }
+      ]
     }
   ]
 }

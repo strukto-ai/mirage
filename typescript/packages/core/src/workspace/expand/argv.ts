@@ -22,7 +22,7 @@ import { classifyParts } from './classify/index.ts'
 import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
-import type { OperandKind } from '../../commands/spec/types.ts'
+import { OperandKind } from '../../commands/spec/types.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 import type { TSNodeLike } from './variable.ts'
 
@@ -82,14 +82,20 @@ export async function expandArgv(
 ): Promise<Argv> {
   const expanded = await expandParts(parts, session, executeFn, callStack)
   if (expanded.length === 0) return new Argv('', [], [])
-  const name = expanded[0] ?? ''
+  // A command name may span several leading words (git-style, e.g.
+  // `gws docs documents get`); the registry says how many.
+  const consumed = registry.matchCommandPrefix(expanded)
+  const name = expanded.slice(0, consumed).join(' ')
 
   const policy = wordPolicy(route(name, session, registry))
   let wordKinds: (OperandKind | null)[] | null = null
   if (policy === WordPolicy.MOUNT) {
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
-      wordKinds = specWordKinds(spec, expanded.slice(1))
+      const extra: (OperandKind | null)[] = new Array<OperandKind | null>(consumed - 1).fill(
+        OperandKind.TEXT,
+      )
+      wordKinds = [...extra, ...specWordKinds(spec, expanded.slice(consumed))]
     }
   }
 
@@ -103,5 +109,5 @@ export async function expandArgv(
   // programs their words unchanged, so `echo sub/file.txt` prints the
   // relative form, not the resolved absolute path.
   const textView = words.map(wordText)
-  return new Argv(name, textView.slice(1), words.slice(1))
+  return new Argv(name, textView.slice(consumed), words.slice(consumed))
 }

@@ -52,6 +52,18 @@ export function eisdir(path: string | { virtual: string }): FsError {
   return fsError(path, 'EISDIR')
 }
 
+export function eexist(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EEXIST')
+}
+
+export function eacces(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EACCES')
+}
+
+export function enotempty(path: string | { virtual: string }): FsError {
+  return fsError(path, 'ENOTEMPTY')
+}
+
 const STRERROR: Record<string, string> = {
   ENOENT: 'No such file or directory',
   ENOTDIR: 'Not a directory',

@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "E=echo; $E hi",
       "expect": {
@@ -41,12 +42,229 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "C=cat; $C /data/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_star_quoted",
+      "seq": 500800,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "vf1() { echo \"$*\"; }; vf1 a b c",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_at_quoted_words",
+      "seq": 500801,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "vf2() { for x in \"$@\"; do echo \"[$x]\"; done; }; vf2 'a b' c",
+      "expect": {
+        "exit": 0,
+        "stdout": "[a b]\n[c]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_star_quoted_words",
+      "seq": 500802,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "vf3() { for x in \"$*\"; do echo \"[$x]\"; done; }; vf3 'a b' c",
+      "expect": {
+        "exit": 0,
+        "stdout": "[a b c]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_at_unquoted",
+      "seq": 500803,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "vf4() { for x in $@; do echo \"[$x]\"; done; }; vf4 'a b' c",
+      "expect": {
+        "exit": 0,
+        "stdout": "[a]\n[b]\n[c]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_star_unquoted",
+      "seq": 500804,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "vf5() { for x in $*; do echo \"[$x]\"; done; }; vf5 'a b' c",
+      "expect": {
+        "exit": 0,
+        "stdout": "[a]\n[b]\n[c]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_dollar_zero",
+      "seq": 500805,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo $0",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_backtick_basic",
+      "seq": 500806,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo `echo hi`",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_backtick_var",
+      "seq": 500807,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "vb1=`printf 'a\\nb'`; echo \"$vb1\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "var_backtick_in_dquote",
+      "seq": 500808,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "echo \"`echo hi` there\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi there\n",
         "stderr": ""
       }
     }

@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {
@@ -41,7 +42,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/sorted_a.txt",
       "expect": {
@@ -66,7 +68,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/sorted_b.txt",
       "expect": {

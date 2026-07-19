@@ -15,7 +15,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "grep -v '^#' /.bash_history | tail -n 3",
       "expect": {
@@ -40,7 +42,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "grep -v '^#' /.bash_history | tail -n 1",
       "expect": {
@@ -65,7 +68,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /.bash_history | sed 's/^#[0-9]*$/#TS/' | tail -n 4",
       "expect": {

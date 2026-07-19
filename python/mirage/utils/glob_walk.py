@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
-import fnmatch
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -21,6 +20,7 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import PathSpec
+from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ async def expand_pattern(
                 continue
             next_level.extend(
                 e for e in entries
-                if fnmatch.fnmatch(e.rstrip("/").rsplit("/", 1)[-1], seg))
+                if fnmatch(e.rstrip("/").rsplit("/", 1)[-1], seg))
         level = next_level
         if not level:
             return []

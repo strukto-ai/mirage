@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".\" /data/user.json",
       "expect": {
@@ -41,7 +42,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".name\" /data/user.json",
       "expect": {
@@ -66,7 +68,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".age\" /data/user.json",
       "expect": {
@@ -91,7 +94,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq -r \".name\" /data/user.json",
       "expect": {
@@ -116,7 +120,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".users[].name\" /data/users.json",
       "expect": {
@@ -141,7 +146,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".id\" /data/data.jsonl",
       "expect": {
@@ -166,7 +172,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".[].id\" /data/data.jsonl",
       "expect": {
@@ -191,7 +198,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq -r \".[].msg\" /data/chat.jsonl",
       "expect": {
@@ -216,7 +224,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/user.json | jq",
       "expect": {
@@ -241,7 +250,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".id\" /data/data.jsonl | wc -l",
       "expect": {
@@ -266,7 +276,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".id\" /data/data.jsonl | sort -n",
       "expect": {
@@ -291,7 +302,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \"keys\" /data/user.json",
       "expect": {
@@ -316,7 +328,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \". | length\" /data/users.json",
       "expect": {
@@ -341,7 +354,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".users[] | select(.age > 27)\" /data/users.json",
       "expect": {
@@ -366,7 +380,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \"select(.id > 1)\" /data/data.jsonl",
       "expect": {
@@ -391,7 +406,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq",
       "expect": {
@@ -416,7 +432,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "jq \".\"",
       "expect": {

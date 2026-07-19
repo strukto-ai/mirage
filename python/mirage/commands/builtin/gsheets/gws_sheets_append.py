@@ -30,7 +30,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("gws-sheets-append",
+@command("gws sheets +append",
          resource=["gsheets", "gdrive"],
          spec=SPEC,
          write=True)

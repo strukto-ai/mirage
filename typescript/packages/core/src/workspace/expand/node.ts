@@ -106,7 +106,15 @@ export async function expandNode(
   }
 
   if (ntype === NT.EXPANSION) {
-    return expandBraces(tsNode, session.env, callStack, session.arrays)
+    // In-string whitespace attaches to the node's leading `${` token
+    // ("${a} ${b}" parses the space into the second expansion);
+    // preserve it, mirroring the simple-expansion prefix handling.
+    const raw = tsNode.text
+    const brace = raw.indexOf('${')
+    const prefix = brace > 0 ? raw.slice(0, brace) : ''
+    const expandChild = (c: TSNodeLike): Promise<string> =>
+      expandNode(c, session, executeFn, callStack)
+    return prefix + (await expandBraces(tsNode, session, callStack, expandChild))
   }
 
   if (ntype === NT.COMMAND_SUBSTITUTION) {

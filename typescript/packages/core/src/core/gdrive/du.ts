@@ -12,70 +12,56 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileType, PathSpec, type FileStat } from '../../types.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { readdir } from './readdir.ts'
+import { FileType, type PathSpec } from '../../types.ts'
 import { stat } from './stat.ts'
+import { iterTree } from './tree.ts'
 
-async function walkSize(
-  accessor: GDriveAccessor,
-  path: PathSpec,
-  index: IndexCacheStore | undefined,
-  entries: [string, number][] | null,
-): Promise<number> {
-  let s: FileStat
-  try {
-    s = await stat(accessor, path, index)
-  } catch {
-    return 0
-  }
-  if (s.type !== FileType.DIRECTORY) {
-    const size = s.size ?? 0
-    if (entries !== null) {
-      const prefix = mountPrefixOf(path.virtual, path.resourcePath)
-      const raw = rstripSlash(path.virtual)
-      const key = prefix !== '' && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
-      entries.push([key, size])
-    }
-    return size
-  }
-  let children: string[]
-  try {
-    children = await readdir(accessor, path, index)
-  } catch {
-    return 0
-  }
-  let total = 0
-  for (const child of children) {
-    const trimmed = rstripSlash(child)
-    const childSpec = new PathSpec({
-      virtual: trimmed,
-      directory: trimmed,
-      resolved: false,
-      resourcePath: mountKey(trimmed, mountPrefixOf(path.virtual, path.resourcePath)),
-    })
-    total += await walkSize(accessor, childSpec, index, entries)
-  }
-  return total
-}
-
+// Total size in bytes under a path: a file resolves from its own stat, a
+// directory sums its walked descendants, mirroring the python core du.
 export async function du(
   accessor: GDriveAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<number> {
-  return walkSize(accessor, path, index, null)
+  let info
+  try {
+    info = await stat(accessor, path, index)
+  } catch {
+    info = null
+  }
+  if (info !== null && info.type !== FileType.DIRECTORY) return info.size ?? 0
+  let total = 0
+  for await (const [, item, isDir] of iterTree(accessor, path)) {
+    if (!isDir) total += parseInt(item.size ?? '0', 10)
+  }
+  return total
 }
 
+// List of [path, size] tuples plus the walked total, in the generic du
+// (entries, total) contract.
 export async function duAll(
   accessor: GDriveAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<[[string, number][], number]> {
+  let info
+  try {
+    info = await stat(accessor, path, index)
+  } catch {
+    info = null
+  }
+  if (info !== null && info.type !== FileType.DIRECTORY) {
+    return [[], info.size ?? 0]
+  }
   const entries: [string, number][] = []
-  const total = await walkSize(accessor, path, index, entries)
+  let total = 0
+  for await (const [rel, item, isDir] of iterTree(accessor, path)) {
+    if (isDir) continue
+    const size = parseInt(item.size ?? '0', 10)
+    entries.push(['/' + rel, size])
+    total += size
+  }
   return [entries, total]
 }

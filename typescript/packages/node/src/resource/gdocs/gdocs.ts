@@ -58,6 +58,8 @@ export class GDocsResource extends BaseResource implements Resource {
       clientId: config.clientId,
       clientSecret: config.clientSecret,
       refreshToken: config.refreshToken,
+      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
+      ...(config.apiBase !== undefined ? { apiBase: config.apiBase } : {}),
     })
     this.accessor = new GDocsAccessor({ tokenManager: tm })
   }

@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import {
   buildResource,
   CommandSafeguard,
   ConsistencyPolicy,
+  ScriptSource,
   MountMode,
   OnExceed,
   RAMFileCacheStore,
@@ -25,7 +27,6 @@ import {
   RedisFileCacheStore,
   RedisWorkspaceStateStore,
   buildRuntime,
-  VFS_ENTRY,
   type RuntimeEntry,
   type FileCache,
   type IndexConfig,
@@ -45,26 +46,42 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
 
+/** True for the docker-style single-line `.py` path form. */
+function isScriptPath(value: string): boolean {
+  return !value.includes('\n') && value.trim().endsWith('.py')
+}
+
+// Config carries a reference, the wire carries content (the docker
+// build-context model): the value must be a path to a .py file, read
+// at load time. In code, scripts are functions; config is the only
+// door for script source.
+function loadScriptSource(value: string): ScriptSource {
+  if (!isScriptPath(value)) {
+    throw new Error(
+      `a config script must reference a .py file (e.g. script: guard.py), got '${value}'`,
+    )
+  }
+  return new ScriptSource(readFileSync(value.trim(), 'utf-8'))
+}
+
 function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
   const out: RuntimeEntry[] = []
   for (const entry of entries) {
     if (typeof entry === 'string') {
-      out.push(entry === VFS_ENTRY ? VFS_ENTRY : buildRuntime(entry))
+      out.push(buildRuntime(entry))
       continue
     }
     if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
-    const { name, ...options } = entry
+    const { name, script, ...options } = entry
     if (typeof name !== 'string' || name === '') {
       throw new Error("runtime entry needs a non-empty 'name'")
     }
-    if (name === VFS_ENTRY) {
-      if (Object.keys(options).length > 0) {
-        throw new Error('the vfs runtime entry takes no options')
-      }
-      out.push(VFS_ENTRY)
-      continue
+    if (script !== undefined && typeof script !== 'string') {
+      throw new Error('a runtime entry script must be a .py path string')
     }
-    out.push(buildRuntime(name, options))
+    const built = buildRuntime(name, options)
+    if (script !== undefined) built.script = loadScriptSource(script)
+    out.push(built)
   }
   return out
 }
@@ -264,6 +281,7 @@ interface StoreBlock {
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
   runtimes?: (string | Record<string, unknown>)[] | null
+  route?: string | null
   mode?: string
   consistency?: string
   defaultSessionId?: string
@@ -302,6 +320,28 @@ export function loadWorkspaceConfig(
   return normalized as unknown as WorkspaceConfigRaw
 }
 
+/**
+ * Resolve relative script paths against the config file's directory.
+ *
+ * A path-form `script`/`route` in a config file means "next to the
+ * file" (the docker build-context model), never "wherever the server
+ * happens to run". In-memory object configs are untouched.
+ */
+function absolutizeScripts(raw: WorkspaceConfigRaw, base: string): void {
+  const route = raw.route
+  if (typeof route === 'string' && isScriptPath(route) && !isAbsolute(route.trim())) {
+    raw.route = join(base, route.trim())
+  }
+  if (!Array.isArray(raw.runtimes)) return
+  for (const entry of raw.runtimes) {
+    if (typeof entry === 'string') continue
+    const script = entry.script
+    if (typeof script === 'string' && isScriptPath(script) && !isAbsolute(script.trim())) {
+      entry.script = join(base, script.trim())
+    }
+  }
+}
+
 export function loadWorkspaceConfigFile(
   path: string,
   env?: Record<string, string>,
@@ -311,7 +351,9 @@ export function loadWorkspaceConfigFile(
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`config source must be a mapping`)
   }
-  return loadWorkspaceConfig(parsed as Record<string, unknown>, env)
+  const config = loadWorkspaceConfig(parsed as Record<string, unknown>, env)
+  absolutizeScripts(config, dirname(resolve(path)))
+  return config
 }
 
 export interface WorkspaceArgs {
@@ -326,6 +368,7 @@ export interface WorkspaceArgs {
     workspaceId?: string
     store?: WorkspaceStateStore
     runtimes?: RuntimeEntry[]
+    route?: ScriptSource
   }
   fuseMounts: Record<string, boolean | string>
 }
@@ -418,6 +461,9 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(stateStore !== undefined ? { store: stateStore } : {}),
       ...(cfg.runtimes !== undefined && cfg.runtimes !== null
         ? { runtimes: buildRuntimeEntries(cfg.runtimes) }
+        : {}),
+      ...(cfg.route !== undefined && cfg.route !== null
+        ? { route: loadScriptSource(cfg.route) }
         : {}),
     },
     fuseMounts,

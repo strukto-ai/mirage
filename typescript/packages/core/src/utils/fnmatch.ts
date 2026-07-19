@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // Port of CPython fnmatch.translate matching semantics. Deliberate divergences:
-// always case-sensitive (no normcase, so this equals Python fnmatchcase), and an
-// invalid class range like [z-a] becomes the never-matching (?!) instead of raising.
+// always case-sensitive (no normcase, so this equals Python fnmatchcase), an
+// invalid class range like [z-a] becomes the never-matching (?!) instead of
+// raising, and a leading ^ negates a class like ! does (bash/glibc semantics;
+// CPython keeps ^ literal). Mirrors the Python mirage.utils.fnmatch wrapper.
 export function fnmatch(name: string, pattern: string): boolean {
   return translate(pattern).test(name)
 }
@@ -22,7 +24,7 @@ export function fnmatch(name: string, pattern: string): boolean {
 function classBody(stuff: string): string {
   let body = stuff.replace(/\\/g, '\\\\').replace(/\]/g, '\\]').replace(/\[/g, '\\[')
   if (body.startsWith('!')) body = '^' + body.slice(1)
-  else if (body.startsWith('^')) body = '\\' + body
+  else if (body.startsWith('^')) body = '^' + body.slice(1)
   try {
     new RegExp('[' + body + ']')
   } catch {
@@ -45,7 +47,7 @@ function translate(pattern: string): RegExp {
       re += '.'
     } else if (c === '[') {
       let j = i
-      if (j < n && pattern[j] === '!') j += 1
+      if (j < n && (pattern[j] === '!' || pattern[j] === '^')) j += 1
       if (j < n && pattern[j] === ']') j += 1
       while (j < n && pattern[j] !== ']') j += 1
       if (j >= n) {
@@ -53,7 +55,7 @@ function translate(pattern: string): RegExp {
       } else {
         const stuff = pattern.slice(i, j)
         i = j + 1
-        if (stuff === '!') re += '.'
+        if (stuff === '!' || stuff === '^') re += '.'
         else re += classBody(stuff)
       }
     } else if (/[.+^$(){}|[\]\\/]/.test(c)) {

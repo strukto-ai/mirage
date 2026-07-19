@@ -14,10 +14,16 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
+import type * as VersionsModule from './versions.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
   return { ...actual, listFiles: vi.fn(), downloadFile: vi.fn() }
+})
+
+vi.mock('./versions.ts', async () => {
+  const actual = await vi.importActual<typeof VersionsModule>('./versions.ts')
+  return { ...actual, downloadRevision: vi.fn(), captureFileMetadata: vi.fn() }
 })
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
@@ -25,10 +31,14 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
+import { runWithRevisions } from '../../observe/context.ts'
 import * as drive from '../google/drive.ts'
-import { read } from './read.ts'
+import { read, readFileVersioned } from './read.ts'
+import * as versions from './versions.ts'
 
-const STUB_TOKEN_MANAGER = {} as TokenManager
+const STUB_TOKEN_MANAGER = {
+  config: { clientId: 'cid', refreshToken: 'rt' },
+} as TokenManager
 
 function makeAccessor(): GDriveAccessor {
   return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
@@ -113,5 +123,26 @@ describe('gdrive read auto-bootstrap', () => {
     })
     await expect(read(accessor, path, index)).rejects.toThrow(/EISDIR/)
     expect(vi.mocked(drive.downloadFile)).not.toHaveBeenCalled()
+  })
+})
+
+describe('gdrive versioned reads', () => {
+  it('a pinned path reads that revision, not live content', async () => {
+    const enc = new TextEncoder()
+    vi.mocked(versions.downloadRevision).mockResolvedValue(enc.encode('pinned'))
+    const data = await runWithRevisions(new Map([['/data/f.txt', 'r1']]), () =>
+      readFileVersioned(STUB_TOKEN_MANAGER, 'f1', '/data/f.txt', 'f.txt'),
+    )
+    expect(new TextDecoder().decode(data)).toBe('pinned')
+    expect(versions.downloadRevision).toHaveBeenCalledWith(STUB_TOKEN_MANAGER, 'f1', 'r1')
+    expect(drive.downloadFile).not.toHaveBeenCalled()
+  })
+
+  it('an unpinned unrecorded read skips the metadata call', async () => {
+    const enc = new TextEncoder()
+    vi.mocked(drive.downloadFile).mockResolvedValue(enc.encode('live'))
+    const data = await readFileVersioned(STUB_TOKEN_MANAGER, 'f1', '/data/f.txt', 'f.txt')
+    expect(new TextDecoder().decode(data)).toBe('live')
+    expect(versions.captureFileMetadata).not.toHaveBeenCalled()
   })
 })

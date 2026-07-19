@@ -15,7 +15,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "printf 'a\\nb\\nc\\n' | tee /data/xc1.txt > /dev/null && printf 'b\\nc\\nd\\n' | tee /data2/xc2.txt > /dev/null && comm /data/xc1.txt /data2/xc2.txt",
       "expect": {
@@ -39,7 +41,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "comm -12 /data/xc1.txt /data2/xc2.txt",
       "expect": {

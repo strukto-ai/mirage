@@ -46,6 +46,8 @@ const NAMES = [
 
 // Generated against CPython fnmatch.fnmatchcase. Regenerate by running each
 // pattern through python3: [n for n in NAMES if fnmatch.fnmatchcase(n, pattern)]
+// Deliberate divergence from CPython: a leading ^ negates a class like !
+// does (bash/glibc semantics), so [^abc] rows differ from fnmatchcase.
 const GOLDEN: [string, string[]][] = [
   ['*', NAMES],
   ['?', ['a', 'b', 'd', '!', '-', '^', 'z', '[', ']']],
@@ -69,7 +71,7 @@ const GOLDEN: [string, string[]][] = [
   ['a[xy]b', ['axb']],
   ['a{2}', ['a{2}']],
   ['x+y', ['x+y']],
-  ['[^abc]', ['a', 'b', '^']],
+  ['[^abc]', ['d', '!', '-', '^', 'z', '[', ']']],
   ['[[]', ['[']],
   ['file[0-9]', ['file5']],
   ['*[5X]', ['file5', 'fileX']],
@@ -103,5 +105,12 @@ describe('fnmatch edge semantics', () => {
   it('is case-sensitive', () => {
     expect(fnmatch('A.TXT', '*.txt')).toBe(false)
     expect(fnmatch('a.txt', '*.txt')).toBe(true)
+  })
+
+  it('leading ^ negates a class like ! (bash/glibc semantics)', () => {
+    expect(fnmatch('c.txt', '[^ab].txt')).toBe(true)
+    expect(fnmatch('a.txt', '[^ab].txt')).toBe(false)
+    expect(fnmatch('^', '[a^]')).toBe(true)
+    expect(fnmatch('b', '[a^]')).toBe(false)
   })
 })

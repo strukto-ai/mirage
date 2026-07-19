@@ -23,8 +23,8 @@ const drive = new GDriveResource({
   refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
 })
 
-const ws = new Workspace({ '/drive': drive }, { mode: MountMode.READ })
-await ws.execute('ls /drive/owned/')
+const ws = new Workspace({ '/drive': drive }, { mode: MountMode.WRITE })
+await ws.execute('ls /drive/')
 ```
 
 ## Browser
@@ -42,7 +42,7 @@ const drive = new GDriveResource({
   refreshToken: localStorage.getItem('gdrive.refresh_token')!,
 })
 
-const ws = new Workspace({ '/drive': drive }, { mode: MountMode.READ })
+const ws = new Workspace({ '/drive': drive }, { mode: MountMode.WRITE })
 ```
 
 The browser examples in `examples/typescript/browser/src/gdrive_pkce.ts` show a full PKCE flow that keeps the secret out of the page.
@@ -55,9 +55,10 @@ The browser examples in `examples/typescript/browser/src/gdrive_pkce.ts` show a 
 | `clientSecret` | required | Google OAuth client secret. Redacted in snapshots. |
 | `refreshToken` | required | User's refresh token. Redacted in snapshots. |
 | `refreshFn` | built-in | Optional override for the access-token refresh callback. |
+| `folderId` | unset | Mount a single folder as the root instead of the whole Drive. The folder may live in My Drive or inside a Shared Drive (drive scope resolves automatically); other shared drives are not surfaced on scoped mounts. |
 
 ## Mount mode
 
-`read`, partial write (uploads under `/drive/owned/`).
+`read` and `write`. Under write mode the standard write commands (`tee`, `cp`, `mv`, `rm`, `mkdir`, `sed -i`, ...) work on regular files and folders; Google-native files (`.gdoc.json`, `.gsheet.json`, `.gslide.json`) are mutated through the `gws` commands instead.
 
-For the mounted layout (`owned/`, `shared/`, mime-aware listings) see the [Python Drive docs](/python/resource/gdrive).
+For the mounted layout, the `gws` command reference, and snapshot behavior see the [Python Drive docs](/python/resource/gdrive).

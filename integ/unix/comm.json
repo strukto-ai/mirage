@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "comm /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {
@@ -41,7 +42,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "comm -12 /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {
@@ -66,7 +68,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "comm -23 /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {
@@ -91,7 +94,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "comm -13 /data/sorted_a.txt /data/sorted_b.txt",
       "expect": {

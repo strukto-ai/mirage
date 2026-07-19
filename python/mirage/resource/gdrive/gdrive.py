@@ -32,6 +32,7 @@ class GoogleDriveResource(BaseResource):
     name: str = ResourceName.GDRIVE
     caches_reads: bool = True
     PROMPT: str = PROMPT
+    SUPPORTS_SNAPSHOT: bool = True
 
     def __init__(self, config: GoogleDriveConfig) -> None:
         super().__init__()

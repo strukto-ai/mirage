@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir -p /data/g9 && cd /data/g9",
       "expect": {
@@ -35,7 +37,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo hi > OUT && cat OUT && cd / && rm -r /data/g9",
       "expect": {
@@ -57,7 +61,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo one > sub/LOG",
       "expect": {
@@ -79,7 +85,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo two >> sub/LOG && cat sub/LOG",
       "expect": {
@@ -101,7 +109,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "wc -l < sub/LOG && cd / && rm -r /data/g11",
       "expect": {
@@ -123,7 +133,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir -p /data/g13 && cd /data/g13 && echo hi > CDOUT && cat /data/g13/CDOUT",
       "expect": {
@@ -148,7 +160,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo one && echo two > captured && cat captured",
       "expect": {
@@ -173,7 +186,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo a > chain && echo b >> chain && cat chain && wc -l < chain",
       "expect": {
@@ -195,7 +209,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "{ echo g1; echo g2; } > gout && cat gout && cd / && rm -r /data/g13",
       "expect": {

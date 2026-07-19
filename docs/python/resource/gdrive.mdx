@@ -22,7 +22,22 @@ config = GoogleDriveConfig(
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
 resource = GoogleDriveResource(config=config)
-ws = Workspace({"/gdrive": resource}, mode=MountMode.READ)
+ws = Workspace({"/gdrive": resource}, mode=MountMode.WRITE)
+```
+
+To mount a subfolder instead of the whole Drive, set `folder_id`.
+The mount root becomes that folder. The folder may live in My Drive,
+be shared with you, sit inside a Shared Drive, or be a Shared Drive
+id itself; the drive scope is resolved automatically. Scoped mounts
+do not surface other shared drives:
+
+```python
+config = GoogleDriveConfig(
+    client_id=os.environ["GOOGLE_CLIENT_ID"],
+    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+    refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+    folder_id="1AbCdEfFolderId",
+)
 ```
 
 ## Filesystem Layout
@@ -82,6 +97,31 @@ APIs:
 Regular files (PDFs, images, CSVs, etc.) are downloaded directly
 from Drive. Large regular files use streaming.
 
+## Write Support
+
+Under `MountMode.WRITE` the standard write commands work on regular
+files and folders: `tee`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`,
+`touch`, `truncate`, and in-place editors such as `sed -i`. Semantics
+follow the other object-store mounts (GNU check-then-act: `EEXIST`
+on mkdir over an existing name, `mv` onto a non-empty directory
+fails with `ENOTEMPTY`, `cp -r` merges).
+
+Google-native files (`.gdoc.json`, `.gsheet.json`, `.gslide.json`)
+are read-only as bytes; writing to them fails with `EACCES`. Mutate
+them through the `gws` commands below instead.
+
+Drive access is per-item (shared-drive roles, folder-level grants), so
+a write mount can still hold items you may not edit. A mutation the
+API denies fails with `EACCES` (Permission denied) on that operand,
+like a real filesystem; the rest of the mount keeps working.
+
+## Snapshots
+
+The resource supports workspace snapshots. Recorded reads capture the
+file's Drive revision (`headRevisionId`), and a loaded snapshot pins
+reads to that revision via the Drive Revisions API, so replay serves
+the exact bytes the agent saw.
+
 ## Cache
 
 The Google Drive resource uses `IndexCacheStore` (same as Slack,
@@ -111,7 +151,7 @@ resource = GoogleDriveResource(config=config)
 
 
 async def main():
-    ws = Workspace({"/gdrive": resource}, mode=MountMode.READ)
+    ws = Workspace({"/gdrive": resource}, mode=MountMode.WRITE)
 
     # List root
     r = await ws.execute("ls /gdrive/ | head -n 10")
@@ -150,7 +190,7 @@ async def main():
 
     # Create a new Google Doc
     r = await ws.execute(
-        "gws-docs-documents-create"
+        "gws docs documents create"
         ' --json \'{"title": "New Doc from MIRAGE"}\'')
     print(await r.stdout_str())
 
@@ -236,15 +276,27 @@ wc-parquet /gdrive/data/sales.parquet
 
 ## Resource-Specific Commands
 
-Google Drive registers Google Workspace write commands so that
-Google-native files can be created and updated from the Drive mount.
+Google Drive registers the `gws` command family so Google-native
+files can be created and updated from the Drive mount. The syntax
+mirrors the Google Workspace CLI:
 
-### `gws-docs-documents-create`
+```bash
+gws <service> <resource> <method> [--params JSON] [--json JSON]   # API passthrough
+gws <service> +<helper> [flags]                                   # ergonomic helper
+```
+
+Passthrough commands call the corresponding API method directly:
+`--params` fills URL path and query parameters, `--json` is the
+request body, and the output is the compact API response JSON.
+Helpers (`+write`, `+read`, `+append`) wrap the common operations
+in plain flags.
+
+### `gws docs documents create`
 
 Create a new Google Doc.
 
 ```bash
-gws-docs-documents-create --json '{"title": "My Doc"}'
+gws docs documents create --json '{"title": "My Doc"}'
 ```
 
 | Option   | Required | Description                  |
@@ -253,12 +305,12 @@ gws-docs-documents-create --json '{"title": "My Doc"}'
 
 Returns the created document JSON.
 
-### `gws-docs-documents-batchUpdate`
+### `gws docs documents batchUpdate`
 
 Apply batch updates to a Google Doc.
 
 ```bash
-gws-docs-documents-batchUpdate \
+gws docs documents batchUpdate \
   --params '{"documentId": "DOC_ID"}' \
   --json '{"requests": [...]}'
 ```
@@ -270,12 +322,12 @@ gws-docs-documents-batchUpdate \
 
 Returns the batch update response JSON.
 
-### `gws-docs-write`
+### `gws docs +write`
 
 Append text to a Google Doc.
 
 ```bash
-gws-docs-write --document DOC_ID --text "Hello from MIRAGE"
+gws docs +write --document DOC_ID --text "Hello from MIRAGE"
 ```
 
 | Option       | Required | Description    |
@@ -285,12 +337,12 @@ gws-docs-write --document DOC_ID --text "Hello from MIRAGE"
 
 Returns the update response JSON.
 
-### `gws-sheets-read`
+### `gws sheets +read`
 
 Read values from a spreadsheet range.
 
 ```bash
-gws-sheets-read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
+gws sheets +read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
 ```
 
 | Option          | Required | Description       |
@@ -300,29 +352,30 @@ gws-sheets-read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
 
 Returns the range values.
 
-### `gws-sheets-write`
+### `gws sheets +write`
 
 Write values to a spreadsheet range.
 
 ```bash
-gws-sheets-write \
-  --params '{"spreadsheetId": "SHEET_ID", "range": "Sheet1!A1:C3", "valueInputOption": "USER_ENTERED"}' \
-  --json '{"values": [["a", "b", "c"]]}'
+gws sheets +write --spreadsheet SHEET_ID --range "Sheet1!A1:C3" --values "a,b,c"
 ```
 
-| Option     | Required | Description                                                     |
-| ---------- | -------- | --------------------------------------------------------------- |
-| `--params` | yes      | JSON with `spreadsheetId`, `range`, optional `valueInputOption` |
-| `--json`   | yes      | JSON body with `values` array                                   |
+| Option          | Required | Description                                    |
+| --------------- | -------- | ---------------------------------------------- |
+| `--spreadsheet` | yes      | Spreadsheet ID                                 |
+| `--range`       | yes      | A1 notation range to overwrite                 |
+| `--values`      | no       | Comma-separated values for a single row        |
+| `--json-values` | no       | JSON array of rows (alternative to `--values`) |
 
-Returns the update response JSON.
+One of `--values` or `--json-values` is required. Returns the
+update response JSON.
 
-### `gws-sheets-append`
+### `gws sheets +append`
 
 Append rows to a spreadsheet.
 
 ```bash
-gws-sheets-append --spreadsheet SHEET_ID --range "Sheet1!A1" --values "a,b,c"
+gws sheets +append --spreadsheet SHEET_ID --range "Sheet1!A1" --values "a,b,c"
 ```
 
 | Option          | Required | Description                                    |
@@ -335,12 +388,12 @@ gws-sheets-append --spreadsheet SHEET_ID --range "Sheet1!A1" --values "a,b,c"
 One of `--values` or `--json-values` is required. Returns the
 append response JSON.
 
-### `gws-sheets-spreadsheets-create`
+### `gws sheets spreadsheets create`
 
 Create a new spreadsheet.
 
 ```bash
-gws-sheets-spreadsheets-create --json '{"properties": {"title": "My Sheet"}}'
+gws sheets spreadsheets create --json '{"properties": {"title": "My Sheet"}}'
 ```
 
 | Option   | Required | Description                       |
@@ -349,12 +402,12 @@ gws-sheets-spreadsheets-create --json '{"properties": {"title": "My Sheet"}}'
 
 Returns the created spreadsheet JSON.
 
-### `gws-sheets-spreadsheets-batchUpdate`
+### `gws sheets spreadsheets batchUpdate`
 
 Apply batch updates to a spreadsheet.
 
 ```bash
-gws-sheets-spreadsheets-batchUpdate \
+gws sheets spreadsheets batchUpdate \
   --params '{"spreadsheetId": "SHEET_ID"}' \
   --json '{"requests": [...]}'
 ```
@@ -366,12 +419,12 @@ gws-sheets-spreadsheets-batchUpdate \
 
 Returns the batch update response JSON.
 
-### `gws-slides-presentations-create`
+### `gws slides presentations create`
 
 Create a new Google Slides presentation.
 
 ```bash
-gws-slides-presentations-create --json '{"title": "My Deck"}'
+gws slides presentations create --json '{"title": "My Deck"}'
 ```
 
 | Option   | Required | Description                  |
@@ -380,12 +433,12 @@ gws-slides-presentations-create --json '{"title": "My Deck"}'
 
 Returns the created presentation JSON.
 
-### `gws-slides-presentations-batchUpdate`
+### `gws slides presentations batchUpdate`
 
 Apply batch updates to a presentation.
 
 ```bash
-gws-slides-presentations-batchUpdate \
+gws slides presentations batchUpdate \
   --params '{"presentationId": "PRES_ID"}' \
   --json '{"requests": [...]}'
 ```
@@ -396,3 +449,31 @@ gws-slides-presentations-batchUpdate \
 | `--json`   | yes      | JSON body with `requests` array |
 
 Returns the batch update response JSON.
+
+### Drive API Passthroughs
+
+The Drive v3 files and permissions methods are available with the
+same passthrough shape:
+
+| Command                        | Description                                    |
+| ------------------------------ | ---------------------------------------------- |
+| `gws drive files list`         | List files (`--params` supports `q`, `pageSize`) |
+| `gws drive files get`          | Get file metadata by `fileId`                  |
+| `gws drive files create`       | Create a file (`--json` metadata)              |
+| `gws drive files update`       | Update file metadata                           |
+| `gws drive files copy`         | Copy a file                                    |
+| `gws drive files delete`       | Delete a file                                  |
+| `gws drive files export`       | Export a native file (`fileId`, `mimeType`)    |
+| `gws drive permissions create` | Share a file                                   |
+| `gws drive permissions list`   | List a file's permissions                      |
+| `gws drive permissions delete` | Remove a permission                            |
+
+Examples:
+
+```bash
+gws drive files list --params '{"q": "name = '"'"'report.pdf'"'"'"}'
+gws drive files export --params '{"fileId": "DOC_ID", "mimeType": "text/plain"}'
+gws drive permissions create \
+  --params '{"fileId": "FILE_ID"}' \
+  --json '{"role": "reader", "type": "anyone"}'
+```

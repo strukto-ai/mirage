@@ -64,23 +64,22 @@ PROMPT = """\
     .namedRanges[]
 
   Read commands (alternative to cat for range-scoped reads — lighter):
-    gws-sheets-read --spreadsheet <id> --range Sheet1!A1:C10"""
+    gws sheets +read --spreadsheet <id> --range Sheet1!A1:C10"""
 
 WRITE_PROMPT = """\
   Write commands:
-    gws-sheets-write \\
-      --params '{"spreadsheetId": "<id>", "range": "Sheet1!A1:B2", "valueInputOption": "USER_ENTERED"}' \\
-      --json   '{"values": [["Name", "Score"], ["Alice", 42]]}'
+    gws sheets +write --spreadsheet <id> --range Sheet1!A1:B2 \\
+      --json-values '[["Name", "Score"], ["Alice", 42]]'
 
-    gws-sheets-append --spreadsheet <id> --range Sheet1!A1 \\
+    gws sheets +append --spreadsheet <id> --range Sheet1!A1 \\
       --values "Bob,37"                          # comma-separated single row
-    gws-sheets-append --spreadsheet <id> --range Sheet1!A1 \\
+    gws sheets +append --spreadsheet <id> --range Sheet1!A1 \\
       --json-values '[["Bob", 37], ["Carol", 51]]'   # multiple rows
 
-    gws-sheets-spreadsheets-create \\
+    gws sheets spreadsheets create \\
       --json '{"properties": {"title": "Q2 Budget"}}'
 
-    gws-sheets-spreadsheets-batchUpdate \\
+    gws sheets spreadsheets batchUpdate \\
       --params '{"spreadsheetId": "<id>"}' \\
       --json   '{"requests": [{"addSheet": {"properties": {"title": "Q3"}}}]}'
 

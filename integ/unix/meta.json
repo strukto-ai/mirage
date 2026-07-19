@@ -15,7 +15,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir -p /data/metad && echo alpha > /data/metad/f.txt && touch -t 202601021530 /data/metad/f.txt",
       "expect": {
@@ -39,7 +41,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "ls -l /data/metad",
       "expect": {
@@ -63,7 +67,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chmod 601 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -87,7 +93,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -111,7 +119,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chown 500:dev /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -135,7 +145,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chown alice /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -159,7 +171,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "touch -t 202601021530 /data/metad/new.txt && ls -l /data/metad",
       "expect": {
@@ -183,7 +197,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "touch -c /data/metad/ghost.txt && ls /data/metad",
       "expect": {
@@ -207,7 +223,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
@@ -229,7 +247,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -251,7 +271,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
       "expect": {
@@ -273,7 +295,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad",
       "expect": {
@@ -295,7 +319,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "touch -h -t 202601021530 /data/metad/ln.txt && readlink /data/metad/ln.txt",
       "expect": {
@@ -319,7 +345,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chmod 999 /data/metad/g.txt 2>&1",
       "expect": {
@@ -343,7 +371,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chmod u+q /data/metad/g.txt 2>&1",
       "expect": {
@@ -367,7 +397,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chmod 644 /data/metad/missing.txt 2>&1",
       "expect": {
@@ -391,7 +423,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "chown alice /data/metad/missing.txt 2>&1",
       "expect": {
@@ -415,7 +449,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "touch -t 99 /data/metad/g.txt 2>&1",
       "expect": {
@@ -437,7 +473,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "rm /data/metad/ln.txt && rm -r /data/metad",
       "expect": {

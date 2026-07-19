@@ -20,6 +20,7 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gdrive import COMMANDS
+from mirage.core.gdrive.resolve import DriveNode
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
@@ -143,16 +144,41 @@ async def test_sed_stdin(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_sed_in_place_rejected(accessor, index):
-    with pytest.raises(PermissionError,
-                       match="-i not supported on this backend"):
-        await sed(
+async def test_sed_in_place_writes_back(accessor, index):
+    await index.put(
+        "/test/file.txt",
+        IndexEntry(
+            id="file123",
+            name="file.txt",
+            resource_type="gdrive/file",
+            remote_time="2026-01-01T00:00:00Z",
+            vfs_name="file.txt",
+            size=100,
+        ))
+    node = DriveNode(id="file123", name="file.txt", mime_type="text/plain")
+    with patch(
+            "mirage.core.google.drive.google_get_bytes",
+            new_callable=AsyncMock,
+            return_value=b"hello world\n",
+    ), patch(
+            "mirage.core.gdrive.write.resolve_key",
+            new_callable=AsyncMock,
+            return_value=node,
+    ), patch(
+            "mirage.core.gdrive.write.update_file_content",
+            new_callable=AsyncMock,
+    ) as update:
+        _result, io = await sed(
             accessor,
             [_scope("/test/file.txt")],
-            "s/a/b/",
+            "s/hello/bye/",
             i=True,
             index=index,
         )
+        assert io.exit_code == 0
+        update.assert_awaited_once()
+        assert update.await_args.args[1] == "file123"
+        assert update.await_args.args[2] == b"bye world\n"
 
 
 @pytest.mark.asyncio

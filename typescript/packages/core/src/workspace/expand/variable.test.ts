@@ -73,8 +73,10 @@ describe('lookupVar', () => {
   })
 })
 
+const textExpandChild = (c: TSNodeLike): Promise<string> => Promise.resolve(c.text)
+
 describe('expandBraces', () => {
-  it('${VAR} reads from env', () => {
+  it('${VAR} reads from env', async () => {
     const varName = stringNode(NT.VARIABLE_NAME, 'FOO')
     const node: TSNodeLike = {
       type: NT.EXPANSION,
@@ -82,10 +84,11 @@ describe('expandBraces', () => {
       children: [stringNode('${', '${'), varName, stringNode('}', '}')],
       namedChildren: [varName],
     }
-    expect(expandBraces(node, { FOO: 'bar' }, null)).toBe('bar')
+    const s = makeSession({ env: { FOO: 'bar' } })
+    expect(await expandBraces(node, s, null, textExpandChild)).toBe('bar')
   })
 
-  it('${VAR:-default} falls back when missing', () => {
+  it('${VAR:-default} falls back when missing', async () => {
     const varName = stringNode(NT.VARIABLE_NAME, 'FOO')
     const op = stringNode(':-', ':-')
     const word = stringNode(NT.WORD, 'default')
@@ -95,10 +98,11 @@ describe('expandBraces', () => {
       children: [stringNode('${', '${'), varName, op, word, stringNode('}', '}')],
       namedChildren: [varName, word],
     }
-    expect(expandBraces(node, {}, null)).toBe('default')
+    const s = makeSession()
+    expect(await expandBraces(node, s, null, textExpandChild)).toBe('default')
   })
 
-  it('${VAR:-default} uses actual value when present', () => {
+  it('${VAR:-default} uses actual value when present', async () => {
     const varName = stringNode(NT.VARIABLE_NAME, 'FOO')
     const op = stringNode(':-', ':-')
     const word = stringNode(NT.WORD, 'default')
@@ -108,6 +112,7 @@ describe('expandBraces', () => {
       children: [stringNode('${', '${'), varName, op, word, stringNode('}', '}')],
       namedChildren: [varName, word],
     }
-    expect(expandBraces(node, { FOO: 'real' }, null)).toBe('real')
+    const s = makeSession({ env: { FOO: 'real' } })
+    expect(await expandBraces(node, s, null, textExpandChild)).toBe('real')
   })
 })

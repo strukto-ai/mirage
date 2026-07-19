@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from fnmatch import fnmatch
 
 from mirage.types import FindType, PathSpec
+from mirage.utils.fnmatch import fnmatch
 
 
 def start_basename(path: PathSpec) -> str:

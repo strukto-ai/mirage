@@ -13,12 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import \
-    gws_slides_presentations_batchUpdate  # noqa: E501
-from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
-    gws_slides_presentations_create  # noqa: E501
 from mirage.commands.builtin.gslides.io import IO as _IO
 from mirage.commands.builtin.gslides.rm import rm
+from mirage.commands.builtin.gws import GWS_SLIDES_API_COMMANDS
 
 COMMANDS = [
     *make_generic_commands(
@@ -26,6 +23,5 @@ COMMANDS = [
         _IO,
     ),
     rm,
-    gws_slides_presentations_create,
-    gws_slides_presentations_batchUpdate,
+    *GWS_SLIDES_API_COMMANDS,
 ]

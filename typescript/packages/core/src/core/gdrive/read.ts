@@ -16,8 +16,10 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
+import { record, recordingActive, revisionFor } from '../../observe/context.ts'
 import { readDoc } from '../gdocs/read.ts'
 import { downloadFile } from '../google/drive.ts'
+import { captureFileMetadata, downloadRevision } from './versions.ts'
 import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
 import type { TokenManager } from '../google/_client.ts'
@@ -33,6 +35,33 @@ function eisdir(p: string): Error {
 
 export async function readBytes(tm: TokenManager, fileId: string): Promise<Uint8Array> {
   return downloadFile(tm, fileId)
+}
+
+// Download a binary file honouring snapshot revision pins. A pinned path
+// reads that revision's content; an actively recorded read captures
+// (fingerprint, revision) so snapshots can pin it later, mirroring the
+// msgraph read_item.
+export async function readFileVersioned(
+  tm: TokenManager,
+  fileId: string,
+  virtual: string,
+  label: string,
+): Promise<Uint8Array> {
+  const pinned = revisionFor(virtual)
+  const startMs = performance.now()
+  let fingerprint: string | null = null
+  let revision: string | null = pinned
+  let data: Uint8Array
+  if (pinned !== null) {
+    data = await downloadRevision(tm, fileId, pinned)
+  } else if (recordingActive()) {
+    ;[fingerprint, revision] = await captureFileMetadata(tm, fileId)
+    data = await downloadFile(tm, fileId)
+  } else {
+    data = await downloadFile(tm, fileId)
+  }
+  record('read', label, 'gdrive', data.length, startMs, { fingerprint, revision })
+  return data
 }
 
 export async function read(
@@ -64,7 +93,7 @@ export async function read(
   if (rt === 'gdrive/gdoc') return readDoc(accessor.tokenManager, result.entry.id)
   if (rt === 'gdrive/gsheet') return readSpreadsheet(accessor.tokenManager, result.entry.id)
   if (rt === 'gdrive/gslide') return readPresentation(accessor.tokenManager, result.entry.id)
-  return downloadFile(accessor.tokenManager, result.entry.id)
+  return readFileVersioned(accessor.tokenManager, result.entry.id, path.virtual, key)
 }
 
 export async function* stream(

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PYTHON_ONLY_HINTS, type Runtime } from './runtime.ts'
+import { PYTHON_ONLY_HINTS, VfsRuntime, type Runtime } from './runtime.ts'
 import { MontyRuntime } from './python/runtimes/monty.ts'
 import { PyodideRuntime } from './python/runtimes/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
@@ -25,6 +25,7 @@ const NAMED: Record<string, new (options?: Record<string, unknown>) => Runtime> 
   pyodide: PyodideRuntime,
   monty: MontyRuntime,
   quickjs: QuickJsRuntime,
+  vfs: VfsRuntime,
 }
 
 /** The runtime classes that capture a command, preference order. */
@@ -46,6 +47,7 @@ const OPTION_KEYS: Record<string, readonly string[]> = {
   ],
   monty: ['workspaceBridge', 'listMounts'],
   quickjs: ['workspaceBridge', 'listMounts'],
+  vfs: ['script', 'captures'],
 }
 
 /**
@@ -60,7 +62,7 @@ export function buildRuntime(name: string, options: Record<string, unknown> = {}
     const known = Object.keys(NAMED)
       .map((n) => `'${n}'`)
       .join(', ')
-    throw new Error(`unknown runtime: '${name}' (expected one of ${known}, or 'vfs')`)
+    throw new Error(`unknown runtime: '${name}' (expected one of ${known})`)
   }
   const allowed = OPTION_KEYS[name] ?? []
   for (const key of Object.keys(options)) {

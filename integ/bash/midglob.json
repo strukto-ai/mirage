@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir -p /data/g15/sub /data/g15/sea && cd /data/g15 && printf 'hi\n' | tee sub/x.txt > /dev/null && printf 'yo\n' | tee sea/x.txt > /dev/null",
       "expect": {
@@ -35,7 +37,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo s*/x.txt",
       "expect": {
@@ -57,7 +61,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat s*/x.txt",
       "expect": {
@@ -79,7 +85,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "cat /data/g15/s*/x.txt",
       "expect": {
@@ -104,7 +112,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo n*/x.txt",
       "expect": {

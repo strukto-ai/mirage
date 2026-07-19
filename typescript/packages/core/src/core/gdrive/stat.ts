@@ -18,6 +18,8 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
+import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
+import { resolveKey } from './resolve.ts'
 
 function guessType(name: string): FileType {
   const lower = name.toLowerCase()
@@ -44,6 +46,49 @@ function guessType(name: string): FileType {
   return FileType.BINARY
 }
 
+const MIME_TO_RT: Readonly<Record<string, string>> = {
+  'application/vnd.google-apps.document': 'gdrive/gdoc',
+  'application/vnd.google-apps.spreadsheet': 'gdrive/gsheet',
+  'application/vnd.google-apps.presentation': 'gdrive/gslide',
+}
+
+// Resolve a stat with direct Drive queries when the index can't answer.
+// Generic write commands (cp/mv/rm) stat without an index, and gdrive is
+// id-addressed, so a cold cache must not read as ENOENT.
+async function statFromApi(
+  accessor: GDriveAccessor,
+  key: string,
+  virtual: string,
+): Promise<FileStat> {
+  const node = await resolveKey(accessor, key)
+  if (node === null) throw enoent(virtual)
+  const item = await getFile(accessor.tokenManager, node.id)
+  const modified = item.modifiedTime ?? ''
+  if (node.mimeType === FOLDER_MIME) {
+    return new FileStat({
+      name: node.name,
+      type: FileType.DIRECTORY,
+      modified,
+      extra: { file_id: node.id },
+    })
+  }
+  const ext = MIME_TO_EXT[node.mimeType]
+  const vfsName = ext !== undefined ? `${node.name}${ext}` : node.name
+  // Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
+  const size = ext !== undefined ? null : parseInt(item.size ?? '0', 10)
+  return new FileStat({
+    name: vfsName,
+    size,
+    type: guessType(vfsName),
+    modified,
+    fingerprint: modified !== '' ? modified : null,
+    extra: {
+      file_id: node.id,
+      resource_type: MIME_TO_RT[node.mimeType] ?? 'gdrive/file',
+    },
+  })
+}
+
 export async function stat(
   accessor: GDriveAccessor,
   path: PathSpec,
@@ -54,7 +99,7 @@ export async function stat(
   const key = path.resourcePath
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
 
-  if (index === undefined) throw enoent(path.virtual)
+  if (index === undefined) return statFromApi(accessor, key, path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
@@ -77,7 +122,7 @@ export async function stat(
     }
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {
-      throw enoent(path.virtual)
+      return statFromApi(accessor, key, path.virtual)
     }
   }
   if (DIRECTORY_RESOURCE_TYPES.has(result.entry.resourceType)) {

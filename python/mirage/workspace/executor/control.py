@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
 from collections.abc import Callable
 from typing import Any
 
@@ -26,6 +25,7 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec, word_text
+from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -293,7 +293,7 @@ async def handle_case(
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     for patterns, body in items:
-        if any(fnmatch.fnmatch(word, p.strip()) for p in patterns):
+        if any(fnmatch(word, p.strip()) for p in patterns):
             all_stdout: list[ByteSource] = []
             merged_io = IOResult()
             last_exec = ExecutionNode(command="case", exit_code=0)

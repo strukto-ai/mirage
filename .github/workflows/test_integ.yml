@@ -394,6 +394,17 @@ jobs:
           echo "SSH_HOST=127.0.0.1" >> "$GITHUB_ENV"
           echo "SSH_PORT=2222" >> "$GITHUB_ENV"
 
+      - name: Start fake Google Workspace server shared by both hosts
+        working-directory: integ
+        run: |
+          nohup pnpm exec tsx server/gws_server.ts --port 19999 > /tmp/gws.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "GWS_URL=" /tmp/gws.log && break
+            sleep 1
+          done
+          cat /tmp/gws.log
+          echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
+
       - name: Start fake Hugging Face hub shared by both hosts
         run: |
           nohup ./python/.venv/bin/python integ/server/hf_server.py --port 5099 > /tmp/hfsrv.log 2>&1 &

@@ -1,0 +1,5 @@
+[
+  {"kind": "doc", "name": "Q1 Plan", "text": "hello gdoc"},
+  {"kind": "sheet", "name": "Metrics", "rows": [["region", "revenue"], ["emea", "120"]]},
+  {"kind": "slide", "name": "Launch Deck"}
+]

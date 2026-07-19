@@ -49,7 +49,7 @@ async function gwsDocsWriteCommand(
 }
 
 export const GDOCS_GWS_WRITE = command({
-  name: 'gws-docs-write',
+  name: 'gws docs +write',
   resource: [ResourceName.GDOCS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsDocsWriteCommand,

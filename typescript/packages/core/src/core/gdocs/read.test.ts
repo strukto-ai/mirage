@@ -35,7 +35,9 @@ import * as drive from '../google/drive.ts'
 import * as client from '../google/_client.ts'
 import { read } from './read.ts'
 
-const STUB_TOKEN_MANAGER = {} as TokenManager
+const STUB_TOKEN_MANAGER = {
+  config: { clientId: 'cid', refreshToken: 'rt' },
+} as TokenManager
 
 function makeAccessor(): GDocsAccessor {
   return new GDocsAccessor({ tokenManager: STUB_TOKEN_MANAGER })

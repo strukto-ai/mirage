@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
+import type { Runtime } from '../executor/runtime.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
@@ -63,6 +64,10 @@ export class MountRegistry {
   private readonly defaultMode: MountMode
   private cacheStore: FileCache | null = null
   private reconciler: ReadReconciler | null = null
+  // The world's vfs runtime, set by Workspace after construction.
+  // Catch-all when its captures are empty; explicit captures make
+  // unclaimed commands an admission failure (126).
+  vfsRuntime: Runtime | null = null
 
   setReconciler(reconciler: ReadReconciler): void {
     this.reconciler = reconciler
@@ -336,6 +341,24 @@ export class MountRegistry {
       return m
     }
     return null
+  }
+
+  /**
+   * How many leading words form a registered command name. Command names
+   * may span several words ("gws docs documents get"), git-style. A nested
+   * name resolves from anywhere its owning mount is reachable, so this
+   * scans every mount (mirroring mountForCommand) and returns the longest
+   * prefix any mount recognises, or 1 (bare first token) when none does.
+   */
+  matchCommandPrefix(words: string[]): number {
+    if (words.length === 0) return 0
+    let best = 1
+    const candidates = [...this.mountList]
+    if (this.rootRef !== null) candidates.push(this.rootRef)
+    for (const mount of candidates) {
+      best = Math.max(best, mount.longestCommandMatch(words))
+    }
+    return best
   }
 
   async resolveMount(

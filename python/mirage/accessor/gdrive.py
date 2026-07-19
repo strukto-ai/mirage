@@ -18,6 +18,11 @@ from mirage.core.google._client import TokenManager
 
 class GDriveAccessor(Accessor):
 
+    # Memoized by core.gdrive.resolve.root_context: the scoped root's
+    # shared drive id (None when the root is in My Drive). Unset until
+    # the first resolution.
+    root_drive_id: str | None
+
     def __init__(self, config, token_manager: TokenManager) -> None:
         self.config = config
         self.token_manager = token_manager

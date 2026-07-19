@@ -23,6 +23,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.types import PathSpec
 from mirage.workspace.expand.classify import classify_word
 from mirage.workspace.expand.node import expand_node
+from mirage.workspace.expand.variable import _PARAM_OPS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
 
@@ -37,9 +38,11 @@ def _has_at_expansion(node: tree_sitter.Node) -> bool:
 def _array_at_name(child: tree_sitter.Node) -> str | None:
     if child.type != NT.EXPANSION:
         return None
-    has_length_op = any(c.type == "#" and not c.is_named
-                        for c in child.children)
-    if has_length_op:
+    # Any operator (length #, slice :, strip/replace, indirection !)
+    # disqualifies the plain-splat fast path; expand_braces owns those.
+    has_op = any(c.type in _PARAM_OPS and not c.is_named
+                 for c in child.children)
+    if has_op:
         return None
     sub = next((c for c in child.named_children if c.type == "subscript"),
                None)

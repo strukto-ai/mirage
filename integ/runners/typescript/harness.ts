@@ -32,12 +32,15 @@ export interface Mount {
   bucket?: string
   prefix?: string
   root?: string
+  drive?: string
 }
 
 export interface Target {
   id: string
   hosts: string[]
   service?: string
+  epoch?: string
+  apps?: string
   mounts: Mount[]
 }
 
@@ -96,6 +99,7 @@ export interface ExecWorkspace {
   execute(cmd: string, opts?: { stdin?: Uint8Array }): Promise<ExecResult>
   dispatch(opName: string, path: string): Promise<unknown>
   cache: { clear(): Promise<void> }
+  mounts(): readonly { resource: { index?: { clear(): Promise<void> } } }[]
   close(): Promise<void>
 }
 
@@ -199,7 +203,14 @@ export async function runCase(
   ws: ExecWorkspace,
   c: Case,
 ): Promise<{ exitCode: number; out: string; err: string; elapsed: number }> {
-  if (c.clear_cache === true) await ws.cache.clear()
+  if (c.clear_cache === true) {
+    // A full clear means the file cache AND every mount's index cache:
+    // remote listings live in the per-resource index, and a listing
+    // populated by an earlier case must not leak into this one. Resources
+    // without an index cache (e.g. opfs) have nothing to clear.
+    await ws.cache.clear()
+    for (const m of ws.mounts()) await m.resource.index?.clear()
+  }
   const start = performance.now()
   if (c.provision === true) {
     const plan = await (ws as unknown as ProvisionExec).execute(c.command, { provision: true })

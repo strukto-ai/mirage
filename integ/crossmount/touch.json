@@ -15,7 +15,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "touch /data/xt.txt /data2/xt.txt && ls /data/xt.txt /data2/xt.txt && rm /data/xt.txt /data2/xt.txt && ls /data2",
       "expect": {

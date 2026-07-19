@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { evaluateArith } from '../../shell/arith.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { ExitSignal } from '../../shell/errors.ts'
+import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -29,9 +30,13 @@ export interface TSNodeLike {
   children: TSNodeLike[]
   namedChildren: TSNodeLike[]
   isNamed?: boolean
+  startIndex?: number
+  endIndex?: number
 }
 
-const PARAM_OPS: ReadonlySet<string> = new Set([
+export type ExpandChild = (node: TSNodeLike) => Promise<string>
+
+export const PARAM_OPS: ReadonlySet<string> = new Set([
   ':-',
   '-',
   ':+',
@@ -46,6 +51,8 @@ const PARAM_OPS: ReadonlySet<string> = new Set([
   '%%',
   '/',
   '//',
+  '/#',
+  '/%',
   ':',
   '^',
   '^^',
@@ -53,6 +60,18 @@ const PARAM_OPS: ReadonlySet<string> = new Set([
   ',,',
   '!',
 ])
+
+const REPLACE_OPS: ReadonlySet<string> = new Set(['/', '//', '/#', '/%'])
+
+const STRIP_OPS: ReadonlySet<string> = new Set(['#', '##', '%', '%%'])
+
+const CASE_OPS: ReadonlySet<string> = new Set(['^', '^^', ',', ',,'])
+
+// Ops whose first operand is a glob pattern that must keep its literal
+// spelling (no unescaping) while still expanding nested $-expansions.
+const PATTERN_OPS: ReadonlySet<string> = new Set([...REPLACE_OPS, ...STRIP_OPS, ...CASE_OPS])
+
+const LITERAL_ARG_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, 'regex'])
 
 export function lookupVar(name: string, session: Session, callStack: CallStack | null): string {
   const env = session.env
@@ -97,9 +116,150 @@ export function lookupVar(name: string, session: Session, callStack: CallStack |
     const localVal = callStack.getLocal(name)
     if (localVal !== null) return localVal
   }
+  const fromArray = session.arrays[name]
+  if (fromArray !== undefined) {
+    return fromArray[0] ?? ''
+  }
   if (name === 'PWD') return session.cwd
   if (name === 'HOME') return homeDir(session) ?? ''
   return env[name] ?? ''
+}
+
+interface BraceParse {
+  varName: string | null
+  subscript: string | null
+  lengthOp: boolean
+  indirectOp: boolean
+  op: string | null
+  groups: TSNodeLike[][]
+}
+
+function groupSeparator(op: string | null): string | null {
+  if (op !== null && REPLACE_OPS.has(op)) return '/'
+  if (op === ':') return ':'
+  return null
+}
+
+function parseBraces(node: TSNodeLike): BraceParse {
+  let varName: string | null = null
+  let subscript: string | null = null
+  let lengthOp = false
+  let indirectOp = false
+  let op: string | null = null
+  const groups: TSNodeLike[][] = []
+  let seenVar = false
+
+  for (const c of node.children) {
+    if (c.type === '${' || c.type === '}') continue
+    if (c.type === '#' && !seenVar) {
+      lengthOp = true
+      continue
+    }
+    if (c.type === '!' && !seenVar) {
+      indirectOp = true
+      continue
+    }
+    if ((c.type === NT.VARIABLE_NAME || c.type === NT.SPECIAL_VARIABLE_NAME) && !seenVar) {
+      varName = c.text
+      seenVar = true
+      continue
+    }
+    if (c.type === 'subscript' && !seenVar) {
+      for (const sc of c.namedChildren) {
+        if (sc.type === NT.VARIABLE_NAME && varName === null) {
+          varName = sc.text
+        } else if (subscript === null && sc.type !== NT.VARIABLE_NAME) {
+          subscript = sc.text
+        }
+      }
+      seenVar = true
+      continue
+    }
+    if (PARAM_OPS.has(c.type) && op === null) {
+      op = c.text
+      groups.push([])
+      continue
+    }
+    if (op !== null && c.isNamed !== true && c.type === groupSeparator(op)) {
+      groups.push([])
+      continue
+    }
+    if (op !== null) {
+      groups[groups.length - 1]?.push(c)
+    }
+  }
+  return { varName, subscript, lengthOp, indirectOp, op, groups }
+}
+
+// Pattern operands (${f%$ext}) arrive as opaque `regex` nodes whose
+// $-references have no child nodes; resolve them textually while
+// keeping every other character (glob syntax) literal.
+function expandDollarRefs(text: string, session: Session, callStack: CallStack | null): string {
+  if (!text.includes('$')) return text
+  const out: string[] = []
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const ch = text[i] ?? ''
+    if (ch !== '$' || i + 1 >= n) {
+      out.push(ch)
+      i += 1
+      continue
+    }
+    let j = i + 1
+    const braced = text[j] === '{'
+    if (braced) j += 1
+    const start = j
+    while (j < n && /[A-Za-z0-9_]/.test(text[j] ?? '')) j += 1
+    const name = text.slice(start, j)
+    if (name === '' || (braced && (j >= n || text[j] !== '}'))) {
+      out.push(ch)
+      i += 1
+      continue
+    }
+    if (braced) j += 1
+    out.push(lookupVar(name, session, callStack))
+    i = j
+  }
+  return out.join('')
+}
+
+async function expandOperand(
+  node: TSNodeLike,
+  expandChild: ExpandChild,
+  patternMode: boolean,
+  session: Session,
+  callStack: CallStack | null,
+): Promise<string> {
+  if (node.type === NT.CONCATENATION) {
+    return expandGroup(node.children, expandChild, patternMode, session, callStack)
+  }
+  if (patternMode && LITERAL_ARG_TYPES.has(node.type)) {
+    return expandDollarRefs(node.text, session, callStack)
+  }
+  return expandChild(node)
+}
+
+// ${x:?custom msg} carries its message as sibling nodes whose gap (the
+// space) exists only in the source bytes; stitch gaps back from node
+// offsets so multi-word operands round-trip.
+async function expandGroup(
+  nodes: TSNodeLike[],
+  expandChild: ExpandChild,
+  patternMode: boolean,
+  session: Session,
+  callStack: CallStack | null,
+): Promise<string> {
+  const pieces: string[] = []
+  let prevEnd: number | null = null
+  for (const c of nodes) {
+    if (prevEnd !== null && c.startIndex !== undefined && c.startIndex > prevEnd) {
+      pieces.push(' '.repeat(c.startIndex - prevEnd))
+    }
+    pieces.push(await expandOperand(c, expandChild, patternMode, session, callStack))
+    prevEnd = c.endIndex ?? null
+  }
+  return pieces.join('')
 }
 
 function globStrip(value: string, pattern: string, greedy: boolean, prefix: boolean): string {
@@ -121,188 +281,264 @@ function globStrip(value: string, pattern: string, greedy: boolean, prefix: bool
   return value.slice(0, i)
 }
 
-function applyOp(op: string, val: string, varInEnv: boolean, args: string[]): string {
-  if (op === ':-') return val !== '' ? val : (args[0] ?? '')
-  if (op === '-') {
-    if (varInEnv) return val
-    return args[0] ?? ''
-  }
-  if (op === ':+') return val !== '' ? (args[0] ?? '') : ''
-  if (op === '+') return varInEnv ? (args[0] ?? '') : ''
-  if (op === '#') return globStrip(val, args[0] ?? '', false, true)
-  if (op === '##') return globStrip(val, args[0] ?? '', true, true)
-  if (op === '%') return globStrip(val, args[0] ?? '', false, false)
-  if (op === '%%') return globStrip(val, args[0] ?? '', true, false)
-  if (op === '/') {
-    if (args.length === 0) return val
-    const replacement = args[1] ?? ''
-    return val.replace(args[0] ?? '', replacement)
-  }
-  if (op === '//') {
-    if (args.length === 0) return val
-    const replacement = args[1] ?? ''
-    return val.split(args[0] ?? '').join(replacement)
-  }
-  if (op === '^^') return val.toUpperCase()
-  if (op === ',,') return val.toLowerCase()
-  if (op === '^') return val.length > 0 ? (val[0] ?? '').toUpperCase() + val.slice(1) : val
-  if (op === ',') return val.length > 0 ? (val[0] ?? '').toLowerCase() + val.slice(1) : val
-  if (op === ':' && args.length > 0) {
-    const offsetRaw = args[0] ?? ''
-    const lengthRaw = args[1]
-    const offsetParsed = parseInt(offsetRaw.trim(), 10)
-    if (Number.isNaN(offsetParsed)) return val
-    let offset = offsetParsed
-    let length: number | null = null
-    if (lengthRaw !== undefined) {
-      const lengthParsed = parseInt(lengthRaw.trim(), 10)
-      if (Number.isNaN(lengthParsed)) return val
-      length = lengthParsed
+// Bash ${var/pat/rep}: pattern is a glob, longest match wins. anchor is
+// '#' (prefix), '%' (suffix), or null.
+function globReplace(
+  value: string,
+  pattern: string,
+  replacement: string,
+  replaceAll: boolean,
+  anchor: string | null,
+): string {
+  if (pattern === '') return value
+  if (anchor === '#') {
+    for (let j = value.length; j >= 0; j--) {
+      if (fnmatch(value.slice(0, j), pattern)) return replacement + value.slice(j)
     }
-    if (offset < 0) offset = Math.max(0, val.length + offset)
-    if (length === null) return val.slice(offset)
-    if (length < 0) return val.slice(offset, Math.max(offset, val.length + length))
-    return val.slice(offset, offset + length)
+    return value
+  }
+  if (anchor === '%') {
+    for (let i = 0; i <= value.length; i++) {
+      if (fnmatch(value.slice(i), pattern)) return value.slice(0, i) + replacement
+    }
+    return value
+  }
+  if (value === '') {
+    return fnmatch('', pattern) ? replacement : value
+  }
+  const out: string[] = []
+  let i = 0
+  const n = value.length
+  while (i < n) {
+    let matchEnd = -1
+    for (let j = n; j >= i; j--) {
+      if (fnmatch(value.slice(i, j), pattern)) {
+        matchEnd = j
+        break
+      }
+    }
+    if (matchEnd <= i) {
+      // No match here (or an empty one, which bash skips over).
+      out.push(value[i] ?? '')
+      i += 1
+      continue
+    }
+    out.push(replacement)
+    i = matchEnd
+    if (!replaceAll) {
+      out.push(value.slice(i))
+      return out.join('')
+    }
+  }
+  return out.join('')
+}
+
+function caseMod(op: string, val: string, pattern: string): string {
+  if (val === '') return val
+  const all = op === '^^' || op === ',,'
+  let out = ''
+  for (let i = 0; i < val.length; i++) {
+    const ch = val[i] ?? ''
+    if ((!all && i > 0) || (pattern !== '' && !fnmatch(ch, pattern))) {
+      out += ch
+      continue
+    }
+    out += op === '^' || op === '^^' ? ch.toUpperCase() : ch.toLowerCase()
+  }
+  return out
+}
+
+// bash evaluates substring offsets and array subscripts as arithmetic
+// (${v:1+1}, ${a[i+1]}).
+function arithInt(text: string, env: Record<string, string>): number | null {
+  if (/^\s*-?\d+\s*$/.test(text)) return Number.parseInt(text.trim(), 10)
+  try {
+    const { value } = evaluateArith(text, env)
+    return Number(value)
+  } catch (err) {
+    if (err instanceof ArithError) return null
+    throw err
+  }
+}
+
+function substring(val: string, groups: string[], env: Record<string, string>): string {
+  const offsetRaw = groups[0]
+  if (offsetRaw === undefined) return val
+  let offset = arithInt(offsetRaw, env)
+  if (offset === null) return val
+  let length: number | null = null
+  const lengthRaw = groups[1]
+  if (lengthRaw !== undefined) {
+    length = arithInt(lengthRaw, env)
+    if (length === null) return val
+  }
+  if (offset < 0) offset = Math.max(0, val.length + offset)
+  if (length === null) return val.slice(offset)
+  if (length < 0) return val.slice(offset, Math.max(offset, val.length + length))
+  return val.slice(offset, offset + length)
+}
+
+function sliceArray(arr: string[], groups: string[], env: Record<string, string>): string[] {
+  const offsetRaw = groups[0]
+  if (offsetRaw === undefined) return arr
+  let offset = arithInt(offsetRaw, env)
+  if (offset === null) return arr
+  let length: number | null = null
+  const lengthRaw = groups[1]
+  if (lengthRaw !== undefined) {
+    length = arithInt(lengthRaw, env)
+    if (length === null) return arr
+  }
+  if (offset < 0) offset = Math.max(0, arr.length + offset)
+  if (length === null) return arr.slice(offset)
+  if (length < 0) return arr.slice(offset, Math.max(offset, arr.length + length))
+  return arr.slice(offset, offset + length)
+}
+
+// bash evaluates subscripts in arithmetic context (${a[i+1]});
+// unresolvable expressions index element 0, mirroring bash's
+// unset-name-is-zero arithmetic rule.
+export function arrayIndex(idxText: string, env: Record<string, string>): number {
+  return arithInt(idxText, env) ?? 0
+}
+
+function valueOp(op: string, val: string, groups: string[], env: Record<string, string>): string {
+  if (STRIP_OPS.has(op)) {
+    const pattern = groups[0] ?? ''
+    return globStrip(val, pattern, op === '##' || op === '%%', op === '#' || op === '##')
+  }
+  if (REPLACE_OPS.has(op)) {
+    const pattern = groups[0] ?? ''
+    const replacement = groups[1] ?? ''
+    let anchor: string | null = null
+    if (op === '/#') anchor = '#'
+    else if (op === '/%') anchor = '%'
+    return globReplace(val, pattern, replacement, op === '//', anchor)
+  }
+  if (CASE_OPS.has(op)) {
+    return caseMod(op, val, groups[0] ?? '')
+  }
+  if (op === ':') {
+    return substring(val, groups, env)
   }
   return val
 }
 
-export function expandBraces(
+export async function expandBraces(
   node: TSNodeLike,
-  env: Record<string, string>,
+  session: Session,
   callStack: CallStack | null,
-  arrays: Record<string, string[]> = {},
-): string {
-  let varName: string | null = null
-  let subscriptNode: TSNodeLike | null = null
-  let lengthOp = false
-  let indirectOp = false
-  let op: string | null = null
-  const args: string[] = []
-  let seenVar = false
+  expandChild: ExpandChild,
+): Promise<string> {
+  const p = parseBraces(node)
+  const env = session.env
+  const arrays = session.arrays
 
-  for (const c of node.children) {
-    if (c.type === '${' || c.type === '}') continue
-    if (c.type === '#' && !seenVar) {
-      lengthOp = true
-      continue
-    }
-    if (c.type === '!' && !seenVar) {
-      indirectOp = true
-      continue
-    }
-    if (c.type === NT.VARIABLE_NAME) {
-      varName = c.text
-      seenVar = true
-      continue
-    }
-    if (c.type === 'subscript') {
-      subscriptNode = c
-      for (const sc of c.namedChildren) {
-        if (sc.type === NT.VARIABLE_NAME) {
-          varName = sc.text
-          break
-        }
-      }
-      seenVar = true
-      continue
-    }
-    if (PARAM_OPS.has(c.type) && op === null) {
-      op = c.text
-      continue
-    }
-    if (
-      c.type === NT.WORD ||
-      c.type === NT.STRING ||
-      c.type === NT.RAW_STRING ||
-      c.type === NT.STRING_CONTENT ||
-      c.type === NT.NUMBER ||
-      c.type === 'regex'
-    ) {
-      args.push(c.text)
-      continue
-    }
-    if (c.type === NT.CONCATENATION) {
-      // A multi-word operand (`${x:?custom msg}`) parses as one
-      // concatenation node; take its text verbatim.
-      args.push(c.text)
-    }
+  const groups: string[] = []
+  for (let gi = 0; gi < p.groups.length; gi++) {
+    const patternMode = gi === 0 && p.op !== null && PATTERN_OPS.has(p.op)
+    groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
   }
 
   let val = ''
   let varInEnv = false
 
-  if (subscriptNode !== null && varName !== null) {
-    let idxText = ''
-    for (const sc of subscriptNode.namedChildren) {
-      if (sc.type === NT.VARIABLE_NAME) continue
-      idxText = sc.text
-      break
-    }
-    let arr = arrays[varName]
+  if (p.subscript !== null && p.varName !== null) {
+    let arr = arrays[p.varName]
     if (arr === undefined) {
-      const scalar = env[varName] ?? ''
+      const scalar = env[p.varName] ?? ''
       arr = scalar !== '' ? [scalar] : []
     }
-    varInEnv = varName in arrays || varName in env
-    if (idxText === '@' || idxText === '*') {
-      if (lengthOp) return String(arr.length)
+    varInEnv = p.varName in arrays || p.varName in env
+    if (p.subscript === '@' || p.subscript === '*') {
+      if (p.indirectOp) {
+        return arr.map((_, i) => String(i)).join(' ')
+      }
+      if (p.lengthOp) return String(arr.length)
+      if (p.op === ':') {
+        return sliceArray(arr, groups, env).join(' ')
+      }
+      if (p.op !== null && (STRIP_OPS.has(p.op) || REPLACE_OPS.has(p.op) || CASE_OPS.has(p.op))) {
+        const op = p.op
+        return arr.map((el) => valueOp(op, el, groups, env)).join(' ')
+      }
       val = arr.join(' ')
     } else {
-      const i = parseInt(idxText, 10)
-      if (Number.isFinite(i) && !Number.isNaN(i) && i >= 0 && i < arr.length) {
-        val = arr[i] ?? ''
+      let idx = arrayIndex(p.subscript, env)
+      if (idx < 0) idx += arr.length
+      if (idx >= 0 && idx < arr.length) {
+        val = arr[idx] ?? ''
+        varInEnv = true
       } else {
         val = ''
+        varInEnv = false
       }
     }
-  } else if (varName !== null) {
+  } else if (p.varName !== null) {
     if (callStack) {
-      const localVal = callStack.getLocal(varName)
+      const localVal = callStack.getLocal(p.varName)
       if (localVal !== null) {
         val = localVal
         varInEnv = true
       }
     }
+    if (!varInEnv && p.varName in arrays) {
+      const arr = arrays[p.varName] ?? []
+      val = arr[0] ?? ''
+      varInEnv = true
+    }
+    if (!varInEnv && p.varName in env) {
+      val = env[p.varName] ?? ''
+      varInEnv = true
+    }
     if (!varInEnv) {
-      varInEnv = varName in env
-      val = env[varName] ?? ''
+      // Specials, positionals, PWD/HOME fall back to the shared
+      // lookup; set-ness follows value presence.
+      val = lookupVar(p.varName, session, callStack)
+      varInEnv = val !== ''
     }
   }
 
-  if (indirectOp) {
-    return val !== '' ? (env[val] ?? '') : ''
+  if (p.indirectOp) {
+    return val !== '' ? lookupVar(val, session, callStack) : ''
   }
-  if (lengthOp) return String(val.length)
-  if (op === null) return val
-  if (op === '?' || op === ':?') {
-    const triggered = op === '?' ? !varInEnv : val === ''
+  if (p.lengthOp) return String(val.length)
+  if (p.op === null) return val
+  if (p.op === '?' || p.op === ':?') {
+    const triggered = p.op === '?' ? !varInEnv : val === ''
     if (!triggered) return val
     const message =
-      args.length > 0
-        ? args.join(' ')
-        : op === '?'
+      groups[0] !== undefined && groups[0] !== ''
+        ? groups[0]
+        : p.op === '?'
           ? 'parameter not set'
           : 'parameter null or not set'
     // GNU: fatal at top level with status 127; a containing
     // subshell/pipeline segment reports 1.
     throw new ExitSignal(
       127,
-      new TextEncoder().encode(`bash: ${varName ?? ''}: ${message}\n`),
+      new TextEncoder().encode(`bash: ${p.varName ?? ''}: ${message}\n`),
       null,
       1,
     )
   }
-  if (op === '=' || op === ':=') {
-    const triggered = op === '=' ? !varInEnv : val === ''
+  if (p.op === '=' || p.op === ':=') {
+    const triggered = p.op === '=' ? !varInEnv : val === ''
     if (!triggered) return val
-    const defaultVal = args[0] ?? ''
-    if (callStack !== null && callStack.getLocal(varName ?? '') !== null) {
-      callStack.setLocal(varName ?? '', defaultVal)
-    } else if (varName !== null) {
-      env[varName] = defaultVal
+    const defaultVal = groups[0] ?? ''
+    if (callStack !== null && callStack.getLocal(p.varName ?? '') !== null) {
+      callStack.setLocal(p.varName ?? '', defaultVal)
+    } else if (p.varName !== null) {
+      env[p.varName] = defaultVal
     }
     return defaultVal
   }
-  return applyOp(op, val, varInEnv, args)
+  if (p.op === ':-') return val !== '' ? val : (groups[0] ?? '')
+  if (p.op === '-') {
+    if (varInEnv) return val
+    return groups[0] ?? ''
+  }
+  if (p.op === ':+') return val !== '' ? (groups[0] ?? '') : ''
+  if (p.op === '+') return varInEnv ? (groups[0] ?? '') : ''
+  return valueOp(p.op, val, groups, env)
 }

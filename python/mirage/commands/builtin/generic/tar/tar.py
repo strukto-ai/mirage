@@ -1,4 +1,3 @@
-import fnmatch
 import io
 import tarfile
 from collections.abc import Awaitable, Callable
@@ -9,11 +8,12 @@ from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
                                                        ReadMode, WriteMode)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.fnmatch import fnmatch
 
 
 def _excluded(name: str, pattern: str) -> bool:
     base = name.split("/")[-1]
-    return fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(base, pattern)
+    return fnmatch(name, pattern) or fnmatch(base, pattern)
 
 
 def _compression_suffix(z: bool, j: bool, J: bool) -> CompressionSuffix:

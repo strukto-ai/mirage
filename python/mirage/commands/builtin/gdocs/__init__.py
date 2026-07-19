@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gdocs.gws_docs_documents_batchUpdate import \
-    gws_docs_documents_batchUpdate
-from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
-    gws_docs_documents_create
 from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
 from mirage.commands.builtin.gdocs.io import IO as _IO
 from mirage.commands.builtin.gdocs.rm import rm
 from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.gws import GWS_DOCS_API_COMMANDS
 
 COMMANDS = [
     *make_generic_commands(
@@ -27,7 +24,6 @@ COMMANDS = [
         _IO,
     ),
     rm,
-    gws_docs_documents_batchUpdate,
-    gws_docs_documents_create,
     gws_docs_write,
+    *GWS_DOCS_API_COMMANDS,
 ]

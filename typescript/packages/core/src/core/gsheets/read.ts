@@ -16,7 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GSheetsAccessor } from '../../accessor/gsheets.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { SHEETS_API_BASE, type TokenManager, googleGet } from '../google/_client.ts'
+import { sheetsBase, type TokenManager, googleGet } from '../google/_client.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -27,7 +27,7 @@ export async function readSpreadsheet(
   tm: TokenManager,
   spreadsheetId: string,
 ): Promise<Uint8Array> {
-  const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}`
+  const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}`
   const data = await googleGet(tm, url)
   return ENC.encode(JSON.stringify(data))
 }
@@ -37,7 +37,7 @@ export async function readValues(
   spreadsheetId: string,
   range: string,
 ): Promise<Uint8Array> {
-  const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${range}`
+  const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}`
   const data = await googleGet(tm, url)
   return ENC.encode(JSON.stringify(data))
 }

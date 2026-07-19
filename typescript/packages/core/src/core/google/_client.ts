@@ -20,7 +20,37 @@ export const DOCS_API_BASE = 'https://docs.googleapis.com/v1'
 export const SLIDES_API_BASE = 'https://slides.googleapis.com/v1'
 export const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4'
 export const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1'
+export const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 export const TOKEN_BUFFER_SECONDS = 300
+
+export function tokenUrl(config: GoogleConfig): string {
+  return config.apiBase !== undefined ? `${config.apiBase}/token` : TOKEN_URL
+}
+
+export function driveBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/drive/v3` : DRIVE_API_BASE
+}
+
+export function driveUploadBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/upload/drive/v3` : DRIVE_UPLOAD_BASE
+}
+
+export function docsBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/v1` : DOCS_API_BASE
+}
+
+export function slidesBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/v1` : SLIDES_API_BASE
+}
+
+export function sheetsBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/v4` : SHEETS_API_BASE
+}
 
 export class GoogleApiError extends Error {
   readonly status: number
@@ -40,7 +70,7 @@ export async function refreshAccessToken(config: GoogleConfig): Promise<[string,
   if (config.clientSecret !== undefined && config.clientSecret !== '') {
     body.set('client_secret', config.clientSecret)
   }
-  const r = await fetch(TOKEN_URL, {
+  const r = await fetch(tokenUrl(config), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
@@ -54,7 +84,7 @@ export async function refreshAccessToken(config: GoogleConfig): Promise<[string,
 }
 
 export class TokenManager {
-  private readonly config: GoogleConfig
+  readonly config: GoogleConfig
   private accessToken: string | null = null
   private expiresAt = 0
   private inflight: Promise<string> | null = null
@@ -143,6 +173,49 @@ export async function googlePut(tm: TokenManager, url: string, json: unknown): P
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new GoogleApiError(`Google PUT ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}
+
+export async function googlePatch(
+  tm: TokenManager,
+  url: string,
+  json: unknown,
+  params?: Record<string, string>,
+): Promise<unknown> {
+  const headers = await googleHeaders(tm)
+  const full = params !== undefined ? `${url}?${new URLSearchParams(params).toString()}` : url
+  const r = await fetch(full, {
+    method: 'PATCH',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(json),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new GoogleApiError(`Google PATCH ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+  return r.json()
+}
+
+// Raw byte payloads (upload endpoints).
+export async function googleSendBytes(
+  tm: TokenManager,
+  method: 'POST' | 'PATCH',
+  url: string,
+  data: Uint8Array,
+  contentType: string,
+  params?: Record<string, string>,
+): Promise<unknown> {
+  const headers = await googleHeaders(tm)
+  const full = params !== undefined ? `${url}?${new URLSearchParams(params).toString()}` : url
+  const r = await fetch(full, {
+    method,
+    headers: { ...headers, 'Content-Type': contentType },
+    body: data as unknown as BodyInit,
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new GoogleApiError(`Google ${method} ${url} → ${String(r.status)} ${text}`, r.status)
   }
   return r.json()
 }

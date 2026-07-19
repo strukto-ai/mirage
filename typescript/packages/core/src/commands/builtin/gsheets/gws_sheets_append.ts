@@ -63,7 +63,7 @@ async function gwsSheetsAppendCommand(
 }
 
 export const GSHEETS_GWS_APPEND = command({
-  name: 'gws-sheets-append',
+  name: 'gws sheets +append',
   resource: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsSheetsAppendCommand,

@@ -19,7 +19,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
 import { classifyWord } from './classify/index.ts'
 import { expandNode, type ExecuteFn } from './node.ts'
-import type { TSNodeLike } from './variable.ts'
+import { PARAM_OPS, type TSNodeLike } from './variable.ts'
 
 const SPLIT_TYPES: ReadonlySet<string> = new Set([NT.SIMPLE_EXPANSION, NT.EXPANSION])
 
@@ -39,8 +39,10 @@ function getPositionalArgs(session: Session, callStack: CallStack | null): strin
 
 function arrayAtName(child: TSNodeLike): string | null {
   if (child.type !== NT.EXPANSION) return null
+  // Any operator (length #, slice :, strip/replace, indirection !)
+  // disqualifies the plain-splat fast path; expandBraces owns those.
   for (const c of child.children) {
-    if (c.type === '#' && c.isNamed !== true) return null
+    if (PARAM_OPS.has(c.type) && c.isNamed !== true) return null
   }
   let subscript: TSNodeLike | null = null
   for (const c of child.namedChildren) {

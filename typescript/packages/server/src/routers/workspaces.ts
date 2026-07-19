@@ -116,6 +116,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
           ...(args.options.index !== undefined ? { index: args.options.index } : {}),
           ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
+          ...(args.options.route !== undefined ? { route: args.options.route } : {}),
         })
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })

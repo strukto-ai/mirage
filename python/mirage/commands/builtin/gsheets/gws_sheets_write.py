@@ -14,23 +14,23 @@
 
 import json
 
-import aiohttp
-
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.commands.registry import command
 from mirage.commands.spec.types import CommandSpec, OperandKind, Option
-from mirage.core.gsheets._client import SHEETS_API_BASE, google_headers
+from mirage.core.gsheets.write import update_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--params", value_kind=OperandKind.TEXT),
-    Option(long="--json", value_kind=OperandKind.TEXT),
+    Option(long="--spreadsheet", value_kind=OperandKind.TEXT),
+    Option(long="--range", value_kind=OperandKind.TEXT),
+    Option(long="--values", value_kind=OperandKind.TEXT),
+    Option(long="--json-values", value_kind=OperandKind.TEXT),
 ), )
 
 
-@command("gws-sheets-write",
+@command("gws sheets +write",
          resource=["gsheets", "gdrive"],
          spec=SPEC,
          write=True)
@@ -40,28 +40,23 @@ async def gws_sheets_write(
     *texts: str,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    params_str = _extra.get("params", "")
-    json_str = _extra.get("json", "")
-    if not params_str or not isinstance(params_str, str):
-        raise ValueError("--params is required")
-    if not json_str or not isinstance(json_str, str):
-        raise ValueError("--json is required")
-    p = json.loads(params_str)
-    sheet_id = p.get("spreadsheetId", "")
-    range_ = p.get("range", "")
-    vio = p.get("valueInputOption", "USER_ENTERED")
-    if not sheet_id:
-        raise ValueError("--params must contain spreadsheetId")
-    if not range_:
-        raise ValueError("--params must contain range")
-    body = json.loads(json_str)
-    base = f"{SHEETS_API_BASE}/spreadsheets/{sheet_id}"
-    url = f"{base}/values/{range_}?valueInputOption={vio}"
-    headers = await google_headers(accessor.token_manager)
-    async with aiohttp.ClientSession() as session:
-        async with session.put(url, headers=headers, json=body) as resp:
-            resp.raise_for_status()
-            result = await resp.json()
+    sheet_id = _extra.get("spreadsheet", "")
+    range_ = _extra.get("range", "")
+    values_csv = _extra.get("values", "")
+    json_values = _extra.get("json-values", _extra.get("json_values", ""))
+    if not sheet_id or not isinstance(sheet_id, str):
+        raise ValueError("--spreadsheet is required")
+    if not range_ or not isinstance(range_, str):
+        raise ValueError("--range is required")
+    if json_values and isinstance(json_values, str):
+        values_json = json_values
+    elif values_csv and isinstance(values_csv, str):
+        row = values_csv.split(",")
+        values_json = json.dumps([row])
+    else:
+        raise ValueError("--values or --json-values is required")
+    result = await update_values(accessor.token_manager, sheet_id, range_,
+                                 values_json)
     out = json.dumps(result, ensure_ascii=False,
                      separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

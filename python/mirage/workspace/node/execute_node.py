@@ -18,13 +18,15 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
+from mirage.runtime.route import RoutingDecision
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError
+from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
+from mirage.types import word_text
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.control import (handle_case, handle_for,
                                                handle_if, handle_select,
@@ -36,6 +38,7 @@ from mirage.workspace.expand import (expand_and_classify, expand_node,
                                      expand_redirects)
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.expand.node import expand_arith
+from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.command_dispatch import execute_command
@@ -51,6 +54,33 @@ from mirage.shell.helpers import (  # isort: skip
     get_subshell_body, get_text, get_unset_names, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_local, handle_readonly, handle_test, handle_unset)
+
+
+async def _expand_array_items(
+    array_node: Any,
+    session: Session,
+    execute_fn: Callable[..., Any],
+    registry: MountRegistry,
+    cs: CallStack | None,
+) -> list[str]:
+    """Expand an array literal into its element words.
+
+    Elements behave like any other shell word list: command
+    substitutions word-split and globs resolve to matches
+    (``a=($(cmd) /data/*.txt)``), with zero-match globs kept literal.
+
+    Args:
+        array_node (Any): the tree-sitter ``array`` node.
+        session (Session): shell session.
+        execute_fn (Callable): workspace execute for substitutions.
+        registry (MountRegistry): mount registry for glob resolution.
+        cs (CallStack | None): function-call scope, if any.
+    """
+    values = list(array_node.named_children)
+    classified = await expand_and_classify(values, session, execute_fn,
+                                           registry, session.cwd, cs)
+    resolved = await resolve_globs(classified, registry)
+    return [word_text(w) for w in resolved]
 
 
 async def _recurse_reassociated(
@@ -111,6 +141,7 @@ async def execute_node(
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
+    routing_decision: RoutingDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
@@ -138,7 +169,8 @@ async def execute_node(
                       job_table,
                       execute_fn,
                       agent_id,
-                      cancel=cancel)
+                      cancel=cancel,
+                      routing_decision=routing_decision)
 
     kind = node_kind(node)
 
@@ -162,7 +194,8 @@ async def execute_node(
                                      stdin,
                                      cs,
                                      job_table,
-                                     cancel=cancel)
+                                     cancel=cancel,
+                                     routing_decision=routing_decision)
 
     # ── pipeline ────────────────────────────────
     if kind == NodeKind.PIPELINE:
@@ -312,11 +345,8 @@ async def execute_node(
                 ]
                 if val_nodes and val_nodes[0].type == NT.ARRAY:
                     key = get_text(child).partition("=")[0]
-                    items = [
-                        await expand_node(ac, session, execute_fn, cs)
-                        for ac in val_nodes[0].named_children
-                    ]
-                    session.arrays[key] = items
+                    session.arrays[key] = await _expand_array_items(
+                        val_nodes[0], session, execute_fn, registry, cs)
                     continue
                 expanded = await expand_node(child, session, execute_fn, cs)
                 assignments.append(expanded)
@@ -363,28 +393,78 @@ async def execute_node(
     # ── variable assignment at top level ────────
     if kind == NodeKind.VAR_ASSIGN:
         text = get_text(node)
-        if "=" in text:
-            key, _, val = text.partition("=")
-            if key in session.readonly_vars:
-                err = f"bash: {key}: readonly variable\n".encode()
-                return None, IOResult(exit_code=1,
-                                      stderr=err), ExecutionNode(command=text,
-                                                                 exit_code=1,
-                                                                 stderr=err)
-            val_nodes = [
-                c for c in node.named_children if c.type != NT.VARIABLE_NAME
-            ]
-            if val_nodes and val_nodes[0].type == NT.ARRAY:
-                items = []
-                for ac in val_nodes[0].named_children:
-                    items.append(await expand_node(ac, session, execute_fn,
-                                                   cs))
+        if "=" not in text:
+            return None, IOResult(), ExecutionNode(command=text, exit_code=0)
+        subscript_node = next(
+            (c for c in node.named_children if c.type == "subscript"), None)
+        name_source = subscript_node if subscript_node is not None else node
+        name_node = next((c for c in name_source.named_children
+                          if c.type == NT.VARIABLE_NAME), None)
+        key = (get_text(name_node)
+               if name_node is not None else text.partition("=")[0])
+        append = any(c.type == "+=" for c in node.children)
+        if key in session.readonly_vars:
+            err = f"bash: {key}: readonly variable\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=text,
+                                                             exit_code=1,
+                                                             stderr=err)
+        val_nodes = [
+            c for c in node.named_children
+            if c.type not in (NT.VARIABLE_NAME, "subscript")
+        ]
+        if val_nodes and val_nodes[0].type == NT.ARRAY:
+            items = await _expand_array_items(val_nodes[0], session,
+                                              execute_fn, registry, cs)
+            if append:
+                base = session.arrays.get(key)
+                if base is None:
+                    scalar = session.env.pop(key, None)
+                    base = [scalar] if scalar else []
+                session.arrays[key] = base + items
+            else:
                 session.arrays[key] = items
                 session.env.pop(key, None)
-                return None, IOResult(), ExecutionNode(command=text,
-                                                       exit_code=0)
-            if val_nodes:
-                val = await expand_node(val_nodes[0], session, execute_fn, cs)
+            return None, IOResult(), ExecutionNode(command=text, exit_code=0)
+        if val_nodes:
+            val = await expand_node(val_nodes[0], session, execute_fn, cs)
+        else:
+            val = text.partition("=")[2]
+        if subscript_node is not None:
+            idx_text = ""
+            for sc in subscript_node.named_children:
+                if sc.type != NT.VARIABLE_NAME:
+                    idx_text = get_text(sc)
+                    break
+            arr = session.arrays.get(key)
+            if arr is None:
+                scalar = session.env.pop(key, None)
+                arr = [scalar] if scalar else []
+            idx = _array_index(idx_text, session.env)
+            if idx < 0:
+                idx += len(arr)
+            if idx < 0:
+                # bash aborts the whole line on a bad assignment
+                # subscript (status 1); containment mirrors ${var:?}.
+                name_text = text.partition("=")[0].removesuffix("+")
+                raise ExitSignal(1,
+                                 stderr=(f"bash: {name_text}: "
+                                         "bad array subscript\n").encode(),
+                                 contained_code=1)
+            while len(arr) <= idx:
+                arr.append("")
+            arr[idx] = arr[idx] + val if append else val
+            session.arrays[key] = arr
+            return None, IOResult(), ExecutionNode(command=text, exit_code=0)
+        if append:
+            arr = session.arrays.get(key)
+            if arr:
+                arr[0] = arr[0] + val
+            elif arr is not None:
+                arr.append(val)
+            else:
+                session.env[key] = session.env.get(key, "") + val
+        else:
             session.env[key] = val
             session.arrays.pop(key, None)
         return None, IOResult(), ExecutionNode(command=text, exit_code=0)

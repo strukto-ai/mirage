@@ -26,5 +26,5 @@ export const GDRIVE_PROMPT = `{prefix}
   IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
   Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.
 
-  All gws-* commands from /gdocs, /gsheets, /gslides also work here
+  All gws commands from /gdocs, /gsheets, /gslides also work here
   (the per-service prompts have flag examples).`

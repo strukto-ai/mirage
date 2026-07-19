@@ -23,23 +23,22 @@ def test_prompt_includes_buckets_and_structure():
     assert "still in owned/" in rendered
     assert "gsheet.json structure" in rendered
     assert ".sheets[].properties.title" in rendered
-    assert "gws-sheets-read" in rendered
+    assert "gws sheets +read" in rendered
 
 
 def test_write_prompt_examples_match_actual_signatures():
-    assert "gws-sheets-write" in WRITE_PROMPT
+    assert "gws sheets +write" in WRITE_PROMPT
     assert "--params" in WRITE_PROMPT
     assert "--json" in WRITE_PROMPT
     assert "spreadsheetId" in WRITE_PROMPT
-    assert "valueInputOption" in WRITE_PROMPT
-    assert "gws-sheets-append" in WRITE_PROMPT
+    assert "gws sheets +append" in WRITE_PROMPT
     assert "--spreadsheet" in WRITE_PROMPT
     assert "--range" in WRITE_PROMPT
     assert "--values" in WRITE_PROMPT
     assert "--json-values" in WRITE_PROMPT
-    assert "gws-sheets-spreadsheets-create" in WRITE_PROMPT
+    assert "gws sheets spreadsheets create" in WRITE_PROMPT
     assert '{"properties": {"title":' in WRITE_PROMPT
-    assert "gws-sheets-spreadsheets-batchUpdate" in WRITE_PROMPT
+    assert "gws sheets spreadsheets batchUpdate" in WRITE_PROMPT
     assert "spreadsheetId" in WRITE_PROMPT
 
 

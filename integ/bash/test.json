@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "test -f plain.txt && echo yes-f && test -d sub && echo yes-d && test -f missing.txt || echo no-f",
       "expect": {

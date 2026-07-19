@@ -13,7 +13,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "mkdir -p /data/g10 && cd /data/g10 && printf 'echo sourced-ok\\n' | tee lib.sh > /dev/null",
       "expect": {
@@ -35,7 +37,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "source lib.sh && . /data/g10/lib.sh && cd / && rm -r /data/g10",
       "expect": {

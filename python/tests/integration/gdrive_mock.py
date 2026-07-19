@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -35,6 +36,9 @@ _PATCH_TARGETS = {
     ],
     "download_file": [
         "mirage.core.gdrive.read.download_file",
+    ],
+    "capture_file_metadata": [
+        "mirage.core.gdrive.read.capture_file_metadata",
     ],
 }
 
@@ -206,12 +210,19 @@ def _build_fakes(registry):
                 return other.get_bytes(file_id)
         raise FileNotFoundError(file_id)
 
+    async def fake_capture_file_metadata(
+            token_manager, file_id: str) -> tuple[str | None, str | None]:
+        data = await fake_download_file(token_manager, file_id)
+        digest = hashlib.md5(data).hexdigest()
+        return digest, f"rev-{digest}"
+
     return {
         "refresh": fake_refresh,
         "list_files": fake_list_files,
         "list_shared_drives": fake_list_shared_drives,
         "list_all_files": fake_list_all_files,
         "download_file": fake_download_file,
+        "capture_file_metadata": fake_capture_file_metadata,
     }
 
 

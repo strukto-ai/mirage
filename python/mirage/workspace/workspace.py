@@ -31,7 +31,7 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
 from mirage.commands.errors import FindParseError, UsageError
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import RecordingScope
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
@@ -43,9 +43,13 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import Runtime
-from mirage.runtime.table import (DEFAULT_ENTRIES, VFS_ENTRY, bind_commands,
-                                  build_runtime)
+from mirage.runtime.base import RunResult, Runtime
+from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
+                                  RoutingDecisionError, command_facts,
+                                  decide_line)
+from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
+                                  build_runtime, catch_all,
+                                  runtime_bindings_for, whole_line_runtime)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
@@ -90,6 +94,28 @@ ResourceMount: TypeAlias = (BaseResource | Mount
                                     dict[str, CommandSafeguard]])
 
 
+def _reject_config_script(kind: str, value: object) -> None:
+    """Guard the code API: script source strings belong to config.
+
+    In code, scripts and routes are callables; a plain string is
+    almost always a script that should live next to the workspace
+    yaml and be referenced there (``script:`` on an entry, ``route:``
+    on the workspace), where the loader wraps it as ScriptSource.
+
+    Args:
+        kind (str): what carried the string, for the error message.
+        value (object): the suspect script value.
+
+    Raises:
+        TypeError: the value is a plain string.
+    """
+    if isinstance(value, str):
+        raise TypeError(
+            f"{kind} must be a callable taking the RouteContext; config "
+            f"scripts reference a .py file (script:/route: in the "
+            f"workspace yaml)")
+
+
 class Workspace:
     """Unified virtual filesystem over heterogeneous resources.
 
@@ -114,6 +140,7 @@ class Workspace:
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
         runtimes: list[Runtime | str] | None = None,
+        route: RouteFn | None = None,
     ) -> None:
         self._registry = MountRegistry()
         # One provider scopes every control-plane store by workspace id;
@@ -240,6 +267,14 @@ class Workspace:
         # per invocation, never a silent escalation to another runtime).
         self._runtime_entries = self._resolve_runtime_entries(runtimes)
         self._registry.runtime_bindings = bind_commands(self._runtime_entries)
+        self._registry.vfs_runtime = next(
+            (entry for entry in self._runtime_entries
+             if isinstance(entry, VfsRuntime)), None)
+        if isinstance(self._registry.vfs_runtime, VfsRuntime):
+            self._registry.vfs_runtime.bind_line_executor(
+                self._execute_line_for_vfs)
+        _reject_config_script("route", route)
+        self._route = route
 
         for prefix, fuse_target in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
@@ -391,40 +426,167 @@ class Workspace:
         return self._ops.mount_prefixes()
 
     def _resolve_runtime_entries(
-            self, runtimes: list[Runtime | str] | None) -> list[Runtime | str]:
+            self, runtimes: list[Runtime | str] | None) -> list[Runtime]:
         """Build and wire the workspace's ordered runtime world.
 
-        Name strings become no-option instances; the vfs marker passes
-        through; every instance gets the workspace dispatch attached.
-        An explicit list fails loud per entry. The default world
-        (monty, quickjs, vfs) builds gracefully: a missing extra skips
-        the entry so its commands report the install hint per
-        invocation, never a silent escalation to another runtime.
+        Name strings become no-option instances and every instance gets
+        the workspace dispatch attached. The vfs runtime is required:
+        when the list omits it, an unconditional one is appended, so
+        the world always names an executor for unclaimed commands. An
+        explicit list fails loud per entry. The default world (monty,
+        quickjs, vfs) builds gracefully: a missing extra skips the
+        entry so its commands report the install hint per invocation,
+        never a silent escalation to another runtime.
 
         Args:
             runtimes (list[Runtime | str] | None): user entries, or
                 None for the default world.
         """
-        entries: list[Runtime | str] = []
+        entries: list[Runtime] = []
         if runtimes is None:
             for name in DEFAULT_ENTRIES:
-                if name == VFS_ENTRY:
-                    entries.append(VFS_ENTRY)
-                    continue
                 try:
                     entries.append(build_runtime(name))
                 except (ImportError, FileNotFoundError):
                     continue
         else:
             for entry in runtimes:
-                if isinstance(entry, str) and entry != VFS_ENTRY:
-                    entries.append(build_runtime(entry))
-                else:
-                    entries.append(entry)
+                entries.append(
+                    build_runtime(entry) if isinstance(entry, str) else entry)
+        if not any(entry.name == VfsRuntime.name for entry in entries):
+            entries.append(VfsRuntime())
         for entry in entries:
-            if isinstance(entry, Runtime):
-                entry.attach(self.dispatch, self._runtime_mount_prefixes)
+            _reject_config_script(f"runtime {entry.name!r} script",
+                                  entry.script)
+            entry.attach(self.dispatch, self._runtime_mount_prefixes)
         return entries
+
+    def add_runtime(self, runtime: Runtime | str) -> Runtime:
+        """Append a runtime entry to the workspace's ordered world.
+
+        The entry lands last, so it never steals a command an earlier
+        entry already captures (first capturer still wins). A name
+        builds like a config entry and fails loud; a duplicate name is
+        rejected before any state changes.
+
+        Args:
+            runtime (Runtime | str): a Runtime instance or a registry
+                runtime name (built like a config entry).
+
+        Raises:
+            ValueError: unknown name or duplicate entry.
+        """
+        entry = (build_runtime(runtime)
+                 if isinstance(runtime, str) else runtime)
+        _reject_config_script(f"runtime {entry.name!r} script", entry.script)
+        candidate = [*self._runtime_entries, entry]
+        bindings = bind_commands(candidate)
+        entry.attach(self.dispatch, self._runtime_mount_prefixes)
+        self._runtime_entries = candidate
+        self._registry.runtime_bindings = bindings
+        return entry
+
+    def _whole_line_runtime(
+            self, ast: Any,
+            decision: RoutingDecision | None) -> Runtime | None:
+        """The runtime taking this whole line, None for the executor.
+
+        A runtime with ``runs_lines`` takes the raw line when the
+        line's resolved bindings place one of its commands (or "*") on
+        it; everything else walks the executor's tree as today. The
+        common world has no such runtime, so this is a cheap scan.
+
+        Args:
+            ast: the parsed tree-sitter root node.
+            decision (RoutingDecision | None): the line's decision,
+                None when only static bindings apply.
+        """
+        if not any(entry.runs_lines and not isinstance(entry, VfsRuntime)
+                   for entry in self._runtime_entries):
+            return None
+        bindings: Mapping[str, Runtime
+                          | None] = (decision.bindings if decision is not None
+                                     else self._registry.runtime_bindings)
+        facts = command_facts(ast)
+        return whole_line_runtime(bindings, [fact.command for fact in facts])
+
+    async def _execute_line_for_vfs(self, line: str, stdin: bytes | None,
+                                    env: dict[str,
+                                              str], cwd: str) -> RunResult:
+        """The workspace executor as the vfs runtime's run_line.
+
+        Args:
+            line (str): the raw command line.
+            stdin (bytes | None): bytes piped into the line.
+            env (dict[str, str]): environment overrides for the line.
+            cwd (str): working directory for the line.
+        """
+        io = await self.execute(line, stdin=stdin, cwd=cwd, env=env)
+        stdout = (await materialize(io.stdout)
+                  if io.stdout is not None else b"")
+        stderr = (await materialize(io.stderr)
+                  if io.stderr is not None else None)
+        return RunResult(stdout=stdout, stderr=stderr, exit_code=io.exit_code)
+
+    async def _resolve_routing_decision(
+            self, ast: Any, command: str, runtime: str | None, provision: bool,
+            session: Session, session_id: str,
+            inherited: RoutingDecision | None) -> RoutingDecision | None:
+        """The routing ladder for one typed line: runtime, route, scripts.
+
+        Returns None when nothing decides (no runtime argument, no
+        policy configured) so dispatch falls to the static bindings. A
+        nested eval passes its typed line's decision as ``inherited``
+        and keeps it: nested lines never re-route. Provision never
+        routes.
+
+        Args:
+            ast: the parsed tree-sitter root node.
+            command: the raw command line.
+            runtime: the execute() runtime argument, top of the ladder.
+            provision: whether this is a provision run.
+            session: the effective session (cwd, env).
+            session_id: session hosting the line.
+            inherited: the calling line's decision, for nested evals.
+        """
+        if inherited is not None:
+            return inherited
+        if runtime is not None:
+            try:
+                overlay = runtime_bindings_for(self._runtime_entries, runtime)
+            except ValueError as exc:
+                raise RoutingDecisionError(str(exc)) from exc
+            return RoutingDecision(bindings={
+                **self._registry.runtime_bindings,
+                **overlay
+            },
+                                   fallback=catch_all(self._runtime_entries))
+        if provision:
+            return None
+        has_scripts = any(entry.script is not None
+                          for entry in self._runtime_entries)
+        if self._route is None and not has_scripts:
+            return None
+        facts = command_facts(ast)
+        ctx = RouteContext(
+            line=command,
+            commands=facts,
+            command=facts[0].command if facts else "",
+            builtin=facts[0].builtin if facts else False,
+            cwd=session.cwd,
+            env=dict(session.env),
+            session_id=session_id,
+            agent_id=self._current_agent_id or "",
+            mounts=tuple(self._runtime_mount_prefixes()),
+        )
+        try:
+            return await decide_line(self._runtime_entries, self._route, ctx,
+                                     self._registry.runtime_bindings,
+                                     self.dispatch)
+        except RoutingDecisionError:
+            raise
+        except (ValueError, ImportError) as exc:
+            raise RoutingDecisionError(str(exc)) from exc
 
     @property
     def _cwd(self) -> str:
@@ -482,8 +644,7 @@ class Workspace:
                 return
             drain_tasks = list(self._cache._drain_tasks.values())
             for line_runtime in self._runtime_entries:
-                if isinstance(line_runtime, Runtime):
-                    await line_runtime.close()
+                await line_runtime.close()
             resources = {
                 id(mount.resource): mount.resource
                 for mount in self._registry.mounts()
@@ -872,39 +1033,53 @@ class Workspace:
         """
         return IOResult()
 
-    async def _exec_recursion(self, cancel: asyncio.Event | None, cmd: str,
-                              **opts: Any) -> Any:
+    async def _exec_recursion(self, cancel: asyncio.Event | None,
+                              routing_decision: "RoutingDecision | None",
+                              cmd: str, **opts: Any) -> Any:
         # The executor's internal eval ($(), source, eval, xargs, ...):
         # never a typed line, so it must not record a history entry or
         # open its own recording context (GNU: history is appended by
-        # the line reader, the evaluator can't touch it).
-        return await self.execute(cmd, cancel=cancel, record=False, **opts)
+        # the line reader, the evaluator can't touch it). It inherits
+        # the typed line's routing decision: nested lines never
+        # re-route.
+        return await self.execute(cmd,
+                                  cancel=cancel,
+                                  record=False,
+                                  routing_decision=routing_decision,
+                                  **opts)
 
     @overload
-    async def execute(self,
-                      command: str,
-                      session_id: str | None = ...,
-                      stdin: ByteSource | None = ...,
-                      provision: Literal[False] = ...,
-                      agent_id: str | None = ...,
-                      cwd: str | None = ...,
-                      env: dict[str, str] | None = ...,
-                      cancel: asyncio.Event | None = ...,
-                      record: bool = ...) -> IOResult:
+    async def execute(
+            self,
+            command: str,
+            session_id: str | None = ...,
+            stdin: ByteSource | None = ...,
+            provision: Literal[False] = ...,
+            agent_id: str | None = ...,
+            cwd: str | None = ...,
+            env: dict[str, str] | None = ...,
+            cancel: asyncio.Event | None = ...,
+            record: bool = ...,
+            runtime: str | None = ...,
+            routing_decision: "RoutingDecision | None" = ...) -> IOResult:
         ...
 
     @overload
-    async def execute(self,
-                      command: str,
-                      session_id: str | None = ...,
-                      stdin: ByteSource | None = ...,
-                      *,
-                      provision: Literal[True],
-                      agent_id: str | None = ...,
-                      cwd: str | None = ...,
-                      env: dict[str, str] | None = ...,
-                      cancel: asyncio.Event | None = ...,
-                      record: bool = ...) -> ProvisionResult:
+    async def execute(
+            self,
+            command: str,
+            session_id: str | None = ...,
+            stdin: ByteSource | None = ...,
+            *,
+            provision: Literal[True],
+            agent_id: str | None = ...,
+            cwd: str | None = ...,
+            env: dict[str, str] | None = ...,
+            cancel: asyncio.Event | None = ...,
+            record: bool = ...,
+            runtime: str | None = ...,
+            routing_decision: "RoutingDecision | None" = ...
+    ) -> ProvisionResult:
         ...
 
     async def execute(
@@ -918,6 +1093,8 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
+        runtime: str | None = None,
+        routing_decision: RoutingDecision | None = None,
     ) -> IOResult | ProvisionResult:
         """Execute a shell command in the workspace.
 
@@ -943,7 +1120,17 @@ class Workspace:
                 opening a recording context; ops emitted by the command
                 flow into the caller's recorder. Used by the executor's
                 internal evaluations and available to SDK callers that
-                need an unrecorded run.
+                need an unrecorded run. Nested lines inherit the typed
+                line's routing decision and never re-route.
+            runtime: Explicit runtime for this line, naming a workspace
+                runtime entry. Stages the named runtime captures rebind
+                to it for this line only (nested evals inherit it);
+                everything else keeps its normal binding, so the
+                argument overrides policy, never capability. Raises
+                ValueError for a name that is not a workspace entry.
+            routing_decision: Internal. The typed line's routing decision,
+                forwarded by the executor's nested evals so inner
+                lines never re-route.
         """
         if cancel is not None and cancel.is_set():
             raise MirageAbortError()
@@ -975,11 +1162,13 @@ class Workspace:
         is_line = record and not provision
         scope = RecordingScope(active=is_line)
 
-        exec_recursion = partial(self._exec_recursion, cancel)
-
         session_token = set_current_session(effective_session)
         try:
             ast = parse(command)
+            decision = await self._resolve_routing_decision(
+                ast, command, runtime, provision, effective_session,
+                session_id, routing_decision)
+            exec_recursion = partial(self._exec_recursion, cancel, decision)
             offending = find_syntax_error(ast)
             if offending is not None:
                 snippet = offending.strip()[:40]
@@ -999,6 +1188,18 @@ class Workspace:
                                    self._plan_eval_stub, self._namespace, ast,
                                    effective_session), prov_timeout, prov_name
                     or "")
+            line_runtime = self._whole_line_runtime(ast, decision)
+            if line_runtime is not None:
+                data = (await materialize(stdin)
+                        if stdin is not None else None)
+                result = await line_runtime.run_line(
+                    command, data, dict(effective_session.env),
+                    effective_session.cwd)
+                io = IOResult(exit_code=result.exit_code,
+                              stdout=result.stdout,
+                              stderr=result.stderr)
+                session.last_exit_code = io.exit_code
+                return io
             io, _ = await run_command_tree(
                 self.dispatch,
                 self._registry,
@@ -1010,6 +1211,7 @@ class Workspace:
                 effective_session,
                 stdin,
                 cancel,
+                routing_decision=decision,
             )
             session.last_exit_code = io.exit_code
             await self.apply_io(io, records=scope.records)
@@ -1023,7 +1225,7 @@ class Workspace:
             io = IOResult(exit_code=124, stderr=msg)
             session.last_exit_code = 124
             return io
-        except (MirageAbortError, ContentDriftError):
+        except (MirageAbortError, ContentDriftError, RoutingDecisionError):
             raise
         except FindParseError as exc:
             msg = f"{exc}\n".encode()

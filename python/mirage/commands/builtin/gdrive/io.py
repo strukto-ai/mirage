@@ -16,16 +16,28 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.core.gdrive.copy import copy as _copy
+from mirage.core.gdrive.create import create as _create
+from mirage.core.gdrive.du import du as _du
+from mirage.core.gdrive.du import du_all as _du_all
+from mirage.core.gdrive.exists import exists as _exists
+from mirage.core.gdrive.find import find as _find
+from mirage.core.gdrive.mkdir import mkdir as _mkdir
 from mirage.core.gdrive.read import read as _read
 from mirage.core.gdrive.readdir import is_dir_name as _is_dir_name
 from mirage.core.gdrive.readdir import readdir as _readdir
+from mirage.core.gdrive.rename import rename as _rename
+from mirage.core.gdrive.rm import rm_r as _rm_r
+from mirage.core.gdrive.rmdir import rmdir as _rmdir
 from mirage.core.gdrive.stat import stat as _stat
+from mirage.core.gdrive.truncate import truncate as _truncate
+from mirage.core.gdrive.unlink import unlink as _unlink
+from mirage.core.gdrive.write import write_bytes as _write
 
-# Drive holds real byte files (read via the generic factory) but is written
-# only through the bespoke gws_* Workspace commands, so the generic
-# byte-mutation commands (cp/mv/tee/...) are intentionally absent.
-# gdrive's native read_stream is a
-# coroutine returning bytes-or-iterator (Workspace-aware), so the stream op is
+# Raw bytes read and write via the generic factory; google-native files
+# (gdoc/gsheet/gslide) render as API-resource JSON and are mutated through
+# the gws commands instead. gdrive's native read_stream is a coroutine
+# returning bytes-or-iterator (Workspace-aware), so the stream op is
 # synthesized from the whole-file read instead.
 IO = CommandIO(
     readdir=_readdir,
@@ -35,6 +47,20 @@ IO = CommandIO(
     is_dir_name=lambda _accessor, child: _is_dir_name(child),
     is_mounted=lambda a: True,
     local=False,
+    write=_write,
+    exists=_exists,
+    mkdir=_mkdir,
+    unlink=_unlink,
+    rmdir=_rmdir,
+    rm_r=_rm_r,
+    rename=_rename,
+    copy=_copy,
+    dir_copy=_copy,
+    create=_create,
+    truncate=_truncate,
+    find=_find,
+    du_total=_du,
+    du_all=_du_all,
 )
 
 resolve_glob = IO.resolve_glob

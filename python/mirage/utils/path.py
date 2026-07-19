@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from fnmatch import fnmatchcase
+
+from mirage.utils.fnmatch import fnmatch
 
 
 def glob_prefix_match(path: str, pattern: str) -> bool:
@@ -38,7 +39,7 @@ def glob_prefix_match(path: str, pattern: str) -> bool:
     if len(path_segs) < len(pat_segs):
         return False
     return all(
-        fnmatchcase(seg, pat)
+        fnmatch(seg, pat)
         for seg, pat in zip(path_segs[:len(pat_segs)], pat_segs))
 
 

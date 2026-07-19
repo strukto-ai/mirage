@@ -96,7 +96,15 @@ def provision_line(result) -> str:
 
 async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
     if case.get("clear_cache"):
+        # A full clear means the file cache AND every mount's index cache:
+        # remote listings live in the per-resource index, and a listing
+        # populated by an earlier case must not leak into this one.
+        # Resources without an index cache have nothing to clear.
         await ws.cache.clear()
+        for mount in ws.mounts():
+            store = getattr(mount.resource, "index", None)
+            if store is not None:
+                await store.clear()
     start = time.monotonic()
     if case.get("provision"):
         plan = await ws.execute(case["command"], provision=True)

@@ -14,6 +14,7 @@
 
 import shlex
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import tree_sitter
@@ -25,7 +26,7 @@ from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
-from mirage.workspace.expand.variable import _expand_braces, _lookup_var
+from mirage.workspace.expand.variable import _lookup_var, expand_braces
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -114,8 +115,18 @@ async def expand_node(
         return prefix + _lookup_var(var, session, call_stack)
 
     if ntype == NT.EXPANSION:
-        return _expand_braces(ts_node, session.env,
-                              getattr(session, "arrays", {}), call_stack)
+        # In-string whitespace attaches to the node's leading `${` token
+        # ("${a} ${b}" parses the space into the second expansion);
+        # preserve it, mirroring the simple-expansion prefix handling.
+        raw = get_text(ts_node)
+        brace = raw.find("${")
+        prefix = raw[:brace] if brace > 0 else ""
+        expand_child = partial(expand_node,
+                               session=session,
+                               execute_fn=execute_fn,
+                               call_stack=call_stack)
+        return prefix + await expand_braces(ts_node, session, call_stack,
+                                            expand_child)
 
     if ntype == NT.COMMAND_SUBSTITUTION:
         inner_cmds = [

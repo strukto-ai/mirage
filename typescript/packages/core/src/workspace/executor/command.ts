@@ -31,7 +31,8 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
-import type { Runtime } from './runtime.ts'
+import { VfsRuntime, type Runtime } from './runtime.ts'
+import type { RoutingDecision } from './route/index.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -63,6 +64,43 @@ interface RunOnMountCtx {
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
+  routingDecision?: RoutingDecision
+}
+
+/** The 126 result for a command no runtime accepted. */
+function admissionDenial(cmdName: string): IOResult {
+  const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
+  return new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })
+}
+
+/**
+ * Resolve a command against the line's routing decision. With no
+ * decision, the static bindings apply. With one, the command's runtime
+ * is looked up in the decision: its binding, or the decision's
+ * fallback when no entry captures it. A resolved VfsRuntime means the
+ * executor serves the command itself (the vfs runtime has no
+ * interpreter door); null means no runtime accepted it: exit 126,
+ * "no runtime accepted this line", like a shell refusing to exec.
+ */
+function lineRuntimeFor(
+  cmdName: string,
+  runtimeBindings: Record<string, Runtime> | undefined,
+  vfs: Runtime | null,
+  routingDecision: RoutingDecision | undefined,
+): [Runtime | undefined, IOResult | null] {
+  if (routingDecision === undefined) {
+    const restricted = vfs instanceof VfsRuntime && vfs.restricted
+    const runtime = runtimeBindings?.[cmdName]
+    if (runtime !== undefined && runtime === vfs) return [undefined, null]
+    if (runtime === undefined && restricted) return [undefined, admissionDenial(cmdName)]
+    return [runtime, null]
+  }
+  const runtime = Object.hasOwn(routingDecision.bindings, cmdName)
+    ? routingDecision.bindings[cmdName]
+    : routingDecision.fallback
+  if (runtime === null || runtime === undefined) return [undefined, admissionDenial(cmdName)]
+  if (runtime instanceof VfsRuntime) return [undefined, null]
+  return [runtime, null]
 }
 
 interface RunOnMountOpts {
@@ -101,7 +139,8 @@ async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings } = ctx
+  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings, routingDecision } =
+    ctx
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
@@ -158,6 +197,14 @@ async function runOnMount(
       ? (virtual: string, stat: FileStat) => mergeOverlayStat(namespace.metaFor(virtual), stat)
       : null
 
+  const [lineRuntime, denial] = lineRuntimeFor(
+    cmdName,
+    runtimeBindings,
+    registry.vfsRuntime,
+    routingDecision,
+  )
+  if (denial !== null) return [null, denial]
+
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {
       stdin: opts.stdin ?? null,
@@ -166,7 +213,7 @@ async function runOnMount(
       sessionId: session.sessionId,
       env: session.env,
       execAllowed: registry.isExecAllowed(),
-      ...(runtimeBindings?.[cmdName] !== undefined ? { runtime: runtimeBindings[cmdName] } : {}),
+      ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
       safeguardOverride,
     })
@@ -240,6 +287,7 @@ export async function handleCommand(
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
+  routingDecision?: RoutingDecision,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -354,6 +402,7 @@ export async function handleCommand(
       ...(namespace !== undefined ? { namespace } : {}),
       ...(ensureOpen !== undefined ? { ensureOpen } : {}),
       ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
+      ...(routingDecision !== undefined ? { routingDecision } : {}),
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
@@ -502,6 +551,7 @@ export async function handleCommand(
     ...(namespace !== undefined ? { namespace } : {}),
     ...(ensureOpen !== undefined ? { ensureOpen } : {}),
     ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
+    ...(routingDecision !== undefined ? { routingDecision } : {}),
   }
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,

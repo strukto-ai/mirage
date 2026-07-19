@@ -26,7 +26,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("gws-sheets-read", resource=["gsheets", "gdrive"], spec=SPEC)
+@command("gws sheets +read", resource=["gsheets", "gdrive"], spec=SPEC)
 async def gws_sheets_read(
     accessor: GSheetsAccessor,
     paths: list[PathSpec],

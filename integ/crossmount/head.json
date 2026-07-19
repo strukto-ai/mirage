@@ -15,7 +15,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "head -n 2 /data/a.txt /data2/xm.txt",
       "expect": {
@@ -39,7 +41,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "head -q -n 1 /data/a.txt /data2/xm.txt",
       "expect": {

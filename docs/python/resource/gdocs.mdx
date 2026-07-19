@@ -118,12 +118,12 @@ async def main():
 
     # Create a new document
     r = await ws.execute(
-        'gws-docs-documents-create --json \'{"title":"MIRAGE Example Doc"}\'')
+        'gws docs documents create --json \'{"title":"MIRAGE Example Doc"}\'')
     print(await r.stdout_str())
 
     # Append text to a document
     r = await ws.execute(
-        'gws-docs-write --document 1AbCdEf --text "Appended via MIRAGE."')
+        'gws docs +write --document 1AbCdEf --text "Appended via MIRAGE."')
     print(await r.stdout_str())
 
 
@@ -153,12 +153,12 @@ Standard commands available on the mounted Google Docs tree:
 
 Resource-specific commands:
 
-### `gws-docs-documents-create`
+### `gws docs documents create`
 
 Create a new Google Docs document.
 
 ```bash
-gws-docs-documents-create --json '{"title":"MIRAGE Example Doc"}'
+gws docs documents create --json '{"title":"MIRAGE Example Doc"}'
 ```
 
 | Option   | Required | Description                  |
@@ -167,12 +167,12 @@ gws-docs-documents-create --json '{"title":"MIRAGE Example Doc"}'
 
 Returns the created document JSON.
 
-### `gws-docs-documents-batchUpdate`
+### `gws docs documents batchUpdate`
 
 Batch update a document.
 
 ```bash
-gws-docs-documents-batchUpdate --params '{"documentId":"1AbCdEf"}' --json '{"requests":[]}'
+gws docs documents batchUpdate --params '{"documentId":"1AbCdEf"}' --json '{"requests":[]}'
 ```
 
 | Option     | Required | Description                |
@@ -182,12 +182,12 @@ gws-docs-documents-batchUpdate --params '{"documentId":"1AbCdEf"}' --json '{"req
 
 Returns the batch update response JSON.
 
-### `gws-docs-write`
+### `gws docs +write`
 
 Append text to a document.
 
 ```bash
-gws-docs-write --document 1AbCdEf --text "Appended via MIRAGE."
+gws docs +write --document 1AbCdEf --text "Appended via MIRAGE."
 ```
 
 | Option       | Required | Description        |

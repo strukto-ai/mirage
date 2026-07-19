@@ -15,7 +15,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "printf 'same\\nold\\n' | tee /data/xdiff.txt > /dev/null && printf 'same\\nnew\\n' | tee /data2/xdiff.txt > /dev/null && diff /data/xdiff.txt /data2/xdiff.txt",
       "expect": {

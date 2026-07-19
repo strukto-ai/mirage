@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "uniq /data/a.txt /data2/xm_uniq_out.txt",
       "expect": {

@@ -18,7 +18,7 @@ import posixpath
 
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.gdocs._client import DOCS_API_BASE, TokenManager, google_get
+from mirage.core.gdocs._client import TokenManager, docs_base, google_get
 from mirage.core.gdocs.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 async def read_doc(token_manager: TokenManager, doc_id: str) -> bytes:
-    url = f"{DOCS_API_BASE}/documents/{doc_id}"
+    url = f"{docs_base(token_manager)}/documents/{doc_id}"
     data = await google_get(token_manager, url)
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
 

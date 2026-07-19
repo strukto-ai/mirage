@@ -16,7 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDocsAccessor } from '../../accessor/gdocs.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { DOCS_API_BASE, type TokenManager, googleGet } from '../google/_client.ts'
+import { docsBase, type TokenManager, googleGet } from '../google/_client.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -30,7 +30,7 @@ function eisdir(p: string): Error {
 }
 
 export async function readDoc(tm: TokenManager, docId: string): Promise<Uint8Array> {
-  const url = `${DOCS_API_BASE}/documents/${docId}`
+  const url = `${docsBase(tm)}/documents/${docId}`
   const data = await googleGet(tm, url)
   return ENC.encode(JSON.stringify(data))
 }

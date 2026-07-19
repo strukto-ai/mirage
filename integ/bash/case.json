@@ -16,7 +16,8 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "case x in x) echo one; echo two;; esac",
       "expect": {
@@ -41,12 +42,61 @@
         "sharepoint",
         "ssh",
         "nextcloud",
-        "box"
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "case y in x) echo one;; *) echo fall; echo through;; esac",
       "expect": {
         "exit": 0,
         "stdout": "fall\nthrough\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_caret_class",
+      "seq": 500910,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "case foo in f[^x]o) echo yes;; *) echo no;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_bang_class",
+      "seq": 500911,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "case foo in f[!x]o) echo yes;; *) echo no;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes\n",
         "stderr": ""
       }
     }

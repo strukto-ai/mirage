@@ -24,8 +24,8 @@ from mirage.accessor.s3 import S3Config
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
-from mirage.runtime.base import Runtime
-from mirage.runtime.table import VFS_ENTRY, build_runtime
+from mirage.runtime.base import Runtime, ScriptSource
+from mirage.runtime.table import build_runtime
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import (DEFAULT_STATE_ROOT,
@@ -238,16 +238,76 @@ class MountBlock(BaseModel):
         return _coerce_mount_mode(v)
 
 
+def _is_script_path(value: str) -> bool:
+    """True for the docker-style single-line ``.py`` path form.
+
+    Args:
+        value (str): a yaml ``script``/``route`` value.
+    """
+    return "\n" not in value and value.strip().endswith(".py")
+
+
+def _load_script_source(value: str) -> ScriptSource:
+    """Embed the referenced ``.py`` file as script source.
+
+    Config carries a reference, the wire carries content (the docker
+    build-context model): the value must be a path to a ``.py`` file,
+    read at load time. In code, scripts are callables; config is the
+    only door for script source.
+
+    Args:
+        value (str): the yaml ``script``/``route`` value.
+
+    Raises:
+        ValueError: the value is not a ``.py`` path.
+        FileNotFoundError: the referenced file does not exist.
+    """
+    if not _is_script_path(value):
+        raise ValueError("a config script must reference a .py file "
+                         f"(e.g. script: guard.py), got {value!r}")
+    return ScriptSource(Path(value.strip()).read_text())
+
+
+def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
+    """Resolve relative script paths against the config file's dir.
+
+    A path-form ``script``/``route`` in a config file means "next to
+    the file" (the docker build-context model), never "wherever the
+    server happens to run". Mutates the parsed mapping in place;
+    in-memory dict configs are untouched by the loader.
+
+    Args:
+        raw (dict[str, Any]): the parsed config mapping.
+        base (Path): directory containing the config file.
+    """
+    route = raw.get("route")
+    if isinstance(route, str) and _is_script_path(route) \
+            and not Path(route.strip()).is_absolute():
+        raw["route"] = str(base / route.strip())
+    runtimes = raw.get("runtimes")
+    if not isinstance(runtimes, list):
+        return
+    for entry in runtimes:
+        if not isinstance(entry, dict):
+            continue
+        script = entry.get("script")
+        if isinstance(script, str) and _is_script_path(script) \
+                and not Path(script.strip()).is_absolute():
+            entry["script"] = str(base / script.strip())
+
+
 def _build_runtime_entries(
         entries: list[str | dict[str, Any]]) -> list["Runtime | str"]:
     """Turn config runtime entries into workspace runtime entries.
 
     Args:
         entries (list[str | dict[str, Any]]): name strings, or maps
-            carrying a name plus constructor options flat on the entry.
+            carrying a name plus a ``script`` and constructor options
+            flat on the entry.
 
     Raises:
-        ValueError: a map entry without a name, or options on vfs.
+        ValueError: a map entry without a name, or non-script options
+            on vfs.
     """
     out: list[Runtime | str] = []
     for entry in entries:
@@ -258,12 +318,14 @@ def _build_runtime_entries(
         name = options.pop("name", None)
         if not isinstance(name, str) or not name:
             raise ValueError("runtime entry needs a non-empty 'name'")
-        if name == VFS_ENTRY:
-            if options:
-                raise ValueError("the vfs runtime entry takes no options")
-            out.append(VFS_ENTRY)
-            continue
-        out.append(build_runtime(name, **options))
+        script = options.pop("script", None)
+        if script is not None and not isinstance(script, str):
+            raise ValueError(
+                "a runtime entry script must be a .py path string")
+        built = build_runtime(name, **options)
+        if script is not None:
+            built.script = _load_script_source(script)
+        out.append(built)
     return out
 
 
@@ -275,6 +337,10 @@ class WorkspaceConfig(BaseModel):
     # with a name plus constructor options flat on the entry
     # ({name: wasi, home: /opt/...}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
+    # Global route script: a .py path whose content is embedded at
+    # load. Its last expression names the runtime for the line, or
+    # None to fall to entry scripts.
+    route: str | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
     default_session_id: str | None = None
@@ -329,6 +395,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["owns_store"] = True
         if self.runtimes is not None:
             kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
+        if self.route is not None:
+            kwargs["route"] = _load_script_source(self.route)
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:
@@ -430,9 +498,11 @@ def load_config(source: str | Path | dict[str, Any],
     Returns:
         WorkspaceConfig: validated config object.
     """
+    base: Path | None = None
     if isinstance(source, (str, Path)):
         text = Path(source).read_text(encoding="utf-8")
         raw = yaml.safe_load(text)
+        base = Path(source).resolve().parent
     else:
         raw = dict(source)
     if not isinstance(raw, dict):
@@ -440,4 +510,6 @@ def load_config(source: str | Path | dict[str, Any],
             f"config source must be a mapping, got {type(raw).__name__}")
     use_env = env if env is not None else dict(os.environ)
     interpolated = _interpolate_env(raw, use_env)
+    if base is not None:
+        _absolutize_scripts(interpolated, base)
     return WorkspaceConfig.model_validate(interpolated)

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
 from functools import partial
 
 from mirage.accessor.email import EmailAccessor
@@ -32,6 +31,7 @@ from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
+from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -139,7 +139,7 @@ async def _find_server_side(
         subject = _sanitize(h.get("subject", "No Subject"))
         uid = h.get("uid", "")
         filename = f"{subject}__{uid}.email.json"
-        if fnmatch.fnmatch(filename, name_pattern):
+        if fnmatch(filename, name_pattern):
             vfs_path = "/".join(p
                                 for p in [prefix, folder, date_str, filename]
                                 if p)

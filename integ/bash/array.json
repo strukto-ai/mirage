@@ -1,0 +1,748 @@
+{
+  "cases": [
+    {
+      "id": "array_index_zero",
+      "seq": 500700,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar1=(one two three); echo ${ar1[0]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_index_last",
+      "seq": 500701,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar2=(one two three); echo ${ar2[2]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "three\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_neg_index",
+      "seq": 500702,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar3=(one two three); echo ${ar3[-1]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "three\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_at",
+      "seq": 500703,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar4=(one two three); echo ${ar4[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "one two three\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_star",
+      "seq": 500704,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar5=(one two three); echo ${ar5[*]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "one two three\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_len",
+      "seq": 500705,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar6=(one two three); echo ${#ar6[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_len_zero",
+      "seq": 500706,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar7=(); echo ${#ar7[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_bare_first",
+      "seq": 500707,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar8=(one two three); echo $ar8",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_quoted_words",
+      "seq": 500708,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar9=(one two three); for x in \"${ar9[@]}\"; do echo \"[$x]\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "[one]\n[two]\n[three]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_spaces_len",
+      "seq": 500709,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar10=('x y' z); echo ${#ar10[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_spaces_words",
+      "seq": 500710,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar11=('x y' z); for i in \"${ar11[@]}\"; do echo \"[$i]\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "[x y]\n[z]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_prefix_suffix",
+      "seq": 500711,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar12=(one two); echo \"pre${ar12[@]}post\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "preone twopost\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_elem_upper",
+      "seq": 500712,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar13=(one two); echo ${ar13[1]^^}",
+      "expect": {
+        "exit": 0,
+        "stdout": "TWO\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_elem_len",
+      "seq": 500713,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar14=(hello hi); echo ${#ar14[0]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_slice",
+      "seq": 500714,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar15=(1 2 3 4); echo ${ar15[@]:1:2}",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_slice_tail",
+      "seq": 500715,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar16=(1 2 3 4); echo ${ar16[@]:2}",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_indices",
+      "seq": 500716,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar17=(x y z); echo ${!ar17[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 1 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_arith_index",
+      "seq": 500717,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ai1=1; ar18=(x y z); echo ${ar18[ai1]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "y\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_arith_expr",
+      "seq": 500718,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ai2=1; ar19=(x y z); echo ${ar19[ai2+1]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "z\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_per_elem_replace",
+      "seq": 500719,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar20=(cat car cow); echo ${ar20[@]/c/K}",
+      "expect": {
+        "exit": 0,
+        "stdout": "Kat Kar Kow\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_per_elem_strip",
+      "seq": 500720,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar21=(a.txt b.txt); echo ${ar21[@]%.txt}",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_append",
+      "seq": 500721,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar22=(1 2); ar22+=(3); echo ${#ar22[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_append_scalar_base",
+      "seq": 500722,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "as1=one; as1+=(two); echo ${#as1[@]} ${as1[0]} ${as1[1]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 one two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_set_index",
+      "seq": 500723,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar23=(1 2); ar23[0]=9; echo ${ar23[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "9 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_set_neg_index",
+      "seq": 500724,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar24=(1 2 3); ar24[-1]=X; echo ${ar24[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 2 X\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_cmdsub",
+      "seq": 500725,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar25=($(echo one two)); echo ${#ar25[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_glob",
+      "seq": 500726,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar26=(/data/sorted_*.txt); echo ${#ar26[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_scalar_append",
+      "seq": 500727,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "av1=ab; av1+=cd; echo $av1",
+      "expect": {
+        "exit": 0,
+        "stdout": "abcd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_scalar_append_unset",
+      "seq": 500728,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "zz_av2+=x; echo $zz_av2",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "array_bad_subscript",
+      "seq": 500729,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "ar27=(1); ar27[-5]=x; echo rc=$?",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: ar27[-5]: bad array subscript\n"
+      }
+    },
+    {
+      "id": "array_bad_subscript_contained",
+      "seq": 500730,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "(ar28=(1); ar28[-5]=x); echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "bash: ar28[-5]: bad array subscript\n"
+      }
+    }
+  ]
+}

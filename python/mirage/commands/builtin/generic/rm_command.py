@@ -60,7 +60,7 @@ def make_rm(
         removed: dict[str, ByteSource] = {}
         for p in paths:
             try:
-                await unlink(p)
+                await unlink(accessor, p, index)
             except (FileNotFoundError, ValueError):
                 if f:
                     continue

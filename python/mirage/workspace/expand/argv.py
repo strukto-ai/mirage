@@ -98,14 +98,19 @@ async def expand_argv(
     expanded = await expand_parts(parts, session, execute_fn, call_stack)
     if not expanded:
         return Argv(name="", args=(), operands=())
-    name = expanded[0]
+    # A command name may span several leading words (git-style, e.g.
+    # `gws docs documents get`); the registry says how many.
+    consumed = registry.match_command_prefix(expanded)
+    name = " ".join(expanded[:consumed])
 
     policy = word_policy(route(name, session, registry))
     word_kinds: list[OperandKind | None] | None = None
     if policy is WordPolicy.MOUNT:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
-            word_kinds = spec_word_kinds(spec, expanded[1:])
+            extra: list[OperandKind
+                        | None] = [OperandKind.TEXT] * (consumed - 1)
+            word_kinds = extra + spec_word_kinds(spec, expanded[consumed:])
 
     classified = classify_parts(expanded,
                                 registry,
@@ -124,5 +129,5 @@ async def expand_argv(
     # relative form, not the resolved absolute path.
     text_view = [word_text(p) for p in words]
     return Argv(name=name,
-                args=tuple(text_view[1:]),
-                operands=tuple(words[1:]))
+                args=tuple(text_view[consumed:]),
+                operands=tuple(words[consumed:]))

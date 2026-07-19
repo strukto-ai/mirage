@@ -54,5 +54,52 @@ written-by-open
 ['alpha', 'beta']
 === py3_monty_runtime_argv ===
 ['alpha', 'beta']
+=== runtime_arg_static_monty ===
+main.py
+=== runtime_arg_line_local ===
+routed-to-local
+=== runtime_arg_does_not_leak ===
+main.py
+=== route_script_monty ===
+main.py
+=== route_script_local ===
+routed-to-local
+use-local
+=== route_refused ===
+exit_code=126
+mirage: python3: no runtime accepted this line
+=== route_vfs_open ===
+vfs-open
+=== global_route_default ===
+main.py
+=== global_route_named ===
+went-local
+go-local
+=== add_runtime_arg_before ===
+unknown-runtime-rejected
+=== add_runtime_arg_after ===
+added-local
+=== vfs_captures_allow ===
+vfs-captured
+=== vfs_captures_deny ===
+exit_code=126
+mirage: ls: no runtime accepted this line
+=== vfs_captures_python3 ===
+42
+=== ctx_command_pipeline ===
+came-through-pipe
+=== vfs_script_allow ===
+fine
+=== vfs_script_deny ===
+exit_code=126
+mirage: cat: no runtime accepted this line
 === py3_safeguard_timeout ===
 exit_code=124
+=== whole_line_capture ===
+box:nvidia-smi -L | grep GPU
+=== whole_line_uncaptured ===
+still-the-workspace
+=== whole_line_star ===
+box:ls /ram && echo done
+=== whole_line_refused ===
+keep-out

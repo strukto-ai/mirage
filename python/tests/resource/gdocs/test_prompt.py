@@ -26,13 +26,13 @@ def test_prompt_includes_buckets_and_structure():
 
 
 def test_write_prompt_examples_match_actual_signatures():
-    assert "gws-docs-write" in WRITE_PROMPT
+    assert "gws docs +write" in WRITE_PROMPT
     assert "--document" in WRITE_PROMPT
     assert "--text" in WRITE_PROMPT
-    assert "gws-docs-documents-create" in WRITE_PROMPT
+    assert "gws docs documents create" in WRITE_PROMPT
     assert "--json" in WRITE_PROMPT
     assert '{"title":' in WRITE_PROMPT
-    assert "gws-docs-documents-batchUpdate" in WRITE_PROMPT
+    assert "gws docs documents batchUpdate" in WRITE_PROMPT
     assert "documentId" in WRITE_PROMPT
 
 

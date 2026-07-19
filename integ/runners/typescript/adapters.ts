@@ -26,6 +26,10 @@ import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-b
 import {
   BoxResource,
   DiskResource,
+  GDocsResource,
+  GDriveResource,
+  GSheetsResource,
+  GSlidesResource,
   HfBucketsResource,
   MountMode,
   RAMResource,
@@ -286,6 +290,135 @@ async function openSsh(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+const GDRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
+
+async function gwsJson(url: string, init?: RequestInit): Promise<Record<string, unknown>> {
+  const r = await fetch(url, init)
+  if (!r.ok) throw new Error(`gws fake request failed: ${url} -> ${String(r.status)}`)
+  return (await r.json()) as Record<string, unknown>
+}
+
+async function gwsFolder(base: string, name: string, parent: string): Promise<string> {
+  const q = `name='${name}' and '${parent}' in parents and trashed=false`
+  const listed = await gwsJson(`${base}/drive/v3/files?q=${encodeURIComponent(q)}`)
+  const files = listed.files as { id: string }[]
+  const first = files[0]
+  if (first !== undefined) return first.id
+  const created = await gwsJson(`${base}/drive/v3/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: GDRIVE_FOLDER_MIME, parents: [parent] }),
+  })
+  return created.id as string
+}
+
+// The fake Google Workspace server is external and shared; /reset gives
+// each run a clean, deterministic state. Each mount is scoped to a
+// per-mount folder via GoogleConfig.folderId, the s3 key_prefix analog.
+interface GwsAppEntry {
+  kind: 'doc' | 'sheet' | 'slide'
+  name: string
+  text?: string
+  rows?: string[][]
+}
+
+// Native files are API objects, not byte blobs, so they seed through the
+// same editor APIs the backends speak instead of fixture uploads.
+async function seedGwsApps(base: string, entries: GwsAppEntry[]): Promise<void> {
+  for (const entry of entries) {
+    if (entry.kind === 'doc') {
+      const doc = await gwsJson(`${base}/v1/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: entry.name }),
+      })
+      const requests = [{ insertText: { location: { index: 1 }, text: entry.text ?? '' } }]
+      await gwsJson(`${base}/v1/documents/${doc.documentId as string}:batchUpdate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests }),
+      })
+    } else if (entry.kind === 'sheet') {
+      const sheet = await gwsJson(`${base}/v4/spreadsheets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ properties: { title: entry.name } }),
+      })
+      const id = sheet.spreadsheetId as string
+      await gwsJson(`${base}/v4/spreadsheets/${id}/values/Sheet1:append`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: entry.rows ?? [] }),
+      })
+    } else {
+      await gwsJson(`${base}/v1/presentations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: entry.name }),
+      })
+    }
+  }
+}
+
+function gwsNativeResource(base: string, resource: string): GDocsResource | GSheetsResource | GSlidesResource {
+  const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
+  if (resource === 'gdocs') return new GDocsResource(config)
+  if (resource === 'gsheets') return new GSheetsResource(config)
+  return new GSlidesResource(config)
+}
+
+async function openGws(target: Target): Promise<Open> {
+  let base = process.env.GWS_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('gdrive target requires GWS_URL')
+  // Native mounts (gdocs/gsheets/gslides) render the modified date into
+  // filenames, so those targets pin the server clock.
+  await gwsJson(`${base}/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target.epoch !== undefined ? { epoch: target.epoch } : {}),
+  })
+  const mounts: Record<string, GDriveResource | GDocsResource | GSheetsResource | GSlidesResource> = {}
+  const driveIds: Record<string, string> = {}
+  for (const m of target.mounts) {
+    if (m.resource !== 'gdrive') {
+      mounts[m.path] = gwsNativeResource(base, m.resource)
+      continue
+    }
+    // A mount may live inside a Shared Drive: the drive is created once
+    // per name and its id is the walk's start.
+    const drive = m.drive
+    if (drive !== undefined && !(drive in driveIds)) {
+      const created = (await gwsJson(`${base}/drive/v3/drives`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: drive }),
+      })) as { id: string }
+      driveIds[drive] = created.id
+    }
+    let parent = drive !== undefined ? (driveIds[drive] as string) : 'root'
+    for (const segment of String(m.root).split('/')) {
+      parent = await gwsFolder(base, segment, parent)
+    }
+    mounts[m.path] = new GDriveResource({
+      clientId: 'integ',
+      clientSecret: 'integ',
+      refreshToken: 'integ',
+      apiBase: base,
+      folderId: parent,
+    })
+  }
+  if (target.apps !== undefined) {
+    const manifest = join(integRoot(), 'fixtures', `${target.apps}.json`)
+    await seedGwsApps(base, JSON.parse(readFileSync(manifest, 'utf8')) as GwsAppEntry[])
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
@@ -293,6 +426,10 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   opfs: openOpfs,
   s3: openS3,
   ssh: openSsh,
+  gdrive: openGws,
+  gdocs: openGws,
+  gsheets: openGws,
+  gslides: openGws,
   hf: openHf,
   box: openBox,
 }

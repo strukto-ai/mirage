@@ -29,7 +29,9 @@ import { readdir } from './readdir.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
-const STUB_TOKEN_MANAGER = {} as TokenManager
+const STUB_TOKEN_MANAGER = {
+  config: { clientId: 'cid', refreshToken: 'rt' },
+} as TokenManager
 
 function makeAccessor(): GDriveAccessor {
   return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
@@ -143,7 +145,7 @@ describe('readdir shared drives', () => {
       new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
       index,
     )
-    expect(out).toEqual(['/Team/', '/Team [Shared Drive]/', '/Team [Shared Drive 2]/'])
+    expect(out).toEqual(['/Team/', '/Team [Shared Drive 2]/', '/Team [Shared Drive]/'])
     expect((await index.get('/Team')).entry?.id).toBe('drive1')
     expect((await index.get('/Team [Shared Drive]')).entry?.id).toBe('drive2')
     expect((await index.get('/Team [Shared Drive 2]')).entry?.id).toBe('drive3')

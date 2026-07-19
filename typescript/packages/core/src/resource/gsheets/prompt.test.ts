@@ -24,25 +24,24 @@ describe('GSHEETS_PROMPT', () => {
     expect(rendered).toContain('still in owned/')
     expect(rendered).toContain('gsheet.json structure')
     expect(rendered).toContain('.sheets[].properties.title')
-    expect(rendered).toContain('gws-sheets-read')
+    expect(rendered).toContain('gws sheets +read')
   })
 })
 
 describe('GSHEETS_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GSHEETS_WRITE_PROMPT).toContain('gws-sheets-write')
+    expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets +write')
     expect(GSHEETS_WRITE_PROMPT).toContain('--params')
     expect(GSHEETS_WRITE_PROMPT).toContain('--json')
     expect(GSHEETS_WRITE_PROMPT).toContain('spreadsheetId')
-    expect(GSHEETS_WRITE_PROMPT).toContain('valueInputOption')
-    expect(GSHEETS_WRITE_PROMPT).toContain('gws-sheets-append')
+    expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets +append')
     expect(GSHEETS_WRITE_PROMPT).toContain('--spreadsheet')
     expect(GSHEETS_WRITE_PROMPT).toContain('--range')
     expect(GSHEETS_WRITE_PROMPT).toContain('--values')
     expect(GSHEETS_WRITE_PROMPT).toContain('--json-values')
-    expect(GSHEETS_WRITE_PROMPT).toContain('gws-sheets-spreadsheets-create')
+    expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets spreadsheets create')
     expect(GSHEETS_WRITE_PROMPT).toContain('{"properties": {"title":')
-    expect(GSHEETS_WRITE_PROMPT).toContain('gws-sheets-spreadsheets-batchUpdate')
+    expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets spreadsheets batchUpdate')
   })
 
   it('documents rm', () => {

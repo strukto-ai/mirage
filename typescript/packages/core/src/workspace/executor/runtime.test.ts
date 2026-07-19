@@ -15,8 +15,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   bindCommands,
+  runtimeBindingsFor,
   DEFAULT_ENTRIES,
-  VFS_ENTRY,
+  VfsRuntime,
   type RunArgs,
   type Runtime,
   type RunResult,
@@ -47,12 +48,18 @@ describe('runtime table', () => {
     expect(candidates('grep')).toEqual([])
   })
 
-  it('default entries end with the vfs marker', () => {
-    expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe(VFS_ENTRY)
+  it('default entries end with the vfs runtime', () => {
+    expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('vfs')
   })
 
   it('buildRuntime fails loud on unknown names', () => {
     expect(() => buildRuntime('ghost')).toThrow(/unknown runtime: 'ghost'/)
+  })
+
+  it('buildRuntime builds the vfs runtime by name', () => {
+    expect(buildRuntime('vfs')).toBeInstanceOf(VfsRuntime)
+    const restricted = buildRuntime('vfs', { captures: ['grep', 'cat'] })
+    expect([...restricted.captures]).toEqual(['grep', 'cat'])
   })
 
   it("buildRuntime hints Python-only for 'wasi' and 'local'", () => {
@@ -65,14 +72,14 @@ describe('bindCommands', () => {
   it('first capturer wins', () => {
     const fake = new FakeRuntime()
     const monty = new MontyRuntime()
-    const bindings = bindCommands([fake, monty, VFS_ENTRY])
+    const bindings = bindCommands([fake, monty, new VfsRuntime()])
     expect(bindings.python3).toBe(fake)
     expect(bindings['made-up']).toBe(fake)
     expect(bindings.python).toBe(monty)
   })
 
-  it('the vfs marker binds nothing', () => {
-    expect(bindCommands([VFS_ENTRY])).toEqual({})
+  it('the vfs runtime binds nothing', () => {
+    expect(bindCommands([new VfsRuntime()])).toEqual({})
   })
 
   it('rejects duplicate names', () => {
@@ -94,5 +101,25 @@ describe('buildRuntime option validation', () => {
 
   it('accepts declared option keys', () => {
     expect(() => buildRuntime('pyodide', { home: '/assets/pyodide' })).not.toThrow()
+  })
+})
+
+describe('runtimeBindingsFor', () => {
+  it('maps only the named runtime captures', () => {
+    const fake = new FakeRuntime()
+    const bindings = runtimeBindingsFor([fake, new VfsRuntime()], 'fake')
+    expect(bindings).toEqual({ python3: fake, 'made-up': fake })
+  })
+
+  it('rejects the vfs name', () => {
+    expect(() => runtimeBindingsFor([new FakeRuntime(), new VfsRuntime()], 'vfs')).toThrow(
+      /not a runtime you can select/,
+    )
+  })
+
+  it('unknown names list the workspace entries', () => {
+    expect(() => runtimeBindingsFor([new FakeRuntime(), new VfsRuntime()], 'nope')).toThrow(
+      /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'vfs'\)/,
+    )
   })
 })

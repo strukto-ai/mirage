@@ -63,11 +63,11 @@ PROMPT = """\
 
 WRITE_PROMPT = """\
   Write commands:
-    gws-docs-write --document <doc-id> --text "text to append"
+    gws docs +write --document <doc-id> --text "text to append"
 
-    gws-docs-documents-create --json '{"title": "My Doc"}'
+    gws docs documents create --json '{"title": "My Doc"}'
 
-    gws-docs-documents-batchUpdate \\
+    gws docs documents batchUpdate \\
       --params '{"documentId": "<id>"}' \\
       --json   '{"requests": [{"insertText": {"location": {"index": 1}, "text": "Hello"}}]}'
 
@@ -75,7 +75,7 @@ WRITE_PROMPT = """\
   literal characters \\ + n end up in the doc. Either:
     --text $'line1\\nline2'                          # ANSI-C quoting
     --text "$(printf 'line1\\nline2')"               # printf interprets
-    gws-docs-documents-batchUpdate --json '{...}'    # JSON handles escapes
+    gws docs documents batchUpdate --json '{...}'    # JSON handles escapes
 
   Delete:
     rm {prefix}/owned/<file>.gdoc.json      # permanent delete from Drive

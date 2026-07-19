@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
 import posixpath
 
 from mirage.commands.builtin.grep_context import grep_context_lines
@@ -22,6 +21,7 @@ from mirage.commands.builtin.grep_helper import (BINARY_EXTENSIONS,
 from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
                                                  _AsyncReaddir, _AsyncStat)
 from mirage.types import FileType
+from mirage.utils.fnmatch import fnmatch
 
 TYPE_EXTENSIONS: dict[str, list[str]] = {
     "py": [".py"],
@@ -60,8 +60,7 @@ def rg_matches_filter(
         exts = TYPE_EXTENSIONS.get(file_type, [f".{file_type}"])
         if not any(entry.endswith(ext) for ext in exts):
             return False
-    if glob_pattern is not None and not fnmatch.fnmatch(
-            basename, glob_pattern):
+    if glob_pattern is not None and not fnmatch(basename, glob_pattern):
         return False
     return True
 

@@ -31,6 +31,9 @@ from mirage.commands.spec.usage import (missing_value_error,
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
+from mirage.runtime.base import Runtime
+from mirage.runtime.route import RoutingDecision
+from mirage.runtime.table import VfsRuntime
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -140,6 +143,51 @@ def _check_mount_root_guard_raw(
     return None
 
 
+def _admission_denial(cmd_name: str) -> IOResult:
+    """The 126 result for a command no runtime accepted.
+
+    Args:
+        cmd_name (str): the refused command.
+    """
+    msg = f"mirage: {cmd_name}: no runtime accepted this line\n"
+    return IOResult(exit_code=126, stderr=msg.encode())
+
+
+def _line_runtime(
+        cmd_name: str, registry: MountRegistry, routing: RoutingDecision | None
+) -> tuple[Runtime | None, IOResult | None]:
+    """Resolve a command against the line's routing decision.
+
+    With no decision, the workspace's static bindings apply. With one,
+    the command's runtime is looked up in the decision: its binding,
+    or the decision's fallback when no entry captures it. A resolved
+    VfsRuntime means the executor serves the command itself (the vfs
+    runtime has no interpreter door); None means no runtime accepted
+    it: exit 126, like a shell refusing to exec.
+
+    Args:
+        cmd_name (str): the command being dispatched.
+        registry (MountRegistry): registry holding static bindings and
+            the world's vfs runtime.
+        routing (RoutingDecision | None): the typed line's decision.
+    """
+    if routing is None:
+        vfs = registry.vfs_runtime
+        restricted = isinstance(vfs, VfsRuntime) and vfs.restricted
+        runtime = registry.runtime_bindings.get(cmd_name)
+        if runtime is vfs and vfs is not None:
+            return None, None
+        if runtime is None and restricted:
+            return None, _admission_denial(cmd_name)
+        return runtime, None
+    runtime = routing.bindings.get(cmd_name, routing.fallback)
+    if runtime is None:
+        return None, _admission_denial(cmd_name)
+    if isinstance(runtime, VfsRuntime):
+        return None, None
+    return runtime, None
+
+
 def _scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, Any]:
     # `repeatable=True` on find value-flags makes parse_to_kwargs emit
     # lists; bespoke backend wrappers read these as scalars. Migrated
@@ -174,6 +222,7 @@ async def run_on_mount(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
+    routing_decision: RoutingDecision | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
@@ -228,6 +277,10 @@ async def run_on_mount(
     stat_overlay = (functools.partial(_namespace_stat_overlay, namespace)
                     if cmd_name == "ls" and namespace is not None else None)
 
+    line_runtime, denial = _line_runtime(cmd_name, registry, routing_decision)
+    if denial is not None:
+        return None, denial
+
     try:
         stdout, io = await mount.execute_cmd(
             cmd_name,
@@ -240,7 +293,7 @@ async def run_on_mount(
             session_id=session.session_id,
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
-            runtime=registry.runtime_bindings.get(cmd_name),
+            runtime=line_runtime,
             stat_overlay=stat_overlay,
         )
     except UsageError as exc:
@@ -429,6 +482,7 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
+    routing_decision: RoutingDecision | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
@@ -555,8 +609,12 @@ async def handle_command(
                                       command=cmd_str,
                                       exit_code=code,
                                       stderr=refusal_msg)
-        run_single = functools.partial(run_on_mount, registry, session,
-                                       dispatch, namespace)
+        run_single = functools.partial(run_on_mount,
+                                       registry,
+                                       session,
+                                       dispatch,
+                                       namespace,
+                                       routing_decision=routing_decision)
         stdout, io = await handle_cross_mount(cmd_name,
                                               path_scopes,
                                               cross_texts,
@@ -673,7 +731,8 @@ async def handle_command(
                                     texts,
                                     flag_kwargs,
                                     stdin=stdin,
-                                    mount=mount)
+                                    mount=mount,
+                                    routing_decision=routing_decision)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""
