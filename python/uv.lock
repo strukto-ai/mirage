@@ -4130,6 +4130,9 @@ fuse = [
 gcs = [
     { name = "aioboto3" },
 ]
+gridfs = [
+    { name = "pymongo" },
+]
 hdf5 = [
     { name = "h5py" },
     { name = "pandas" },
@@ -4258,6 +4261,7 @@ requires-dist = [
     { name = "mirage-ai", extras = ["email"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["fuse"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["gcs"], marker = "extra == 'all'" },
+    { name = "mirage-ai", extras = ["gridfs"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["hdf5"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["hf"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["langfuse"], marker = "extra == 'all'" },
@@ -4292,6 +4296,7 @@ requires-dist = [
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.56" },
     { name = "pydantic-monty", marker = "extra == 'monty'", specifier = ">=0.0.18" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13.0" },
+    { name = "pymongo", marker = "extra == 'gridfs'", specifier = ">=4.9" },
     { name = "pymongo", marker = "extra == 'mongodb'", specifier = ">=4.9" },
     { name = "pypdfium2", marker = "extra == 'pdf'", specifier = ">=5.7.0" },
     { name = "python-multipart", specifier = ">=0.0.27" },
@@ -4307,7 +4312,7 @@ requires-dist = [
     { name = "wasmtime", marker = "extra == 'quickjs'", specifier = ">=46" },
     { name = "wasmtime", marker = "extra == 'wasi'", specifier = ">=46" },
 ]
-provides-extras = ["monty", "wasi", "quickjs", "s3", "r2", "gcs", "oci", "databricks", "ssh", "nextcloud", "hf", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "langfuse", "chroma", "qdrant", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "camel", "daytona", "all", "lancedb"]
+provides-extras = ["monty", "wasi", "quickjs", "s3", "r2", "gcs", "oci", "databricks", "ssh", "nextcloud", "hf", "fuse", "mongodb", "gridfs", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "langfuse", "chroma", "qdrant", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "camel", "daytona", "all", "lancedb"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -97,6 +97,9 @@ fuse     = ["mfusepy>=1.0.0"]
 # --- mongodb ---
 mongodb  = ["pymongo>=4.9"]
 
+# --- gridfs ---
+gridfs   = ["pymongo>=4.9"]
+
 # --- postgres ---
 postgres = ["asyncpg>=0.30.0"]
 
@@ -167,6 +170,7 @@ all = [
     "mirage-ai[hf]",
     "mirage-ai[fuse]",
     "mirage-ai[mongodb]",
+    "mirage-ai[gridfs]",
     "mirage-ai[postgres]",
     "mirage-ai[redis]",
     "mirage-ai[email]",

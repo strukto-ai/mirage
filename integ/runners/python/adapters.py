@@ -26,6 +26,7 @@ from types import ModuleType
 import aiohttp
 import boto3
 from moto.server import ThreadedMotoServer
+from pymongo import AsyncMongoClient
 
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
@@ -37,6 +38,7 @@ from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
 from mirage.resource.gdrive.gdrive import GoogleDriveResource
+from mirage.resource.gridfs import GridFSConfig, GridFSResource
 from mirage.resource.gsheets.config import GSheetsConfig
 from mirage.resource.gsheets.gsheets import GSheetsResource
 from mirage.resource.gslides.config import GSlidesConfig
@@ -51,6 +53,7 @@ from mirage.resource.sharepoint.sharepoint import SharePointResource
 from mirage.resource.ssh import SSHConfig, SSHResource
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
 S3_ACCESS = os.environ.get("AWS_ACCESS_KEY_ID", "testing")
@@ -109,6 +112,27 @@ class S3Service:
                     self.client.delete_object(Bucket=bucket, Key=obj["Key"])
             self.client.delete_bucket(Bucket=bucket)
         self.stop()
+
+
+class GridFSService:
+
+    def __init__(self, run_id: str) -> None:
+        self.uri = MONGODB_URI
+        self.database = f"mirage_integ_{run_id}"
+
+    def resource(self, mount: dict) -> GridFSResource:
+        return GridFSResource(
+            GridFSConfig(uri=self.uri,
+                         database=self.database,
+                         bucket=mount["bucket"],
+                         key_prefix=mount.get("prefix")))
+
+    async def teardown(self) -> None:
+        client: AsyncMongoClient = AsyncMongoClient(self.uri)
+        try:
+            await client.drop_database(self.database)
+        finally:
+            await client.close()
 
 
 def _load_module(path: Path) -> ModuleType:
@@ -507,7 +531,8 @@ class SharePointService:
 
 
 Service = (S3Service | OneDriveService | SharePointService | SSHService
-           | NextcloudService | GwsService | HfService | DropboxService)
+           | NextcloudService | GwsService | HfService | DropboxService
+           | GridFSService)
 
 
 def build_ram(
@@ -539,6 +564,13 @@ def build_s3(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, S3Service)
+    return service.resource(mount), _noop
+
+
+def build_gridfs(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GridFSService)
     return service.resource(mount), _noop
 
 
@@ -617,6 +649,7 @@ BUILDERS = {
     "disk": build_disk,
     "redis": build_redis,
     "s3": build_s3,
+    "gridfs": build_gridfs,
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,
     "ssh": build_ssh,
@@ -636,6 +669,8 @@ async def open_target(
     service: Service | None = None
     if target.get("service") == "s3":
         service = S3Service(run_id)
+    elif target.get("service") == "gridfs":
+        service = GridFSService(run_id)
     elif target.get("service") == "onedrive":
         service = await OneDriveService.create()
     elif target.get("service") == "sharepoint":

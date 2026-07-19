@@ -28,6 +28,7 @@ import {
   DropboxResource,
   GDocsResource,
   GDriveResource,
+  GridFSResource,
   GSheetsResource,
   GSlidesResource,
   HfBucketsResource,
@@ -49,6 +50,7 @@ export interface Open {
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
+const MONGODB_URI = process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
 const S3_ENDPOINT = process.env.S3_ENDPOINT
 const S3_REGION = process.env.S3_REGION ?? 'us-east-1'
 const S3_ACCESS = process.env.AWS_ACCESS_KEY_ID ?? 'testing'
@@ -102,6 +104,33 @@ async function openOpfs(target: Target): Promise<Open> {
   const cleanup = async (): Promise<void> => {
     await ws.close()
     restoreNav()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openGridfs(target: Target): Promise<Open> {
+  const id = runId()
+  const uri = MONGODB_URI
+  const database = `mirage_integ_${id}`
+  const mounts: Record<string, GridFSResource> = {}
+  for (const m of target.mounts) {
+    mounts[m.path] = new GridFSResource({
+      uri,
+      database,
+      bucket: String(m.bucket),
+      keyPrefix: m.prefix,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    const { MongoClient } = await import('mongodb')
+    const client = new MongoClient(uri)
+    try {
+      await client.db(database).dropDatabase()
+    } finally {
+      await client.close()
+    }
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
@@ -377,6 +406,7 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   redis: openRedis,
   opfs: openOpfs,
   s3: openS3,
+  gridfs: openGridfs,
   ssh: openSsh,
   gdrive: openGws,
   gdocs: openGws,

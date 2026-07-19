@@ -67,6 +67,13 @@ export {
 } from './fuse/mount.ts'
 export { isMacosMetadata } from './fuse/platform/macos.ts'
 export { S3Resource, type S3ResourceState } from './resource/s3/s3.ts'
+export { GridFSResource, type GridFSResourceState } from './resource/gridfs/gridfs.ts'
+export {
+  normalizeGridFSConfig,
+  type GridFSConfig,
+  type GridFSConfigRedacted,
+} from './resource/gridfs/config.ts'
+export { GridFSAccessor } from './accessor/gridfs.ts'
 export {
   DatabricksVolumeResource,
   type DatabricksVolumeResourceState,

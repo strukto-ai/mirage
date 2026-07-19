@@ -112,6 +112,7 @@ jobs:
           - { extra: s3, module: mirage.resource.s3 }
           - { extra: ssh, module: mirage.resource.ssh }
           - { extra: mongodb, module: mirage.resource.mongodb }
+          - { extra: gridfs, module: mirage.resource.gridfs }
           - { extra: postgres, module: mirage.resource.postgres }
           - { extra: redis, module: mirage.resource.redis }
           - { extra: email, module: mirage.resource.email }

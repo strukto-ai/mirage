@@ -178,6 +178,6 @@ Those HTTP drivers still need a browser-reachable endpoint with the correct CORS
 | Python `open()` writes back through mount | Browser | ✅ with JSPI (Chrome 137+); ❌ otherwise |
 | Postgres through `NeonPgDriver` | Browser | ✅ over HTTP; endpoint must allow the browser origin |
 | MongoDB through `HttpMongoDriver` | Browser | ✅ through an HTTP proxy; direct MongoDB sockets are unavailable |
-| Node-only resources (SSH, LanceDB, Email, Disk, Redis, Hugging Face, FUSE) | Browser | ❌ Node APIs or raw TCP required |
+| Node-only resources (SSH, LanceDB, Email, Disk, Redis, Hugging Face, GridFS, FUSE) | Browser | ❌ Node APIs or raw TCP required |
 
 The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or large API-backed FUSE reads, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.
