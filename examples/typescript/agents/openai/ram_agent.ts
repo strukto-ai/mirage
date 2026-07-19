@@ -17,7 +17,12 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
 import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
-import { MirageEditor, MirageShell, buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import {
+  MirageEditor,
+  MirageShell,
+  buildSystemPrompt,
+  mirageReadFileTool,
+} from '@struktoai/mirage-agents/openai'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
@@ -33,6 +38,7 @@ const instructions = buildSystemPrompt({
   extraInstructions:
     'All file paths start from /. ' +
     'For example: /hello.txt, /data/numbers.csv. ' +
+    'Use read_file to read text, images, and PDFs. ' +
     'Use the shell tool to run commands like: ' +
     "echo 'content' > /hello.txt, mkdir /data, " +
     'cat /hello.txt, ls /.',
@@ -43,6 +49,7 @@ const agent = new Agent({
   model: 'gpt-5.5-mini',
   instructions,
   tools: [
+    mirageReadFileTool(ws),
     shellTool({ shell: new MirageShell(ws) }),
     applyPatchTool({ editor: new MirageEditor(ws) }),
   ],
@@ -52,7 +59,7 @@ const task =
   "Create a file /hello.txt with the content 'Hello from Mirage!'. " +
   'Then create a directory /data and write a CSV file /data/numbers.csv ' +
   'with columns: name, value. Add 3 rows of sample data. ' +
-  'Finally, list all files and cat the CSV.'
+  'Finally, list all files and read the CSV with read_file.'
 
 const result = await run(agent, task)
 console.log(result.finalOutput)

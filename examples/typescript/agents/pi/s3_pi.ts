@@ -22,14 +22,14 @@ import {
   Workspace,
   type S3Config,
 } from '@struktoai/mirage-node'
-import { getModel } from '@mariozechner/pi-ai'
 import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
-} from '@mariozechner/pi-coding-agent'
+} from '@earendil-works/pi-coding-agent'
 import { buildSystemPrompt, mirageExtension } from '@struktoai/mirage-agents/pi'
 
 loadEnv({
@@ -73,8 +73,9 @@ const resourceLoader = new DefaultResourceLoader({
 })
 await resourceLoader.reload()
 
+const modelRuntime = await ModelRuntime.create()
 const { session } = await createAgentSession({
-  model: getModel('anthropic', 'claude-sonnet-4-6'),
+  modelRuntime,
   resourceLoader,
   sessionManager: SessionManager.inMemory(),
 })

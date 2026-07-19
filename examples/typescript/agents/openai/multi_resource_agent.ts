@@ -30,6 +30,7 @@ import {
   MirageEditor,
   MirageShell,
   buildSystemPrompt,
+  mirageReadFileTool,
 } from '@struktoai/mirage-agents/openai'
 
 loadEnv({
@@ -80,6 +81,7 @@ const agent = new Agent({
   model: 'gpt-5.5',
   instructions: buildSystemPrompt({ workspace: ws }),
   tools: [
+    mirageReadFileTool(ws),
     shellTool({ shell: new MirageShell(ws) }),
     applyPatchTool({ editor: new MirageEditor(ws) }),
   ],

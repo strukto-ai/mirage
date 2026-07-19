@@ -15,9 +15,20 @@
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import {
+  MountMode,
+  OpsRegistry,
+  RAMResource,
+  Workspace,
+  toStateDict,
+} from '@struktoai/mirage-node'
 import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
-import { MirageEditor, MirageShell, buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import {
+  MirageEditor,
+  MirageShell,
+  buildSystemPrompt,
+  mirageReadFileTool,
+} from '@struktoai/mirage-agents/openai'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
@@ -41,6 +52,7 @@ const agent = new Agent({
       'Write a 3-line note about Mirage to /report.txt using the shell tool.',
   }),
   tools: [
+    mirageReadFileTool(ws),
     shellTool({ shell: new MirageShell(ws) }),
     applyPatchTool({ editor: new MirageEditor(ws) }),
   ],
@@ -56,7 +68,7 @@ console.log('\n--- Original files ---')
 console.log(origFiles.join('\n'))
 
 console.log('\n--- Persisting snapshot ---')
-const state = await ws.toStateDict()
+const state = await toStateDict(ws)
 console.log(`snapshot mounts: ${state.mounts.length}`)
 
 console.log('\n--- Restoring into fresh workspace ---')

@@ -125,7 +125,7 @@ qdrant   = ["qdrant-client[fastembed]>=1.18.0"]
 anthropic   = ["anthropic>=0.88"]
 
 # --- openai ---
-openai      = ["openai>=2.30.0", "openai-agents>=0.14.7"]
+openai      = ["openai>=2.46.0", "openai-agents>=0.18.3"]
 
 # --- pydantic-ai ---
 pydantic-ai = [

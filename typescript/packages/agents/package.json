@@ -81,10 +81,9 @@
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.0",
-    "@mariozechner/pi-ai": "^0.70.0",
-    "@mariozechner/pi-coding-agent": "^0.70.0",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
     "@mastra/core": "^1.29.0",
-    "@openai/agents": "^0.8.0",
+    "@openai/agents": "^0.13.5",
     "ai": "^6.0.0",
     "deepagents": "^1.9.0",
     "zod": "^4.0.0"
@@ -93,10 +92,7 @@
     "@anthropic-ai/claude-agent-sdk": {
       "optional": true
     },
-    "@mariozechner/pi-ai": {
-      "optional": true
-    },
-    "@mariozechner/pi-coding-agent": {
+    "@earendil-works/pi-coding-agent": {
       "optional": true
     },
     "@mastra/core": {
@@ -117,9 +113,9 @@
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.178",
-    "@mariozechner/pi-coding-agent": "^0.70.2",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
     "@mastra/core": "^1.29.1",
-    "@openai/agents": "^0.8.0",
+    "@openai/agents": "^0.13.5",
     "@struktoai/mirage-node": "workspace:*",
     "@types/picomatch": "^4.0.3",
     "ai": "^6.0.170",
