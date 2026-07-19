@@ -35,7 +35,7 @@ SPEC = CommandSpec(
 )
 
 
-@command("gws-gmail-reply", resource="gmail", spec=SPEC, write=True)
+@command("gws gmail +reply", resource="gmail", spec=SPEC, write=True)
 async def gws_gmail_reply(
     accessor: GmailAccessor,
     paths: list[PathSpec],

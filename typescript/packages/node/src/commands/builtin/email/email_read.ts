@@ -56,7 +56,7 @@ async function emailReadCommand(
 }
 
 export const EMAIL_READ = command({
-  name: 'email-read',
+  name: 'email read',
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailReadCommand,

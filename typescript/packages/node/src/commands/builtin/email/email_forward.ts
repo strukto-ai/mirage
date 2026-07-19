@@ -63,7 +63,7 @@ async function emailForwardCommand(
 }
 
 export const EMAIL_FORWARD = command({
-  name: 'email-forward',
+  name: 'email forward',
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailForwardCommand,

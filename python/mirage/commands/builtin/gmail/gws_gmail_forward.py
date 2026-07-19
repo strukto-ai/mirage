@@ -35,7 +35,7 @@ SPEC = CommandSpec(
 )
 
 
-@command("gws-gmail-forward", resource="gmail", spec=SPEC, write=True)
+@command("gws gmail +forward", resource="gmail", spec=SPEC, write=True)
 async def gws_gmail_forward(
     accessor: GmailAccessor,
     paths: list[PathSpec],

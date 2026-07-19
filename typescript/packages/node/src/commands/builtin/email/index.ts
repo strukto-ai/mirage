@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
+import {
+  type RegisteredCommand,
+  ResourceName,
+  makeGenericCommands,
+  withAliases,
+} from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { EMAIL_FIND } from './find.ts'
 import { EMAIL_FORWARD } from './email_forward.ts'
@@ -20,7 +25,6 @@ import { EMAIL_GREP } from './grep.ts'
 import { EMAIL_IO } from './io.ts'
 import { EMAIL_READ } from './email_read.ts'
 import { EMAIL_REPLY } from './email_reply.ts'
-import { EMAIL_REPLY_ALL } from './email_reply_all.ts'
 import { EMAIL_RG } from './rg.ts'
 import { EMAIL_SEND } from './email_send.ts'
 import { EMAIL_TRIAGE } from './email_triage.ts'
@@ -36,8 +40,14 @@ export const EMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...EMAIL_RG,
   ...EMAIL_SEND,
   ...EMAIL_REPLY,
-  ...EMAIL_REPLY_ALL,
   ...EMAIL_FORWARD,
   ...EMAIL_TRIAGE,
   ...EMAIL_READ,
+  // himalaya aliases dispatch to the same handlers as the canonical
+  // `email <verb>` commands above.
+  ...withAliases(EMAIL_SEND, 'himalaya message send'),
+  ...withAliases(EMAIL_REPLY, 'himalaya message reply'),
+  ...withAliases(EMAIL_FORWARD, 'himalaya message forward'),
+  ...withAliases(EMAIL_TRIAGE, 'himalaya envelope list'),
+  ...withAliases(EMAIL_READ, 'himalaya message read'),
 ]

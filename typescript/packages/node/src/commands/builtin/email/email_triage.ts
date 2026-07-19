@@ -76,7 +76,7 @@ async function emailTriageCommand(
 }
 
 export const EMAIL_TRIAGE = command({
-  name: 'email-triage',
+  name: 'email list',
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailTriageCommand,

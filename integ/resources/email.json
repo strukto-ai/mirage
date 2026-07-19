@@ -254,7 +254,7 @@
    "targets": [
     "email"
    ],
-   "command": "email-triage --unseen | jq -r '.[].subject'",
+   "command": "email list --unseen | jq -r '.[].subject'",
    "expect": {
     "exit": 0,
     "stdout": "Q2 Budget Review\nServer alert: worker-3\n",
@@ -267,7 +267,7 @@
    "targets": [
     "email"
    ],
-   "command": "email-triage --from billing@vendor.example --folder Archive | jq -r '.[].uid'",
+   "command": "email list --from billing@vendor.example --folder Archive | jq -r '.[].uid'",
    "expect": {
     "exit": 0,
     "stdout": "1\n",
@@ -280,7 +280,7 @@
    "targets": [
     "email"
    ],
-   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && email-read --folder Archive --uid $U | jq -r .snippet",
+   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && email read --folder Archive --uid $U | jq -r .snippet",
    "expect": {
     "exit": 0,
     "stdout": "invoice 4471 attached, total 240 usd\n",
@@ -293,7 +293,7 @@
    "targets": [
     "email"
    ],
-   "command": "email-send --to integ@example.com --subject 'Ship update' --body 'departing tuesday'",
+   "command": "email send --to integ@example.com --subject 'Ship update' --body 'departing tuesday'",
    "expect": {
     "exit": 0,
     "stdout": "{\"status\":\"sent\",\"to\":\"integ@example.com\",\"subject\":\"Ship update\"}",
@@ -321,7 +321,7 @@
     "email"
    ],
    "clear_cache": true,
-   "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && email-reply --folder INBOX --uid $U --body 'numbers look good' | jq -r .subject",
+   "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && email reply --folder INBOX --uid $U --body 'numbers look good' | jq -r .subject",
    "expect": {
     "exit": 0,
     "stdout": "Re: Q2 Budget Review\n",
@@ -335,7 +335,7 @@
     "email"
    ],
    "clear_cache": true,
-   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && email-forward --folder Archive --uid $U --to integ@example.com | jq -r .status",
+   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && email forward --folder Archive --uid $U --to integ@example.com | jq -r .status",
    "expect": {
     "exit": 0,
     "stdout": "sent\n",
@@ -574,6 +574,71 @@
    "expect": {
     "exit": 0,
     "stdout": "Q2 Budget Review\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_alias_himalaya_list",
+   "seq": 540300,
+   "targets": [
+    "email"
+   ],
+   "command": "himalaya envelope list --from billing@vendor.example --folder Archive | jq -r '.[].uid'",
+   "expect": {
+    "exit": 0,
+    "stdout": "1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_alias_himalaya_read",
+   "seq": 540301,
+   "targets": [
+    "email"
+   ],
+   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message read --folder Archive --uid $U | jq -r .snippet",
+   "expect": {
+    "exit": 0,
+    "stdout": "invoice 4471 attached, total 240 usd\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_alias_himalaya_send",
+   "seq": 540302,
+   "targets": [
+    "email"
+   ],
+   "command": "himalaya message send --to integ@example.com --subject 'Alias ping' --body 'sent via himalaya alias'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"status\":\"sent\",\"to\":\"integ@example.com\",\"subject\":\"Alias ping\"}",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_alias_himalaya_reply",
+   "seq": 540303,
+   "targets": [
+    "email"
+   ],
+   "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && himalaya message reply --folder INBOX --uid $U --body 'alias reply body' | jq -r .subject",
+   "expect": {
+    "exit": 0,
+    "stdout": "Re: Q2 Budget Review\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "em_alias_himalaya_forward",
+   "seq": 540304,
+   "targets": [
+    "email"
+   ],
+   "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message forward --folder Archive --uid $U --to integ@example.com | jq -r .status",
+   "expect": {
+    "exit": 0,
+    "stdout": "sent\n",
     "stderr": ""
    }
   }

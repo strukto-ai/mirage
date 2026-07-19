@@ -18,9 +18,13 @@ export const EMAIL_PROMPT = `{prefix}
       <subject>__<uid>.email.json
       <subject>__<uid>/           # if attachments exist
         <attachment-filename>
-  Folders include: INBOX, Sent, Drafts, etc. cat shows email as JSON.`
+  Folders include: INBOX, Sent, Drafts, etc. cat shows email as JSON.
+
+  Read commands:
+    email list --folder INBOX --unseen        # id/from/subject/date
+    email read --folder INBOX --uid <uid>     # one message as JSON`
 
 export const EMAIL_WRITE_PROMPT = `  Write commands:
-    email-send "to@email.com" "subject" "body"
-    email-reply <email-path> "reply body"
-    email-forward <email-path> "to@email.com"`
+    email send --to "to@email.com" --subject "Hi" --body "..."
+    email reply --folder INBOX --uid <uid> --body "..." [--all]
+    email forward --folder INBOX --uid <uid> --to "to@email.com"`

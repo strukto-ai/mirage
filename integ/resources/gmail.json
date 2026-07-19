@@ -241,7 +241,7 @@
    "targets": [
     "gmail"
    ],
-   "command": "gws-gmail-triage --query is:unread | jq -r '.[].subject'",
+   "command": "gws gmail +triage --query is:unread | jq -r '.[].subject'",
    "expect": {
     "exit": 0,
     "stdout": "Server alert: worker-3\nQ2 Budget Review\n",
@@ -254,7 +254,7 @@
    "targets": [
     "gmail"
    ],
-   "command": "gws-gmail-triage --query from:billing | jq -r '.[].id'",
+   "command": "gws gmail +triage --query from:billing | jq -r '.[].id'",
    "expect": {
     "exit": 0,
     "stdout": "msg0005\n",
@@ -267,7 +267,7 @@
    "targets": [
     "gmail"
    ],
-   "command": "M=$(cat /mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json | jq -r .id) && gws-gmail-read --id $M | jq -r .snippet",
+   "command": "M=$(cat /mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json | jq -r .id) && gws gmail +read --id $M | jq -r .snippet",
    "expect": {
     "exit": 0,
     "stdout": "invoice 4471 attached, total 240 usd\n",
@@ -280,7 +280,7 @@
    "targets": [
     "gmail"
    ],
-   "command": "gws-gmail-send --to lila@example.com --subject 'Ship update' --body 'departing tuesday'",
+   "command": "gws gmail +send --to lila@example.com --subject 'Ship update' --body 'departing tuesday'",
    "expect": {
     "exit": 0,
     "stdout": "{\"id\":\"msg0006\",\"threadId\":\"msg0006\",\"labelIds\":[\"SENT\"]}",
@@ -308,7 +308,7 @@
     "gmail"
    ],
    "clear_cache": true,
-   "command": "M=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json | jq -r .id) && gws-gmail-reply --message-id $M --body 'numbers look good' | jq -r .threadId",
+   "command": "M=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json | jq -r .id) && gws gmail +reply --message-id $M --body 'numbers look good' | jq -r .threadId",
    "expect": {
     "exit": 0,
     "stdout": "msg0001\n",
@@ -322,7 +322,7 @@
     "gmail"
    ],
    "clear_cache": true,
-   "command": "M=$(cat /mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json | jq -r .id) && gws-gmail-forward --message-id $M --to marcus@example.com | jq -r '.labelIds[0]'",
+   "command": "M=$(cat /mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json | jq -r .id) && gws gmail +forward --message-id $M --to marcus@example.com | jq -r '.labelIds[0]'",
    "expect": {
     "exit": 0,
     "stdout": "SENT\n",
@@ -336,10 +336,10 @@
     "gmail"
    ],
    "clear_cache": true,
-   "command": "M=$(cat /mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json | jq -r .id) && gws-gmail-delete --id $M",
+   "command": "M=$(cat /mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json | jq -r .id) && gws gmail users messages trash --params \"{\\\"userId\\\": \\\"me\\\", \\\"id\\\": \\\"$M\\\"}\" | jq -r '.labelIds[-1]'",
    "expect": {
     "exit": 0,
-    "stdout": "",
+    "stdout": "TRASH\n",
     "stderr": ""
    }
   },
@@ -368,6 +368,19 @@
    "expect": {
     "exit": 0,
     "stdout": "2026-01-07\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "gm_raw_labels_list",
+   "seq": 530028,
+   "targets": [
+    "gmail"
+   ],
+   "command": "gws gmail users labels list --params '{\"userId\": \"me\"}' | jq -c '[.labels[].id] | contains([\"INBOX\", \"SENT\", \"TRASH\"])'",
+   "expect": {
+    "exit": 0,
+    "stdout": "true\n",
     "stderr": ""
    }
   },

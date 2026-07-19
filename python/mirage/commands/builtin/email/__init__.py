@@ -15,7 +15,6 @@
 from mirage.commands.builtin.email.email_forward import email_forward
 from mirage.commands.builtin.email.email_read import email_read
 from mirage.commands.builtin.email.email_reply import email_reply
-from mirage.commands.builtin.email.email_reply_all import email_reply_all
 from mirage.commands.builtin.email.email_send import email_send
 from mirage.commands.builtin.email.email_triage import email_triage
 from mirage.commands.builtin.email.find import find
@@ -24,9 +23,18 @@ from mirage.commands.builtin.email.io import IO as _IO
 from mirage.commands.builtin.email.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.registry import add_aliases
 from mirage.core.email.read import read as _read
 
 _EMAIL_OVERRIDES = {"find", "grep", "rg"}
+
+# The `email <verb>` names are canonical. himalaya aliases dispatch to the
+# same handlers so agents familiar with the himalaya CLI also work.
+add_aliases(email_send, "himalaya message send")
+add_aliases(email_reply, "himalaya message reply")
+add_aliases(email_forward, "himalaya message forward")
+add_aliases(email_triage, "himalaya envelope list")
+add_aliases(email_read, "himalaya message read")
 
 COMMANDS = [
     *make_filetype_commands(
@@ -41,7 +49,6 @@ COMMANDS = [
     rg,
     email_send,
     email_reply,
-    email_reply_all,
     email_forward,
     email_triage,
     email_read,

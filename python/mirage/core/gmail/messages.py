@@ -15,8 +15,7 @@
 import base64
 from typing import Any
 
-from mirage.core.google._client import (TokenManager, gmail_base, google_get,
-                                        google_post)
+from mirage.core.google._client import TokenManager, gmail_base, google_get
 
 
 async def list_messages(
@@ -44,20 +43,6 @@ async def list_messages(
     url = f"{gmail_base(token_manager)}/users/me/messages"
     data = await google_get(token_manager, url, params=params)
     return data.get("messages", [])
-
-
-async def trash_message(
-    token_manager: TokenManager,
-    message_id: str,
-) -> None:
-    """Move a Gmail message to Trash.
-
-    Args:
-        token_manager (TokenManager): manages OAuth2 tokens.
-        message_id (str): Gmail message ID.
-    """
-    url = f"{gmail_base(token_manager)}/users/me/messages/{message_id}/trash"
-    await google_post(token_manager, url, json={})
 
 
 async def get_message_raw(

@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.config import RegisteredCommand, command, cross_command
+from mirage.commands.config import (RegisteredCommand, add_aliases, command,
+                                    cross_command)
 from mirage.commands.spec import CommandSpec, Operand, OperandKind
 
 
@@ -113,6 +114,38 @@ class TestCommandDecoratorWrite:
 
         rc = my_cat._registered_commands[0]
         assert rc.write is False
+
+
+class TestAddAliases:
+
+    def test_alias_registers_extra_name_same_handler(self):
+        spec = CommandSpec()
+
+        @command("email send", resource="email", spec=spec, write=True)
+        async def my_send(backend, paths, *texts, **kw):
+            pass
+
+        add_aliases(my_send, "himalaya message send")
+        names = {rc.name for rc in my_send._registered_commands}
+        assert names == {"email send", "himalaya message send"}
+        alias = next(rc for rc in my_send._registered_commands
+                     if rc.name == "himalaya message send")
+        canonical = next(rc for rc in my_send._registered_commands
+                         if rc.name == "email send")
+        assert alias.fn is canonical.fn
+        assert alias.resource == "email"
+        assert alias.write is True
+
+    def test_multiple_aliases(self):
+        spec = CommandSpec()
+
+        @command("email list", resource="email", spec=spec)
+        async def my_list(backend, paths, *texts, **kw):
+            pass
+
+        add_aliases(my_list, "himalaya envelope list", "mail ls")
+        names = {rc.name for rc in my_list._registered_commands}
+        assert names == {"email list", "himalaya envelope list", "mail ls"}
 
 
 class TestCrossCommandDecorator:

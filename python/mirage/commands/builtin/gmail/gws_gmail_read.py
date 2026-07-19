@@ -31,7 +31,7 @@ SPEC = CommandSpec(
 )
 
 
-@command("gws-gmail-read", resource="gmail", spec=SPEC)
+@command("gws gmail +read", resource="gmail", spec=SPEC)
 async def gws_gmail_read(
     accessor: GmailAccessor,
     paths: list[PathSpec],
