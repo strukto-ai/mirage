@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "cmp_same",
-      "seq": 318,
+      "id": "seq_s_sep",
+      "seq": 601220,
       "targets": [
         "ram",
         "disk",
@@ -24,16 +24,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cmp /data/a.txt /data/a.txt",
+      "command": "seq -s , 1 5",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "1,2,3,4,5\n",
         "stderr": ""
       }
     },
     {
-      "id": "cmp_differ",
-      "seq": 319,
+      "id": "seq_w_width",
+      "seq": 601221,
       "targets": [
         "ram",
         "disk",
@@ -55,16 +55,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cmp /data/a.txt /data/b.txt",
+      "command": "seq -w 8 10",
       "expect": {
-        "exit": 1,
-        "stdout": "/data/a.txt /data/b.txt differ: char 1, line 1\n",
+        "exit": 0,
+        "stdout": "08\n09\n10\n",
         "stderr": ""
       }
     },
     {
-      "id": "cmp_l_list",
-      "seq": 601130,
+      "id": "seq_w_negwidth",
+      "seq": 601222,
       "targets": [
         "ram",
         "disk",
@@ -86,41 +86,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/qcmp && printf 'abc' > /data/qcmp/l1 && printf 'aXc' > /data/qcmp/l2 && cmp -l /data/qcmp/l1 /data/qcmp/l2; echo rc=$?",
+      "command": "seq -w -2 2",
       "expect": {
         "exit": 0,
-        "stdout": "2 142 130\nrc=1\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "cmp_s_silent",
-      "seq": 601131,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "gridfs",
-        "s3-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "mkdir -p /data/qcmp && printf 'abc' > /data/qcmp/s1 && printf 'abc' > /data/qcmp/s2 && cmp -s /data/qcmp/s1 /data/qcmp/s2 && echo same",
-      "expect": {
-        "exit": 0,
-        "stdout": "same\n",
+        "stdout": "-2\n-1\n00\n01\n02\n",
         "stderr": ""
       }
     }

@@ -58,3 +58,20 @@ def test_mktemp_with_dir():
     path = _bytes(stdout).strip().decode()
     assert path.startswith("/tmp/")
     assert io.exit_code == 0
+
+
+def test_mktemp_explicit_path_template():
+    ws, _ = _ws()
+    stdout, io = _run_raw(ws, "mkdir -p /data/mt && mktemp /data/mt/f.XXXX")
+    path = _bytes(stdout).strip().decode()
+    assert path.startswith("/data/mt/f.")
+    assert io.exit_code == 0
+
+
+def test_mktemp_d_explicit_path_template():
+    ws, _ = _ws()
+    stdout, io = _run_raw(ws,
+                          "mkdir -p /data/mtd && mktemp -d /data/mtd/t.XXXX")
+    path = _bytes(stdout).strip().decode()
+    assert path.startswith("/data/mtd/t.")
+    assert io.exit_code == 0

@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "cut_f1",
-      "seq": 40,
+      "id": "rm_v_file",
+      "seq": 601030,
       "targets": [
         "ram",
         "disk",
@@ -12,8 +12,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -24,16 +22,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cut -f 1 -d , /data/csv.csv",
+      "command": "mkdir -p /data/prm1 && printf 'x' > /data/prm1/f.txt && rm -v /data/prm1/f.txt",
       "expect": {
         "exit": 0,
-        "stdout": "name\nalice\nbob\n",
+        "stdout": "removed '/data/prm1/f.txt'\n",
         "stderr": ""
       }
     },
     {
-      "id": "cut_f2",
-      "seq": 41,
+      "id": "rm_dv_empty",
+      "seq": 601031,
       "targets": [
         "ram",
         "disk",
@@ -43,8 +41,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -55,16 +51,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cut -f 2 -d , /data/csv.csv",
+      "command": "mkdir -p /data/prm2/ev && rm -dv /data/prm2/ev",
       "expect": {
         "exit": 0,
-        "stdout": "age\n30\n25\n",
+        "stdout": "removed directory '/data/prm2/ev'\n",
         "stderr": ""
       }
     },
     {
-      "id": "cut_c2_4",
-      "seq": 42,
+      "id": "rm_d_nonempty_err",
+      "seq": 601032,
       "targets": [
         "ram",
         "disk",
@@ -74,8 +70,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -86,16 +80,45 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cut -c 2-4 /data/a.txt",
+      "command": "mkdir -p /data/prm3/ne/x && printf 'y' > /data/prm3/ne/f.txt && rm -d /data/prm3/ne",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rm: cannot remove '/data/prm3/ne': Directory not empty\n"
+      }
+    },
+    {
+      "id": "rm_rv_chain",
+      "seq": 601033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prm4/lin/sub && printf 'z' > /data/prm4/lin/sub/z.txt && rm -rv /data/prm4/lin",
       "expect": {
         "exit": 0,
-        "stdout": "ell\norl\noo\nar\naz\n",
+        "stdout": "removed '/data/prm4/lin/sub/z.txt'\nremoved directory '/data/prm4/lin/sub'\nremoved directory '/data/prm4/lin'\n",
         "stderr": ""
       }
     },
     {
-      "id": "cut_tab",
-      "seq": 43,
+      "id": "rm_r_effect",
+      "seq": 601034,
       "targets": [
         "ram",
         "disk",
@@ -105,8 +128,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -117,16 +138,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cut -f 1 /data/tabbed.txt",
+      "command": "mkdir -p /data/prm5/re/s && printf 'a' > /data/prm5/re/s/a.txt && rm -r /data/prm5/re; test -d /data/prm5/re && echo present || echo gone",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\nc\n",
+        "stdout": "gone\n",
         "stderr": ""
       }
     },
     {
-      "id": "cut_c1",
-      "seq": 238,
+      "id": "rm_rf_missing",
+      "seq": 601035,
       "targets": [
         "ram",
         "disk",
@@ -136,8 +157,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -148,16 +167,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cut -c 1 /data/a.txt",
+      "command": "rm -rf /data/prm6/nope; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "h\nw\nf\nb\nb\n",
+        "stdout": "rc=0\n",
         "stderr": ""
       }
     },
     {
-      "id": "cut_c_range_open",
-      "seq": 239,
+      "id": "rm_f_missing",
+      "seq": 601036,
       "targets": [
         "ram",
         "disk",
@@ -167,8 +186,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -179,103 +196,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cut -c 3- /data/a.txt",
+      "command": "rm -f /data/prm7_nope.txt; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "llo\nrld\no\nr\nz\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "cut_d_space",
-      "seq": 240,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "gridfs",
-        "s3-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "cut -d ' ' -f 2 /data/fields.txt",
-      "expect": {
-        "exit": 0,
-        "stdout": "30\n25\n40\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "cut_f1_3",
-      "seq": 241,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "gridfs",
-        "s3-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "cut -d , -f 1,2 /data/csv.csv",
-      "expect": {
-        "exit": 0,
-        "stdout": "name,age\nalice,30\nbob,25\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "cut_complement",
-      "seq": 601170,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "gridfs",
-        "s3-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "mkdir -p /data/qcut && printf 'a,b,c,d\\n' > /data/qcut/c.txt && cut --complement -d, -f2,3 /data/qcut/c.txt",
-      "expect": {
-        "exit": 0,
-        "stdout": "a,d\n",
+        "stdout": "rc=0\n",
         "stderr": ""
       }
     }

@@ -249,7 +249,7 @@ export { sha256sumGeneric } from './commands/builtin/generic/sha256sum.ts'
 export { jqGeneric } from './commands/builtin/generic/jq.ts'
 export { grepGeneric } from './commands/builtin/generic/grep.ts'
 export { rgGeneric } from './commands/builtin/generic/rg.ts'
-export { cpGeneric } from './commands/builtin/generic/cp.ts'
+export { cpGeneric, cpWalk } from './commands/builtin/generic/cp.ts'
 export { mvGeneric } from './commands/builtin/generic/mv.ts'
 export { awkGeneric } from './commands/builtin/generic/awk.ts'
 export { catGeneric } from './commands/builtin/generic/cat.ts'
@@ -319,6 +319,7 @@ export {
   formatRecordText,
   formatRecords,
 } from './commands/builtin/utils/output.ts'
+export { removalLines } from './commands/builtin/utils/verbose.ts'
 export { grepFilesOnly, grepRecursive } from './commands/builtin/grep_helper.ts'
 export { interpretEscapes } from './commands/builtin/utils/escapes.ts'
 export {

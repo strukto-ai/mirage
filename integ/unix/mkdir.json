@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "expand",
-      "seq": 76,
+      "id": "mkdir_v",
+      "seq": 601060,
       "targets": [
         "ram",
         "disk",
@@ -12,8 +12,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -24,16 +22,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cat /data/tabbed.txt | expand",
+      "command": "mkdir -p /data/pmkd1 && mkdir -v /data/pmkd1/single",
       "expect": {
         "exit": 0,
-        "stdout": "a       1\nb       2\nc       3\n",
+        "stdout": "mkdir: created directory '/data/pmkd1/single'\n",
         "stderr": ""
       }
     },
     {
-      "id": "expand_t4",
-      "seq": 339,
+      "id": "mkdir_p_nested",
+      "seq": 601061,
       "targets": [
         "ram",
         "disk",
@@ -43,8 +41,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -55,16 +51,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "expand -t 4 /data/tabbed.txt",
+      "command": "mkdir -p /data/pmkd2/a/b/c && test -d /data/pmkd2/a/b/c && echo ok",
       "expect": {
         "exit": 0,
-        "stdout": "a   1\nb   2\nc   3\n",
+        "stdout": "ok\n",
         "stderr": ""
       }
     },
     {
-      "id": "expand_i_spacetab",
-      "seq": 347,
+      "id": "mkdir_p_existing",
+      "seq": 601062,
       "targets": [
         "ram",
         "disk",
@@ -74,8 +70,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -86,41 +80,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo expandisp=$(printf ' \\tX\\n' | expand -i | wc -c)",
+      "command": "mkdir -p /data/pmkd3/e && mkdir -p /data/pmkd3/e && echo ok",
       "expect": {
         "exit": 0,
-        "stdout": "expandisp=10\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "expand_t_tabs",
-      "seq": 601250,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "gridfs",
-        "s3-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "mkdir -p /data/qex && printf 'a\\tb\\n' > /data/qex/ex.txt && expand -t 4 /data/qex/ex.txt | cat -A",
-      "expect": {
-        "exit": 0,
-        "stdout": "a   b$\n",
+        "stdout": "ok\n",
         "stderr": ""
       }
     }

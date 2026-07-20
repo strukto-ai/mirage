@@ -394,6 +394,37 @@
         "stdout": "",
         "stderr": "uniq: invalid count: '2junk'"
       }
+    },
+    {
+      "id": "uniq_i_icase",
+      "seq": 601150,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/quniq && printf 'A\\na\\nB\\nb\\nC\\n' > /data/quniq/u.txt && uniq -i /data/quniq/u.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "A\nB\nC\n",
+        "stderr": ""
+      }
     }
   ]
 }

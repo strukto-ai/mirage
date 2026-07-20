@@ -61,6 +61,68 @@
         "stdout": "/data/sub/nested.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ln_sv",
+      "seq": 601020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pln1 && printf 'y' > /data/pln1/t.txt && ln -sv /data/pln1/t.txt /data/pln1/lk",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/pln1/lk' -> '/data/pln1/t.txt'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_sf_replace",
+      "seq": 601021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pln2 && printf 'y' > /data/pln2/t.txt && ln -s /data/pln2/t.txt /data/pln2/lk && ln -sf /data/pln2/t.txt /data/pln2/lk && readlink /data/pln2/lk",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/pln2/t.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

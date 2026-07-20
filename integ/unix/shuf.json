@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "zip_create",
-      "seq": 598,
+      "id": "shuf_single",
+      "seq": 601350,
       "targets": [
         "ram",
         "disk",
@@ -24,16 +24,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zip /data/sub/arch.zip /data/sub/nested.txt",
+      "command": "printf 'solo\\n' | shuf",
       "expect": {
         "exit": 0,
-        "stdout": "  adding: data/sub/nested.txt\n",
+        "stdout": "solo\n",
         "stderr": ""
       }
     },
     {
-      "id": "zip_j_junk",
-      "seq": 601320,
+      "id": "shuf_sorted_roundtrip",
+      "seq": 601351,
       "targets": [
         "ram",
         "disk",
@@ -55,10 +55,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/pzip && printf hi > /data/pzip/u.txt && zip -q -j /data/pzip/uz.zip /data/pzip/u.txt && unzip -l /data/pzip/uz.zip | grep -c 'u.txt'",
+      "command": "printf 'a\\nb\\nc\\n' | shuf | sort | tr -d '\\n'",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "abc",
         "stderr": ""
       }
     }

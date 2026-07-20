@@ -47,9 +47,22 @@ export async function mktempGeneric(
 ): Promise<CommandFnResult> {
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
   const tFlag = opts.flags.t === true
-  const parent = tFlag ? '/tmp' : typeof opts.flags.p === 'string' ? opts.flags.p : '/tmp'
   const templateArg = texts[0]
-  const template = templateArg !== undefined && templateArg !== '' ? templateArg : 'tmp.XXXXXXXXXX'
+  let template = templateArg !== undefined && templateArg !== '' ? templateArg : 'tmp.XXXXXXXXXX'
+  let parent: string
+  if (tFlag) {
+    parent = '/tmp'
+  } else if (typeof opts.flags.p === 'string') {
+    parent = opts.flags.p
+  } else if (template.includes('/')) {
+    // An explicit path template names its own directory (GNU); only a bare
+    // template with no -p/-t falls back to the temp dir.
+    const idx = template.lastIndexOf('/')
+    parent = template.slice(0, idx) || '/'
+    template = template.slice(idx + 1)
+  } else {
+    parent = '/tmp'
+  }
   let xCount = 0
   while (xCount < template.length && template.charCodeAt(template.length - 1 - xCount) === 88) {
     xCount += 1

@@ -467,7 +467,6 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       }),
       new Option({
         short: '-w',
-        valueKind: OperandKind.TEXT,
         description: 'Pad numbers with zeros to equal width.',
       }),
       new Option({

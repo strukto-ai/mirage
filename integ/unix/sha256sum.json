@@ -92,6 +92,37 @@
         "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sha256sum_c_check",
+      "seq": 601230,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qsha && printf 'hello' > /data/qsha/sh.txt && sha256sum /data/qsha/sh.txt > /data/qsha/sums && sha256sum -c /data/qsha/sums",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/qsha/sh.txt: OK\n",
+        "stderr": ""
+      }
     }
   ]
 }

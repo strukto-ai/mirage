@@ -86,6 +86,93 @@
         "stdout": "1\n2\n3\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mv_v_single",
+      "seq": 601010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmv1 && printf '1' > /data/pmv1/s.txt && mv -v /data/pmv1/s.txt /data/pmv1/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "renamed '/data/pmv1/s.txt' -> '/data/pmv1/d.txt'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mv_f_over",
+      "seq": 601011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmv2 && printf '1' > /data/pmv2/s.txt && printf '2' > /data/pmv2/d.txt && mv -f /data/pmv2/s.txt /data/pmv2/d.txt && cat /data/pmv2/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mv_n_noclobber",
+      "seq": 601012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmv3 && printf '1' > /data/pmv3/s.txt && printf '2' > /data/pmv3/d.txt && mv -n /data/pmv3/s.txt /data/pmv3/d.txt && cat /data/pmv3/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2",
+        "stderr": ""
+      }
     }
   ]
 }

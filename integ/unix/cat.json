@@ -464,6 +464,130 @@
         "stdout": "a^I1$\nb^I2$\nc^I3$\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cat_s_squeeze",
+      "seq": 601100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcat && printf 'a\\n\\n\\n\\nb\\n' > /data/qcat/sq.txt && cat -s /data/qcat/sq.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cat_e_blank",
+      "seq": 601101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcat && printf 'a\\n\\nb\\n' > /data/qcat/e.txt && cat -e /data/qcat/e.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a$\n$\nb$\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cat_t_tab",
+      "seq": 601102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcat && printf 'x\\ty\\n' > /data/qcat/t.txt && cat -t /data/qcat/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "x^Iy\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cat_v_ctrl",
+      "seq": 601103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcat && printf 'a\\001b\\n' > /data/qcat/v.txt && cat -v /data/qcat/v.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a^Ab\n",
+        "stderr": ""
+      }
     }
   ]
 }

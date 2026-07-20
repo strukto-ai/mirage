@@ -30,6 +30,37 @@
         "stdout": "/data/a.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "realpath_m_missing_ok",
+      "seq": 601240,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qrp && printf 'x' > /data/qrp/sh.txt && realpath -m /data/qrp/no/../sh.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/qrp/sh.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

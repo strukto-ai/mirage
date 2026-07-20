@@ -553,6 +553,68 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "sort_h_human",
+      "seq": 601110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qsort && printf '2K\\n1M\\n3K\\n512\\n' > /data/qsort/h.txt && sort -h /data/qsort/h.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "512\n2K\n3K\n1M\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_V_version",
+      "seq": 601111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qsort && printf 'v1.10\\nv1.9\\nv1.2\\n' > /data/qsort/vs.txt && sort -V /data/qsort/vs.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1.2\nv1.9\nv1.10\n",
+        "stderr": ""
+      }
     }
   ]
 }

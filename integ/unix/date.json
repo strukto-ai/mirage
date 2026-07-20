@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "zip_create",
-      "seq": 598,
+      "id": "date_d_iso",
+      "seq": 601270,
       "targets": [
         "ram",
         "disk",
@@ -24,16 +24,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zip /data/sub/arch.zip /data/sub/nested.txt",
+      "command": "date -u -d '2021-06-15T12:00:00Z' -I",
       "expect": {
         "exit": 0,
-        "stdout": "  adding: data/sub/nested.txt\n",
+        "stdout": "2021-06-15\n",
         "stderr": ""
       }
     },
     {
-      "id": "zip_j_junk",
-      "seq": 601320,
+      "id": "date_d_rfc",
+      "seq": 601271,
       "targets": [
         "ram",
         "disk",
@@ -55,10 +55,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/pzip && printf hi > /data/pzip/u.txt && zip -q -j /data/pzip/uz.zip /data/pzip/u.txt && unzip -l /data/pzip/uz.zip | grep -c 'u.txt'",
+      "command": "date -u -d '2021-06-15T12:00:00Z' -R",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "Tue, 15 Jun 2021 12:00:00 +0000\n",
         "stderr": ""
       }
     }

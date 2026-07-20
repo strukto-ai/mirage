@@ -323,7 +323,7 @@ async def test_primitive_verbose_skips_failed_moves():
         files, {"/src", "/d"}, ["/src/a.txt", "/src/b.txt", "/d"],
         v=True,
         unlink_fails={"/src/a.txt": PermissionError("/src/a.txt")})
-    assert out == b"'/src/b.txt' -> '/d/b.txt'\n"
+    assert out == b"renamed '/src/b.txt' -> '/d/b.txt'\n"
 
 
 @pytest.mark.asyncio

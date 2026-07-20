@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "zip_create",
-      "seq": 598,
+      "id": "unzip_l_list",
+      "seq": 601330,
       "targets": [
         "ram",
         "disk",
@@ -24,16 +24,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zip /data/sub/arch.zip /data/sub/nested.txt",
+      "command": "mkdir -p /data/punz && printf hi > /data/punz/a.txt && zip -q -j /data/punz/az.zip /data/punz/a.txt && unzip -l /data/punz/az.zip | grep -c 'a.txt'",
       "expect": {
         "exit": 0,
-        "stdout": "  adding: data/sub/nested.txt\n",
+        "stdout": "1\n",
         "stderr": ""
       }
     },
     {
-      "id": "zip_j_junk",
-      "seq": 601320,
+      "id": "unzip_o_d_extract",
+      "seq": 601331,
       "targets": [
         "ram",
         "disk",
@@ -55,10 +55,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/pzip && printf hi > /data/pzip/u.txt && zip -q -j /data/pzip/uz.zip /data/pzip/u.txt && unzip -l /data/pzip/uz.zip | grep -c 'u.txt'",
+      "command": "mkdir -p /data/punz && printf extract > /data/punz/e.txt && zip -q -j /data/punz/ez.zip /data/punz/e.txt && mkdir -p /data/punz/out && unzip -o -q -d /data/punz/out /data/punz/ez.zip && cat /data/punz/out/e.txt",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "extract",
         "stderr": ""
       }
     }

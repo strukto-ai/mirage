@@ -154,6 +154,68 @@
         "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gzip_k_keep",
+      "seq": 601300,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgz && printf 'roundtrip\\n' > /data/pgz/k.txt && gzip -k /data/pgz/k.txt && test -f /data/pgz/k.txt && echo kept && zcat /data/pgz/k.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "kept\nroundtrip\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gzip_9_level",
+      "seq": 601301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgz && printf 'level9\\n' > /data/pgz/l.txt && gzip -9 /data/pgz/l.txt && zcat /data/pgz/l.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "level9\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
+
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
@@ -52,26 +56,39 @@ async def rm(
             errors.append(f"rm: cannot remove '{p.virtual}': "
                           "No such file or directory")
             continue
+        entry_lines: list[str] = []
         if s.type == FileType.DIRECTORY:
             if recursive:
                 if ops.rm_r is None:
                     raise NotImplementedError(
                         "rm: recursive remove not supported on this backend")
+                if v:
+                    readdir = functools.partial(ops.readdir,
+                                                accessor,
+                                                index=index)
+                    entry_lines = removal_lines(await walk(
+                        readdir, functools.partial(ops.stat, accessor), p))
                 await ops.rm_r(accessor, p)
             elif d:
                 if ops.rmdir is None:
                     raise NotImplementedError(
                         "rm: directory remove not supported on this backend")
+                if await ops.readdir(accessor, p, index=index):
+                    errors.append(f"rm: cannot remove '{p.virtual}': "
+                                  "Directory not empty")
+                    continue
                 await ops.rmdir(accessor, p)
+                entry_lines = [f"removed directory '{p.virtual}'"]
             else:
                 errors.append(
                     f"rm: cannot remove '{p.virtual}': Is a directory")
                 continue
         else:
             await ops.require(Operation.UNLINK)(accessor, p)
+            entry_lines = [f"removed '{p.virtual}'"]
         removed[p.mount_path] = b""
         if v:
-            verbose_parts.append(f"removed '{p.virtual}'")
+            verbose_parts.extend(entry_lines)
     output = format_optional_records(verbose_parts) if v else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return output, IOResult(writes=removed,

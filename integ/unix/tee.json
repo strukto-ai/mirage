@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "zip_create",
-      "seq": 598,
+      "id": "tee_a_append",
+      "seq": 601050,
       "targets": [
         "ram",
         "disk",
@@ -12,8 +12,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -24,16 +22,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zip /data/sub/arch.zip /data/sub/nested.txt",
+      "command": "mkdir -p /data/ptee1 && printf 'hi' > /data/ptee1/t.txt && printf 'MORE' | tee -a /data/ptee1/t.txt > /dev/null && cat /data/ptee1/t.txt",
       "expect": {
         "exit": 0,
-        "stdout": "  adding: data/sub/nested.txt\n",
+        "stdout": "hiMORE",
         "stderr": ""
       }
     },
     {
-      "id": "zip_j_junk",
-      "seq": 601320,
+      "id": "tee_a_stdout",
+      "seq": 601051,
       "targets": [
         "ram",
         "disk",
@@ -43,8 +41,6 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -55,10 +51,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/pzip && printf hi > /data/pzip/u.txt && zip -q -j /data/pzip/uz.zip /data/pzip/u.txt && unzip -l /data/pzip/uz.zip | grep -c 'u.txt'",
+      "command": "mkdir -p /data/ptee2 && printf 'A' > /data/ptee2/s.txt && printf 'B' | tee -a /data/ptee2/s.txt && printf '|' && cat /data/ptee2/s.txt",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "B|AB",
         "stderr": ""
       }
     }

@@ -30,6 +30,99 @@
         "stdout": "",
         "stderr": "gunzip: (stdin): unexpected end of file"
       }
+    },
+    {
+      "id": "gunzip_k_keep",
+      "seq": 601310,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgu && printf 'keepgz\\n' > /data/pgu/g.txt && gzip /data/pgu/g.txt && gunzip -k /data/pgu/g.txt.gz && test -f /data/pgu/g.txt.gz && echo bothkept && cat /data/pgu/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "bothkept\nkeepgz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gunzip_t_test",
+      "seq": 601311,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgu && printf 'testme\\n' > /data/pgu/t.txt && gzip /data/pgu/t.txt && gunzip -t /data/pgu/t.txt.gz && echo ok=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gunzip_c_stdout",
+      "seq": 601312,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgu && printf 'tostdout\\n' > /data/pgu/c.txt && gzip /data/pgu/c.txt && gunzip -c /data/pgu/c.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "tostdout\n",
+        "stderr": ""
+      }
     }
   ]
 }

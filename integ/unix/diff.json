@@ -123,6 +123,99 @@
         "stdout": "diff -r /data/dr/x/a.txt /data/dr/y/a.txt\n1c1\n< aaa\n---\n> AAA\nOnly in /data/dr/x: leftonly.txt\nOnly in /data/dr/y: rightonly.txt\ndiff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt\n1c1\n< deep1\n---\n> deep2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "diff_i_ignorecase",
+      "seq": 601120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qdiff && printf 'Hello\\n' > /data/qdiff/d1 && printf 'hello\\n' > /data/qdiff/d2 && diff -i /data/qdiff/d1 /data/qdiff/d2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "diff_w_ignorews",
+      "seq": 601121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qdiff && printf 'a b\\n' > /data/qdiff/w1 && printf 'a   b\\n' > /data/qdiff/w2 && diff -w /data/qdiff/w1 /data/qdiff/w2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "diff_q_brief",
+      "seq": 601122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qdiff && printf 'x\\n' > /data/qdiff/q1 && printf 'y\\n' > /data/qdiff/q2 && diff -q /data/qdiff/q1 /data/qdiff/q2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Files /data/qdiff/q1 and /data/qdiff/q2 differ\nrc=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

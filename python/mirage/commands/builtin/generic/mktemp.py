@@ -17,13 +17,18 @@ def _rand_suffix(length: int) -> str:
 
 def _build_path(p: str | PathSpec | None, t: bool,
                 texts: tuple[str, ...]) -> tuple[PathSpec, PathSpec]:
-    if t or p is None:
-        parent = PathSpec.from_str_path("/tmp")
-    elif isinstance(p, PathSpec):
-        parent = p
-    else:
-        parent = PathSpec.from_str_path(p)
     template = texts[0] if texts else "tmp.XXXXXXXXXX"
+    if t:
+        parent = PathSpec.from_str_path("/tmp")
+    elif p is not None:
+        parent = p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
+    elif "/" in template:
+        # An explicit path template names its own directory (GNU); only a
+        # bare template with no -p/-t falls back to the temp dir.
+        head, _, template = template.rpartition("/")
+        parent = PathSpec.from_str_path(head or "/")
+    else:
+        parent = PathSpec.from_str_path("/tmp")
     i = len(template)
     while i > 0 and template[i - 1] == "X":
         i -= 1

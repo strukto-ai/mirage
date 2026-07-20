@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
+
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic_bind.provision import \
     write_metadata_provision
 from mirage.commands.builtin.s3.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.readdir import readdir
@@ -35,9 +39,10 @@ async def _rm(
     recursive: bool = False,
     force: bool = False,
     remove_dir: bool = False,
+    verbose: bool = False,
     *,
     index: IndexCacheStore,
-) -> str | None:
+) -> tuple[str | None, list[str]]:
     """Remove one operand, returning a GNU stderr line on failure.
 
     Args:
@@ -46,32 +51,38 @@ async def _rm(
         recursive (bool): ``-r``; remove directories and their contents.
         force (bool): ``-f``; a missing operand is not an error.
         remove_dir (bool): ``-d``; remove empty directories.
+        verbose (bool): ``-v``; collect one ``removed ...`` line per entry.
         index (IndexCacheStore): Cache index threaded into the core ops.
 
     Returns:
-        str | None: ``rm: cannot remove ...`` line, or None when removed
-        (or skipped under ``-f``).
+        tuple[str | None, list[str]]: A ``rm: cannot remove ...`` line (or
+        None when removed / skipped under ``-f``) and the verbose lines.
     """
     label = path.virtual
     try:
         s = await stat(accessor, path, index=index)
     except (FileNotFoundError, ValueError):
         if force:
-            return None
-        return f"rm: cannot remove '{label}': No such file or directory"
+            return None, []
+        return f"rm: cannot remove '{label}': No such file or directory", []
     if s.type == FileType.DIRECTORY:
         if recursive:
+            lines = removal_lines(await walk(
+                functools.partial(readdir, accessor, index=index),
+                functools.partial(stat, accessor, index=index),
+                path)) if verbose else []
             await rm_r(accessor, path)
-        elif remove_dir:
+            return None, lines
+        if remove_dir:
             children = await readdir(accessor, path, index)
             if children:
-                return f"rm: cannot remove '{label}': Directory not empty"
+                return (f"rm: cannot remove '{label}': Directory not empty",
+                        [])
             await rmdir(accessor, path)
-        else:
-            return f"rm: cannot remove '{label}': Is a directory"
-    else:
-        await unlink(accessor, path)
-    return None
+            return None, [f"removed directory '{label}'"] if verbose else []
+        return f"rm: cannot remove '{label}': Is a directory", []
+    await unlink(accessor, path)
+    return None, [f"removed '{label}'"] if verbose else []
 
 
 @command("rm",
@@ -100,18 +111,18 @@ async def rm(
     removed: dict[str, ByteSource] = {}
     for p in paths:
         # GNU rm reports the operand and keeps removing the rest.
-        error = await _rm(accessor,
-                          p,
-                          recursive=r or R,
-                          force=f,
-                          remove_dir=d,
-                          index=index)
+        error, entry_lines = await _rm(accessor,
+                                       p,
+                                       recursive=r or R,
+                                       force=f,
+                                       remove_dir=d,
+                                       verbose=v,
+                                       index=index)
         if error is not None:
             errors.append(error)
             continue
         removed[p.mount_path] = b""
-        if v:
-            verbose_parts.append(f"removed '{p.virtual}'")
+        verbose_parts.extend(entry_lines)
     output = format_optional_records(verbose_parts) if v else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return output, IOResult(writes=removed,

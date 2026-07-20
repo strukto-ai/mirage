@@ -117,7 +117,6 @@ SPECS: dict[str, CommandSpec] = {
                              "between numbers."),
             ),
             Option(short="-w",
-                   value_kind=OperandKind.TEXT,
                    description="Pad numbers with zeros to equal width."),
             Option(
                 short="-f",

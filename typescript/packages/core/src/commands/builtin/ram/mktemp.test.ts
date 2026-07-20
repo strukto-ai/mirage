@@ -55,4 +55,18 @@ describe('mktemp', () => {
     expect(path.startsWith('/tmp/')).toBe(true)
     expect(resource.store.dirs.has(path)).toBe(true)
   })
+
+  it('uses the directory of an explicit path template', async () => {
+    const { out, resource } = await runMktemp({}, ['/data/mt/f.XXXX'])
+    const path = out.trim()
+    expect(path.startsWith('/data/mt/f.')).toBe(true)
+    expect(resource.store.files.has(path)).toBe(true)
+  })
+
+  it('-d uses the directory of an explicit path template', async () => {
+    const { out, resource } = await runMktemp({ d: true }, ['/data/mtd/t.XXXX'])
+    const path = out.trim()
+    expect(path.startsWith('/data/mtd/t.')).toBe(true)
+    expect(resource.store.dirs.has(path)).toBe(true)
+  })
 })

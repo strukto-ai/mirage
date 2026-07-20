@@ -30,6 +30,99 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "split_l",
+      "seq": 601070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/psp1 && printf 'l1\\nl2\\nl3\\nl4\\n' > /data/psp1/in.txt && split -l 2 /data/psp1/in.txt /data/psp1/p_ && cat /data/psp1/p_aa && printf '|' && cat /data/psp1/p_ab",
+      "expect": {
+        "exit": 0,
+        "stdout": "l1\nl2\n|l3\nl4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "split_d",
+      "seq": 601071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/psp2 && printf 'l1\\nl2\\nl3\\nl4\\n' > /data/psp2/in.txt && split -d -l 2 /data/psp2/in.txt /data/psp2/n && ls /data/psp2 | grep '^n0' | tr '\\n' ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "n00 n01 ",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "split_a",
+      "seq": 601072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/psp3 && printf 'a\\nb\\nc\\nd\\ne\\nf\\n' > /data/psp3/in.txt && split -a 1 -l 2 /data/psp3/in.txt /data/psp3/s. && ls /data/psp3 | grep '^s\\.' | tr '\\n' ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "s.a s.b s.c ",
+        "stderr": ""
+      }
     }
   ]
 }
