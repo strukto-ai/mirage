@@ -67,7 +67,7 @@ async function linearIssueCreateCommand(
 }
 
 export const LINEAR_ISSUE_CREATE = command({
-  name: 'linear-issue-create',
+  name: 'linear issue create',
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueCreateCommand,

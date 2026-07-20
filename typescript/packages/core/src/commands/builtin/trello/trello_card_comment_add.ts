@@ -52,7 +52,7 @@ async function trelloCardCommentAddCommand(
 }
 
 export const TRELLO_CARD_COMMENT_ADD = command({
-  name: 'trello-card-comment-add',
+  name: 'trello card comment',
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardCommentAddCommand,

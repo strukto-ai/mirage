@@ -54,7 +54,7 @@ async def search_segments(
             "conditions": conditions,
         }
     response = await dify_post(
-        accessor.config,
+        accessor,
         f"/datasets/{accessor.config.dataset_id}/retrieve",
         {
             "query": query,

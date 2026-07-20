@@ -19,6 +19,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import {
   listTeamCycles,
+  listTeamDocuments,
   listTeamIssues,
   listTeamMembers,
   listTeamProjects,
@@ -26,6 +27,7 @@ import {
 } from './_client.ts'
 import {
   cycleFilename,
+  documentFilename,
   issueDirname,
   memberFilename,
   projectFilename,
@@ -139,6 +141,7 @@ export async function readdir(
       `${prefix}/${key}/issues`,
       `${prefix}/${key}/projects`,
       `${prefix}/${key}/cycles`,
+      `${prefix}/${key}/documents`,
     ]
   }
 
@@ -258,6 +261,35 @@ export async function readdir(
           name: pickString(cycle, 'name') || pickString(cycle, 'id'),
           resourceType: 'linear/cycle',
           remoteTime: pickString(cycle, 'updatedAt'),
+          vfsName: filename,
+        }),
+      ])
+      names.push(`${prefix}/${key}/${filename}`)
+    }
+    await index.setDir(virtualKey, entries)
+    return names
+  }
+
+  if (parts.length === 3 && parts[0] === 'teams' && parts[2] === 'documents') {
+    if (index === undefined) throw enoent(path)
+    const teamKey = makeVirtualKey(prefix, parts.slice(0, 2).join('/'))
+    const team = await ensureLookup(accessor, index, filter, prefix, 'teams', teamKey)
+    const listing = await index.listDir(virtualKey)
+    if (listing.entries !== undefined && listing.entries !== null) {
+      return listing.entries
+    }
+    const documents = await listTeamDocuments(accessor.transport, team.id)
+    const entries: [string, IndexEntry][] = []
+    const names: string[] = []
+    for (const document of documents) {
+      const filename = documentFilename(document)
+      entries.push([
+        filename,
+        new IndexEntry({
+          id: pickString(document, 'id'),
+          name: pickString(document, 'title') || pickString(document, 'id'),
+          resourceType: 'linear/document',
+          remoteTime: pickString(document, 'updatedAt'),
           vfsName: filename,
         }),
       ])

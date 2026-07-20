@@ -22,9 +22,10 @@ from mirage.core.dify.stat import stat as _stat
 # find keep wrappers to avoid an extra document-detail API call per path: the
 # generic cat eagerly stats the file and the generic find would call the full
 # stat, while Dify's stat is a detail fetch (the wrappers use bespoke glob
-# resolution / stat_light instead). search pushes down to the Dify retrieval
-# API. Dify is read-only, so the generic byte-mutation commands are
-# intentionally absent (no write op wired).
+# resolution / stat_light instead). ls receives a light-stat adapter from the
+# package factory. search pushes down to the Dify retrieval API. Dify is
+# read-only, so the generic byte-mutation commands are intentionally absent
+# (no write op wired).
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,

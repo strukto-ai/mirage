@@ -284,7 +284,7 @@ $ rg -n "Mirage daemon CLI|workspace|session|provision" /github/typescript
 $ cat /github/typescript/packages/cli/src/main.ts
 
 # 3. File a design issue in Linear with the feedback + code refs
-$ linear-issue-create --team_id <team-id> \
+$ linear issue create --team_id <team-id> \
     --title "[Design] Rework Mirage CLI top-level command surface" \
     --description "$(cat <<'EOF'
 ... feedback, screenshot summary, and links to the offending files ...

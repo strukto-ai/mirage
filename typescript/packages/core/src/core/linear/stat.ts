@@ -96,7 +96,13 @@ export async function stat(
         extra: { team_id: teamId },
       })
     }
-    if (leaf === 'members' || leaf === 'issues' || leaf === 'projects' || leaf === 'cycles') {
+    if (
+      leaf === 'members' ||
+      leaf === 'issues' ||
+      leaf === 'projects' ||
+      leaf === 'cycles' ||
+      leaf === 'documents'
+    ) {
       return new FileStat({ name: leaf, type: FileType.DIRECTORY })
     }
   }
@@ -151,12 +157,13 @@ export async function stat(
   if (
     parts.length === 4 &&
     parts[0] === 'teams' &&
-    (parts[2] === 'projects' || parts[2] === 'cycles')
+    (parts[2] === 'projects' || parts[2] === 'cycles' || parts[2] === 'documents')
   ) {
     if (index === undefined) throw enoent(path)
     const result = await lookupWithFallback(accessor, virtualKey, prefix, index)
     if (result.entry === undefined || result.entry === null) throw enoent(path)
-    const idKey = parts[2] === 'projects' ? 'project_id' : 'cycle_id'
+    const idKey =
+      parts[2] === 'projects' ? 'project_id' : parts[2] === 'cycles' ? 'cycle_id' : 'document_id'
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,

@@ -35,7 +35,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello-card-update", resource="trello", spec=SPEC)
+@command("trello card update", resource="trello", spec=SPEC)
 async def trello_card_update(
     accessor: TrelloAccessor,
     paths: list[PathSpec],

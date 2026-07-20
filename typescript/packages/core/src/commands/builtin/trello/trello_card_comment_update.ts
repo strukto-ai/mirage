@@ -57,7 +57,7 @@ async function trelloCardCommentUpdateCommand(
 }
 
 export const TRELLO_CARD_COMMENT_UPDATE = command({
-  name: 'trello-card-comment-update',
+  name: 'trello card comment-update',
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardCommentUpdateCommand,

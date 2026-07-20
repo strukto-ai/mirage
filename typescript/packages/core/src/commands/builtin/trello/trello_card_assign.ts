@@ -44,7 +44,7 @@ async function trelloCardAssignCommand(
 }
 
 export const TRELLO_CARD_ASSIGN = command({
-  name: 'trello-card-assign',
+  name: 'trello card assign',
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardAssignCommand,

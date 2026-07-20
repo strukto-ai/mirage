@@ -1,0 +1,524 @@
+{
+ "cases": [
+  {
+   "id": "ln_root_ls",
+   "seq": 560000,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues",
+   "expect": {
+    "exit": 0,
+    "stdout": "teams\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_teams_ls",
+   "seq": 560001,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT__Platform__team_plat\nWEB__Web__team_web\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_team_children_ls",
+   "seq": 560002,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams/PLAT__Platform__team_plat",
+   "expect": {
+    "exit": 0,
+    "stdout": "cycles\ndocuments\nissues\nmembers\nprojects\nteam.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_issues_ls",
+   "seq": 560003,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams/PLAT__Platform__team_plat/issues",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT-1__iss_plat_1\nPLAT-2__iss_plat_2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_members_ls",
+   "seq": 560004,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams/PLAT__Platform__team_plat/members",
+   "expect": {
+    "exit": 0,
+    "stdout": "Alex_Kim__usr_alex.json\nSam_Rivera__usr_sam.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_projects_ls",
+   "seq": 560005,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams/PLAT__Platform__team_plat/projects",
+   "expect": {
+    "exit": 0,
+    "stdout": "Search__prj_search.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cycles_ls",
+   "seq": 560006,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams/PLAT__Platform__team_plat/cycles",
+   "expect": {
+    "exit": 0,
+    "stdout": "Cycle_1__cyc_1.json\nCycle_2__cyc_2.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_team_cat_jq",
+   "seq": 560007,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/team.json | jq -r '.team_key + \" \" + .team_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT Platform\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_issue_cat_jq",
+   "seq": 560008,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json | jq -r '.issue_key + \" | \" + .title + \" | \" + .state_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT-1 | Add search API | In Progress\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_issue_labels_jq",
+   "seq": 560009,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json | jq -c '.label_names'",
+   "expect": {
+    "exit": 0,
+    "stdout": "[\"feature\"]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_issue_assignee_jq",
+   "seq": 560010,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json | jq -r '.assignee_name + \" <\" + .assignee_email + \">\"'",
+   "expect": {
+    "exit": 0,
+    "stdout": "alex <alex@strukto.ai>\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_comments_jq",
+   "seq": 560011,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/comments.jsonl | jq -rs '.[] | .user_name + \": \" + .body'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Sam Rivera: Started design doc.\nAlex Kim: Endpoint stubbed, tests pending.\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_project_cat_jq",
+   "seq": 560012,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/projects/Search__prj_search.json | jq -r '.name + \" issues=\" + (.issue_count|tostring)'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Search issues=1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_project_issues_jq",
+   "seq": 560013,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/projects/Search__prj_search.json | jq -r '.issues[].issue_key'",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT-1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cycle_cat_jq",
+   "seq": 560014,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/cycles/Cycle_1__cyc_1.json | jq -r '.name + \" #\" + (.number|tostring)'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Cycle 1 #1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_member_cat_jq",
+   "seq": 560015,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/members/Alex_Kim__usr_alex.json | jq -r '.display_name + \" <\" + .email + \">\"'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Alex Kim <alex@strukto.ai>\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_find_type_f_count",
+   "seq": 560016,
+   "targets": [
+    "linear"
+   ],
+   "command": "find /issues -type f | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "17\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_find_issues",
+   "seq": 560017,
+   "targets": [
+    "linear"
+   ],
+   "command": "find /issues -name 'issue.json' | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "3\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_grep_cache",
+   "seq": 560018,
+   "targets": [
+    "linear"
+   ],
+   "command": "grep -rl 'evicting' /issues",
+   "expect": {
+    "exit": 0,
+    "stdout": "/issues/teams/PLAT__Platform__team_plat/issues/PLAT-2__iss_plat_2/issue.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_web_team_ls",
+   "seq": 560019,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams/WEB__Web__team_web/issues",
+   "expect": {
+    "exit": 0,
+    "stdout": "WEB-1__iss_web_1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_crossmount_cp",
+   "seq": 560020,
+   "targets": [
+    "linear"
+   ],
+   "command": "cp /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json /scratch/issue.json && cat /scratch/issue.json | jq -r '.issue_id'",
+   "expect": {
+    "exit": 0,
+    "stdout": "iss_plat_1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_documents_ls",
+   "seq": 560021,
+   "targets": [
+    "linear"
+   ],
+   "command": "ls /issues/teams/PLAT__Platform__team_plat/documents",
+   "expect": {
+    "exit": 0,
+    "stdout": "Indexer_Runbook__doc_plat_runbook.json\nSearch_Architecture__doc_plat_arch.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_doc_cat_jq",
+   "seq": 560022,
+   "targets": [
+    "linear"
+   ],
+   "command": "cat /issues/teams/PLAT__Platform__team_plat/documents/Search_Architecture__doc_plat_arch.json | jq -r '.title + \" | \" + .project_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Search Architecture | Search\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_team_list",
+   "seq": 560023,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear team list | jq -r '.[].team_key'",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT\nWEB\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_team_get",
+   "seq": 560024,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear team get PLAT | jq -r '.team_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Platform\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_team_members",
+   "seq": 560025,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear team members PLAT | jq -r '.[].display_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Alex Kim\nSam Rivera\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_issue_list",
+   "seq": 560026,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear issue list --team PLAT | jq -r '.[].issue_key'",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT-1\nPLAT-2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_issue_get",
+   "seq": 560027,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear issue get PLAT-1 | jq -r '.title'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Add search API\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_project_list",
+   "seq": 560028,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear project list --team PLAT | jq -rc '.[] | {name, issue_count}'",
+   "expect": {
+    "exit": 0,
+    "stdout": "{\"name\":\"Search\",\"issue_count\":1}\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_project_get",
+   "seq": 560029,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear project get prj_search --team PLAT | jq -r '.issues[].issue_key'",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT-1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_cycle_list",
+   "seq": 560030,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear cycle list --team PLAT | jq -r '.[].name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Cycle 1\nCycle 2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_cycle_current",
+   "seq": 560031,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear cycle current --team PLAT | jq -r '.name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Cycle 2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_cycle_get",
+   "seq": 560032,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear cycle get cyc_1 --team PLAT | jq -r '.name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Cycle 1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_label_list",
+   "seq": 560033,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear label list --team PLAT | jq -r '.[].name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "feature\nbug\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_comment_list",
+   "seq": 560034,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear comment list PLAT-1 | jq -r '.[].body'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Started design doc.\nEndpoint stubbed, tests pending.\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_user_list",
+   "seq": 560035,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear user list | jq -r '.[].email'",
+   "expect": {
+    "exit": 0,
+    "stdout": "alex@strukto.ai\nsam@strukto.ai\njo@strukto.ai\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_user_get",
+   "seq": 560036,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear user get sam@strukto.ai | jq -r '.display_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Sam Rivera\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_document_list",
+   "seq": 560037,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear document list --team PLAT | jq -r '.[].title'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Search Architecture\nIndexer Runbook\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_document_get",
+   "seq": 560038,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear document get doc_plat_arch --team PLAT | jq -r '.project_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Search\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ln_cmd_search",
+   "seq": 560039,
+   "targets": [
+    "linear"
+   ],
+   "command": "linear search index | jq -r '.[].identifier'",
+   "expect": {
+    "exit": 0,
+    "stdout": "PLAT-1\n",
+    "stderr": ""
+   }
+  }
+ ]
+}

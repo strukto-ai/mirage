@@ -2,31 +2,32 @@ import errno
 from collections.abc import AsyncIterator
 from typing import Any
 
+from mirage.accessor.dify import DifyAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify._client import get_document_segments, iter_segment_pages
 from mirage.core.dify.path import resolve_path
 from mirage.types import PathSpec
 
 
-async def read_bytes(accessor,
+async def read_bytes(accessor: DifyAccessor,
                      path: PathSpec,
                      index: IndexCacheStore = NULL_INDEX) -> bytes:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
-    segments = await get_document_segments(accessor.config, resolved.entry.id)
+    segments = await get_document_segments(accessor, resolved.entry.id)
     return segments_to_bytes(segments)
 
 
 async def read_stream(
-        accessor,
+        accessor: DifyAccessor,
         path: PathSpec,
         index: IndexCacheStore = NULL_INDEX) -> AsyncIterator[bytes]:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
     first = True
-    async for page in iter_segment_pages(accessor.config, resolved.entry.id):
+    async for page in iter_segment_pages(accessor, resolved.entry.id):
         for segment in page:
             if first:
                 first = False

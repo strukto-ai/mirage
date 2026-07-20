@@ -22,9 +22,9 @@ from mirage.resource.secrets import reveal_secret
 from mirage.core.linear.queries import (  # isort: skip
     COMMENT_CREATE_MUTATION, COMMENT_UPDATE_MUTATION, ISSUE_COMMENTS_QUERY,
     ISSUE_CREATE_MUTATION, ISSUE_LOOKUP_QUERY, ISSUE_QUERY, ISSUE_SEARCH_QUERY,
-    ISSUE_UPDATE_MUTATION, TEAM_CYCLES_QUERY, TEAM_ISSUES_QUERY,
-    TEAM_LIST_QUERY, TEAM_MEMBERS_QUERY, TEAM_PROJECTS_QUERY,
-    USER_LOOKUP_QUERY)
+    ISSUE_UPDATE_MUTATION, TEAM_CYCLES_QUERY, TEAM_DOCUMENTS_QUERY,
+    TEAM_ISSUES_QUERY, TEAM_LABELS_QUERY, TEAM_LIST_QUERY, TEAM_MEMBERS_QUERY,
+    TEAM_PROJECTS_QUERY, USER_LOOKUP_QUERY)
 
 
 class LinearAPIError(RuntimeError):
@@ -154,6 +154,34 @@ async def list_team_cycles(config: LinearConfig,
         {"teamId": team_id},
         ("team", "cycles"),
     )
+
+
+async def list_team_labels(config: LinearConfig,
+                           team_id: str) -> list[dict[str, Any]]:
+    return await paginate_connection(
+        config,
+        TEAM_LABELS_QUERY,
+        {"teamId": team_id},
+        ("team", "labels"),
+    )
+
+
+async def list_team_documents(config: LinearConfig,
+                              team_id: str) -> list[dict[str, Any]]:
+    return await paginate_connection(
+        config,
+        TEAM_DOCUMENTS_QUERY,
+        {"teamId": team_id},
+        ("team", "documents"),
+    )
+
+
+async def resolve_team(config: LinearConfig, key_or_id: str) -> dict[str, Any]:
+    teams = await list_teams(config)
+    for team in teams:
+        if team.get("id") == key_or_id or team.get("key") == key_or_id:
+            return team
+    raise FileNotFoundError(key_or_id)
 
 
 async def get_issue(config: LinearConfig, issue_id: str) -> dict[str, Any]:

@@ -21,10 +21,10 @@ from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.stat import stat as _stat
 
 # Linear issues/projects/teams are read through the generic factory (find
-# included); the linear_issue_* and
-# linear_search commands are the bespoke write/search surface. The generic
-# byte-mutation commands are intentionally absent (mutations go through the
-# platform commands, no write op wired).
+# included); the nested `linear <noun> <verb>` commands (reads.py plus the
+# linear_issue_*/comment write commands) are the platform surface. The
+# generic byte-mutation commands are intentionally absent (mutations go
+# through the platform commands, no write op wired).
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,

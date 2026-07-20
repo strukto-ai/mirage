@@ -171,6 +171,28 @@ const TEAM_CYCLES_QUERY = `query TeamCycles($teamId: String!, $first: Int!, $aft
   }
 }`
 
+const TEAM_LABELS_QUERY = `query TeamLabels($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    labels(first: $first, after: $after) {
+      nodes { id name color }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+
+const TEAM_DOCUMENTS_QUERY = `query TeamDocuments($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    documents(first: $first, after: $after) {
+      nodes {
+        id title content url createdAt updatedAt
+        project { id name }
+        creator { id name email }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+
 const ISSUE_QUERY = `query Issue($issueId: String!) {
   issue(id: $issueId) {
     id identifier title description priority url createdAt updatedAt
@@ -264,6 +286,31 @@ export async function listTeamCycles(
   teamId: string,
 ): Promise<Record<string, unknown>[]> {
   return paginate(transport, TEAM_CYCLES_QUERY, { teamId }, ['team', 'cycles'])
+}
+
+export async function listTeamLabels(
+  transport: LinearTransport,
+  teamId: string,
+): Promise<Record<string, unknown>[]> {
+  return paginate(transport, TEAM_LABELS_QUERY, { teamId }, ['team', 'labels'])
+}
+
+export async function listTeamDocuments(
+  transport: LinearTransport,
+  teamId: string,
+): Promise<Record<string, unknown>[]> {
+  return paginate(transport, TEAM_DOCUMENTS_QUERY, { teamId }, ['team', 'documents'])
+}
+
+export async function resolveTeam(
+  transport: LinearTransport,
+  keyOrId: string,
+): Promise<Record<string, unknown>> {
+  const teams = await listTeams(transport)
+  for (const team of teams) {
+    if (team.id === keyOrId || team.key === keyOrId) return team
+  }
+  throw enoent(keyOrId)
 }
 
 export async function getIssue(

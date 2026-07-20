@@ -31,7 +31,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("linear-issue-set-project", resource="linear", spec=SPEC)
+@command("linear issue set-project", resource="linear", spec=SPEC)
 async def linear_issue_set_project(
     accessor: LinearAccessor,
     paths: list[PathSpec],

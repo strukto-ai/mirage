@@ -165,6 +165,54 @@ query TeamCycles($teamId: String!, $first: Int!, $after: String) {
 }
 """
 
+TEAM_LABELS_QUERY = """
+query TeamLabels($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    labels(first: $first, after: $after) {
+      nodes {
+        id
+        name
+        color
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+"""
+
+TEAM_DOCUMENTS_QUERY = """
+query TeamDocuments($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    documents(first: $first, after: $after) {
+      nodes {
+        id
+        title
+        content
+        url
+        createdAt
+        updatedAt
+        project {
+          id
+          name
+        }
+        creator {
+          id
+          name
+          email
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+"""
+
 ISSUE_QUERY = """
 query Issue($issueId: String!) {
   issue(id: $issueId) {

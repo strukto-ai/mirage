@@ -26,8 +26,25 @@ export const TRELLO_PROMPT = `{prefix}
                 <card-name>__<card-id>/
                   card.json
                   comments.jsonl
-  Always ls directories first to discover exact names.`
+  Always ls directories first to discover exact names.
+
+  Read commands (nested names, mirror the trello CLI; every command emits
+  normalized JSON to stdout so you can pipe to jq):
+    trello board list                       # all boards
+    trello board show <board-id>
+    trello board members <board-id>
+    trello list list <board-id>             # lists on a board
+    trello label list <board-id>
+    trello card list <list-id>              # cards in a list
+    trello card show <card-id>
+    trello card comments <card-id>`
 
 export const TRELLO_WRITE_PROMPT = `  Write commands:
-    trello-card-create <list-path> "name" "description"
-    trello-card-comment-add <card-path> "comment"`
+    trello card create <list-path> "name" "description"
+    trello card update <card-path> [--name ...] [--desc ...]
+    trello card move <card-path> --list_id <list-id>
+    trello card assign <card-path> --member_id <member-id>
+    trello card label <card-path> --label_id <label-id>
+    trello card unlabel <card-path> --label_id <label-id>
+    trello card comment <card-path> "comment"
+    trello card comment-update --comment_id <comment-id> "comment"`

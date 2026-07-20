@@ -64,7 +64,7 @@ async function linearIssueAddLabelCommand(
 }
 
 export const LINEAR_ISSUE_ADD_LABEL = command({
-  name: 'linear-issue-add-label',
+  name: 'linear issue add-label',
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueAddLabelCommand,

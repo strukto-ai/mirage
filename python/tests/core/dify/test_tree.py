@@ -41,6 +41,17 @@ async def collision_documents(config):
     ]
 
 
+async def invalid_documents(config):
+    return [
+        document("doc-1", "valid", slug="valid"),
+        {
+            "id": "doc-2"
+        },
+        document("doc-3", "bad", slug="../bad"),
+        document("", "missing-id", slug="missing-id"),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_ensure_tree_builds_prefixed_entries_and_uses_api_size(
         monkeypatch, dify_accessor, dify_index):
@@ -71,16 +82,45 @@ async def test_ensure_tree_builds_prefixed_entries_and_uses_api_size(
 
 
 @pytest.mark.asyncio
-async def test_ensure_tree_rejects_duplicate_and_path_collision(
-        monkeypatch, dify_accessor, dify_index):
+async def test_ensure_tree_skips_duplicate_slug(monkeypatch, caplog,
+                                                dify_accessor, dify_index):
     monkeypatch.setattr(tree, "list_all_documents", duplicate_documents)
-    with pytest.raises(ValueError, match="Duplicate slug 'same'"):
-        await tree.ensure_tree(dify_accessor, dify_index, "")
 
-    await dify_index.clear()
+    await tree.ensure_tree(dify_accessor, dify_index, "")
+
+    root = await dify_index.list_dir("/")
+    kept = await dify_index.get("/same")
+    assert root.entries == ["/same"]
+    assert kept.entry.id == "doc-1"
+    assert "Skipping duplicate Dify document slug" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_ensure_tree_skips_path_collision(monkeypatch, caplog,
+                                                dify_accessor, dify_index):
     monkeypatch.setattr(tree, "list_all_documents", collision_documents)
-    with pytest.raises(ValueError, match="Path collision"):
-        await tree.ensure_tree(dify_accessor, dify_index, "")
+
+    await tree.ensure_tree(dify_accessor, dify_index, "")
+
+    root = await dify_index.list_dir("/")
+    kept = await dify_index.get("/foo")
+    skipped = await dify_index.get("/foo/bar")
+    assert root.entries == ["/foo"]
+    assert kept.entry.id == "doc-1"
+    assert skipped.entry is None
+    assert "Skipping Dify document path collision" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_ensure_tree_skips_invalid_documents(monkeypatch, caplog,
+                                                   dify_accessor, dify_index):
+    monkeypatch.setattr(tree, "list_all_documents", invalid_documents)
+
+    await tree.ensure_tree(dify_accessor, dify_index, "")
+
+    root = await dify_index.list_dir("/")
+    assert root.entries == ["/valid"]
+    assert caplog.text.count("Skipping invalid Dify document") == 3
 
 
 def test_tree_slug_and_timestamp_helpers():

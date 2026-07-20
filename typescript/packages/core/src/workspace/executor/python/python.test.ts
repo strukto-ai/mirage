@@ -210,7 +210,7 @@ describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, 
   })
 })
 
-describe('python3: TS-specific (Pyodide isolation + mechanics)', () => {
+describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 30000 }, () => {
   // These have no Python-subprocess analog — they pin the Pyodide-layer
   // isolation invariants documented in §14 of the design doc.
 

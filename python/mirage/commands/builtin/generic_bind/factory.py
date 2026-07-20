@@ -95,6 +95,7 @@ def make_generic_commands(
     *,
     overrides: set[str] | None = None,
     provision_overrides: dict[str, Callable[..., Any]] | None = None,
+    ops_overrides: dict[str, CommandIO] | None = None,
 ) -> list[Callable[..., Any]]:
     """Generate the default command set for a backend from its ops.
 
@@ -106,36 +107,41 @@ def make_generic_commands(
         provision_overrides (dict[str, Callable] | None): per-command
             provision functions that replace the catalog default (for a
             backend whose cost model genuinely differs).
+        ops_overrides (dict[str, CommandIO] | None): per-command adapters
+            that replace the shared adapter when one command needs a cheaper
+            backend operation.
     """
     skip = overrides or set()
     prov_over = provision_overrides or {}
+    ops_over = ops_overrides or {}
     commands: list[Callable[..., Any]] = []
     for b in _BUILDERS:
         if b.name in skip:
             continue
+        base_ops = ops_over.get(b.name, ops)
         # A read-only backend (no write op) can't run the byte-mutation
         # commands (cp/mv/tee/gunzip/...), so don't register a command that
         # would crash when invoked.
-        if not ops.supports(b.requirements):
+        if not base_ops.supports(b.requirements):
             continue
         if b.read:
-            cmd_ops = with_read_cache(ops)
+            cmd_ops = with_read_cache(base_ops)
         elif not b.write:
-            cmd_ops = with_stat_cache(ops)
+            cmd_ops = with_stat_cache(base_ops)
         else:
-            cmd_ops = ops
+            cmd_ops = base_ops
         bound = functools.partial(b.fn, cmd_ops)
         provision: Callable[..., Any] | None
         if b.name in prov_over:
             provision = prov_over[b.name]
         elif b.provision is not None:
-            provision = b.provision(ops.stat)
+            provision = b.provision(base_ops.stat)
         else:
             provision = default_provision(b.name,
-                                          ops.stat,
-                                          resolve_glob=ops.resolve_glob,
-                                          readdir=ops.readdir)
-        agg = b.aggregate if ops.local else None
+                                          base_ops.stat,
+                                          resolve_glob=base_ops.resolve_glob,
+                                          readdir=base_ops.readdir)
+        agg = b.aggregate if base_ops.local else None
         commands.append(
             command(b.name,
                     resource=resource,

@@ -485,6 +485,26 @@ jobs:
           cat /tmp/boxsrv.log
           echo "BOX_ENDPOINT=http://127.0.0.1:5096" >> "$GITHUB_ENV"
 
+      - name: Start fake Trello API for the typescript host
+        run: |
+          nohup ./python/.venv/bin/python integ/server/trello_server.py --port 5095 > /tmp/trellosrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "TRELLO_ENDPOINT=" /tmp/trellosrv.log && break
+            sleep 1
+          done
+          cat /tmp/trellosrv.log
+          echo "TRELLO_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
+
+      - name: Start fake Linear API for the typescript host
+        run: |
+          nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linearsrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "LINEAR_ENDPOINT=" /tmp/linearsrv.log && break
+            sleep 1
+          done
+          cat /tmp/linearsrv.log
+          echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
+
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py
 

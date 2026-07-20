@@ -118,6 +118,14 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: BOX_ENDPOINT not set\n`)
       continue
     }
+    if (target.service === 'trello' && !process.env.TRELLO_ENDPOINT) {
+      process.stderr.write(`skip [${id}]: TRELLO_ENDPOINT not set\n`)
+      continue
+    }
+    if (target.service === 'linear' && !process.env.LINEAR_ENDPOINT) {
+      process.stderr.write(`skip [${id}]: LINEAR_ENDPOINT not set\n`)
+      continue
+    }
     await runTarget(target, cases, root, report, emit)
   }
 

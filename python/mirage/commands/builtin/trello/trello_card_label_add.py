@@ -29,7 +29,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello-card-label-add", resource="trello", spec=SPEC)
+@command("trello card label", resource="trello", spec=SPEC)
 async def trello_card_label_add(
     accessor: TrelloAccessor,
     paths: list[PathSpec],

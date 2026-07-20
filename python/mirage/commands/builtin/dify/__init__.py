@@ -12,22 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.commands.builtin.dify.cat import make_cat
 from mirage.commands.builtin.dify.find import find
 from mirage.commands.builtin.dify.io import IO as _IO
 from mirage.commands.builtin.dify.search import search
 from mirage.commands.builtin.generic_bind import (make_generic_commands,
                                                   with_read_cache)
+from mirage.core.dify.stat import stat_light
 
 _DIFY_OVERRIDES = {"cat", "find"}
 
 _DIFY_CACHED_OPS = with_read_cache(_IO)
+_DIFY_LIGHT_STAT_OPS = replace(_IO, stat=stat_light)
 
 COMMANDS = [
     *make_generic_commands(
         "dify",
         _IO,
         overrides=_DIFY_OVERRIDES,
+        ops_overrides={"ls": _DIFY_LIGHT_STAT_OPS},
     ),
     make_cat(_DIFY_CACHED_OPS),
     find,

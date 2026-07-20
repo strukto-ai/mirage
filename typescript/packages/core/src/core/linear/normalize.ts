@@ -282,6 +282,52 @@ export function normalizeCycle(cycle: Json, teamId: string): NormalizedCycle {
   }
 }
 
+export interface NormalizedLabel {
+  label_id: string | null
+  name: string | null
+  color: string | null
+}
+
+export function normalizeLabel(label: Json): NormalizedLabel {
+  return {
+    label_id: pickStringOrNull(label, 'id'),
+    name: pickStringOrNull(label, 'name'),
+    color: pickStringOrNull(label, 'color'),
+  }
+}
+
+export interface NormalizedDocument {
+  document_id: string | null
+  title: string | null
+  content: string
+  project_id: string | null
+  project_name: string | null
+  creator_id: string | null
+  creator_name: string | null
+  creator_email: string | null
+  created_at: string | null
+  updated_at: string | null
+  url: string | null
+}
+
+export function normalizeDocument(document: Json): NormalizedDocument {
+  const project = asObject(document.project)
+  const creator = asObject(document.creator)
+  return {
+    document_id: pickStringOrNull(document, 'id'),
+    title: pickStringOrNull(document, 'title'),
+    content: pickStringOrNull(document, 'content') ?? '',
+    project_id: pickStringOrNull(project, 'id'),
+    project_name: pickStringOrNull(project, 'name'),
+    creator_id: pickStringOrNull(creator, 'id'),
+    creator_name: pickStringOrNull(creator, 'name'),
+    creator_email: pickStringOrNull(creator, 'email'),
+    created_at: pickStringOrNull(document, 'createdAt'),
+    updated_at: pickStringOrNull(document, 'updatedAt'),
+    url: pickStringOrNull(document, 'url'),
+  }
+}
+
 export function buildProjectIssue(issue: Json): NormalizedProjectIssue {
   const state = asObject(issue.state)
   return {

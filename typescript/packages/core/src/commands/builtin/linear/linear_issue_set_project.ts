@@ -50,7 +50,7 @@ async function linearIssueSetProjectCommand(
 }
 
 export const LINEAR_ISSUE_SET_PROJECT = command({
-  name: 'linear-issue-set-project',
+  name: 'linear issue set-project',
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueSetProjectCommand,

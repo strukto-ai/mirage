@@ -44,7 +44,7 @@ async function trelloCardMoveCommand(
 }
 
 export const TRELLO_CARD_MOVE = command({
-  name: 'trello-card-move',
+  name: 'trello card move',
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardMoveCommand,

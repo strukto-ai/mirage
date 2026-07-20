@@ -32,7 +32,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("linear-issue-add-label", resource="linear", spec=SPEC)
+@command("linear issue add-label", resource="linear", spec=SPEC)
 async def linear_issue_add_label(
     accessor: LinearAccessor,
     paths: list[PathSpec],

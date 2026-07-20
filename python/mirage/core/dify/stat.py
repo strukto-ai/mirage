@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from mirage.accessor.dify import DifyAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify._client import get_document_detail
 from mirage.core.dify.path import resolve_path
@@ -7,7 +8,7 @@ from mirage.core.dify.tree import extract_document_size
 from mirage.types import FileStat, FileType, PathSpec
 
 
-async def stat_light(accessor,
+async def stat_light(accessor: DifyAccessor,
                      path: PathSpec,
                      index: IndexCacheStore = NULL_INDEX) -> FileStat:
     resolved = await resolve_path(accessor, path, index)
@@ -35,7 +36,7 @@ async def stat_light(accessor,
     )
 
 
-async def stat(accessor,
+async def stat(accessor: DifyAccessor,
                path: PathSpec,
                index: IndexCacheStore = NULL_INDEX) -> FileStat:
     resolved = await resolve_path(accessor, path, index)
@@ -45,7 +46,7 @@ async def stat(accessor,
             type=FileType.DIRECTORY,
             extra={"children_count": 0},
         )
-    detail = await get_document_detail(accessor.config, resolved.entry.id)
+    detail = await get_document_detail(accessor, resolved.entry.id)
     source_size = extract_document_size(detail)
     if source_size is None:
         source_size = resolved.entry.size

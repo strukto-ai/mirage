@@ -81,9 +81,9 @@ Approved refunds are processed within five business days.
 /knowledge/policies/privacy:0.89
 Customer data is stored encrypted at rest and in transit.
 === calls_ls ===
-list=1 detail=1 segments=0 retrieve=0
+list=1 detail=0 segments=0 retrieve=0
 === calls_ls_then_guides ===
-list=1 detail=3 segments=0 retrieve=0
+list=1 detail=0 segments=0 retrieve=0
 === calls_cat ===
 list=1 detail=0 segments=1 retrieve=0
 === warm_cat ===

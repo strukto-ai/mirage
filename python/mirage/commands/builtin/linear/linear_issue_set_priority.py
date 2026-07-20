@@ -31,7 +31,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("linear-issue-set-priority", resource="linear", spec=SPEC)
+@command("linear issue set-priority", resource="linear", spec=SPEC)
 async def linear_issue_set_priority(
     accessor: LinearAccessor,
     paths: list[PathSpec],

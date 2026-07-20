@@ -1,12 +1,16 @@
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from mirage.accessor.dify import DifyAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dify._client import list_all_documents
 from mirage.utils.path import gnu_basename, parent
 
+logger = logging.getLogger(__name__)
 
-async def ensure_tree(accessor,
+
+async def ensure_tree(accessor: DifyAccessor,
                       index: IndexCacheStore = NULL_INDEX,
                       prefix: str = "") -> None:
     root_key = mount_root(prefix)
@@ -15,7 +19,7 @@ async def ensure_tree(accessor,
         return
 
     # list_all_documents already filters to visible documents.
-    documents = await list_all_documents(accessor.config)
+    documents = await list_all_documents(accessor)
     dir_entries = build_dir_entries(
         documents,
         prefix,
@@ -32,23 +36,8 @@ def build_dir_entries(
     prefix: str,
     slug_metadata_name: str = "slug",
 ) -> dict[str, list[tuple[str, IndexEntry]]]:
-    files: dict[str, dict[str, Any]] = {}
-    raw_slugs: dict[str, str] = {}
-    has_slugs: dict[str, bool] = {}
-    for document in documents:
-        slug, has_slug = extract_slug(document, slug_metadata_name)
-        path = normalize_slug(slug)
-        if path in files:
-            value = path.strip("/")
-            raise ValueError(
-                f"Duplicate {slug_metadata_name} '{value}': documents "
-                f"'{files[path].get('id')}' and '{document.get('id')}' share "
-                "the same path.")
-        files[path] = document
-        raw_slugs[path] = str(slug)
-        has_slugs[path] = has_slug
-
-    raise_on_collisions(files)
+    files, raw_slugs, has_slugs = collect_files(documents, slug_metadata_name)
+    files = skip_path_collisions(files)
     directories = collect_directories(set(files))
     dir_entries: dict[str, list[tuple[str, IndexEntry]]] = {
         virtual_path(directory, prefix): []
@@ -87,6 +76,39 @@ def build_dir_entries(
     return dir_entries
 
 
+def collect_files(
+    documents: list[dict[str, Any]],
+    slug_metadata_name: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, str], dict[str, bool]]:
+    files: dict[str, dict[str, Any]] = {}
+    raw_slugs: dict[str, str] = {}
+    has_slugs: dict[str, bool] = {}
+    for document in documents:
+        try:
+            document_id = document.get("id")
+            if document_id is None or not str(document_id).strip():
+                raise ValueError("missing document id")
+            slug, has_slug = extract_slug(document, slug_metadata_name)
+            path = normalize_slug(slug)
+        except (KeyError, ValueError) as exc:
+            logger.warning("Skipping invalid Dify document %r: %s",
+                           document.get("id"), exc)
+            continue
+        if path in files:
+            logger.warning(
+                "Skipping duplicate Dify document slug %r: documents %r and "
+                "%r share the same path.",
+                path.strip("/"),
+                files[path].get("id"),
+                document.get("id"),
+            )
+            continue
+        files[path] = document
+        raw_slugs[path] = str(slug)
+        has_slugs[path] = has_slug
+    return files, raw_slugs, has_slugs
+
+
 def extract_slug(document: dict[str, Any],
                  slug_metadata_name: str = "slug") -> tuple[str, bool]:
     metadata = document.get("doc_metadata")
@@ -114,19 +136,26 @@ def normalize_slug(value: str) -> str:
     return "/" + "/".join(parts)
 
 
-def raise_on_collisions(files: dict[str, dict[str, Any]]) -> None:
+def skip_path_collisions(
+        files: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    safe = dict(files)
     paths = set(files)
     for path in sorted(paths):
         parts = path.strip("/").split("/")
         for index in range(1, len(parts)):
             ancestor = "/" + "/".join(parts[:index])
             if ancestor in paths:
-                raise ValueError(
-                    "Path collision: document "
-                    f"'{files[ancestor].get('id')}' uses file path "
-                    f"'{ancestor.strip('/')}' but document "
-                    f"'{files[path].get('id')}' requires it as a directory "
-                    "prefix.")
+                logger.warning(
+                    "Skipping Dify document path collision: document %r uses "
+                    "file path %r but document %r requires it as a directory "
+                    "prefix.",
+                    files[ancestor].get("id"),
+                    ancestor.strip("/"),
+                    files[path].get("id"),
+                )
+                safe.pop(path, None)
+                break
+    return safe
 
 
 def collect_directories(paths: set[str]) -> set[str]:

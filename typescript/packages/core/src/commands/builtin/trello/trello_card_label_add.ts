@@ -44,7 +44,7 @@ async function trelloCardLabelAddCommand(
 }
 
 export const TRELLO_CARD_LABEL_ADD = command({
-  name: 'trello-card-label-add',
+  name: 'trello card label',
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardLabelAddCommand,

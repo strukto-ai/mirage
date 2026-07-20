@@ -66,7 +66,7 @@ async function trelloCardCreateCommand(
 }
 
 export const TRELLO_CARD_CREATE = command({
-  name: 'trello-card-create',
+  name: 'trello card create',
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardCreateCommand,

@@ -85,7 +85,7 @@ async function linearIssueTransitionCommand(
 }
 
 export const LINEAR_ISSUE_TRANSITION = command({
-  name: 'linear-issue-transition',
+  name: 'linear issue transition',
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueTransitionCommand,
