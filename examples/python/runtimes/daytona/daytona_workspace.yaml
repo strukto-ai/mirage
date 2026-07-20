@@ -1,0 +1,67 @@
+# S3-centered workspace with a Daytona whole-line runtime.
+#
+# Usage (env vars interpolate from the CLI's environment):
+#   set -a; source .env.development; set +a
+#   mirage workspace create daytona_workspace.yaml --id daytona-demo
+#   printf 'print("hello from the sandbox")\n' \
+#     | mirage execute -w daytona-demo -c 'cat > /data/hello.py'
+#   mirage execute -w daytona-demo -c 'python3 data/hello.py'
+#   mirage workspace delete daytona-demo
+#
+# Captured lines (python3, pip) run whole inside a Daytona
+# sandbox with the workspace synced under its workspace root; every
+# other command stays on the local vfs. The sandbox is created on the
+# first captured line and reused until the workspace is deleted.
+#
+# For a GPU sandbox (needs GPU quota on the Daytona org), size it with
+# an image (sizing requires one; snapshot sandboxes fix sizing at
+# snapshot creation):
+#   - name: daytona
+#     captures: ["python3", "nvidia-smi"]
+#     api_key: ${DAYTONA_API_KEY}
+#     image: nvidia/cuda:12.9.0-base-ubuntu24.04
+#     resources: {cpu: 1, memory: 2, disk: 10, gpu: 1}
+
+mode: EXEC
+
+mounts:
+  /data:
+    resource: s3
+    config:
+      bucket: ${AWS_S3_BUCKET}
+      region: ${AWS_DEFAULT_REGION}
+      aws_access_key_id: ${AWS_ACCESS_KEY_ID}
+      aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+      key_prefix: mirage-daytona-cli-demo
+
+# Lifecycle: the active entry below stops the sandbox after 10 idle
+# minutes and deletes it 30 minutes later, so a forgotten demo cleans
+# itself up (deleting the workspace already deletes a sandbox it
+# created; these knobs are the safety net, and the whole lifecycle for
+# a shared sandbox_id: sandbox, which close never deletes). Daytona
+# defaults: stop after 15 idle minutes, never delete; 0 = never stop /
+# delete right on stop.
+#
+# Any other Daytona create param goes through sandbox_params verbatim
+# (merged last, so it can also override the options above):
+#   sandbox_params:
+#     auto_archive_interval: 30
+#     labels: {team: ml}
+#
+# Live S3 instead of copy sync (mount: fuse): the sandbox runs mirage
+# and FUSE-mounts the same bucket, so remote writes appear in /data
+# immediately. Needs an image or snapshot with fuse3 and
+# mirage-ai[s3,fuse] baked in; build the snapshot once with
+# prebake_snapshot.py (the API key needs snapshot-write scope), then:
+#   - name: daytona
+#     captures: ["python3"]
+#     api_key: ${DAYTONA_API_KEY}
+#     snapshot: mirage-fuse
+#     mount: fuse
+runtimes:
+  - name: daytona
+    captures: ["python3", "pip"]
+    api_key: ${DAYTONA_API_KEY}
+    auto_stop_interval: 10 # idle minutes before stop
+    auto_delete_interval: 30 # minutes stopped before delete
+  - vfs

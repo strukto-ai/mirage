@@ -188,6 +188,20 @@ export class S3Resource implements Resource {
     return globCore(this.accessor, effective, this.index)
   }
 
+  remoteMountSpec(): Record<string, unknown> {
+    const config: Record<string, unknown> = { bucket: this.config.bucket }
+    if (this.config.region !== undefined) config.region = this.config.region
+    if (this.config.endpoint !== undefined) config.endpoint_url = this.config.endpoint
+    if (this.config.accessKeyId !== undefined) config.aws_access_key_id = this.config.accessKeyId
+    if (this.config.secretAccessKey !== undefined) {
+      config.aws_secret_access_key = this.config.secretAccessKey
+    }
+    if (this.config.sessionToken !== undefined) config.aws_session_token = this.config.sessionToken
+    if (this.config.forcePathStyle !== undefined) config.path_style = this.config.forcePathStyle
+    if (this.config.keyPrefix !== undefined) config.key_prefix = this.config.keyPrefix
+    return { resource: 's3', config }
+  }
+
   getState(): Promise<S3ResourceState> {
     return Promise.resolve({
       type: this.kind,

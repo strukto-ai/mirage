@@ -1,0 +1,203 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import posixpath
+import shlex
+from typing import Any
+
+from mirage.runtime.base import RunResult
+from mirage.runtime.sandbox.base import RemoteSandbox
+
+AsyncDaytona: Any
+CreateSandboxFromImageParams: Any
+CreateSandboxFromSnapshotParams: Any
+DaytonaConfig: Any
+Resources: Any
+try:
+    from daytona import AsyncDaytona as _AsyncDaytona
+    from daytona import \
+        CreateSandboxFromImageParams as _CreateSandboxFromImageParams
+    from daytona import \
+        CreateSandboxFromSnapshotParams as _CreateSandboxFromSnapshotParams
+    from daytona import DaytonaConfig as _DaytonaConfig
+    from daytona import Resources as _Resources
+except ImportError:
+    AsyncDaytona = None
+    CreateSandboxFromImageParams = None
+    CreateSandboxFromSnapshotParams = None
+    DaytonaConfig = None
+    Resources = None
+else:
+    AsyncDaytona = _AsyncDaytona
+    CreateSandboxFromImageParams = _CreateSandboxFromImageParams
+    CreateSandboxFromSnapshotParams = _CreateSandboxFromSnapshotParams
+    DaytonaConfig = _DaytonaConfig
+    Resources = _Resources
+
+_INSTALL_HINT = ("the daytona runtime needs the daytona SDK; install with: "
+                 "pip install mirage-ai[daytona]")
+
+_STDIN_PATH = "/tmp/.mirage_stdin"
+
+
+class DaytonaRuntime(RemoteSandbox):
+    """A Daytona sandbox as a whole-line runtime.
+
+    The uniform RemoteSandbox surface maps directly: ``image`` becomes
+    a Daytona image sandbox (omitted = the account's default
+    snapshot), ``resources`` maps onto Daytona's per-sandbox sizing
+    (``gpu`` truthy requests a GPU and forces the sandbox ephemeral,
+    as Daytona requires), ``api_key`` falls back to DAYTONA_API_KEY.
+    Daytona's exec has no stdin and reports combined output, so piped
+    bytes are uploaded and redirected in, and stderr comes back None.
+
+    Args:
+        snapshot (str | None): name of a prebaked Daytona snapshot to
+            boot from. Prefer this over image for anything heavy:
+            image builds run in the sandbox-create path (slow, and
+            large exports have wedged the SDK's log stream), while a
+            snapshot boots in seconds. Mutually exclusive with image.
+        auto_stop_interval (int | None): minutes of inactivity before
+            Daytona stops the sandbox (0 = never; Daytona defaults to
+            15). A stopped sandbox keeps its disk and can be
+            reattached via sandbox_id.
+        auto_delete_interval (int | None): minutes after stopping
+            before Daytona deletes the sandbox (0 = on stop; Daytona
+            defaults to never). GPU sandboxes are ephemeral and always
+            delete on stop.
+        sandbox_params (dict[str, Any] | None): extra Daytona create
+            params passed verbatim to the SDK, merged last so they
+            can also override anything computed here. Covers the long
+            tail (auto_archive_interval, labels, volumes, ...) without
+            a named option per key; unknown keys fail loud in the
+            SDK's own validation.
+        options (Any): the uniform RemoteSandbox constructor fields.
+    """
+
+    name = "daytona"
+    _client: Any = None
+    _sandbox: Any = None
+
+    def __init__(self,
+                 snapshot: str | None = None,
+                 auto_stop_interval: int | None = None,
+                 auto_delete_interval: int | None = None,
+                 sandbox_params: dict[str, Any] | None = None,
+                 **options: Any) -> None:
+        super().__init__(**options)
+        if snapshot is not None and self.image is not None:
+            raise ValueError(
+                "daytona takes image or snapshot, not both: an image "
+                "builds at create time, a snapshot is already built")
+        self.snapshot = snapshot
+        self.auto_stop_interval = auto_stop_interval
+        self.auto_delete_interval = auto_delete_interval
+        self.sandbox_params = dict(sandbox_params) if sandbox_params else {}
+
+    def _ensure_client(self) -> Any:
+        if AsyncDaytona is None:
+            raise ImportError(_INSTALL_HINT)
+        if self._client is None:
+            config = (DaytonaConfig(
+                api_key=self.api_key) if self.api_key is not None else None)
+            self._client = AsyncDaytona(config)
+        return self._client
+
+    async def create_sandbox(self) -> str:
+        client = self._ensure_client()
+        self._sandbox = await client.create(self._create_params())
+        return str(self._sandbox.id)
+
+    async def connect_sandbox(self, sandbox_id: str) -> None:
+        client = self._ensure_client()
+        self._sandbox = await client.get(sandbox_id)
+
+    async def default_workspace_root(self) -> str:
+        """$HOME/workspace: the sandbox user is not root (uid 1001
+        `daytona` in the default snapshot), so a root-level /workspace
+        cannot even be created; home always can."""
+        response = await self._sandbox.process.exec('printf "%s" "$HOME"')
+        home = str(response.result).strip()
+        return posixpath.join(home or "/", "workspace")
+
+    def _create_params(self) -> Any:
+        """Map the uniform constructor fields onto Daytona params."""
+        shared: dict[str, Any] = {}
+        if self.env:
+            shared["env_vars"] = dict(self.env)
+        if self.auto_stop_interval is not None:
+            shared["auto_stop_interval"] = self.auto_stop_interval
+        if self.auto_delete_interval is not None:
+            shared["auto_delete_interval"] = self.auto_delete_interval
+        resources = self._create_resources()
+        if self.image is None:
+            # Snapshot sandboxes fix sizing when the snapshot is
+            # created; dropping a resources block silently would hide
+            # that no GPU was ever requested.
+            if resources is not None:
+                raise ValueError(
+                    "daytona resources (cpu/memory/disk/gpu) require an "
+                    "image; a snapshot sandbox fixes its sizing when the "
+                    "snapshot is created")
+            if self.snapshot is not None:
+                shared["snapshot"] = self.snapshot
+            shared.update(self.sandbox_params)
+            return CreateSandboxFromSnapshotParams(**shared)
+        if self.resources is not None and self.resources.gpu:
+            shared["ephemeral"] = True
+        if resources is not None:
+            shared["resources"] = resources
+        shared["image"] = self.image
+        shared.update(self.sandbox_params)
+        return CreateSandboxFromImageParams(**shared)
+
+    def _create_resources(self) -> Any:
+        if self.resources is None:
+            return None
+        gpu = self.resources.gpu
+        count = gpu if isinstance(gpu, int) else (1 if gpu else None)
+        return Resources(cpu=self.resources.cpu,
+                         memory=self.resources.memory,
+                         disk=self.resources.disk,
+                         gpu=count)
+
+    async def exec_line(self, line: str, stdin: bytes | None,
+                        env: dict[str, str], cwd: str) -> RunResult:
+        command = line
+        if stdin is not None:
+            await self.upload(_STDIN_PATH, stdin)
+            command = f"( {line} ) < {shlex.quote(_STDIN_PATH)}"
+        response = await self._sandbox.process.exec(command, cwd=cwd, env=env)
+        return RunResult(stdout=str(response.result).encode(),
+                         stderr=None,
+                         exit_code=int(response.exit_code))
+
+    async def upload(self, path: str, data: bytes) -> None:
+        parent = path.rsplit("/", 1)[0]
+        if parent:
+            await self._sandbox.fs.create_folder(parent, "755")
+        await self._sandbox.fs.upload_file(data, path)
+
+    async def download(self, path: str) -> bytes:
+        data = await self._sandbox.fs.download_file(path)
+        return data if data is not None else b""
+
+    async def close(self) -> None:
+        if getattr(self, "_sandbox", None) is not None:
+            if self.owned_sandbox:
+                await self._client.delete(self._sandbox)
+            self._sandbox = None
+        if getattr(self, "_client", None) is not None:
+            await self._client.close()
+            self._client = None

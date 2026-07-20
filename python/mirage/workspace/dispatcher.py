@@ -128,6 +128,19 @@ class Dispatcher:
             return False
         return mount.resource.caches_reads
 
+    async def invalidate_all_after_remote(self) -> None:
+        """Drop the file cache and every mount index wholesale.
+
+        A whole-line runtime may have written anywhere in its view of
+        the workspace, so per-path invalidation cannot apply: clear
+        the read caches so the next local command refetches from the
+        backends instead of serving pre-line state.
+        """
+        if self._cache is not None:
+            await self._cache.clear()
+        for mount in self._namespace.registry.mounts():
+            await mount.resource.index.clear()
+
     async def invalidate_after_write_by_path(self, path: str) -> None:
         """Drop file-cache + stale parent index after a write to `path`.
 

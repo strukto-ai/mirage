@@ -166,7 +166,9 @@ camel       = [
 ]
 
 # --- sandboxes ---
-daytona     = ["daytona>=0.176.0"]
+daytona     = [
+    "daytona>=0.176.0",
+]
 
 # --- meta: install everything ---
 all = [
@@ -199,12 +201,16 @@ all = [
     "mirage-ai[agno]",
     "mirage-ai[claude-agent-sdk]",
     "mirage-ai[daytona]",
+    "mirage-ai[e2b]",
 ]
 lancedb = [
     "lancedb>=0.33.0",
 ]
 mem0 = [
     "mem0ai>=2.0.6",
+]
+e2b = [
+    "e2b>=2.0.0",
 ]
 
 [tool.uv]

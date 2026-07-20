@@ -99,7 +99,7 @@ import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
-import { stripSlash } from '../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../utils/slash.ts'
 
 /**
  * One mount entry: a bare resource takes the workspace default mode, a
@@ -355,7 +355,11 @@ export class Workspace {
     for (const entry of this.runtimeEntries) {
       if (typeof entry.script === 'string')
         throw scriptStringError(`runtime '${entry.name}' script`)
-      entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
+      entry.attach(
+        this.buildWorkspaceBridge(),
+        () => this.sandboxVisibleMounts(),
+        () => this.sandboxMountSpecs(),
+      )
       this.closers.push(() => entry.close())
     }
     this.runtimeBindings = bindCommands(this.runtimeEntries)
@@ -445,6 +449,22 @@ export class Workspace {
   }
 
   /**
+   * Per-prefix remote mount specs for sandbox runtimes: each mount
+   * prefix (trailing slash stripped) to its resource's
+   * remoteMountSpec(), null where the backing store is not remotely
+   * reachable. Read per run, like the prefixes.
+   */
+  private sandboxMountSpecs(): Record<string, Record<string, unknown> | null> {
+    const specs: Record<string, Record<string, unknown> | null> = {}
+    for (const m of this.registry.allMounts()) {
+      const stripped = rstripSlash(m.prefix)
+      const prefix = stripped === '' ? '/' : stripped
+      specs[prefix] = m.resource.remoteMountSpec?.() ?? null
+    }
+    return specs
+  }
+
+  /**
    * Append a runtime entry to the workspace's ordered world.
    *
    * The entry lands last, so it never steals a command an earlier
@@ -457,7 +477,11 @@ export class Workspace {
     if (typeof entry.script === 'string') throw scriptStringError(`runtime '${entry.name}' script`)
     const candidate = [...this.runtimeEntries, entry]
     const bindings = bindCommands(candidate)
-    entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
+    entry.attach(
+      this.buildWorkspaceBridge(),
+      () => this.sandboxVisibleMounts(),
+      () => this.sandboxMountSpecs(),
+    )
     this.closers.push(() => entry.close())
     this.runtimeEntries.push(entry)
     this.runtimeBindings = bindings
@@ -1034,6 +1058,20 @@ export class Workspace {
    * for any mount that maintains an index. No-op for paths that resolve
    * to no known mount.
    */
+  /**
+   * Drop the file cache and every mount index wholesale. A whole-line
+   * runtime may have written anywhere in its view of the workspace,
+   * so per-path invalidation cannot apply: clear the read caches so
+   * the next local command refetches from the backends instead of
+   * serving pre-line state.
+   */
+  private async invalidateAllAfterRemote(): Promise<void> {
+    await this.dispatcher.clearFileCache()
+    for (const m of this.registry.allMounts()) {
+      await m.resource.index?.clear()
+    }
+  }
+
   async invalidateAfterWriteByPath(path: string): Promise<void> {
     await this.dispatcher.invalidateAfterWriteByPath(path)
   }
@@ -1186,12 +1224,24 @@ export class Workspace {
     const lineRuntime = this.wholeLineRuntimeFor(rootNode, deps.routingDecision ?? null)
     if (lineRuntime?.runLine !== undefined) {
       const data = stdin !== null ? await materialize(stdin) : null
-      const result = await lineRuntime.runLine(
-        command,
-        data,
-        { ...effectiveSession.env },
-        effectiveSession.cwd,
-      )
+      let result: RunResult
+      try {
+        result = await lineRuntime.runLine(
+          command,
+          data,
+          { ...effectiveSession.env },
+          effectiveSession.cwd,
+        )
+        // The line may have written anywhere in the runtime's view of
+        // the workspace; local read caches are stale.
+        await this.invalidateAllAfterRemote()
+      } catch (err) {
+        result = {
+          stdout: new Uint8Array(),
+          stderr: new TextEncoder().encode(err instanceof Error ? err.message : String(err)),
+          exitCode: 1,
+        }
+      }
       targetSession.lastExitCode = result.exitCode
       if (isLine) {
         const lineIo = new IOResult({

@@ -65,6 +65,16 @@ export interface Resource {
   readonly supportsSnapshot?: boolean
   readonly index?: IndexCacheStore
   readonly accessor?: Accessor
+  /**
+   * How a remote host can mount this resource's backing store: a
+   * serializable `{resource, config}` including credentials, enough
+   * for another mirage process (e.g. inside a sandbox) to construct
+   * the same resource and mount it. The manifest is consumed by
+   * Python mirage in the sandbox, so config keys use its snake_case
+   * field names. Absent or null means the backing store is not
+   * remotely reachable, e.g. RAM or a local disk.
+   */
+  remoteMountSpec?(): Record<string, unknown> | null
   readonly opsMap?: Record<string, unknown>
   setIndex?(config?: IndexConfig): void
   open(): Promise<void>

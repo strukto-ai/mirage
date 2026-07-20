@@ -58,8 +58,10 @@
     "web-tree-sitter": "^0.26.8"
   },
   "peerDependencies": {
+    "@daytonaio/sdk": "^0.199.0",
     "@lancedb/lancedb": "^0.30.0",
     "@zkochan/fuse-native": "^0.1.0",
+    "e2b": "^2.0.0",
     "imapflow": "^1.0.0",
     "mailparser": "^3.6.0",
     "mongodb": "^6.10.0",
@@ -70,10 +72,16 @@
     "ssh2": "^1.16.0"
   },
   "peerDependenciesMeta": {
+    "@daytonaio/sdk": {
+      "optional": true
+    },
     "@lancedb/lancedb": {
       "optional": true
     },
     "@zkochan/fuse-native": {
+      "optional": true
+    },
+    "e2b": {
       "optional": true
     },
     "imapflow": {
@@ -103,12 +111,14 @@
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
+    "@daytonaio/sdk": "^0.199.0",
     "@lancedb/lancedb": "^0.30.0",
     "@types/mailparser": "^3.4.6",
     "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.11.0",
     "@types/ssh2": "^1.15.0",
     "@zkochan/fuse-native": "^0.1.0",
+    "e2b": "^2.0.0",
     "imapflow": "^1.3.2",
     "mailparser": "^3.9.8",
     "mongodb": "^6.10.0",

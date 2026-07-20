@@ -25,11 +25,19 @@ export function registerExecuteCommand(program: Command): void {
     .requiredOption('-w, --workspace <id>', 'Workspace id')
     .requiredOption('-c, --command <command>', 'Shell command to execute')
     .option('-s, --session <id>', 'Session id')
+    .option('--cwd <path>', 'Working directory for this line (a workspace path)')
     .option('--bg', 'Background; return job_id immediately')
     .action(
-      async (opts: { workspace: string; command: string; session?: string; bg?: boolean }) => {
+      async (opts: {
+        workspace: string
+        command: string
+        session?: string
+        cwd?: string
+        bg?: boolean
+      }) => {
         const body: Record<string, unknown> = { command: opts.command, provision: false }
         if (opts.session !== undefined) body.sessionId = opts.session
+        if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.bg !== true && !process.stdin.isTTY) {
           body.stdinBase64 = readFileSync(0).toString('base64')
         }

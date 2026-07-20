@@ -32,6 +32,7 @@ interface ExecuteBody {
   sessionId?: string
   provision?: boolean
   agentId?: string
+  cwd?: string
   stdinBase64?: string
 }
 
@@ -54,6 +55,7 @@ export function registerExecuteRoutes(app: FastifyInstance, deps: ExecuteRoutesD
         entry.runner.ws.execute(body.command, {
           ...(body.sessionId !== undefined ? { sessionId: body.sessionId } : {}),
           ...(body.agentId !== undefined ? { agentId: body.agentId } : {}),
+          ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
           ...(body.provision === true ? { provision: true as const } : {}),
           ...(body.stdinBase64 !== undefined
             ? { stdin: new Uint8Array(Buffer.from(body.stdinBase64, 'base64')) }

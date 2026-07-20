@@ -101,8 +101,13 @@ class WasiRuntime(Runtime):
         self._mount_prefixes = mount_prefixes
         self._runtime = WasmRuntime(self._root / "python.wasm", "python3")
 
-    def attach(self, dispatch: Callable[..., Any],
-               mount_prefixes: Callable[[], list[str]]) -> None:
+    def attach(
+        self,
+        dispatch: Callable[..., Any],
+        mount_prefixes: Callable[[], list[str]],
+        mount_specs: Callable[[], dict[str, dict[str, Any] | None]]
+        | None = None,
+    ) -> None:
         if self._dispatch is None:
             self._dispatch = dispatch
             self._mount_prefixes = mount_prefixes

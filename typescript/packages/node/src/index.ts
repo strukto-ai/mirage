@@ -377,6 +377,17 @@ export { EmailAccessor } from './accessor/email.ts'
 export { EMAIL_COMMANDS } from './commands/builtin/email/index.ts'
 export { EMAIL_OPS } from './ops/email/index.ts'
 export {
+  DaytonaRuntime,
+  DAYTONA_OPTION_KEYS,
+  type DaytonaRuntimeOptions,
+} from './workspace/runtime/daytona.ts'
+export { E2BRuntime, E2B_OPTION_KEYS, type E2BRuntimeOptions } from './workspace/runtime/e2b.ts'
+export {
+  DockerRuntime,
+  DOCKER_OPTION_KEYS,
+  type DockerRuntimeOptions,
+} from './workspace/runtime/docker.ts'
+export {
   buildResource,
   knownResources,
   register as registerResourceFactory,

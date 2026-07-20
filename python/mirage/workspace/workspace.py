@@ -425,6 +425,19 @@ class Workspace:
         # mounts added or removed after construction are picked up.
         return self._ops.mount_prefixes()
 
+    def _runtime_mount_specs(self) -> dict[str, dict[str, Any] | None]:
+        """Per-prefix remote mount specs for sandbox runtimes.
+
+        Maps each mount prefix (trailing slash stripped) to its
+        resource's remote_mount_spec(), None where the backing store
+        is not remotely reachable. Read per run, like the prefixes.
+        """
+        specs: dict[str, dict[str, Any] | None] = {}
+        for mount in self._registry.mounts():
+            prefix = mount.prefix.rstrip("/") or "/"
+            specs[prefix] = mount.resource.remote_mount_spec()
+        return specs
+
     def _resolve_runtime_entries(
             self, runtimes: list[Runtime | str] | None) -> list[Runtime]:
         """Build and wire the workspace's ordered runtime world.
@@ -458,7 +471,8 @@ class Workspace:
         for entry in entries:
             _reject_config_script(f"runtime {entry.name!r} script",
                                   entry.script)
-            entry.attach(self.dispatch, self._runtime_mount_prefixes)
+            entry.attach(self.dispatch, self._runtime_mount_prefixes,
+                         self._runtime_mount_specs)
         return entries
 
     def add_runtime(self, runtime: Runtime | str) -> Runtime:
@@ -481,7 +495,8 @@ class Workspace:
         _reject_config_script(f"runtime {entry.name!r} script", entry.script)
         candidate = [*self._runtime_entries, entry]
         bindings = bind_commands(candidate)
-        entry.attach(self.dispatch, self._runtime_mount_prefixes)
+        entry.attach(self.dispatch, self._runtime_mount_prefixes,
+                     self._runtime_mount_specs)
         self._runtime_entries = candidate
         self._registry.runtime_bindings = bindings
         return entry
@@ -1199,6 +1214,9 @@ class Workspace:
                 result = await line_runtime.run_line(
                     command, data, dict(effective_session.env),
                     effective_session.cwd)
+                # The line may have written anywhere in the runtime's
+                # view of the workspace; local read caches are stale.
+                await self._dispatcher.invalidate_all_after_remote()
                 io = IOResult(exit_code=result.exit_code,
                               stdout=result.stdout,
                               stderr=result.stderr)

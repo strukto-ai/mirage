@@ -98,8 +98,13 @@ class Runtime(ABC):
     # engine inside one command (python3, node), never the line.
     runs_lines: bool = False
 
-    def attach(self, dispatch: Callable[..., Any],
-               mount_prefixes: Callable[[], list[str]]) -> None:
+    def attach(
+        self,
+        dispatch: Callable[..., Any],
+        mount_prefixes: Callable[[], list[str]],
+        mount_specs: Callable[[], dict[str, dict[str, Any] | None]]
+        | None = None,
+    ) -> None:
         """Late-wire workspace I/O into a user-constructed instance.
 
         Config-built and user-passed runtimes exist before the
@@ -112,6 +117,10 @@ class Runtime(ABC):
                 sandboxed runtime bridges file I/O through.
             mount_prefixes (Callable[[], list[str]]): live list of
                 workspace mount prefixes, read per run.
+            mount_specs (Callable | None): per-prefix remote mount
+                specs (each resource's remote_mount_spec()), for
+                runtimes that reproduce the mounts elsewhere; most
+                runtimes ignore it.
         """
 
     @abstractmethod
