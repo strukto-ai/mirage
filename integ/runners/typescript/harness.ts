@@ -43,6 +43,7 @@ export interface Target {
   epoch?: string
   apps?: string
   mail?: string
+  dataset?: string
   mounts: Mount[]
 }
 

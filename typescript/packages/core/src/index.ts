@@ -1065,6 +1065,20 @@ export { readBytes as chromaRead, readStream as chromaReadStream } from './core/
 export { readdir as chromaReaddir } from './core/chroma/readdir.ts'
 export { stat as chromaStat } from './core/chroma/stat.ts'
 export { searchSegments as chromaSearch } from './core/chroma/search.ts'
+export { DifyAccessor } from './accessor/dify.ts'
+export {
+  resolveDifyConfig,
+  type DifyConfig,
+  type DifyConfigResolved,
+} from './resource/dify/config.ts'
+export { DIFY_PROMPT } from './resource/dify/prompt.ts'
+export { DIFY_OPS } from './ops/dify/index.ts'
+export { DIFY_COMMANDS } from './commands/builtin/dify/index.ts'
+export { DifyResource, type DifyResourceOptions } from './resource/dify/dify.ts'
+export { readBytes as difyRead, readStream as difyReadStream } from './core/dify/read.ts'
+export { readdir as difyReaddir } from './core/dify/readdir.ts'
+export { stat as difyStat } from './core/dify/stat.ts'
+export { searchSegments as difySearch } from './core/dify/search.ts'
 export type { QdrantPoint, QdrantRow } from './core/qdrant/_client.ts'
 export { QdrantAccessor } from './accessor/qdrant.ts'
 export {

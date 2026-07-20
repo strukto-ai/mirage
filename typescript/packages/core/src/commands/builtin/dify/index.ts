@@ -12,12 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export function scoreFromDistance(value: unknown): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '0.00'
-  return Math.max(0, 1 - value).toFixed(2)
-}
+import type { DifyAccessor } from '../../../accessor/dify.ts'
+import { ResourceName } from '../../../types.ts'
+import type { RegisteredCommand } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
+import { DIFY_FIND } from './find.ts'
+import { DIFY_IO } from './io.ts'
+import { DIFY_SEARCH } from './search.ts'
 
-export function formatScore(value: unknown): string | null {
-  if (typeof value !== 'number' || Number.isNaN(value)) return null
-  return value.toFixed(2)
-}
+const DIFY_OVERRIDES = new Set(['find', 'search'])
+
+export const DIFY_COMMANDS: readonly RegisteredCommand[] = [
+  ...makeGenericCommands<DifyAccessor>(ResourceName.DIFY, DIFY_IO, {
+    overrides: DIFY_OVERRIDES,
+  }),
+  ...DIFY_FIND,
+  ...DIFY_SEARCH,
+]

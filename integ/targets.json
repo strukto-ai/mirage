@@ -729,6 +729,22 @@
           "backend": "ram"
         }
       ]
+    },
+    {
+      "id": "dify",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "dify",
+      "dataset": "kb-7f3a",
+      "mounts": [
+        {
+          "path": "/knowledge",
+          "resource": "dify",
+          "backend": "dify"
+        }
+      ]
     }
   ]
 }

@@ -519,6 +519,16 @@ jobs:
           cat /tmp/linearsrv.log
           echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
 
+      - name: Start fake Dify API for the typescript host
+        run: |
+          nohup ./python/.venv/bin/python integ/server/dify_server.py --port 5093 > /tmp/difysrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "DIFY_ENDPOINT=" /tmp/difysrv.log && break
+            sleep 1
+          done
+          cat /tmp/difysrv.log
+          echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
+
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py
 
@@ -778,11 +788,6 @@ jobs:
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
-
-      - name: Run dify integ (mock server) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/dify.py > /tmp/dify.out
-          diff integ/truth_dify.txt /tmp/dify.out
 
       - name: Run notion integ (mock server) and diff against truth
         run: |

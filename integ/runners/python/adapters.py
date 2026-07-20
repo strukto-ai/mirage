@@ -39,6 +39,7 @@ from mirage.accessor.sharepoint import SharePointConfig
 from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.box import BoxConfig, BoxResource
+from mirage.resource.dify import DifyConfig, DifyResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
 from mirage.resource.email.config import EmailConfig
@@ -218,6 +219,11 @@ def _load_ssh_server() -> ModuleType:
 def _load_box_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "box_server.py")
+
+
+def _load_dify_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" / "dify_server.py")
 
 
 def _load_trello_server() -> ModuleType:
@@ -732,6 +738,29 @@ class SlackService:
         return None
 
 
+class DifyService:
+
+    def __init__(self, runner, base: str, dataset: str) -> None:
+        self.runner = runner
+        self.base = base
+        self.dataset = dataset
+
+    @classmethod
+    async def create(cls, target: dict) -> "DifyService":
+        module = _load_dify_server()
+        state, _server, runner = await module.start_fake_dify()
+        return cls(runner, state.base, target.get("dataset", "kb-7f3a"))
+
+    def resource(self, mount: dict) -> DifyResource:
+        return DifyResource(
+            DifyConfig(api_key="integ-key",
+                       base_url=self.base,
+                       dataset_id=self.dataset))
+
+    async def teardown(self) -> None:
+        await self.runner.cleanup()
+
+
 class TrelloService:
 
     def __init__(self, state, runner, base: str) -> None:
@@ -811,7 +840,7 @@ class SharePointService:
 Service = (S3Service | OneDriveService | SharePointService | SSHService
            | NextcloudService | GwsService | HfService | BoxService
            | DropboxService | GridFSService | SlackService | TrelloService
-           | LinearService)
+           | LinearService | DifyService)
 
 
 def build_ram(
@@ -885,6 +914,13 @@ def build_dropbox(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DropboxService)
+    return service.resource(mount), _noop
+
+
+def build_dify(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, DifyService)
     return service.resource(mount), _noop
 
 
@@ -987,6 +1023,7 @@ BUILDERS = {
     "slack": build_slack,
     "trello": build_trello,
     "linear": build_linear,
+    "dify": build_dify,
 }
 
 
@@ -1022,6 +1059,8 @@ async def open_target(
         service = await TrelloService.create()
     elif target.get("service") == "linear":
         service = await LinearService.create()
+    elif target.get("service") == "dify":
+        service = await DifyService.create(target)
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
     for mount in target["mounts"]:

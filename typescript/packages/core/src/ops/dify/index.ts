@@ -12,12 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export function scoreFromDistance(value: unknown): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '0.00'
-  return Math.max(0, 1 - value).toFixed(2)
-}
+import { DIFY_IO } from '../../commands/builtin/dify/io.ts'
+import { ResourceName } from '../../types.ts'
+import { makeGenericOps } from '../generic/factory.ts'
+import type { RegisteredOp } from '../registry.ts'
 
-export function formatScore(value: unknown): string | null {
-  if (typeof value !== 'number' || Number.isNaN(value)) return null
-  return value.toFixed(2)
-}
+export const DIFY_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.DIFY, DIFY_IO)

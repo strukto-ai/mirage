@@ -172,6 +172,7 @@ export const ResourceName = Object.freeze({
   POSTGRES: 'postgres',
   LANCEDB: 'lancedb',
   CHROMA: 'chroma',
+  DIFY: 'dify',
   QDRANT: 'qdrant',
   HF_BUCKETS: 'hf_buckets',
   HF_DATASETS: 'hf_datasets',

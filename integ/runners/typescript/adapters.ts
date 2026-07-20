@@ -25,6 +25,7 @@ import {
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import {
   BoxResource,
+  DifyResource,
   DiskResource,
   DropboxResource,
   EmailResource,
@@ -730,6 +731,21 @@ async function openSlack(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function openDify(target: Target): Promise<Open> {
+  const endpoint = process.env.DIFY_ENDPOINT
+  if (!endpoint) throw new Error('dify target requires DIFY_ENDPOINT')
+  const mounts: Record<string, DifyResource> = {}
+  for (const m of target.mounts) {
+    mounts[m.path] = new DifyResource({
+      apiKey: 'integ-key',
+      baseUrl: endpoint,
+      datasetId: target.dataset ?? 'kb-7f3a',
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 async function openTrello(target: Target): Promise<Open> {
   const endpoint = process.env.TRELLO_ENDPOINT
   if (!endpoint) throw new Error('trello target requires TRELLO_ENDPOINT')
@@ -788,4 +804,5 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   slack: openSlack,
   trello: openTrello,
   linear: openLinear,
+  dify: openDify,
 }
