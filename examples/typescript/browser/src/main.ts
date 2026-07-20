@@ -245,7 +245,7 @@ async function demoGslides(ws: Workspace): Promise<void> {
 
 async function demoGdrive(ws: Workspace): Promise<void> {
   line('')
-  line('━━━ Google Drive (/gdrive/) — folder tree + gws-* reused via multi-resource ━━━', 'prompt')
+  line('━━━ Google Drive (/gdrive/) — folder tree + gws commands reused via multi-resource ━━━', 'prompt')
   await run(ws, 'ls /gdrive/')
   await run(ws, 'tree -L 1 /gdrive/')
   await run(ws, "find /gdrive/ -name '*.gdoc.json' | head -n 3")

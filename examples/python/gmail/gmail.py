@@ -212,9 +212,9 @@ async def main() -> None:
 
     # Resource-specific commands
 
-    # gws-gmail-triage
-    print("=== gws-gmail-triage ===")
-    result = await ws.execute('gws-gmail-triage --query "is:unread" --max 3')
+    # gws gmail +triage
+    print("=== gws gmail +triage ===")
+    result = await ws.execute('gws gmail +triage --query "is:unread" --max 3')
     print((await result.stdout_str())[:500])
 
     # ── glob expansion (exercises resolve_glob → readdir)
@@ -232,15 +232,15 @@ async def main() -> None:
     for line in out.splitlines():
         print(f"  {line[:120]}")
 
-    # gws-gmail-read (use message_id from filename)
+    # gws gmail +read (use message_id from filename)
     msg_id = first_msg.rsplit("__", 1)[-1].replace(".gmail.json", "")
-    print(f"=== gws-gmail-read --id {msg_id} ===")
-    result = await ws.execute(f"gws-gmail-read --id {msg_id}")
+    print(f"=== gws gmail +read --id {msg_id} ===")
+    result = await ws.execute(f"gws gmail +read --id {msg_id}")
     print((await result.stdout_str())[:500])
 
-    # gws-gmail-send
-    print("=== gws-gmail-send ===")
-    result = await ws.execute('gws-gmail-send --to "zechengzhang97@gmail.com"'
+    # gws gmail +send
+    print("=== gws gmail +send ===")
+    result = await ws.execute('gws gmail +send --to "zechengzhang97@gmail.com"'
                               ' --subject "Test from MIRAGE"'
                               ' --body "Sent by gmail.py example"')
     out = await result.stdout_str()
@@ -251,24 +251,25 @@ async def main() -> None:
         sent = json.loads(out)
         sent_id = sent.get("id", "")
 
-    # gws-gmail-reply
+    # gws gmail +reply
     if sent_id:
-        print("=== gws-gmail-reply ===")
-        result = await ws.execute(f'gws-gmail-reply --message-id {sent_id}'
+        print("=== gws gmail +reply ===")
+        result = await ws.execute(f'gws gmail +reply --message-id {sent_id}'
                                   ' --body "Reply from MIRAGE"')
         print((await result.stdout_str())[:200])
 
-    # gws-gmail-reply-all
+    # gws gmail +reply-all
     if sent_id:
-        print("=== gws-gmail-reply-all ===")
-        result = await ws.execute(f'gws-gmail-reply-all --message-id {sent_id}'
-                                  ' --body "Reply-all from MIRAGE"')
+        print("=== gws gmail +reply-all ===")
+        result = await ws.execute(
+            f'gws gmail +reply-all --message-id {sent_id}'
+            ' --body "Reply-all from MIRAGE"')
         print((await result.stdout_str())[:200])
 
-    # gws-gmail-forward
+    # gws gmail +forward
     if sent_id:
-        print("=== gws-gmail-forward ===")
-        result = await ws.execute(f'gws-gmail-forward --message-id {sent_id}'
+        print("=== gws gmail +forward ===")
+        result = await ws.execute(f'gws gmail +forward --message-id {sent_id}'
                                   ' --to "zechengzhang97@gmail.com"')
         print((await result.stdout_str())[:200])
 

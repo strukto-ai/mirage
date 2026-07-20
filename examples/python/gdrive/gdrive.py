@@ -145,15 +145,15 @@ async def main() -> None:
         result = await ws.execute(f'realpath "{gdoc}"')
         print(await result.stdout_str())
 
-    print("=== gws-docs-documents-create ===")
+    print("=== gws docs documents create ===")
     result = await ws.execute(
-        'gws-docs-documents-create'
+        'gws docs documents create'
         ' --json \'{"title": "Test from MIRAGE gdrive"}\'')
     print((await result.stdout_str())[:300])
 
-    print("=== gws-sheets-spreadsheets-create ===")
+    print("=== gws sheets spreadsheets create ===")
     result = await ws.execute(
-        'gws-sheets-spreadsheets-create'
+        'gws sheets spreadsheets create'
         ' --json \'{"properties": {"title": "Test Sheet from gdrive"}}\'')
     print((await result.stdout_str())[:300])
 

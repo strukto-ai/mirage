@@ -123,10 +123,10 @@ async function main(): Promise<void> {
     console.log('=== realpath ===')
     console.log(`  ${realpath.out.trim()}`)
 
-    console.log('\n=== gws-docs-documents-create ===')
+    console.log('\n=== gws docs documents create ===')
     const create = await run(
       ws,
-      "gws-docs-documents-create --json '{\"title\": \"MIRAGE TS Example Doc\"}'",
+      "gws docs documents create --json '{\"title\": \"MIRAGE TS Example Doc\"}'",
     )
     if (create.code !== 0) {
       printOut('create FAILED', create.out, create.err)
@@ -140,21 +140,21 @@ async function main(): Promise<void> {
     }
     console.log(`Created: ${docId}`)
 
-    console.log('\n=== gws-docs-documents-batchUpdate ===')
+    console.log('\n=== gws docs documents batchUpdate ===')
     const body = JSON.stringify({
       requests: [{ insertText: { location: { index: 1 }, text: 'Hello from MIRAGE TS!\n' } }],
     })
     const params = JSON.stringify({ documentId: docId })
     const update = await run(
       ws,
-      `gws-docs-documents-batchUpdate --params '${params}' --json '${body}'`,
+      `gws docs documents batchUpdate --params '${params}' --json '${body}'`,
     )
     console.log(`Updated: ${update.out.slice(0, 80)}`)
 
-    console.log('\n=== gws-docs-write ===')
+    console.log('\n=== gws docs +write ===')
     const write = await run(
       ws,
-      `gws-docs-write --document ${docId} --text "Appended via gws-docs-write."`,
+      `gws docs +write --document ${docId} --text "Appended via gws docs +write."`,
     )
     console.log(`Written: ${write.out.slice(0, 80)}`)
 

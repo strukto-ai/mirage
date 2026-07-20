@@ -68,9 +68,9 @@ async def main():
     r = await ws.execute(f"tail -c 200 /gsheets/owned/{first}")
     print(await r.stdout_str())
 
-    print("=== gws-sheets-spreadsheets-create ===")
+    print("=== gws sheets spreadsheets create ===")
     body = json.dumps({"properties": {"title": "MIRAGE Sheets Test"}})
-    r = await ws.execute("gws-sheets-spreadsheets-create"
+    r = await ws.execute("gws sheets spreadsheets create"
                          f" --json '{body}'")
     out = await r.stdout_str()
     if r.exit_code != 0 or not out.strip():
@@ -81,7 +81,7 @@ async def main():
     sheet_id = sheet["spreadsheetId"]
     print(f"Created: {sheet_id}")
 
-    print("\n=== gws-sheets-write ===")
+    print("\n=== gws sheets +write ===")
     params = json.dumps({
         "spreadsheetId": sheet_id,
         "range": "Sheet1!A1",
@@ -94,24 +94,24 @@ async def main():
             ["Bob", "25", "SF"],
         ]
     })
-    r = await ws.execute(f"gws-sheets-write"
+    r = await ws.execute(f"gws sheets +write"
                          f" --params '{params}' --json '{values}'")
     print(f"Written: {(await r.stdout_str())[:80]}")
 
-    print("\n=== gws-sheets-read ===")
-    r = await ws.execute(f'gws-sheets-read'
+    print("\n=== gws sheets +read ===")
+    r = await ws.execute(f'gws sheets +read'
                          f' --spreadsheet {sheet_id}'
                          f' --range "Sheet1!A1:C3"')
     print(f"Values: {await r.stdout_str()}")
 
-    print("=== gws-sheets-append ===")
-    r = await ws.execute(f"gws-sheets-append"
+    print("=== gws sheets +append ===")
+    r = await ws.execute(f"gws sheets +append"
                          f" --spreadsheet {sheet_id}"
                          f" --values Diana,28,Chicago")
     print(f"Appended: {(await r.stdout_str())[:80]}")
 
-    print("\n=== gws-sheets-read (all) ===")
-    r = await ws.execute(f'gws-sheets-read'
+    print("\n=== gws sheets +read (all) ===")
+    r = await ws.execute(f'gws sheets +read'
                          f' --spreadsheet {sheet_id}'
                          f' --range Sheet1')
     print(f"All: {await r.stdout_str()}")

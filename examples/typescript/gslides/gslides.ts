@@ -92,10 +92,10 @@ async function main(): Promise<void> {
     const findOwned = await run(ws, "find /gslides/owned/ -name '*.gslide.json' | head -n 5")
     printOut('find /gslides/owned/', findOwned.out, findOwned.err, 2000)
 
-    console.log('\n=== gws-slides-presentations-create ===')
+    console.log('\n=== gws slides presentations create ===')
     const create = await run(
       ws,
-      "gws-slides-presentations-create --json '{\"title\": \"MIRAGE TS Example Deck\"}'",
+      "gws slides presentations create --json '{\"title\": \"MIRAGE TS Example Deck\"}'",
     )
     if (create.code !== 0) {
       printOut('create FAILED', create.out, create.err)
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     }
     console.log(`Created: ${presId}`)
 
-    console.log('\n=== gws-slides-presentations-batchUpdate (insert text on first slide) ===')
+    console.log('\n=== gws slides presentations batchUpdate (insert text on first slide) ===')
     const slideId = deck.slides?.[0]?.objectId ?? ''
     if (slideId !== '') {
       const params = JSON.stringify({ presentationId: presId })
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
       })
       const batch = await run(
         ws,
-        `gws-slides-presentations-batchUpdate --params '${params}' --json '${body}'`,
+        `gws slides presentations batchUpdate --params '${params}' --json '${body}'`,
       )
       console.log(`Updated: ${batch.out.slice(0, 80)}`)
     }

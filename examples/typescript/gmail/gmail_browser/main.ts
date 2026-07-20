@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     }
 
     console.log('')
-    await run(ws, 'gws-gmail-triage --query "is:unread" --max 3')
+    await run(ws, 'gws gmail +triage --query "is:unread" --max 3')
 
     console.log('')
     await run(ws, 'tree -L 1 /gmail/INBOX/')

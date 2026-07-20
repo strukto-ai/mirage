@@ -128,14 +128,14 @@ async def main() -> None:
     r = await ws.execute(f"realpath /gslides/owned/{first}")
     print(await r.stdout_str())
 
-    print("=== gws-slides-presentations-create ===")
-    r = await ws.execute('gws-slides-presentations-create'
+    print("=== gws slides presentations create ===")
+    r = await ws.execute('gws slides presentations create'
                          ' --json \'{"title": "MIRAGE Slides Test"}\'')
     pres = json.loads(await r.stdout_str())
     pres_id = pres["presentationId"]
     print(f"Created: {pres_id}")
 
-    print("\n=== gws-slides-presentations-batchUpdate ===")
+    print("\n=== gws slides presentations batchUpdate ===")
     body = json.dumps({
         "requests": [{
             "createSlide": {
@@ -147,7 +147,7 @@ async def main() -> None:
         }]
     })
     params = json.dumps({"presentationId": pres_id})
-    r = await ws.execute("gws-slides-presentations-batchUpdate"
+    r = await ws.execute("gws slides presentations batchUpdate"
                          f" --params '{params}' --json '{body}'")
     update = json.loads(await r.stdout_str())
     slide_id = update["replies"][0]["createSlide"]["objectId"]

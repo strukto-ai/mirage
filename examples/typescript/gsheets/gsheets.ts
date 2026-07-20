@@ -92,10 +92,10 @@ async function main(): Promise<void> {
     const findOwned = await run(ws, "find /gsheets/owned/ -name '*.gsheet.json' | head -n 5")
     printOut('find /gsheets/owned/', findOwned.out, findOwned.err, 2000)
 
-    console.log('\n=== gws-sheets-spreadsheets-create ===')
+    console.log('\n=== gws sheets spreadsheets create ===')
     const create = await run(
       ws,
-      "gws-sheets-spreadsheets-create --json '{\"properties\": {\"title\": \"MIRAGE TS Example Sheet\"}}'",
+      "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"MIRAGE TS Example Sheet\"}}'",
     )
     if (create.code !== 0) {
       printOut('create FAILED', create.out, create.err)
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     }
     console.log(`Created: ${sheetId}`)
 
-    console.log('\n=== gws-sheets-write (A1:B2) ===')
+    console.log('\n=== gws sheets +write (A1:B2) ===')
     const writeParams = JSON.stringify({ spreadsheetId: sheetId, range: 'A1:B2' })
     const writeBody = JSON.stringify({
       values: [
@@ -119,19 +119,19 @@ async function main(): Promise<void> {
     })
     const write = await run(
       ws,
-      `gws-sheets-write --params '${writeParams}' --json '${writeBody}'`,
+      `gws sheets +write --params '${writeParams}' --json '${writeBody}'`,
     )
     console.log(`Written: ${write.out.slice(0, 80)}`)
 
-    console.log('\n=== gws-sheets-append (A:B) ===')
+    console.log('\n=== gws sheets +append (A:B) ===')
     const append = await run(
       ws,
-      `gws-sheets-append --spreadsheet ${sheetId} --range "A:B" --json-values '[["appended", "row"]]'`,
+      `gws sheets +append --spreadsheet ${sheetId} --range "A:B" --json-values '[["appended", "row"]]'`,
     )
     console.log(`Appended: ${append.out.slice(0, 80)}`)
 
-    console.log('\n=== gws-sheets-read (A1:B3) ===')
-    const read = await run(ws, `gws-sheets-read --spreadsheet ${sheetId} --range "A1:B3"`)
+    console.log('\n=== gws sheets +read (A1:B3) ===')
+    const read = await run(ws, `gws sheets +read --spreadsheet ${sheetId} --range "A1:B3"`)
     console.log(read.out.trim())
 
     console.log(`\nOpen: https://docs.google.com/spreadsheets/d/${sheetId}/edit`)

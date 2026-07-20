@@ -139,19 +139,19 @@ async function main(): Promise<void> {
       printOut(`realpath ${firstDoc}`, realpath.out, realpath.err)
     }
 
-    console.log('\n=== gws-docs-documents-create ===')
+    console.log('\n=== gws docs documents create ===')
     const create = await run(
       ws,
-      "gws-docs-documents-create --json '{\"title\": \"Test from MIRAGE gdrive\"}'",
+      "gws docs documents create --json '{\"title\": \"Test from MIRAGE gdrive\"}'",
     )
-    printOut('gws-docs-documents-create', create.out, create.err, 300)
+    printOut('gws docs documents create', create.out, create.err, 300)
 
-    console.log('\n=== gws-sheets-spreadsheets-create ===')
+    console.log('\n=== gws sheets spreadsheets create ===')
     const createSheet = await run(
       ws,
-      "gws-sheets-spreadsheets-create --json '{\"properties\": {\"title\": \"Test Sheet from gdrive\"}}'",
+      "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Test Sheet from gdrive\"}}'",
     )
-    printOut('gws-sheets-spreadsheets-create', createSheet.out, createSheet.err, 300)
+    printOut('gws sheets spreadsheets create', createSheet.out, createSheet.err, 300)
   } finally {
     await ws.close()
   }

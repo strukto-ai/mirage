@@ -55,13 +55,13 @@ async def main():
     r = await ws.execute(f'jq ".subject" /gmail/INBOX/{first}')
     print(await r.stdout_str())
 
-    print("=== gws-gmail-triage ===")
-    r = await ws.execute('gws-gmail-triage --query "is:unread" --max 5')
+    print("=== gws gmail +triage ===")
+    r = await ws.execute('gws gmail +triage --query "is:unread" --max 5')
     print((await r.stdout_str())[:500])
 
-    print("=== gws-gmail-send ===")
+    print("=== gws gmail +send ===")
     r = await ws.execute(
-        'gws-gmail-send --to "zechengzhang97@gmail.com"'
+        'gws gmail +send --to "zechengzhang97@gmail.com"'
         ' --subject "Hello from MIRAGE"'
         ' --body "This email was sent via the MIRAGE Gmail resource."')
     print((await r.stdout_str())[:200])
