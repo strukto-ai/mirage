@@ -70,10 +70,20 @@ def handle_readlink(
     flags, operands = split_flags(args, "fenm")
     if not operands:
         return fail("readlink", "readlink: missing operand\n")
+    canonical = any(f in flags for f in "fem")
     lines: list[str] = []
     exit_code = 0
     for op in operands:
-        target = namespace.readlink(abs_path(op, session.cwd))
+        abs_op = abs_path(op, session.cwd)
+        if canonical:
+            # -f/-e/-m canonicalize: resolve every symlink (including a
+            # trailing one) and normalize the path, GNU realpath-style.
+            try:
+                lines.append(posixpath.normpath(namespace.follow(abs_op)))
+            except CycleError:
+                exit_code = 1
+            continue
+        target = namespace.readlink(abs_op)
         if target is None:
             exit_code = 1
             continue

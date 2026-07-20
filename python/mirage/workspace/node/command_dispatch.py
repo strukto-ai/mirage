@@ -440,8 +440,7 @@ async def _run_argv(
     if name == "ln" and "s" in link_flags(operands, "sfnv"):
         return await handle_ln(namespace, session, operands)
 
-    if name == "readlink" and not (link_flags(operands, "fenm")
-                                   & {"f", "e", "m"}):
+    if name == "readlink":
         return handle_readlink(namespace, session, operands)
 
     # ── metadata commands (namespace-routed: resolve-then-setattr with

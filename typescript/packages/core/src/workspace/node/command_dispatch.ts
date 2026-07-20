@@ -577,10 +577,7 @@ async function runArgv(
     return await handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
-    const flags = linkFlags(operands, 'fenm')
-    if (!(flags.has('f') || flags.has('e') || flags.has('m'))) {
-      return handleReadlink(namespace, session, operands)
-    }
+    return handleReadlink(namespace, session, operands)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with
