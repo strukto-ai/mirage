@@ -32,36 +32,56 @@ TOKEN_BUFFER_SECONDS = 300
 
 
 def token_url(config: GoogleConfig) -> str:
+    if config.token_url:
+        return config.token_url
     return f"{config.api_base}/token" if config.api_base else TOKEN_URL
 
 
 def drive_base(token_manager: "TokenManager") -> str:
-    base = token_manager.config.api_base
+    config = token_manager.config
+    if config.drive_api_base:
+        return config.drive_api_base
+    base = config.api_base
     return f"{base}/drive/v3" if base else DRIVE_API_BASE
 
 
 def drive_upload_base(token_manager: "TokenManager") -> str:
-    base = token_manager.config.api_base
+    config = token_manager.config
+    if config.drive_upload_api_base:
+        return config.drive_upload_api_base
+    base = config.api_base
     return f"{base}/upload/drive/v3" if base else DRIVE_UPLOAD_BASE
 
 
 def docs_base(token_manager: "TokenManager") -> str:
-    base = token_manager.config.api_base
+    config = token_manager.config
+    if config.docs_api_base:
+        return config.docs_api_base
+    base = config.api_base
     return f"{base}/v1" if base else DOCS_API_BASE
 
 
 def slides_base(token_manager: "TokenManager") -> str:
-    base = token_manager.config.api_base
+    config = token_manager.config
+    if config.slides_api_base:
+        return config.slides_api_base
+    base = config.api_base
     return f"{base}/v1" if base else SLIDES_API_BASE
 
 
 def sheets_base(token_manager: "TokenManager") -> str:
-    base = token_manager.config.api_base
+    config = token_manager.config
+    if config.sheets_api_base:
+        return config.sheets_api_base
+    base = config.api_base
     return f"{base}/v4" if base else SHEETS_API_BASE
 
 
 def gmail_base(token_manager: "TokenManager") -> str:
-    base = token_manager.config.api_base
+    config = token_manager.config
+    if config.gmail_api_base:
+        return config.gmail_api_base
+    base = config.api_base
     return f"{base}/gmail/v1" if base else GMAIL_API_BASE
 
 

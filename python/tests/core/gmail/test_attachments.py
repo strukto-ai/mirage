@@ -79,7 +79,8 @@ def test_extract_attachments_nested():
 @pytest.mark.asyncio
 async def test_get_attachment():
     encoded = base64.urlsafe_b64encode(b"hello world").decode().rstrip("=")
-    token_manager = SimpleNamespace(config=SimpleNamespace(api_base=None))
+    token_manager = SimpleNamespace(
+        config=SimpleNamespace(api_base=None, gmail_api_base=None))
     with patch(
             "mirage.core.gmail.messages.google_get",
             new_callable=AsyncMock,

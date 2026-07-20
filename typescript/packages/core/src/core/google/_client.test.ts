@@ -17,6 +17,7 @@ import {
   DOCS_API_BASE,
   DRIVE_API_BASE,
   DRIVE_UPLOAD_BASE,
+  GMAIL_API_BASE,
   SHEETS_API_BASE,
   SLIDES_API_BASE,
   TOKEN_URL,
@@ -24,6 +25,7 @@ import {
   docsBase,
   driveBase,
   driveUploadBase,
+  gmailBase,
   refreshAccessToken,
   sheetsBase,
   slidesBase,
@@ -145,6 +147,7 @@ describe('api base helpers', () => {
     expect(docsBase(tm)).toBe(DOCS_API_BASE)
     expect(slidesBase(tm)).toBe(SLIDES_API_BASE)
     expect(sheetsBase(tm)).toBe(SHEETS_API_BASE)
+    expect(gmailBase(tm)).toBe(GMAIL_API_BASE)
     expect(tokenUrl(tm.config)).toBe(TOKEN_URL)
   })
 
@@ -159,6 +162,44 @@ describe('api base helpers', () => {
     expect(docsBase(tm)).toBe('http://127.0.0.1:19999/v1')
     expect(slidesBase(tm)).toBe('http://127.0.0.1:19999/v1')
     expect(sheetsBase(tm)).toBe('http://127.0.0.1:19999/v4')
+    expect(gmailBase(tm)).toBe('http://127.0.0.1:19999/gmail/v1')
     expect(tokenUrl(tm.config)).toBe('http://127.0.0.1:19999/token')
+  })
+
+  it('per-service overrides take precedence over apiBase', () => {
+    const tm = new TokenManager({
+      clientId: 'cid',
+      refreshToken: 'rt',
+      apiBase: 'http://shared:9',
+      tokenUrl: 'http://oauth:1/oauth2/token',
+      driveApiBase: 'http://drive:2/drive/v3',
+      driveUploadApiBase: 'http://drive:2/upload/drive/v3',
+      docsApiBase: 'http://docs:3/docs/v1',
+      sheetsApiBase: 'http://sheets:4/sheets/v4',
+      slidesApiBase: 'http://slides:5/slides/v1',
+      gmailApiBase: 'http://gmail:6/gmail/v1',
+    })
+    expect(tokenUrl(tm.config)).toBe('http://oauth:1/oauth2/token')
+    expect(driveBase(tm)).toBe('http://drive:2/drive/v3')
+    expect(driveUploadBase(tm)).toBe('http://drive:2/upload/drive/v3')
+    expect(docsBase(tm)).toBe('http://docs:3/docs/v1')
+    expect(sheetsBase(tm)).toBe('http://sheets:4/sheets/v4')
+    expect(slidesBase(tm)).toBe('http://slides:5/slides/v1')
+    expect(gmailBase(tm)).toBe('http://gmail:6/gmail/v1')
+  })
+
+  it('per-service falls back to apiBase, then the real default', () => {
+    const tm = new TokenManager({
+      clientId: 'cid',
+      refreshToken: 'rt',
+      apiBase: 'http://m',
+      docsApiBase: 'http://docs-only/docs/v1',
+    })
+    expect(docsBase(tm)).toBe('http://docs-only/docs/v1') // explicit
+    expect(sheetsBase(tm)).toBe('http://m/v4') // apiBase derived
+    expect(gmailBase(tm)).toBe('http://m/gmail/v1') // apiBase derived
+    const bare = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
+    expect(sheetsBase(bare)).toBe(SHEETS_API_BASE) // real default
+    expect(tokenUrl(bare.config)).toBe(TOKEN_URL)
   })
 })
