@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.core.gmail.messages import _extract_attachments, get_attachment
+from mirage.core.google._client import TokenManager
+from mirage.core.google.config import GoogleConfig
 
 
 def test_extract_attachments_none():
@@ -79,7 +80,8 @@ def test_extract_attachments_nested():
 @pytest.mark.asyncio
 async def test_get_attachment():
     encoded = base64.urlsafe_b64encode(b"hello world").decode().rstrip("=")
-    token_manager = SimpleNamespace(config=SimpleNamespace(api_base=None))
+    token_manager = TokenManager(GoogleConfig(client_id="x",
+                                              refresh_token="y"))
     with patch(
             "mirage.core.gmail.messages.google_get",
             new_callable=AsyncMock,
