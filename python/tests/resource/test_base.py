@@ -19,6 +19,7 @@ from mirage.cache.index import (RAMIndexCacheStore, RedisIndexCacheStore,
                                 RedisIndexConfig)
 from mirage.resource.base import BaseResource
 from mirage.resource.ram import RAMResource
+from mirage.resource.s3.s3 import S3Config, S3Resource
 
 
 class ClosingAccessor(Accessor):
@@ -63,3 +64,22 @@ async def test_close_releases_accessor_once():
     await resource.close()
 
     assert accessor.close_calls == 1
+
+
+def test_remote_mount_spec_none_when_not_opted_in():
+    # RAM is local: nothing to reconstruct in a remote sandbox.
+    assert RAMResource().remote_mount_spec() is None
+    assert BaseResource().remote_mount_spec() is None
+
+
+def test_remote_mount_spec_dumps_config_and_unwraps_secrets():
+    r = S3Resource(
+        S3Config(bucket="b",
+                 aws_access_key_id="k",
+                 aws_secret_access_key="sec"))
+    spec = r.remote_mount_spec()
+    assert spec is not None
+    assert spec["resource"] == "s3"
+    # Secrets are unwrapped to plain strings so the sandbox can mount.
+    assert spec["config"]["bucket"] == "b"
+    assert spec["config"]["aws_secret_access_key"] == "sec"

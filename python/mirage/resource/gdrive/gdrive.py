@@ -30,6 +30,7 @@ class GoogleDriveResource(BaseResource):
 
     accessor: GDriveAccessor
     name: str = ResourceName.GDRIVE
+    remotely_mountable: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
