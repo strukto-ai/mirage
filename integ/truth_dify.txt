@@ -6,13 +6,16 @@ policies
 auth
 quickstart
 === tree ===
-├── CHANGELOG.md
-├── guides
-│   ├── auth
-│   └── quickstart
-└── policies
-    ├── privacy
-    └── refunds
+/knowledge
+|-- CHANGELOG.md
+|-- guides
+|   |-- auth
+|   `-- quickstart
+`-- policies
+    |-- privacy
+    `-- refunds
+
+3 directories, 5 files
 === find_md ===
 /knowledge/CHANGELOG.md
 === find_type_f ===

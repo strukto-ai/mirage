@@ -7,12 +7,15 @@ example.jsonl
 example.orc
 example.parquet
 === tree ===
-└── data
-    ├── example.feather
-    ├── example.json
-    ├── example.jsonl
-    ├── example.orc
-    └── example.parquet
+/onedrive
+`-- data
+    |-- example.feather
+    |-- example.json
+    |-- example.jsonl
+    |-- example.orc
+    `-- example.parquet
+
+2 directories, 5 files
 === stat ===
 15533 /onedrive/data/example.json
 === stat_dir ===

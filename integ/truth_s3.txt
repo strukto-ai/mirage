@@ -7,12 +7,15 @@ example.jsonl
 example.orc
 example.parquet
 === s3:tree ===
-└── data
-    ├── example.feather
-    ├── example.json
-    ├── example.jsonl
-    ├── example.orc
-    └── example.parquet
+/s3
+`-- data
+    |-- example.feather
+    |-- example.json
+    |-- example.jsonl
+    |-- example.orc
+    `-- example.parquet
+
+2 directories, 5 files
 === s3:stat ===
 15533 /s3/data/example.json
 === s3:cat_head ===
@@ -137,12 +140,15 @@ example.jsonl
 example.orc
 example.parquet
 === gcs:tree ===
-└── data
-    ├── example.feather
-    ├── example.json
-    ├── example.jsonl
-    ├── example.orc
-    └── example.parquet
+/gcs
+`-- data
+    |-- example.feather
+    |-- example.json
+    |-- example.jsonl
+    |-- example.orc
+    `-- example.parquet
+
+2 directories, 5 files
 === gcs:stat ===
 15533 /gcs/data/example.json
 === gcs:cat_head ===
@@ -267,12 +273,15 @@ example.jsonl
 example.orc
 example.parquet
 === minio:tree ===
-└── data
-    ├── example.feather
-    ├── example.json
-    ├── example.jsonl
-    ├── example.orc
-    └── example.parquet
+/minio
+`-- data
+    |-- example.feather
+    |-- example.json
+    |-- example.jsonl
+    |-- example.orc
+    `-- example.parquet
+
+2 directories, 5 files
 === minio:stat ===
 15533 /minio/data/example.json
 === minio:cat_head ===
@@ -397,12 +406,15 @@ example.jsonl
 example.orc
 example.parquet
 === seaweedfs:tree ===
-└── data
-    ├── example.feather
-    ├── example.json
-    ├── example.jsonl
-    ├── example.orc
-    └── example.parquet
+/seaweedfs
+`-- data
+    |-- example.feather
+    |-- example.json
+    |-- example.jsonl
+    |-- example.orc
+    `-- example.parquet
+
+2 directories, 5 files
 === seaweedfs:stat ===
 15533 /seaweedfs/data/example.json
 === seaweedfs:cat_head ===
