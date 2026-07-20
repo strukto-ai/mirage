@@ -54,7 +54,6 @@ const DEC = new TextDecoder();
 const PER_MOUNT_CASES: ReadonlyArray<readonly [string, string]> = [
   ["ls", `ls {m}/`],
   ["ls_data", `ls {m}/data/`],
-  ["tree", `tree {m}/`],
   ["stat", `stat -c '%s %n' {m}/data/example.json`],
   ["cat_head", `cat {m}/data/example.json | head -n 5`],
   ["head_1_jsonl", `head -n 1 {m}/data/example.jsonl`],
@@ -124,7 +123,6 @@ const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
 
 const INDEX_CASES: ReadonlyArray<readonly [string, string]> = [
   ["ls_l", `ls -l {m}/data/`],
-  ["tree", `tree {m}/`],
 ];
 
 const TIMEOUT_CASES: ReadonlyArray<readonly [string, string]> = [

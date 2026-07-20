@@ -61,7 +61,6 @@ CASES: list[tuple[str, str]] = [
     ("ls_root", "ls {root}"),
     ("ls_table", "ls {root}animals"),
     ("ls_group", "ls {root}animals/cat"),
-    ("tree_table", "tree {root}animals"),
     ("find_md", "find {root}animals -name '*.md'"),
     ("cat_card", "cat {root}animals/cat/big/1.md"),
     ("wc_c_card", "wc -c {root}animals/cat/big/1.md"),

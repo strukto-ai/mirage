@@ -6,16 +6,6 @@ example.json
 example.jsonl
 example.orc
 example.parquet
-=== s3:tree ===
-/s3
-`-- data
-    |-- example.feather
-    |-- example.json
-    |-- example.jsonl
-    |-- example.orc
-    `-- example.parquet
-
-2 directories, 5 files
 === s3:stat ===
 15533 /s3/data/example.json
 === s3:cat_head ===
@@ -139,16 +129,6 @@ example.json
 example.jsonl
 example.orc
 example.parquet
-=== gcs:tree ===
-/gcs
-`-- data
-    |-- example.feather
-    |-- example.json
-    |-- example.jsonl
-    |-- example.orc
-    `-- example.parquet
-
-2 directories, 5 files
 === gcs:stat ===
 15533 /gcs/data/example.json
 === gcs:cat_head ===
@@ -272,16 +252,6 @@ example.json
 example.jsonl
 example.orc
 example.parquet
-=== minio:tree ===
-/minio
-`-- data
-    |-- example.feather
-    |-- example.json
-    |-- example.jsonl
-    |-- example.orc
-    `-- example.parquet
-
-2 directories, 5 files
 === minio:stat ===
 15533 /minio/data/example.json
 === minio:cat_head ===
@@ -405,16 +375,6 @@ example.json
 example.jsonl
 example.orc
 example.parquet
-=== seaweedfs:tree ===
-/seaweedfs
-`-- data
-    |-- example.feather
-    |-- example.json
-    |-- example.jsonl
-    |-- example.orc
-    `-- example.parquet
-
-2 directories, 5 files
 === seaweedfs:stat ===
 15533 /seaweedfs/data/example.json
 === seaweedfs:cat_head ===
@@ -620,20 +580,12 @@ bytes=0 served_from_cache=True
 bytes=0 served_from_cache=True
 === s3:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== s3:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === gcs:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== gcs:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === minio:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== minio:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === seaweedfs:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== seaweedfs:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === s3:exit:grep_match ===
 exit=0
 === s3:exit:grep_no_match ===

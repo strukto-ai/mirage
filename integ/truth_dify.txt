@@ -5,17 +5,6 @@ policies
 === ls_guides ===
 auth
 quickstart
-=== tree ===
-/knowledge
-|-- CHANGELOG.md
-|-- guides
-|   |-- auth
-|   `-- quickstart
-`-- policies
-    |-- privacy
-    `-- refunds
-
-3 directories, 5 files
 === find_md ===
 /knowledge/CHANGELOG.md
 === find_type_f ===

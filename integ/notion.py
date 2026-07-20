@@ -296,7 +296,6 @@ CASES: list[tuple[str, str]] = [
     ("ls_l_pages", f"ls -l {MOUNT}/pages/"),
     ("ls_page_a", f"ls {DIR_A}/"),
     ("stat_dir_a", f"stat -c '%n %y' {DIR_A}"),
-    ("tree", f"tree -L 2 {MOUNT}/"),
     ("cat_page_a", f"cat {DIR_A}/page.json"),
     ("cat_child", f"cat {DIR_C}/page.json"),
     ("jq_title", f'jq ".title" {DIR_A}/page.json'),

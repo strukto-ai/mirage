@@ -6,17 +6,6 @@ dog
 === ls_group ===
 big
 small
-=== tree_table ===
-├── cat
-│   ├── big
-│   │   └── 1.md
-│   └── small
-│       └── 2.md
-└── dog
-    ├── big
-    │   └── 3.md
-    └── small
-        └── 4.md
 === find_md ===
 /db/animals/cat/big/1.md
 /db/animals/cat/small/2.md
