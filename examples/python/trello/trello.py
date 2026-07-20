@@ -111,6 +111,16 @@ async def main() -> None:
     print(f"=== cat {board_path}/board.json ===")
     result = await ws.execute(f"cat {board_path}/board.json")
     print(await result.stdout_str())
+    board_payload = json.loads(await result.stdout_str())
+    board_id = board_payload.get("board_id", "")
+
+    print("=== trello board list ===")
+    result = await ws.execute("trello board list")
+    print(await result.stdout_str())
+
+    print(f"=== trello board show {board_id} ===")
+    result = await ws.execute(f"trello board show {board_id}")
+    print(await result.stdout_str())
 
     print(f"=== ls {board_path}/members/ ===")
     member_result = await ws.execute(f"ls {board_path}/members/")
@@ -247,8 +257,8 @@ async def main() -> None:
     result = await ws.execute(f"realpath {card_path}/card.json")
     print(await result.stdout_str())
 
-    print("=== trello-card-create ===")
-    result = await ws.execute(f'trello-card-create --list_id {list_id}'
+    print("=== trello card create ===")
+    result = await ws.execute(f'trello card create --list_id {list_id}'
                               ' --name "Test card from MIRAGE"'
                               ' --desc "Created by example script"')
     print(await result.stdout_str())
@@ -256,38 +266,37 @@ async def main() -> None:
     new_card = json.loads(await result.stdout_str())
     new_card_id = new_card.get("card_id", "")
 
-    print("=== trello-card-update ===")
+    print("=== trello card update ===")
     result = await ws.execute(
-        f'trello-card-update --card_id {new_card_id}'
+        f'trello card update --card_id {new_card_id}'
         ' --name "Updated test card" --desc "Updated description"')
     print(await result.stdout_str())
 
-    print("=== trello-card-move ===")
+    print("=== trello card move ===")
     result = await ws.execute(
-        f"trello-card-move --card_id {new_card_id} --list_id {list_id}")
+        f"trello card move --card_id {new_card_id} --list_id {list_id}")
     print(await result.stdout_str())
 
     members = (await member_result.stdout_str()).strip().splitlines()
     if members:
         first_member_name = members[0]
         member_id = first_member_name.rsplit("__", 1)[-1].replace(".json", "")
-        print("=== trello-card-assign ===")
-        result = await ws.execute(f"trello-card-assign --card_id {new_card_id}"
+        print("=== trello card assign ===")
+        result = await ws.execute(f"trello card assign --card_id {new_card_id}"
                                   f" --member_id {member_id}")
         print(await result.stdout_str())
 
-    print("=== trello-card-comment-add ===")
-    result = await ws.execute(
-        f'trello-card-comment-add --card_id {new_card_id}'
-        ' --text "Test comment from MIRAGE"')
+    print("=== trello card comment ===")
+    result = await ws.execute(f'trello card comment --card_id {new_card_id}'
+                              ' --text "Test comment from MIRAGE"')
     print(await result.stdout_str())
 
     comment_payload = json.loads(await result.stdout_str())
     comment_id = comment_payload.get("comment_id", "")
 
-    print("=== trello-card-comment-update ===")
+    print("=== trello card comment-update ===")
     result = await ws.execute(
-        f"trello-card-comment-update --comment_id {comment_id}"
+        f"trello card comment-update --comment_id {comment_id}"
         f' --card_id {new_card_id} --text "Updated comment"')
     print(await result.stdout_str())
 
@@ -295,21 +304,20 @@ async def main() -> None:
     if labels:
         first_label_name = labels[0]
         label_id = first_label_name.rsplit("__", 1)[-1].replace(".json", "")
-        print("=== trello-card-label-add ===")
+        print("=== trello card label ===")
+        result = await ws.execute(f"trello card label --card_id {new_card_id}"
+                                  f" --label_id {label_id}")
+        print(await result.stdout_str())
+
+        print("=== trello card unlabel ===")
         result = await ws.execute(
-            f"trello-card-label-add --card_id {new_card_id}"
+            f"trello card unlabel --card_id {new_card_id}"
             f" --label_id {label_id}")
         print(await result.stdout_str())
 
-        print("=== trello-card-label-remove ===")
-        result = await ws.execute(
-            f"trello-card-label-remove --card_id {new_card_id}"
-            f" --label_id {label_id}")
-        print(await result.stdout_str())
-
-    print("=== trello-card-update (archive) ===")
+    print("=== trello card update (archive) ===")
     result = await ws.execute(
-        f"trello-card-update --card_id {new_card_id} --closed true")
+        f"trello card update --card_id {new_card_id} --closed true")
     print(await result.stdout_str())
 
 

@@ -15,7 +15,13 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { MountMode, TrelloResource, Workspace, type FileStat, type TrelloConfig } from '@struktoai/mirage-node'
+import {
+  MountMode,
+  TrelloResource,
+  Workspace,
+  type FileStat,
+  type TrelloConfig,
+} from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
@@ -105,7 +111,14 @@ async function main(): Promise<void> {
     console.log(`\n=== ls ${wsBase}/boards/ ===`)
     const b0 = (await run(ws, `ls "${wsBase}/boards/" | head -n 1`)).trim()
     if (b0 === '') return
+    const boardId = b0.split('__').pop() ?? ''
     const boardBase = `${wsBase}/boards/${b0}`
+
+    console.log('\n=== trello board list ===')
+    await run(ws, 'trello board list')
+
+    console.log(`\n=== trello board show ${boardId} ===`)
+    await run(ws, `trello board show ${boardId}`)
 
     console.log(`\n=== cat ${b0}/board.json ===`)
     await run(ws, `cat "${boardBase}/board.json"`)
@@ -146,7 +159,7 @@ async function main(): Promise<void> {
     if (listId !== '') {
       const created = await run(
         ws,
-        `trello-card-create --list_id ${listId} --name "mirage example card" --desc "created by examples/typescript/trello/trello.ts"`,
+        `trello card create --list_id ${listId} --name "mirage example card" --desc "created by examples/typescript/trello/trello.ts"`,
       )
       let cardId = ''
       try {
@@ -156,11 +169,14 @@ async function main(): Promise<void> {
         console.log('  could not parse created card payload, skipping write demos')
       }
       if (cardId !== '') {
-        await run(ws, `trello-card-update --card_id ${cardId} --name "mirage example card (updated)"`)
-        await run(ws, `trello-card-move --card_id ${cardId} --list_id ${listId}`)
+        await run(
+          ws,
+          `trello card update --card_id ${cardId} --name "mirage example card (updated)"`,
+        )
+        await run(ws, `trello card move --card_id ${cardId} --list_id ${listId}`)
         const comment = await run(
           ws,
-          `trello-card-comment-add --card_id ${cardId} --text "hello from mirage"`,
+          `trello card comment --card_id ${cardId} --text "hello from mirage"`,
         )
         let commentId = ''
         try {
@@ -172,7 +188,7 @@ async function main(): Promise<void> {
         if (commentId !== '') {
           await run(
             ws,
-            `trello-card-comment-update --comment_id ${commentId} --card_id ${cardId} --text "updated comment"`,
+            `trello card comment-update --comment_id ${commentId} --card_id ${cardId} --text "updated comment"`,
           )
         }
       }

@@ -25,7 +25,10 @@ import {
 } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
+dotenv.config({
+  path: resolve(__HERE, '../../../.env.development'),
+  override: true,
+})
 
 function buildConfig(): EmailConfig {
   const imapHost = process.env.IMAP_HOST ?? ''
@@ -33,9 +36,7 @@ function buildConfig(): EmailConfig {
   const username = process.env.EMAIL_USERNAME ?? ''
   const password = process.env.EMAIL_PASSWORD ?? ''
   if (imapHost === '' || smtpHost === '' || username === '' || password === '') {
-    throw new Error(
-      'IMAP_HOST / SMTP_HOST / EMAIL_USERNAME / EMAIL_PASSWORD are required',
-    )
+    throw new Error('IMAP_HOST / SMTP_HOST / EMAIL_USERNAME / EMAIL_PASSWORD are required')
   }
   return buildEmailConfig({
     imapHost,
@@ -54,7 +55,11 @@ async function run(
     const r = await ws.execute(cmd)
     return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
   } catch (err) {
-    return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
+    return {
+      out: '',
+      err: err instanceof Error ? err.message : String(err),
+      code: 1,
+    }
   }
 }
 
@@ -80,7 +85,10 @@ async function main(): Promise<void> {
     if (!folders.some((f) => f.includes('Inbox') || f.includes('INBOX'))) {
       folder = folders[0] ?? ''
     } else {
-      folder = folders.find((f) => f.includes('INBOX')) ?? folders.find((f) => f.includes('Inbox')) ?? folder
+      folder =
+        folders.find((f) => f.includes('INBOX')) ??
+        folders.find((f) => f.includes('Inbox')) ??
+        folder
     }
     if (folder === '') {
       console.log('No folders')
@@ -111,12 +119,13 @@ async function main(): Promise<void> {
       console.log('No messages')
       return
     }
-    const firstMsg = `/email/${folder}/${firstDate}/${messages[0] ?? ''}`
+    const firstFilename = messages[0] ?? ''
+    const firstMsg = `/email/${folder}/${firstDate}/${firstFilename}`
+    const uid = (firstFilename.split('__').at(-1) ?? '').replace(/\.email\.json$/, '')
 
     printSection(`cat ${firstMsg}`, (await run(ws, `cat ${firstMsg}`)).out, '')
     printSection(`jq .subject ${firstMsg}`, (await run(ws, `jq ".subject" ${firstMsg}`)).out, '')
     printSection(`jq .from ${firstMsg}`, (await run(ws, `jq ".from" ${firstMsg}`)).out, '')
-
 
     // chmod/chown/touch never hit the IMAP API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
@@ -133,8 +142,14 @@ async function main(): Promise<void> {
     )
 
     printSection(
-      'email-triage --unseen --max 5',
-      (await run(ws, `email-triage --folder ${folder} --unseen --max 5`)).out,
+      'himalaya envelope list --unseen --max 5',
+      (await run(ws, `himalaya envelope list --folder "${folder}" --unseen --max 5`)).out,
+      '',
+    )
+
+    printSection(
+      `himalaya message read --uid ${uid}`,
+      (await run(ws, `himalaya message read --folder "${folder}" --uid ${uid}`)).out,
       '',
     )
 
@@ -145,10 +160,7 @@ async function main(): Promise<void> {
     )
 
     for (const [label, cmd] of [
-      [
-        `grep -r Hi /email/${folder}/ (folder scope, IMAP search)`,
-        `grep -r Hi /email/${folder}/`,
-      ],
+      [`grep -r Hi /email/${folder}/ (folder scope, IMAP search)`, `grep -r Hi /email/${folder}/`],
       [`rg Hi /email/${folder}/ (folder scope)`, `rg Hi /email/${folder}/`],
     ] as const) {
       console.log(`\n=== ${label} ===`)
