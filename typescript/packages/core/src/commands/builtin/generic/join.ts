@@ -41,43 +41,47 @@ function buildJoinMap(
     const parts = splitFields(line, delimiter)
     if (fieldIdx < parts.length) {
       const key = parts[fieldIdx] ?? ''
-      const rest = parts.slice(0, fieldIdx).concat(parts.slice(fieldIdx + 1))
       const list = result.get(key)
-      if (list === undefined) result.set(key, [rest])
-      else list.push(rest)
+      if (list === undefined) result.set(key, [parts])
+      else list.push(parts)
     }
   }
   return result
 }
 
+function restFields(fields: readonly string[], keyIdx: number): string[] {
+  return fields.slice(0, keyIdx).concat(fields.slice(keyIdx + 1))
+}
+
 function formatRow(
   key: string,
-  rest1: readonly string[],
-  rest2: readonly string[],
+  fields1: readonly string[],
+  field1: number,
+  fields2: readonly string[],
+  field2: number,
   oFmt: string | null,
   outSep: string,
+  emptyValue: string | null,
 ): string {
-  if (oFmt === null) return [key, ...rest1, ...rest2].join(outSep)
+  if (oFmt === null) {
+    return [key, ...restFields(fields1, field1), ...restFields(fields2, field2)].join(outSep)
+  }
+  // -o FILENUM.FIELD indexes the original 1-based field (join key included),
+  // so map against the full field list; a missing field uses the -e value.
   const fields: string[] = []
   for (const spec of oFmt.split(',')) {
     const trimmed = spec.trim()
     if (trimmed === '0') {
       fields.push(key)
-    } else {
-      const parts = trimmed.split('.')
-      const fileN = Number.parseInt(parts[0] ?? '', 10)
-      const fieldM = Number.parseInt(parts[1] ?? '', 10) - 1
-      const src = fileN === 1 ? rest1 : rest2
-      if (fieldM >= 0 && fieldM < src.length) fields.push(src[fieldM] ?? '')
-      else fields.push('')
+      continue
     }
+    const parts = trimmed.split('.')
+    const src = parts[0] === '1' ? fields1 : fields2
+    const idx = Number.parseInt(parts[1] ?? '', 10) - 1
+    if (idx >= 0 && idx < src.length) fields.push(src[idx] ?? '')
+    else fields.push(emptyValue ?? '')
   }
   return fields.join(outSep)
-}
-
-function firstValue<K, V>(map: Map<K, V>): V | undefined {
-  for (const v of map.values()) return v
-  return undefined
 }
 
 function joinLines(
@@ -91,7 +95,6 @@ function joinLines(
   eFlag: string | null,
   oFlag: string | null,
 ): string[] {
-  const map1 = buildJoinMap(lines1, field1, sep)
   const map2 = buildJoinMap(lines2, field2, sep)
   const outSep = sep !== null && sep !== '' ? sep : ' '
   const outLines: string[] = []
@@ -101,24 +104,16 @@ function joinLines(
     const parts = splitFields(line, sep)
     if (field1 >= parts.length) continue
     const key = parts[field1] ?? ''
-    const rest1 = parts.slice(0, field1).concat(parts.slice(field1 + 1))
     const hit = map2.get(key)
     if (hit !== undefined) {
       matchedKeys2.add(key)
       if (vFlag === null) {
-        for (const rest2 of hit) {
-          outLines.push(formatRow(key, rest1, rest2, oFlag, outSep))
+        for (const fields2 of hit) {
+          outLines.push(formatRow(key, parts, field1, fields2, field2, oFlag, outSep, eFlag))
         }
       }
-    } else {
-      if (vFlag === '1' || aFlag === '1') {
-        let placeholder: string[] = []
-        if (oFlag !== null && eFlag !== null && map2.size > 0) {
-          const sample = firstValue(map2)?.[0]
-          if (sample !== undefined) placeholder = sample.map(() => eFlag)
-        }
-        outLines.push(formatRow(key, rest1, placeholder, oFlag, outSep))
-      }
+    } else if (vFlag === '1' || aFlag === '1') {
+      outLines.push(formatRow(key, parts, field1, [], field2, oFlag, outSep, eFlag))
     }
   }
 
@@ -128,13 +123,7 @@ function joinLines(
       if (field2 >= parts.length) continue
       const key = parts[field2] ?? ''
       if (!matchedKeys2.has(key)) {
-        const rest2 = parts.slice(0, field2).concat(parts.slice(field2 + 1))
-        let placeholder: string[] = []
-        if (oFlag !== null && eFlag !== null && map1.size > 0) {
-          const sample = firstValue(map1)?.[0]
-          if (sample !== undefined) placeholder = sample.map(() => eFlag)
-        }
-        outLines.push(formatRow(key, placeholder, rest2, oFlag, outSep))
+        outLines.push(formatRow(key, [], field1, parts, field2, oFlag, outSep, eFlag))
       }
     }
   }
