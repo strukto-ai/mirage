@@ -51,9 +51,9 @@ def test_join_o(env):
 def test_join_o_empty(env):
     env.create_file("a.txt", b"1 a\n2 b\n")
     env.create_file("b.txt", b"1 x\n3 z\n")
-    assert env.mirage("join -a 1 -e NA -o 0,1.2,2.2 /data/a.txt /data/b.txt"
-                      ) == env.native(
-                          "join -a 1 -e NA -o 0,1.2,2.2 a.txt b.txt")
+    assert env.mirage(
+        "join -a 1 -e NA -o 0,1.2,2.2 /data/a.txt /data/b.txt") == env.native(
+            "join -a 1 -e NA -o 0,1.2,2.2 a.txt b.txt")
 
 
 def test_join_12(env):
