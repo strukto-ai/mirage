@@ -45,12 +45,13 @@ agent = Agent(
     deps_type=Deps,
     toolsets=[
         create_console_toolset(require_execute_approval=False,
-                               image_support=True)
+                               image_support=True,
+                               document_support=True)
     ],
 )
 
 
-def main():
+def main() -> None:
     task = (
         "Read and summarize the latest PNG and PDF in the slack "
         "general channel. Open each file with read_file before responding.")
@@ -71,21 +72,6 @@ def main():
             print(f"  {r.op:<8} {r.source:<8} {r.bytes:>10,} B "
                   f"{r.duration_ms:>5} ms  {r.path}")
 
-
-# Single-agent flow.
-#
-# Pydantic AI's tool channel accepts multimodal `BinaryContent` blocks in
-# `ToolReturn.content`, so the agent's `read()` tool can return rendered
-# PDF pages and image bytes inline in its context. No two-phase
-# orchestration needed — unlike the OpenAI Agents SDK, where tool
-# returns are text-only (issue #341) and PDFs require pre-attach via
-# the Files API in a separate user-message turn.
-#
-# Mirage wiring is done by mirage.agents.pydantic_ai.PydanticAIWorkspace
-# in backend.py: when `read(path)` ends in .pdf, it routes through
-# `pages_to_images` and packs each page as
-# `BinaryContent(media_type="image/png")`. Resource-agnostic: the same
-# flow works for /s3, /disk, /slack/.../files/, etc.
 
 if __name__ == "__main__":
     main()

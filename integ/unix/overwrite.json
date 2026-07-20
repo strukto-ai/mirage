@@ -9,7 +9,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -19,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/ow/t /data/ow/s/t && printf old | tee /data/ow/dst.txt > /dev/null && printf new | tee /data/ow/src.txt > /dev/null && printf keep | tee /data/ow/t/f.old > /dev/null && printf merged | tee /data/ow/s/t/f.txt > /dev/null && echo seeded",
       "expect": {
@@ -37,7 +40,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -45,7 +50,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt",
       "expect": {
@@ -63,7 +69,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -71,7 +79,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cp -r /data/ow/s/t /data/ow && cat /data/ow/t/f.txt && ls /data/ow/t",
       "expect": {
@@ -89,7 +98,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -97,7 +108,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mv /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt && ls /data/ow",
       "expect": {
@@ -115,7 +127,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -123,7 +137,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/ow/t && ls /data/ow/t",
       "expect": {
@@ -141,7 +156,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -151,7 +168,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "rm -r /data/ow && echo cleaned",
       "expect": {

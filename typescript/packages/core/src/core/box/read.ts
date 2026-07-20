@@ -16,48 +16,10 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
-import { processBoxcanvas } from '../filetype/boxcanvas.ts'
-import { processBoxnote } from '../filetype/boxnote.ts'
-import { downloadFile, downloadFileStream, getExtractedText } from './api.ts'
-import type { BoxTokenManager } from './_client.ts'
+import { downloadFile, downloadFileStream } from './api.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
-
-const ENC = new TextEncoder()
-
-const OFFICE_FORMAT_BY_RT: Readonly<Record<string, 'docx' | 'xlsx' | 'pptx'>> = {
-  'box/gdoc': 'docx',
-  'box/gsheet': 'xlsx',
-  'box/gslides': 'pptx',
-}
-
-interface BoxOfficeEnvelope {
-  id: string
-  name: string
-  format: 'docx' | 'xlsx' | 'pptx'
-  size: number | null
-  modified_at: string
-  body_text: string
-}
-
-async function processBoxOffice(
-  tm: BoxTokenManager,
-  entry: IndexEntry,
-  format: 'docx' | 'xlsx' | 'pptx',
-): Promise<Uint8Array> {
-  const bodyText = await getExtractedText(tm, entry.id)
-  const envelope: BoxOfficeEnvelope = {
-    id: entry.id,
-    name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-    format,
-    size: entry.size,
-    modified_at: entry.remoteTime,
-    body_text: bodyText,
-  }
-  return ENC.encode(JSON.stringify(envelope, null, 2) + '\n')
-}
 
 function eisdir(p: string): Error {
   const e = new Error(`EISDIR: ${p}`) as Error & { code: string }
@@ -92,16 +54,8 @@ export async function read(
     }
     if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
   }
-  const rt = result.entry.resourceType
-  if (rt === 'box/folder') throw eisdir(path.virtual)
-  const officeFmt = OFFICE_FORMAT_BY_RT[rt]
-  if (officeFmt !== undefined) {
-    return processBoxOffice(accessor.tokenManager, result.entry, officeFmt)
-  }
-  const raw = await downloadFile(accessor.tokenManager, result.entry.id)
-  if (rt === 'box/boxnote') return processBoxnote(raw)
-  if (rt === 'box/boxcanvas') return processBoxcanvas(raw)
-  return raw
+  if (result.entry.resourceType === 'box/folder') throw eisdir(path.virtual)
+  return downloadFile(accessor.tokenManager, result.entry.id)
 }
 
 export async function* stream(
@@ -131,20 +85,7 @@ export async function* stream(
     }
     if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
   }
-  const rt = result.entry.resourceType
-  if (rt === 'box/folder') throw eisdir(path.virtual)
-  const officeFmt = OFFICE_FORMAT_BY_RT[rt]
-  if (officeFmt !== undefined) {
-    yield await processBoxOffice(accessor.tokenManager, result.entry, officeFmt)
-    return
-  }
-  if (rt === 'box/boxnote' || rt === 'box/boxcanvas') {
-    // Box-native JSON formats are tiny; fetch all then process — streaming the
-    // raw JSON would force callers to JSON.parse partial bytes anyway.
-    const raw = await downloadFile(accessor.tokenManager, result.entry.id)
-    yield rt === 'box/boxnote' ? processBoxnote(raw) : processBoxcanvas(raw)
-    return
-  }
+  if (result.entry.resourceType === 'box/folder') throw eisdir(path.virtual)
   for await (const chunk of downloadFileStream(accessor.tokenManager, result.entry.id)) {
     yield chunk
   }

@@ -264,6 +264,7 @@ class ResourceName(str, Enum):
     GMAIL = "gmail"
     TRELLO = "trello"
     MONGODB = "mongodb"
+    GRIDFS = "gridfs"
     POSTGRES = "postgres"
     NOTION = "notion"
     LANGFUSE = "langfuse"
@@ -285,6 +286,7 @@ class ResourceName(str, Enum):
     DROPBOX = "dropbox"
     QDRANT = "qdrant"
     SHAREPOINT = "sharepoint"
+    BOX = "box"
 
 
 @dataclass(frozen=True, init=False)

@@ -63,6 +63,7 @@ describe('ResourceName', () => {
     expect(ResourceName.GMAIL).toBe('gmail')
     expect(ResourceName.TRELLO).toBe('trello')
     expect(ResourceName.MONGODB).toBe('mongodb')
+    expect(ResourceName.GRIDFS).toBe('gridfs')
     expect(ResourceName.NOTION).toBe('notion')
     expect(ResourceName.LANGFUSE).toBe('langfuse')
     expect(ResourceName.SSH).toBe('ssh')
@@ -73,6 +74,7 @@ describe('ResourceName', () => {
     expect(ResourceName.OPFS).toBe('opfs')
     expect(ResourceName.SUPABASE).toBe('supabase')
     expect(ResourceName.POSTGRES).toBe('postgres')
+    expect(ResourceName.NEXTCLOUD).toBe('nextcloud')
     expect(ResourceName.MINIO).toBe('minio')
     expect(ResourceName.CEPH).toBe('ceph')
     expect(ResourceName.SEAWEEDFS).toBe('seaweedfs')
@@ -85,8 +87,8 @@ describe('ResourceName', () => {
     expect(ResourceName.QINGSTOR).toBe('qingstor')
   })
 
-  it('contains exactly 47 entries', () => {
-    expect(Object.keys(ResourceName)).toHaveLength(47)
+  it('contains exactly 49 entries', () => {
+    expect(Object.keys(ResourceName)).toHaveLength(49)
   })
 
   it('is frozen at runtime', () => {

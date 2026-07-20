@@ -78,6 +78,15 @@ function toAddrList(list: AddressObject | AddressObject[] | undefined): EmailAdd
   return objs.flatMap((obj) => obj.value.map((a) => toAddr(a)))
 }
 
+// The rendered date must be the raw Date header text (python serves the
+// header untouched); mailparser's parsed.date would re-format it.
+function rawDateHeader(parsed: ParsedMail): string {
+  const found = parsed.headerLines.find((h) => h.key === 'date')
+  if (found === undefined) return ''
+  const colon = found.line.indexOf(':')
+  return colon === -1 ? '' : found.line.slice(colon + 1).trim()
+}
+
 function fromParsed(parsed: ParsedMail, headersOnly: boolean): ParsedRfc822 {
   const text = headersOnly ? '' : (parsed.text ?? '')
   const html = headersOnly ? '' : typeof parsed.html === 'string' ? parsed.html : ''
@@ -96,7 +105,7 @@ function fromParsed(parsed: ParsedMail, headersOnly: boolean): ParsedRfc822 {
     to: toAddrList(parsed.to),
     cc: toAddrList(parsed.cc),
     subject: parsed.subject ?? '',
-    date: parsed.date instanceof Date ? parsed.date.toUTCString() : '',
+    date: rawDateHeader(parsed),
     body_text: text,
     body_html: html,
     snippet: text.slice(0, 100),

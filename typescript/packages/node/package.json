@@ -51,6 +51,8 @@
     "@napi-rs/lzma": "^1.4.5",
     "@struktoai/mirage-core": "workspace:*",
     "compressjs": "^1.0.3",
+    "fast-xml-parser": "^5.9.0",
+    "fast-xml-validator": "^1.4.0",
     "fs-monkey": "^1.1.0",
     "tree-sitter-bash": "^0.25.1",
     "web-tree-sitter": "^0.26.8"

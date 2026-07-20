@@ -61,7 +61,7 @@ async function emailSendCommand(
 }
 
 export const EMAIL_SEND = command({
-  name: 'email-send',
+  name: 'himalaya message send',
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailSendCommand,

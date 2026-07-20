@@ -50,7 +50,10 @@ async def handle_redirect_provision(
             stdin/stdout redirect targets on mounts.
         session (Session): shell session state.
     """
-    inner = await provision_node_fn(command, session)
+    # command is None for the bare `> file` form: nothing to run,
+    # only the redirect targets cost anything.
+    inner = (ProvisionResult() if command is None else await provision_node_fn(
+        command, session))
     if not targets:
         return inner
     children = [inner]

@@ -5,6 +5,7 @@
     "has_provision": false,
     "has_write": true,
     "resources": [
+      "box",
       "databricks_volume",
       "disk",
       "dropbox",
@@ -13,6 +14,7 @@
       "hf_datasets",
       "hf_models",
       "hf_spaces",
+      "nextcloud",
       "ram",
       "redis",
       "s3",

@@ -30,6 +30,8 @@ async def find(
     maxdepth: int | None = None,
     name_exclude: str | None = None,
     or_names: list[str] | None = None,
+    mtime_min: float | None = None,
+    mtime_max: float | None = None,
     iname: str | None = None,
     path_pattern: str | None = None,
     mindepth: int | None = None,

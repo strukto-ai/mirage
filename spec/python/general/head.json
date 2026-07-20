@@ -13,6 +13,7 @@
     "has_provision": true,
     "has_write": false,
     "resources": [
+      "box",
       "chroma",
       "databricks_volume",
       "dify",
@@ -25,6 +26,7 @@
       "github",
       "github_ci",
       "gmail",
+      "gridfs",
       "gsheets",
       "gslides",
       "hf_buckets",

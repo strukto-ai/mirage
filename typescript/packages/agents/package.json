@@ -50,6 +50,10 @@
       "types": "./dist/pi/index.d.ts",
       "import": "./dist/pi/index.js"
     },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "import": "./dist/mcp/index.js"
+    },
     "./vercel": {
       "types": "./dist/vercel/index.d.ts",
       "import": "./dist/vercel/index.js"
@@ -76,30 +80,31 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@struktoai/mirage-core": "workspace:*",
-    "picomatch": "^4.0.4"
+    "picomatch": "^4.0.4",
+    "zod": "^4.0.0"
   },
   "peerDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.0",
-    "@mariozechner/pi-ai": "^0.70.0",
-    "@mariozechner/pi-coding-agent": "^0.70.0",
-    "@mastra/core": "^1.29.0",
-    "@openai/agents": "^0.8.0",
-    "ai": "^6.0.0",
-    "deepagents": "^1.9.0",
-    "zod": "^4.0.0"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.215",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@mastra/core": "^1.51.0",
+    "@opencode-ai/plugin": "^1.18.3",
+    "@openai/agents": "^0.13.5",
+    "ai": "^7.0.31",
+    "deepagents": "^1.11.1"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
       "optional": true
     },
-    "@mariozechner/pi-ai": {
-      "optional": true
-    },
-    "@mariozechner/pi-coding-agent": {
+    "@earendil-works/pi-coding-agent": {
       "optional": true
     },
     "@mastra/core": {
+      "optional": true
+    },
+    "@opencode-ai/plugin": {
       "optional": true
     },
     "@openai/agents": {
@@ -110,23 +115,26 @@
     },
     "deepagents": {
       "optional": true
-    },
-    "zod": {
-      "optional": true
     }
   },
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.178",
-    "@mariozechner/pi-coding-agent": "^0.70.2",
-    "@mastra/core": "^1.29.1",
-    "@openai/agents": "^0.8.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.215",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@langchain/core": "^1.2.0",
+    "@langchain/langgraph": "^1.4.4",
+    "@langchain/langgraph-checkpoint": "^1.1.2",
+    "@langchain/langgraph-sdk": "^1.9.23",
+    "@mastra/core": "^1.51.0",
+    "@opencode-ai/plugin": "^1.18.3",
+    "@openai/agents": "^0.13.5",
     "@struktoai/mirage-node": "workspace:*",
+    "@types/node": "^22.0.0",
     "@types/picomatch": "^4.0.3",
-    "ai": "^6.0.170",
-    "deepagents": "^1.9.0",
+    "ai": "^7.0.31",
+    "deepagents": "^1.11.1",
+    "langchain": "^1.5.0",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^3.2.6",
-    "zod": "^4.0.0"
+    "vitest": "^3.2.6"
   }
 }

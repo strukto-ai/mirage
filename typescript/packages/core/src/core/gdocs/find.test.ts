@@ -119,7 +119,8 @@ describe('gdocs core find', () => {
     expect(files).toEqual(['/owned/Big__d2.gdoc.json', '/owned/Doc_A__d1.gdoc.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
     expect(dirs).toEqual(['/owned', '/shared'])
-    expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
+    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
+    expect([...new Set(statted)]).toEqual(['/'])
   })
 
   it('treats a null size as 0 for size filters, dirs contribute 0 too', async () => {

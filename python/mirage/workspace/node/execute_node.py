@@ -26,6 +26,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import word_text
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.control import (handle_case, handle_for,
@@ -129,6 +130,36 @@ async def _recurse_reassociated(
     return stdout, io, exec_node
 
 
+async def _recurse_pipe_stderr(
+    recurse: Callable[..., Any],
+    dispatch: Callable[..., Any],
+    execute_fn: Callable[..., Any],
+    registry: MountRegistry,
+    targets: list[Any],
+    node: Any,
+    session: Session,
+    stdin: Any = None,
+    call_stack: CallStack | None = None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    if node not in targets or node_kind(node) != NodeKind.REDIRECT:
+        return await recurse(node, session, stdin, call_stack)
+    command, redirects = get_redirects(node)
+    redirects.append(
+        Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT))
+    expanded, pipe_node = await expand_redirects(redirects, session,
+                                                 execute_fn, registry,
+                                                 call_stack)
+    stdout, io, exec_node = await handle_redirect(recurse, dispatch, command,
+                                                  expanded, session, stdin,
+                                                  call_stack)
+    if pipe_node is not None and stdout is not None:
+        stdout, io2, exec_node2 = await recurse(pipe_node, session, stdout,
+                                                call_stack)
+        io = await io.merge(io2)
+        exec_node = exec_node2
+    return stdout, io, exec_node
+
+
 async def execute_node(
     dispatch: Callable[..., Any],
     registry: MountRegistry,
@@ -200,6 +231,15 @@ async def execute_node(
     # ── pipeline ────────────────────────────────
     if kind == NodeKind.PIPELINE:
         commands, stderr_flags = get_pipeline_commands(node)
+        if any(stderr_flags):
+            targets = [
+                command for i, command in enumerate(commands)
+                if i < len(stderr_flags) and stderr_flags[i]
+            ]
+            wrapped = partial(_recurse_pipe_stderr, recurse, dispatch,
+                              execute_fn, registry, targets)
+            return await handle_pipe(wrapped, commands, stderr_flags, session,
+                                     stdin, cs)
         return await handle_pipe(recurse, commands, stderr_flags, session,
                                  stdin, cs)
 
@@ -212,7 +252,7 @@ async def execute_node(
     # ── redirected statement ────────────────────
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        if command.type == NT.LIST:
+        if command is not None and command.type == NT.LIST:
             # tree-sitter hoists a trailing redirect over the whole
             # &&/|| list; bash binds it to the last command:
             #   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
@@ -225,6 +265,13 @@ async def execute_node(
                               execute_fn, registry, redirects, right)
             return await handle_connection(wrapped, left, op, right, session,
                                            stdin, cs)
+        if command is not None and command.type == NT.PIPELINE:
+            commands, stderr_flags = get_pipeline_commands(command)
+            right = commands[-1]
+            wrapped = partial(_recurse_reassociated, recurse, dispatch,
+                              execute_fn, registry, redirects, right)
+            return await handle_pipe(wrapped, commands, stderr_flags, session,
+                                     stdin, cs)
         expanded_redirects, pipe_node = await expand_redirects(
             redirects, session, execute_fn, registry, cs)
         stdout, io, exec_node = await handle_redirect(recurse, dispatch,

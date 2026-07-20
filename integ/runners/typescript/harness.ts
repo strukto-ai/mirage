@@ -26,6 +26,10 @@ export interface Mount {
   backend: string
   mode?: string
   fixture?: string
+  // Fixture seeded by the adapter (over the backend API) instead of the
+  // harness tee path -- used by read-only backends like box.
+  seed?: string
+  folder?: string
   bucket?: string
   prefix?: string
   root?: string
@@ -38,6 +42,7 @@ export interface Target {
   service?: string
   epoch?: string
   apps?: string
+  mail?: string
   mounts: Mount[]
 }
 
@@ -134,7 +139,7 @@ export function loadCases(root: string): Case[] {
   return cases
 }
 
-function walkFiles(base: string): string[] {
+export function walkFiles(base: string): string[] {
   const out: string[] = []
   for (const entry of readdirSync(base)) {
     const full = join(base, entry)

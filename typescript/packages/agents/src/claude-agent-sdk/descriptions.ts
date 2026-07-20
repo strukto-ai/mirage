@@ -12,30 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const EXECUTE_DESCRIPTION =
-  'Run a shell-style command on the Mirage virtual filesystem. ' +
-  'Supports cat, grep, find, head, tail, ls, wc, sort, uniq, tee, pipe, ' +
-  'and any other Unix command on mounted resources (S3, disk, RAM, etc.). ' +
-  'Also supports reading structured files: cat on .parquet/.orc/.csv returns a table.'
-
-export const READ_DESCRIPTION =
-  'Read the contents of a file on the Mirage virtual filesystem. ' +
-  'Returns line-numbered text. ' +
-  "Optionally pass 'offset' (default 0) to start at a given line " +
-  "and 'limit' (default 2000) to cap the number of lines returned."
-
-export const WRITE_DESCRIPTION =
-  'Write content to a new file on the Mirage virtual filesystem. ' +
-  'Fails if the file already exists; use edit to modify an existing file.'
-
-export const EDIT_DESCRIPTION =
-  'Replace a string in an existing file on the Mirage virtual filesystem. ' +
-  'Fails if old_string is not found or appears more than once. ' +
-  'Pass replace_all=true (default false) to replace every occurrence.'
-
-export const LS_DESCRIPTION =
-  'List files and directories at the given path on the Mirage virtual filesystem.'
-
-export const GREP_DESCRIPTION =
-  'Search for a pattern in files on the Mirage virtual filesystem. ' +
-  'Supports regex. Searches recursively under path.'
+export {
+  EDIT_DESCRIPTION,
+  EXECUTE_DESCRIPTION,
+  GREP_DESCRIPTION,
+  LS_DESCRIPTION,
+  READ_DESCRIPTION,
+  WRITE_DESCRIPTION,
+} from '../tool-descriptions.ts'

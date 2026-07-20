@@ -23,6 +23,7 @@ from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError
 from mirage.shell.helpers import get_text
+from mirage.shell.parse import parse
 from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
@@ -39,6 +40,30 @@ def _unescape_unquoted(text: str) -> str:
     except ValueError:
         return text
     return parts[0] if parts else text
+
+
+def unescape_heredoc(text: str) -> str:
+    """Unquoted-heredoc escapes: \\$, \\`, \\\\, \\<newline> only.
+
+    Unlike double quotes, \\" stays literal in heredoc bodies.
+    """
+    if "\\" not in text:
+        return text
+    text = text.replace("\\\\", "\x00")
+    text = text.replace("\\$", "$")
+    text = text.replace("\\`", "`")
+    text = text.replace("\\\n", "")
+    return text.replace("\x00", "\\")
+
+
+def _find_first(node: tree_sitter.Node, ntype: str) -> tree_sitter.Node | None:
+    if node.type == ntype:
+        return node
+    for child in node.named_children:
+        found = _find_first(child, ntype)
+        if found is not None:
+            return found
+    return None
 
 
 async def expand_arith(
@@ -129,6 +154,18 @@ async def expand_node(
                                             expand_child)
 
     if ntype == NT.COMMAND_SUBSTITUTION:
+        raw = get_text(ts_node)
+        if raw.startswith("$((") and raw.endswith("))"):
+            # Inside heredoc bodies tree-sitter parses `$((expr))` as a
+            # command substitution wrapping a subshell; reparse in
+            # command context so it routes to the arithmetic branch.
+            sub = ts_node.named_children
+            if len(sub) == 1 and sub[0].type == NT.SUBSHELL:
+                reparsed = parse("echo " + raw)
+                arith = _find_first(reparsed, NT.ARITHMETIC_EXPANSION)
+                if arith is not None:
+                    return await expand_node(arith, session, execute_fn,
+                                             call_stack)
         inner_cmds = [
             c for c in ts_node.named_children
             if c.type in (NT.COMMAND, NT.PIPELINE, NT.LIST,

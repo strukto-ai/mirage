@@ -9,7 +9,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -19,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "nl /data/a.txt",
       "expect": {
@@ -37,7 +40,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -47,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "nl -b a /data/a.txt",
       "expect": {
@@ -65,7 +71,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -75,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "nl -d ! /data/a.txt",
       "expect": {
@@ -93,7 +102,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -103,7 +114,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "nl -w 3 /data/a.txt",
       "expect": {
@@ -121,7 +133,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -131,7 +145,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "du /data/b.txt | wc -c",
       "expect": {
@@ -149,7 +164,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -159,7 +176,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "stat -c %n /data/b.txt | wc -c",
       "expect": {
@@ -177,7 +195,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -187,7 +207,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "file /data/b.txt | wc -c",
       "expect": {
@@ -205,7 +226,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -213,7 +236,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "tree /data/sub | wc -c",
       "expect": {
@@ -231,7 +255,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -241,7 +267,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls /data/sub | wc -c",
       "expect": {
@@ -259,7 +286,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -269,7 +298,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "wc -l /data/b.txt | wc -c",
       "expect": {
@@ -287,7 +317,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -297,7 +329,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "md5 /data/b.txt | wc -c",
       "expect": {
@@ -315,7 +348,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -325,7 +360,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cmp /data/a.txt /data/b.txt | wc -c",
       "expect": {

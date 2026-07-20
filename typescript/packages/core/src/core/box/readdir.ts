@@ -18,42 +18,12 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { listFolderItems, type BoxItem } from './api.ts'
+import { enotdir } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
-const ROOT_FOLDER_ID = '0'
-
-// File extensions that mirage post-processes into clean JSON. The vfs name
-// gets a `.json` suffix appended so consumers (and the AI) see at a glance
-// that cat returns JSON; the underlying Box file ID is the same regardless.
-const SPECIAL_EXT_TO_RT: Readonly<Record<string, string>> = {
-  '.boxnote': 'box/boxnote',
-  '.boxcanvas': 'box/boxcanvas',
-  '.gdoc': 'box/gdoc',
-  '.gsheet': 'box/gsheet',
-  '.gslides': 'box/gslides',
-}
-
-function specialResourceType(name: string): string | null {
-  const lower = name.toLowerCase()
-  for (const [src, rt] of Object.entries(SPECIAL_EXT_TO_RT)) {
-    if (lower.endsWith(src)) return rt
-  }
-  return null
-}
-
-function vfsNameFor(name: string): string {
-  const lower = name.toLowerCase()
-  for (const src of Object.keys(SPECIAL_EXT_TO_RT)) {
-    if (lower.endsWith(src)) return name + '.json'
-  }
-  return name
-}
-
-function resourceTypeFor(item: BoxItem): string {
+export function resourceTypeFor(item: BoxItem): string {
   if (item.type === 'folder') return 'box/folder'
   if (item.type === 'web_link') return 'box/weblink'
-  const specialRt = specialResourceType(item.name)
-  if (specialRt !== null) return specialRt
   return 'box/file'
 }
 
@@ -73,7 +43,7 @@ export async function readdir(
 
   let folderId: string
   if (key === '') {
-    folderId = ROOT_FOLDER_ID
+    folderId = accessor.rootFolderId
   } else {
     if (index === undefined) {
       const e = new Error(`ENOENT: ${path.virtual}`) as Error & { code: string }
@@ -94,6 +64,11 @@ export async function readdir(
         throw e
       }
     }
+    if (result.entry.resourceType !== 'box/folder') {
+      // Listing a file id would 404 on /folders/{id}/items; surface the
+      // POSIX error so generic ls falls back to the file entry.
+      throw enotdir(path.virtual)
+    }
     folderId = result.entry.id
   }
 
@@ -101,7 +76,7 @@ export async function readdir(
   const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
   for (const it of items) {
     const isDir = it.type === 'folder'
-    const filename = vfsNameFor(it.name)
+    const filename = it.name
     const sizeNum = typeof it.size === 'number' ? it.size : null
     const entry = new IndexEntry({
       id: it.id,

@@ -136,6 +136,20 @@ describe('node resource registry', () => {
     expect(r.kind).toBe('redis')
   })
 
+  it('Nextcloud: accepts Python YAML snake_case keys', async () => {
+    const resource = await buildResource('nextcloud', {
+      url: 'https://cloud.example/remote.php/dav/files/alice/',
+      username: 'alice',
+      password: 'secret',
+      verify_ssl: false,
+    })
+    expect(resource.kind).toBe('nextcloud')
+    const { config } = resource as unknown as {
+      config: { username?: string; verifySsl?: boolean }
+    }
+    expect(config).toMatchObject({ username: 'alice', verifySsl: false })
+  })
+
   it('normalizeS3Config standalone', () => {
     expect(
       normalizeS3Config({

@@ -9,7 +9,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -19,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/a.txt /data2/xm.txt",
       "expect": {
@@ -37,7 +40,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -47,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat -n /data/b.txt /data2/xm.txt",
       "expect": {
@@ -65,7 +71,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -75,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/sorted_*.txt /data2/xm.txt",
       "expect": {

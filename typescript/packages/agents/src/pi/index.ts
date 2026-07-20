@@ -13,6 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { mirageExtension, type MirageExtensionOptions } from './extension.ts'
-export { mirageOperations, type MirageOperationsBundle } from './operations.ts'
+export {
+  mirageOperations,
+  StaleMirageFileError,
+  type MirageOperationsBundle,
+  type MirageOperationsOptions,
+} from './operations.ts'
 export { MIRAGE_SYSTEM_PROMPT, buildSystemPrompt } from '../prompt.ts'
 export type { BuildSystemPromptOptions } from '../prompt.ts'

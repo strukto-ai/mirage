@@ -9,7 +9,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -19,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && wc -l a.txt)",
       "expect": {
@@ -37,7 +40,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -47,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && wc -l a.txt b.txt)",
       "expect": {
@@ -65,7 +71,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -75,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && wc -l ./a.txt)",
       "expect": {
@@ -93,7 +102,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -103,7 +114,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data/sub && wc -l ../a.txt)",
       "expect": {
@@ -121,7 +133,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -131,7 +145,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && grep world a.txt b.txt)",
       "expect": {
@@ -149,7 +164,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -159,7 +176,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && md5 a.txt)",
       "expect": {
@@ -177,7 +195,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -187,7 +207,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && stat -c %n a.txt)",
       "expect": {
@@ -205,7 +226,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -215,7 +238,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && find sub -name nested.txt)",
       "expect": {
@@ -233,7 +257,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -243,7 +269,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && head -n 1 a.txt b.txt)",
       "expect": {
@@ -261,7 +288,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -271,7 +300,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && grep -l world a.txt b.txt)",
       "expect": {
@@ -289,7 +319,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -299,7 +331,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && grep -r nested disptree)",
       "expect": {
@@ -317,7 +350,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -327,7 +362,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && rg nested disptree)",
       "expect": {
@@ -345,7 +381,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -355,7 +393,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && ls -R disptree)",
       "expect": {
@@ -373,7 +412,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -383,7 +424,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && find disptree)",
       "expect": {

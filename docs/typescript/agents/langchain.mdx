@@ -1,13 +1,13 @@
 ---
-title: LangChain (deepagents)
-description: Back deepagents and other LangGraph-style agents with a Mirage workspace via LangchainWorkspace.
+title: LangChain (Deep Agents)
+description: Back Deep Agents with a Mirage workspace via LangchainWorkspace.
 icon: /images/langchain-logo.svg
 ---
 
-[deepagents](https://github.com/langchain-ai/deepagents) is LangChain's framework for long-horizon coding agents. It accepts a pluggable `backend` for filesystem and shell operations, Mirage ships one.
+[Deep Agents](https://github.com/langchain-ai/deepagents) is LangChain's framework for long-horizon coding agents. It accepts a pluggable `backend` for filesystem and shell operations, and Mirage ships one.
 
 <Note>
-  Node only. The Mirage adapter is runtime-agnostic, but `deepagents` and the LangChain runtime depend on Node APIs.
+  Node only. `LangchainWorkspace` uses `@struktoai/mirage-node`, and Deep Agents depends on Node APIs.
 </Note>
 
 ## Install
@@ -44,16 +44,20 @@ const agent = createDeepAgent({
 const result = await agent.invoke({
   messages: [{ role: 'user', content: 'Create /report.md and summarize.' }],
 })
-for (const text of extractText(result.messages)) {
+for (const text of extractText(result.messages.slice(-1))) {
   console.log(text)
 }
 ```
+
+## Multimodal files
+
+`read_file` can pass images, PDFs, audio, video, PPT, and PPTX files from a Mirage mount to a model as multimodal content. The selected model and provider must support the corresponding input type. Text files continue to use line-based pagination.
 
 ## Exports
 
 | Symbol | Purpose |
 | --- | --- |
-| `LangchainWorkspace` | `Backend` implementation for deepagents, wires reads, writes, edits, and shell. |
+| `LangchainWorkspace` | `SandboxBackendProtocolV2` implementation for Deep Agents, wires reads, writes, edits, search, and shell. |
 | `extractText` | Returns `string[]` of text blocks from an array of LangChain messages. |
 | `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
 

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
+
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
@@ -62,8 +64,49 @@ async def test_awrite_and_aread(backend):
     result = await backend.awrite("/test.txt", "hello world")
     assert result.error is None
 
-    content = await backend.aread("/test.txt")
-    assert "hello world" in content
+    read_result = await backend.aread("/test.txt")
+    assert read_result.error is None
+    assert read_result.file_data == {
+        "content": "hello world",
+        "encoding": "utf-8",
+    }
+
+
+@pytest.mark.asyncio
+async def test_aread_paginates_text_without_line_numbers(backend):
+    await backend.awrite("/lines.txt", "zero\none\ntwo\nthree\n")
+
+    result = await backend.aread("/lines.txt", offset=1, limit=2)
+
+    assert result.error is None
+    assert result.file_data == {
+        "content": "one\ntwo\n",
+        "encoding": "utf-8",
+    }
+
+
+@pytest.mark.asyncio
+async def test_aread_reports_out_of_range_offset(backend):
+    await backend.awrite("/lines.txt", "zero\none\n")
+
+    result = await backend.aread("/lines.txt", offset=2)
+
+    assert result.file_data is None
+    assert result.error == "Line offset 2 exceeds file length (2 lines)"
+
+
+@pytest.mark.asyncio
+async def test_aread_encodes_pdf_as_base64(backend):
+    content = b"%PDF-1.7\n\x00binary"
+    await backend.aupload_files([("/document.pdf", content)])
+
+    result = await backend.aread("/document.pdf")
+
+    assert result.error is None
+    assert result.file_data == {
+        "content": base64.standard_b64encode(content).decode("ascii"),
+        "encoding": "base64",
+    }
 
 
 @pytest.mark.asyncio
@@ -78,37 +121,58 @@ async def test_aedit(backend):
     await backend.awrite("/edit.txt", "foo bar baz")
     result = await backend.aedit("/edit.txt", "bar", "qux")
     assert result.error is None
-    content = await backend.aread("/edit.txt")
-    assert "qux" in content
-    assert "bar" not in content
+    read_result = await backend.aread("/edit.txt")
+    assert read_result.file_data is not None
+    assert "qux" in read_result.file_data["content"]
+    assert "bar" not in read_result.file_data["content"]
 
 
 @pytest.mark.asyncio
-async def test_als_info(backend):
+async def test_als(backend):
     await backend.awrite("/dir/a.txt", "a")
     await backend.awrite("/dir/b.txt", "b")
-    entries = await backend.als_info("/dir")
+    result = await backend.als("/dir")
+    assert result.entries is not None
+    entries = result.entries
     paths = [e["path"] for e in entries]
     assert len(paths) == 2
 
 
 @pytest.mark.asyncio
-async def test_agrep_raw(backend):
-    await backend.awrite("/search.txt",
-                         "hello world\ngoodbye world\nhello again")
-    result = await backend.agrep_raw("hello", path="/")
-    assert isinstance(result, list)
-    assert len(result) >= 2
+async def test_als_reports_command_errors(backend):
+    result = await backend.als("/missing")
+
+    assert result.entries is None
+    assert result.error is not None
 
 
 @pytest.mark.asyncio
-async def test_aglob_info(backend):
+async def test_agrep(backend):
+    await backend.awrite("/search.txt",
+                         "hello world\ngoodbye world\nhello again")
+    result = await backend.agrep("hello", path="/")
+    assert result.matches is not None
+    assert len(result.matches) >= 2
+
+
+@pytest.mark.asyncio
+async def test_aglob(backend):
     await backend.awrite("/data/a.txt", "a")
     await backend.awrite("/data/b.py", "b")
-    entries = await backend.aglob_info("*.txt", path="/data")
+    result = await backend.aglob("*.txt", path="/data")
+    assert result.matches is not None
+    entries = result.matches
     paths = [e["path"] for e in entries]
     assert any("a.txt" in p for p in paths)
     assert not any("b.py" in p for p in paths)
+
+
+@pytest.mark.asyncio
+async def test_aglob_reports_command_errors(backend):
+    result = await backend.aglob("*.txt", path="/missing")
+
+    assert result.matches is None
+    assert result.error is not None
 
 
 @pytest.mark.asyncio

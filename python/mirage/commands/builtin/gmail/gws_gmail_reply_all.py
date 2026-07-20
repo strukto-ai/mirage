@@ -35,7 +35,7 @@ SPEC = CommandSpec(
 )
 
 
-@command("gws-gmail-reply-all", resource="gmail", spec=SPEC, write=True)
+@command("gws gmail +reply-all", resource="gmail", spec=SPEC, write=True)
 async def gws_gmail_reply_all(
     accessor: GmailAccessor,
     paths: list[PathSpec],

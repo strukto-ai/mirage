@@ -53,6 +53,7 @@ export class Session {
   readonlyVars: Set<string>
   arrays: Record<string, string[]>
   stdinBuffer: AsyncLineIterator | null = null
+  stdinSource: unknown = null
   localVars: Map<string, string | null> | null = null
   mountModes: ReadonlyMap<string, MountMode> | null
   generation: number

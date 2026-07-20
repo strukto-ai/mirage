@@ -16,14 +16,13 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { readdir as coreReaddir } from './readdir.ts'
+import { getFolderInfo, type BoxItem } from './api.ts'
+import { readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
+import { pathParts, resolveItem } from './resolve.ts'
 import { enoent } from '../../utils/errors.ts'
 
 function guessType(name: string): FileType {
   const lower = name.toLowerCase()
-  // Box's .boxnote / .boxcanvas / .gdoc / .gsheet / .gslides files surface
-  // through the vfs with a `.json` suffix; the .json check below classifies
-  // them via mirage-processed JSON.
   if (lower.endsWith('.json')) return FileType.JSON
   if (lower.endsWith('.csv')) return FileType.CSV
   if (lower.endsWith('.png')) return FileType.IMAGE_PNG
@@ -41,17 +40,56 @@ function guessType(name: string): FileType {
   return FileType.BINARY
 }
 
+function statFromItem(item: BoxItem): FileStat {
+  const vfsName = item.name
+  const rt = resourceTypeFor(item)
+  if (rt === 'box/folder') {
+    return new FileStat({
+      name: vfsName,
+      type: FileType.DIRECTORY,
+      modified: item.modified_at ?? '',
+      extra: { box_id: item.id },
+    })
+  }
+  const size = typeof item.size === 'number' && item.size > 0 ? item.size : null
+  return new FileStat({
+    name: vfsName,
+    size,
+    type: guessType(vfsName),
+    modified: item.modified_at ?? '',
+    fingerprint:
+      item.modified_at !== undefined && item.modified_at !== '' ? item.modified_at : null,
+    extra: { box_id: item.id, resource_type: rt },
+  })
+}
+
 export async function stat(
   accessor: BoxAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  void accessor
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const key = path.resourcePath
-  if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
+  if (key === '') {
+    // The mount root has no parent listing to inherit an mtime from; fetch
+    // the folder's own metadata so find -mtime and ls -ld see a real
+    // timestamp (mirrors the onedrive Graph-root stat).
+    const info = await getFolderInfo(accessor.tokenManager, accessor.rootFolderId)
+    return new FileStat({
+      name: '/',
+      type: FileType.DIRECTORY,
+      modified: info.modified_at ?? '',
+      extra: { box_id: accessor.rootFolderId },
+    })
+  }
 
-  if (index === undefined) throw enoent(path.virtual)
+  if (index === undefined) {
+    // The write-family builders and provision estimation call stat without a
+    // threaded index; resolve the id directly rather than ENOENT.
+    const item = await resolveItem(accessor, pathParts(path))
+    if (item === null) throw enoent(path.virtual)
+    return statFromItem(item)
+  }
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
@@ -74,7 +112,9 @@ export async function stat(
     }
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {
-      throw enoent(path.virtual)
+      const item = await resolveItem(accessor, pathParts(path))
+      if (item === null) throw enoent(path.virtual)
+      return statFromItem(item)
     }
   }
   if (result.entry.resourceType === 'box/folder') {

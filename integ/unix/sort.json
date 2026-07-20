@@ -9,7 +9,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -19,7 +21,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort /data/a.txt",
       "expect": {
@@ -37,7 +40,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -47,7 +52,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -r /data/a.txt",
       "expect": {
@@ -65,7 +71,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -75,7 +83,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -n /data/numbers.txt",
       "expect": {
@@ -93,7 +102,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -103,7 +114,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort /data/dup.txt | uniq",
       "expect": {
@@ -121,7 +133,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -131,7 +145,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort /data/a.txt | head -n 2",
       "expect": {
@@ -149,7 +164,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -159,7 +176,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort /data/a.txt | tail -n 2",
       "expect": {
@@ -177,7 +195,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -187,7 +207,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -u /data/dup.txt",
       "expect": {
@@ -205,7 +226,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -215,7 +238,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -k 2 -t , /data/csv.csv",
       "expect": {
@@ -233,7 +257,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -243,7 +269,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -f /data/mixed.txt",
       "expect": {
@@ -261,7 +288,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -271,7 +300,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -n -r /data/numbers.txt",
       "expect": {
@@ -289,7 +319,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -299,7 +331,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -t , -k 1 /data/abc.csv",
       "expect": {
@@ -317,7 +350,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -327,7 +362,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -t ' ' -k 2 -n /data/fields.txt",
       "expect": {
@@ -345,7 +381,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -355,7 +393,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo -e 'Feb\\nJan\\nMar' | sort -M",
       "expect": {
@@ -373,7 +412,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -383,7 +424,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "sort -b /data/spaced.txt",
       "expect": {
@@ -401,7 +443,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -411,7 +455,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo sortemptyf=$(sort /data/empty.txt | wc -c)",
       "expect": {
@@ -429,7 +474,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -439,7 +486,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "echo sortblankin=$(echo | sort | wc -c)",
       "expect": {
@@ -457,7 +505,9 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -467,7 +517,8 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "cat /data/dup.txt | sort",
       "expect": {
@@ -485,13 +536,16 @@
         "redis",
         "opfs",
         "s3",
+        "gridfs",
         "s3-prefix",
+        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "box"
       ],
       "command": "sort",
       "expect": {

@@ -28,7 +28,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("email-read", resource="email", spec=SPEC)
+@command("himalaya message read", resource="email", spec=SPEC)
 async def email_read(
     accessor: EmailAccessor,
     paths: list[PathSpec],

@@ -26,13 +26,15 @@ import {
   getNegatedCommand,
   getParts,
   getPipelineCommands,
+  getProcessSubBody,
+  getRedirects,
   getSubshellBody,
   getText,
   getTestArgv,
   getUnsetNames,
   getWhileParts,
 } from './helpers.ts'
-import { NodeType as NT } from './types.ts'
+import { NodeType as NT, RedirectKind } from './types.ts'
 
 function node(
   type: string,
@@ -82,6 +84,56 @@ describe('getParts', () => {
       ],
     })
     expect(getParts(n)).toHaveLength(2)
+  })
+})
+
+describe('getProcessSubBody', () => {
+  it('preserves the complete inner shell source', () => {
+    expect(getProcessSubBody(node('process_substitution', '<(echo one; echo two)'))).toBe(
+      'echo one; echo two',
+    )
+    expect(getProcessSubBody(node('process_substitution', '<(printf x | sort)'))).toBe(
+      'printf x | sort',
+    )
+  })
+})
+
+describe('getRedirects herestring ordering', () => {
+  const commandName = node(NT.COMMAND_NAME, 'cat')
+  const inputWord = node(NT.WORD, 'input.txt')
+  const hereWord = node(NT.WORD, 'here')
+  const input = node(NT.FILE_REDIRECT, '< input.txt', {
+    children: [node(NT.REDIRECT_IN, '<', { isNamed: false }), inputWord],
+    namedChildren: [inputWord],
+  })
+  const herestring = node(NT.HERESTRING_REDIRECT, '<<< here', {
+    children: [node(NT.HERESTRING_TOKEN, '<<<', { isNamed: false }), hereWord],
+    namedChildren: [hereWord],
+  })
+
+  it('hoists a command-nested herestring before an outer file redirect', () => {
+    const command = node(NT.COMMAND, 'cat <<< here', {
+      namedChildren: [commandName, herestring],
+    })
+    const statement = node(NT.REDIRECTED_STATEMENT, 'cat <<< here < input.txt', {
+      namedChildren: [command, input],
+    })
+    const [, redirects] = getRedirects(statement)
+    expect(redirects.map((r) => r.kind)).toEqual([RedirectKind.HERESTRING, RedirectKind.STDIN])
+  })
+
+  it('recovers a herestring parsed as ERROR plus file redirect', () => {
+    const command = node(NT.COMMAND, 'cat', { namedChildren: [commandName] })
+    const recoveredHere = node(NT.FILE_REDIRECT, '< here', {
+      children: [node(NT.REDIRECT_IN, '<', { isNamed: false }), hereWord],
+      namedChildren: [hereWord],
+    })
+    const statement = node(NT.REDIRECTED_STATEMENT, 'cat < input.txt <<< here', {
+      namedChildren: [command, input, node(NT.ERROR, '<<'), recoveredHere],
+    })
+    const [, redirects] = getRedirects(statement)
+    expect(redirects.map((r) => r.kind)).toEqual([RedirectKind.STDIN, RedirectKind.HERESTRING])
+    expect(redirects[1]?.target).toBe('here')
   })
 })
 

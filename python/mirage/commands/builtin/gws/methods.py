@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from mirage.commands.spec.types import CommandSpec, OperandKind, Option
 from mirage.core.google._client import (TokenManager, docs_base, drive_base,
-                                        sheets_base, slides_base)
+                                        gmail_base, sheets_base, slides_base)
 
 # The official gws CLI generates one command per Discovery method and
 # speaks raw API resources: `--params` carries path/query parameters,
@@ -110,6 +110,22 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               "/files/{fileId}/permissions"),
     GwsMethod("drive", "permissions", "delete", "DELETE",
               "/files/{fileId}/permissions/{permissionId}"),
+    GwsMethod("gmail", "users labels", "list", "GET",
+              "/users/{userId}/labels"),
+    GwsMethod("gmail", "users messages", "list", "GET",
+              "/users/{userId}/messages"),
+    GwsMethod("gmail", "users messages", "get", "GET",
+              "/users/{userId}/messages/{id}"),
+    GwsMethod("gmail",
+              "users messages",
+              "send",
+              "POST",
+              "/users/{userId}/messages/send",
+              needs_body=True),
+    GwsMethod("gmail", "users messages", "trash", "POST",
+              "/users/{userId}/messages/{id}/trash"),
+    GwsMethod("gmail", "users messages attachments", "get", "GET",
+              "/users/{userId}/messages/{messageId}/attachments/{id}"),
 )
 
 GWS_API_SPEC = CommandSpec(options=(
@@ -122,6 +138,7 @@ SERVICE_BASES: dict[str, Callable[[TokenManager], str]] = {
     "docs": docs_base,
     "sheets": sheets_base,
     "slides": slides_base,
+    "gmail": gmail_base,
 }
 
 SERVICE_RESOURCES: dict[str, list[str]] = {
@@ -129,4 +146,5 @@ SERVICE_RESOURCES: dict[str, list[str]] = {
     "docs": ["gdocs", "gdrive"],
     "sheets": ["gsheets", "gdrive"],
     "slides": ["gslides", "gdrive"],
+    "gmail": ["gmail"],
 }

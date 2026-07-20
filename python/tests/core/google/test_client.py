@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# yapf: disable
 from mirage.core.google._client import (DOCS_API_BASE, DRIVE_API_BASE,
-                                        DRIVE_UPLOAD_BASE, SHEETS_API_BASE,
-                                        SLIDES_API_BASE, TOKEN_URL,
-                                        TokenManager, docs_base, drive_base,
-                                        drive_upload_base, sheets_base,
-                                        slides_base, token_url)
+                                        DRIVE_UPLOAD_BASE, GMAIL_API_BASE,
+                                        SHEETS_API_BASE, SLIDES_API_BASE,
+                                        TOKEN_URL, TokenManager, docs_base,
+                                        drive_base, drive_upload_base,
+                                        gmail_base, sheets_base, slides_base,
+                                        token_url)
+# yapf: enable
 from mirage.core.google.config import GoogleConfig
 
 
@@ -33,6 +36,7 @@ def test_bases_default_to_real_google_hosts():
     assert docs_base(tm) == DOCS_API_BASE
     assert slides_base(tm) == SLIDES_API_BASE
     assert sheets_base(tm) == SHEETS_API_BASE
+    assert gmail_base(tm) == GMAIL_API_BASE
     assert token_url(tm.config) == TOKEN_URL
 
 
@@ -43,4 +47,5 @@ def test_api_base_override_rewrites_every_service():
     assert docs_base(tm) == "http://127.0.0.1:19999/v1"
     assert slides_base(tm) == "http://127.0.0.1:19999/v1"
     assert sheets_base(tm) == "http://127.0.0.1:19999/v4"
+    assert gmail_base(tm) == "http://127.0.0.1:19999/gmail/v1"
     assert token_url(tm.config) == "http://127.0.0.1:19999/token"

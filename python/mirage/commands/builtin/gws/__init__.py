@@ -19,6 +19,7 @@ GWS_DRIVE_API_COMMANDS = make_gws_api_commands("drive")
 GWS_DOCS_API_COMMANDS = make_gws_api_commands("docs")
 GWS_SHEETS_API_COMMANDS = make_gws_api_commands("sheets")
 GWS_SLIDES_API_COMMANDS = make_gws_api_commands("slides")
+GWS_GMAIL_API_COMMANDS = make_gws_api_commands("gmail")
 
 __all__ = [
     "GWS_METHODS",
@@ -27,5 +28,6 @@ __all__ = [
     "GWS_DOCS_API_COMMANDS",
     "GWS_SHEETS_API_COMMANDS",
     "GWS_SLIDES_API_COMMANDS",
+    "GWS_GMAIL_API_COMMANDS",
     "make_gws_api_commands",
 ]

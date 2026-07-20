@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stripSlash } from '../../utils/slash.ts'
-import type { ByteSource, IOResult } from '../../io/types.ts'
-import { materialize } from '../../io/types.ts'
+import type { ByteSource } from '../../io/types.ts'
+import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
@@ -27,10 +27,29 @@ import type { ExecuteNodeFn } from './jobs.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
+const TO_STDOUT = Symbol('stdout')
+const TO_STDERR = Symbol('stderr')
+type FdDest = typeof TO_STDOUT | typeof TO_STDERR | string
+
+/**
+ * Handle all redirect patterns: >, >>, <, 2>, 2>&1, &>, >&2, <<<.
+ *
+ * File-descriptor routing follows bash's left-to-right fd table: each
+ * redirect updates where fd1/fd2 point at that moment, so
+ * `cmd > f 2>&1` sends both streams to f while `cmd 2>&1 > f` sends
+ * stderr to the original stdout. Output files are created (and
+ * truncated unless appending) when the redirect is processed, even if
+ * the stream ends up empty — including the command-less `> file` form
+ * (command is null).
+ *
+ * Deliberate divergence from bash: when both streams route to the same
+ * destination they are concatenated stdout-then-stderr, not temporally
+ * interleaved (streams are materialized buffers).
+ */
 export async function handleRedirect(
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
-  command: TSNodeLike,
+  command: TSNodeLike | null,
   redirects: readonly Redirect[],
   session: Session,
   stdin: ByteSource | null = null,
@@ -60,113 +79,115 @@ export async function handleRedirect(
     }
   }
 
-  const [stdout, io] = await executeNode(command, session, cmdStdin, callStack)
-  const stdoutData = (await applyBarrier(stdout, io, BarrierPolicy.VALUE)) as Uint8Array | null
-  const stderrData = await materialize(io.stderr)
+  let stdoutData: Uint8Array
+  let stderrData: Uint8Array
+  let io: IOResult
+  if (command === null) {
+    stdoutData = new Uint8Array()
+    stderrData = new Uint8Array()
+    io = new IOResult({ exitCode: 0 })
+  } else {
+    const [stdout, execIo] = await executeNode(command, session, cmdStdin, callStack)
+    io = execIo
+    stdoutData =
+      ((await applyBarrier(stdout, io, BarrierPolicy.VALUE)) as Uint8Array | null) ??
+      new Uint8Array()
+    stderrData = await materialize(io.stderr)
+  }
 
-  let resultStdout: Uint8Array | null = stdoutData ?? new Uint8Array()
-  let resultStderr: Uint8Array | null = stderrData
+  let fd1: FdDest = TO_STDOUT
+  let fd2: FdDest = TO_STDERR
+  const fileBufs = new Map<string, Uint8Array>()
+  const fileScopes = new Map<string, PathSpec>()
 
   for (const r of redirects) {
-    const stream = r.kind
-    const append = r.append
-    const fd = r.fd
-
     if (
-      stream === RedirectKind.STDIN ||
-      stream === RedirectKind.HEREDOC ||
-      stream === RedirectKind.HERESTRING
+      r.kind === RedirectKind.STDIN ||
+      r.kind === RedirectKind.HEREDOC ||
+      r.kind === RedirectKind.HERESTRING
     ) {
       continue
     }
 
-    if (stream === RedirectKind.STDERR_TO_STDOUT && typeof r.target === 'number') {
-      resultStdout = concat([resultStdout ?? new Uint8Array(), resultStderr ?? new Uint8Array()])
-      resultStderr = null
+    // 2>&1 — fd2 follows wherever fd1 points right now
+    if (r.kind === RedirectKind.STDERR_TO_STDOUT && typeof r.target === 'number') {
+      fd2 = fd1
       continue
     }
 
-    if (fd === 1 && r.target === 2) {
-      resultStderr = concat([resultStderr ?? new Uint8Array(), resultStdout ?? new Uint8Array()])
-      resultStdout = null
+    // >&2 or 1>&2 — fd1 follows wherever fd2 points right now
+    if (r.fd === 1 && r.target === 2) {
+      fd1 = fd2
       continue
     }
+
+    // other numeric dups (3>&1, ...) are not simulated
+    if (typeof r.target === 'number') continue
 
     const scope = ensureScope(r.target)
     const path = scope.virtual
-
-    if (fd === -1) {
-      let combined = concat([resultStdout ?? new Uint8Array(), resultStderr ?? new Uint8Array()])
-      if (append) combined = await appendExisting(dispatch, scope, combined)
-      try {
-        await dispatch('write', scope, [combined])
-        io.writes[path] = combined
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        resultStderr = concat([
-          resultStderr ?? new Uint8Array(),
-          new TextEncoder().encode(msg + '\n'),
-        ])
-        io.exitCode = 1
+    fileScopes.set(path, scope)
+    if (r.append) {
+      if (!fileBufs.has(path)) {
+        fileBufs.set(path, await readExisting(dispatch, scope))
       }
-      resultStdout = null
-      resultStderr = null
-      continue
+    } else {
+      fileBufs.set(path, new Uint8Array())
     }
 
-    if (stream === RedirectKind.STDERR) {
-      let data = resultStderr ?? new Uint8Array()
-      if (append) data = await appendExisting(dispatch, scope, data)
-      if (data.byteLength > 0) {
-        try {
-          await dispatch('write', scope, [data])
-          io.writes[path] = data
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          resultStderr = new TextEncoder().encode(msg + '\n')
-          io.exitCode = 1
-          continue
-        }
-      }
-      resultStderr = null
-      continue
+    if (r.fd === -1) {
+      // &> / &>>
+      fd1 = path
+      fd2 = path
+    } else if (r.kind === RedirectKind.STDERR) {
+      fd2 = path
+    } else {
+      fd1 = path
     }
+  }
 
-    let data = resultStdout ?? new Uint8Array()
-    if (append) data = await appendExisting(dispatch, scope, data)
+  let outStdout: Uint8Array = new Uint8Array()
+  let outStderr: Uint8Array = new Uint8Array()
+  for (const [data, dest] of [
+    [stdoutData, fd1],
+    [stderrData, fd2],
+  ] as [Uint8Array, FdDest][]) {
+    if (dest === TO_STDOUT) {
+      outStdout = concat([outStdout, data])
+    } else if (dest === TO_STDERR) {
+      outStderr = concat([outStderr, data])
+    } else {
+      fileBufs.set(dest, concat([fileBufs.get(dest) ?? new Uint8Array(), data]))
+    }
+  }
+
+  for (const [path, data] of fileBufs) {
+    const scope = fileScopes.get(path)
+    if (scope === undefined) continue
     try {
       await dispatch('write', scope, [data])
       io.writes[path] = data
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      resultStderr = concat([
-        resultStderr ?? new Uint8Array(),
-        new TextEncoder().encode(msg + '\n'),
-      ])
+      outStderr = concat([outStderr, new TextEncoder().encode(msg + '\n')])
       io.exitCode = 1
     }
-    resultStdout = null
   }
 
-  io.stderr = resultStderr
+  io.stderr = outStderr.byteLength > 0 ? outStderr : null
   const execNode = new ExecutionNode({ command: 'redirect', exitCode: io.exitCode })
-  const outSource: ByteSource | null =
-    resultStdout !== null && resultStdout.byteLength > 0 ? resultStdout : null
+  const outSource: ByteSource | null = outStdout.byteLength > 0 ? outStdout : null
   return [outSource, io, execNode]
 }
 
-async function appendExisting(
-  dispatch: DispatchFn,
-  scope: PathSpec,
-  data: Uint8Array,
-): Promise<Uint8Array> {
+async function readExisting(dispatch: DispatchFn, scope: PathSpec): Promise<Uint8Array> {
   try {
     const [existing] = await dispatch('read', scope)
-    if (existing instanceof Uint8Array) return concat([existing, data])
+    if (existing instanceof Uint8Array) return existing
   } catch {
-    // file doesn't exist yet, or not readable — treat as starting fresh
+    // file doesn't exist yet, or not readable — appending starts fresh
   }
-  return data
+  return new Uint8Array()
 }
 
 function ensureScope(target: unknown): PathSpec {

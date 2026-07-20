@@ -19,6 +19,7 @@ from mirage.shell.helpers import (get_command_name, get_for_parts,
                                   get_if_branches, get_list_parts, get_parts,
                                   get_pipeline_commands, get_redirects,
                                   get_text, get_while_parts)
+from mirage.shell.parse import find_syntax_error
 from mirage.shell.types import NodeType as NT
 
 
@@ -211,6 +212,11 @@ def test_background():
 def test_empty():
     root = parse("")
     assert len(root.named_children) == 0
+
+
+def test_partial_quoted_heredoc_end_is_not_syntax_error():
+    root = parse("cat <<EN'D'\n$v\nEND")
+    assert find_syntax_error(root) is None
 
 
 def test_preserves_expansions():

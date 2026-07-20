@@ -1,73 +1,87 @@
 ---
 title: Pi Coding Agent
-description: Run @mariozechner/pi-coding-agent with all 7 built-in tools wired to a Mirage workspace.
+description: Run @earendil-works/pi-coding-agent with all 7 built-in tools wired to a Mirage workspace.
 icon: /images/pi-logo.svg
 ---
 
-[Pi Coding Agent](https://github.com/mariozechner/pi) is a TypeScript coding agent with seven built-in tools (read, write, edit, bash, grep, find, ls). Mirage provides an extension factory that swaps Pi's host-backed operations for `Workspace` operations.
+[Pi Coding Agent](https://github.com/earendil-works/pi) is a TypeScript coding agent with seven built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `find`, and `ls`). Mirage provides a native Pi inline extension that replaces their host-filesystem operations with a `Workspace`.
 
 <Note>
-  Node only. Pi is a CLI agent; it uses `process.cwd()`, agent directories, and other Node-only APIs.
+  Node 22.19 or newer only. Pi is a CLI agent; it uses `process.cwd()`, agent directories, and other
+  Node-only APIs.
 </Note>
 
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node @mariozechner/pi-coding-agent @mariozechner/pi-ai
+pnpm add @struktoai/mirage-agents @struktoai/mirage-node @earendil-works/pi-coding-agent
 ```
 
-## Usage
+## Native Pi UI
+
+Pass the Mirage extension to Pi's regular entry point. Pi continues to own its CLI/TUI, model selection, sessions, themes, commands, and authentication.
 
 ```ts
 import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
-import { getModel } from '@mariozechner/pi-ai'
-import {
-  createAgentSession,
-  DefaultResourceLoader,
-  getAgentDir,
-  SessionManager,
-  SettingsManager,
-} from '@mariozechner/pi-coding-agent'
-import { buildSystemPrompt, mirageExtension } from '@struktoai/mirage-agents/pi'
+import { main } from '@earendil-works/pi-coding-agent'
+import { mirageExtension } from '@struktoai/mirage-agents/pi'
 
 const ram = new RAMResource()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 
-const resourceLoader = new DefaultResourceLoader({
-  cwd: process.cwd(),
-  agentDir: getAgentDir(),
-  settingsManager: SettingsManager.create(process.cwd(), getAgentDir()),
-  systemPrompt: buildSystemPrompt({
-    mountInfo: { '/': 'In-memory filesystem (read/write)' },
-  }),
+await main(process.argv.slice(2), {
   extensionFactories: [mirageExtension(ws)],
-  noExtensions: true,
-  noSkills: true,
 })
-await resourceLoader.reload()
-
-const { session } = await createAgentSession({
-  model: getModel('anthropic', 'claude-sonnet-4-6'),
-  resourceLoader,
-  sessionManager: SessionManager.inMemory(),
-})
-
-await session.prompt("Create /hello.txt with 'hi' and ls /.")
 ```
+
+Running this script in a terminal opens Pi's existing UI. The extension also routes interactive `!` and `!!` shell commands through Mirage at the virtual working directory.
+
+For an isolated Mirage session, prevent Pi from loading `AGENTS.md` and `CLAUDE.md` files from the host project:
+
+```bash
+pnpm exec tsx agents/pi/ui_pi.ts --no-context-files
+```
+
+After asking Pi to create a file, you can verify that the native UI is using Mirage:
+
+```text
+!ls /
+!cat /hello.txt
+```
+
+Omit `--no-context-files` when you intentionally want Pi to combine host-project instructions with the mounted Mirage workspace.
+
+The one-shot examples use Pi's lower-level session API and accept `PI_PROVIDER`, `PI_MODEL`, `PI_BASE_URL`, and `PI_API_KEY`. This lets a built-in Pi provider and model run through a compatible gateway without writing credentials to Pi's configuration files.
+
+## Stale-write protection
+
+Pi serializes its own mutations and its `edit` tool checks that the requested old text still exists in the current file. It does not, however, retain a file revision from an earlier agent read.
+
+The Mirage extension records a content fingerprint whenever Pi reads or greps a file. A later `edit` or full-file `write` fails with `StaleMirageFileError` if that content changed in the meantime. Reading the file again refreshes the fingerprint, so the agent can reconsider the new content and retry. The `edit` adapter also checks again immediately before writing.
+
+This protection is enabled by default. It observes the content returned by the mounted resource, so a remote backend's cache and invalidation policy still determines when an external change becomes visible to Mirage.
 
 ## Exports
 
-| Symbol | Purpose |
-| --- | --- |
-| `mirageExtension(ws, opts?)` | Returns an `ExtensionFactory` that registers all 7 Pi tools against `ws`. |
-| `mirageOperations(ws)` | Lower-level: returns the `{ read, write, edit, bash, grep, find, ls }` operation bundle if you want to register tools manually. |
-| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
+| Symbol                        | Purpose                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| `mirageExtension(ws, opts?)`  | Returns a named Pi `InlineExtension` that registers all seven tools against `ws`. |
+| `mirageOperations(ws, opts?)` | Lower-level `{ read, write, edit, bash, grep, find, ls }` operation bundle.       |
+| `StaleMirageFileError`        | Error raised when a mutation targets content that changed after an agent read.    |
+| `buildSystemPrompt`           | Generates a system prompt that describes mounted paths to the model.              |
 
-`mirageExtension` accepts `{ cwd?: string }`, defaults to `'/'`, which tells Pi the working directory inside the mounted workspace.
+`mirageExtension` accepts:
+
+| Option                 | Default             | Purpose                                                                                                         |
+| ---------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `cwd`                  | `'/'`               | Working directory inside the mounted workspace.                                                                 |
+| `staleWriteProtection` | `true`              | Reject mutations when the file changed after Pi read it.                                                        |
+| `systemPrompt`         | Mirage mount prompt | Extra instructions appended to Pi's prompt. Pass a string to replace the Mirage text, or `false` to disable it. |
 
 ## Examples
 
+- [`examples/typescript/agents/pi/ui_pi.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/pi/ui_pi.ts), Mirage inside Pi's native CLI/TUI.
 - [`examples/typescript/agents/pi/ram_pi.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/pi/ram_pi.ts), RAM-only sandbox.
 - [`examples/typescript/agents/pi/s3_pi.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/pi/s3_pi.ts), Pi exploring an S3 bucket through Mirage.

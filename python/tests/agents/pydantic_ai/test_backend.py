@@ -12,15 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pathlib import Path
-
 import pytest
-from pydantic_ai import ToolReturn
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.agents.pydantic_ai.backend import PydanticAIWorkspace
-
-DATA_DIR = Path(__file__).resolve().parents[4] / "data"
 
 
 @pytest.fixture
@@ -120,17 +115,12 @@ async def test_execute_pipe(backend):
 @pytest.mark.asyncio
 async def test_read_bytes(backend):
     await backend.awrite("/bytes.txt", "binary content")
-    data = await backend._aread_bytes("/bytes.txt")
+    data = await backend.aread_bytes("/bytes.txt")
     assert data == b"binary content"
 
 
 @pytest.mark.asyncio
-async def test_aread_pdf_returns_tool_return(backend, workspace):
-    with open(DATA_DIR / "example.pdf", "rb") as f:
-        pdf_bytes = f.read()
-    await workspace.ops.write("/report.pdf", pdf_bytes)
-
-    result = await backend.aread("/report.pdf")
-    assert isinstance(result, ToolReturn)
-    assert "report.pdf" in result.return_value
-    assert len(result.content) > 0
+async def test_exists(backend):
+    assert not await backend.aexists("/missing.txt")
+    await backend.awrite("/exists.txt", "content")
+    assert await backend.aexists("/exists.txt")

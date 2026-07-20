@@ -62,7 +62,7 @@ async function gwsGmailReplyAllCommand(
 }
 
 export const GMAIL_GWS_REPLY_ALL = command({
-  name: 'gws-gmail-reply-all',
+  name: 'gws gmail +reply-all',
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailReplyAllCommand,

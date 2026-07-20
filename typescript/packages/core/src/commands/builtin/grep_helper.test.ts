@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { FileStat, FileType } from '../../types.ts'
 import { PatternType } from './constants.ts'
 import {
   classifyPattern,
   compilePattern,
   extractRequiredLiteral,
+  grepFilesOnly,
   isRegexPattern,
   mergePatternList,
   NEVER_MATCH,
@@ -172,5 +174,28 @@ describe('searchQuery', () => {
   })
   it('returns null when no literal can be proven', () => {
     expect(searchQuery('foo|bar', false)).toBeNull()
+  })
+})
+
+describe('grepFilesOnly', () => {
+  it('scans file operands under recursive instead of walking them', async () => {
+    // GNU: `grep -rl pat file` treats the operand as a file; only directory
+    // operands are walked (search-narrowed candidates arrive as files).
+    const readdirFn = (path: string): Promise<string[]> => Promise.reject(new Error(path))
+    const statFn = (path: string): Promise<FileStat> =>
+      Promise.resolve(new FileStat({ name: path, type: FileType.TEXT }))
+    const readBytesFn = (): Promise<Uint8Array> => Promise.resolve(ENC.encode('alpha beta\n'))
+    const hits = await grepFilesOnly(readdirFn, statFn, readBytesFn, '/data/notes.txt', 'alpha', {
+      recursive: true,
+      ignoreCase: false,
+      invert: false,
+      lineNumbers: false,
+      countOnly: false,
+      fixedString: false,
+      onlyMatching: false,
+      maxCount: null,
+      wholeWord: false,
+    })
+    expect(hits).toEqual(['/data/notes.txt'])
   })
 })

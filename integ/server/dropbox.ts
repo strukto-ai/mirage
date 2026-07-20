@@ -40,11 +40,19 @@ interface DropboxEntryJson {
   server_modified?: string
 }
 
+interface SearchMatchJson {
+  match_type: { '.tag': string }
+  metadata: { '.tag': 'metadata'; metadata: DropboxEntryJson }
+}
+
+const DEC = new TextDecoder()
+
 // One fake Dropbox account with explicit folder objects. Serves every
 // endpoint the backend calls — /oauth2/token plus the /2/files RPCs
 // (list_folder, get_metadata, download, upload, create_folder_v2,
-// delete_v2, move_v2, copy_v2) — on a single origin, matching the
-// DropboxConfig `endpoint` override. Mirrors integ/server/dropbox_server.py.
+// delete_v2, move_v2, copy_v2, search_v2 and search/continue_v2) — on a
+// single origin, matching the DropboxConfig `endpoint` override. Mirrors
+// integ/server/dropbox_server.py.
 export interface FakeDropbox {
   endpoint: string
   close: () => void
@@ -82,6 +90,7 @@ function malformed(res: ServerResponse): void {
 class Account {
   readonly folders = new Set<string>()
   readonly files = new Map<string, StoredFile>()
+  readonly searchCursors = new Map<string, { matches: SearchMatchJson[]; start: number; limit: number }>()
 
   addAncestors(path: string): void {
     const parts = path.split('/').slice(1, -1)
@@ -144,6 +153,32 @@ class Account {
       if (file.startsWith(prefix)) this.files.delete(file)
     }
     return true
+  }
+
+  // Case-insensitive substring over names and content: a superset of the
+  // real token-based matching, which is what grep/rg narrowing needs (the
+  // client still scans the candidates exactly).
+  searchMatches(query: string, scope: string, filenameOnly: boolean): SearchMatchJson[] | null {
+    if (scope !== '' && this.entryFor(scope) === null) return null
+    const q = query.toLowerCase()
+    const scopeLower = scope.toLowerCase()
+    const prefix = scopeLower === '' ? '/' : `${scopeLower}/`
+    const out: SearchMatchJson[] = []
+    for (const path of [...this.folders, ...this.files.keys()].sort()) {
+      const lower = path.toLowerCase()
+      if (scopeLower !== '' && lower !== scopeLower && !lower.startsWith(prefix)) continue
+      const nameHit = path.slice(path.lastIndexOf('/') + 1).toLowerCase().includes(q)
+      const stored = this.files.get(path)
+      const contentHit =
+        !filenameOnly && stored !== undefined && DEC.decode(stored.data).toLowerCase().includes(q)
+      if (!nameHit && !contentHit) continue
+      const tag = nameHit && contentHit ? 'filename_and_content' : nameHit ? 'filename' : 'file_content'
+      out.push({
+        match_type: { '.tag': tag },
+        metadata: { '.tag': 'metadata', metadata: this.entryFor(path) as DropboxEntryJson },
+      })
+    }
+    return out
   }
 
   // Copies a file or a folder subtree; returns false if src is missing.
@@ -279,8 +314,60 @@ function handle(
     json(res, { metadata: account.entryFor(to_path) })
     return
   }
+  if (url === '/2/files/search_v2') {
+    const parsed = JSON.parse(body.toString('utf8') || '{}') as {
+      query?: string
+      options?: { path?: string; max_results?: number; filename_only?: boolean }
+    }
+    const query = parsed.query ?? ''
+    if (query === '') {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error_summary: 'invalid_argument' }))
+      return
+    }
+    const options = parsed.options ?? {}
+    const matches = account.searchMatches(
+      query,
+      options.path ?? '',
+      options.filename_only === true,
+    )
+    if (matches === null) {
+      jsonError(res, 'path/not_found/...')
+      return
+    }
+    searchPage(account, res, matches, 0, options.max_results ?? 100)
+    return
+  }
+  if (url === '/2/files/search/continue_v2') {
+    const { cursor = '' } = JSON.parse(body.toString('utf8') || '{}') as { cursor?: string }
+    const state = account.searchCursors.get(cursor)
+    if (state === undefined) {
+      jsonError(res, 'reset/...')
+      return
+    }
+    searchPage(account, res, state.matches, state.start, state.limit)
+    return
+  }
   res.writeHead(404, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ error_summary: `unknown endpoint ${url}` }))
+}
+
+function searchPage(
+  account: Account,
+  res: ServerResponse,
+  matches: SearchMatchJson[],
+  start: number,
+  limit: number,
+): void {
+  const page = matches.slice(start, start + limit)
+  const hasMore = start + limit < matches.length
+  const resp: Record<string, unknown> = { matches: page, has_more: hasMore }
+  if (hasMore) {
+    const token = `search-${String(account.searchCursors.size)}`
+    account.searchCursors.set(token, { matches, start: start + limit, limit })
+    resp.cursor = token
+  }
+  json(res, resp)
 }
 
 export function startFakeDropbox(): Promise<FakeDropbox> {

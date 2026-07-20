@@ -15,6 +15,17 @@
 import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface BoxConfig {
+  // API origin override (e.g. an integ fake). Defaults to api.box.com.
+  endpoint?: string
+  // Box folder id to mount as the workspace root instead of the account
+  // root ("0"). Folder ids are stable across renames/moves and visible in
+  // the Box web URL (box.com/folder/<id>), so a subfolder mount survives
+  // reorganization that a path prefix would not.
+  rootFolderId?: string
+  // Opt in to grep/rg content-search push-down: route recursive literal
+  // scans through Box search to narrow the file set before scanning locally.
+  // Off by default because Box's search index lags recent writes.
+  contentSearch?: boolean
   clientId?: string
   clientSecret?: string
   refreshToken?: string
@@ -33,6 +44,8 @@ export interface BoxConfig {
 }
 
 export interface BoxConfigRedacted {
+  endpoint?: string
+  rootFolderId?: string
   clientId?: string
   clientSecret?: '<REDACTED>'
   refreshToken?: '<REDACTED>'
@@ -41,6 +54,9 @@ export interface BoxConfigRedacted {
 }
 
 const BoxConfigSchema = z.object({
+  endpoint: z.string().optional(),
+  rootFolderId: z.string().optional(),
+  contentSearch: z.boolean().optional(),
   clientId: z.string().optional(),
   clientSecret: secretStr().optional(),
   refreshToken: secretStr().optional(),
@@ -55,6 +71,8 @@ export function redactBoxConfig(config: BoxConfig): BoxConfigRedacted {
 export function normalizeBoxConfig(input: Record<string, unknown>): BoxConfig {
   return normalizeFields(input, {
     rename: {
+      root_folder_id: 'rootFolderId',
+      content_search: 'contentSearch',
       client_id: 'clientId',
       client_secret: 'clientSecret',
       refresh_token: 'refreshToken',

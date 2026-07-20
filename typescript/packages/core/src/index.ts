@@ -784,6 +784,7 @@ export {
   docsBase,
   driveBase,
   driveUploadBase,
+  gmailBase,
   sheetsBase,
   slidesBase,
   tokenUrl,
@@ -901,6 +902,7 @@ export { DROPBOX_OPS } from './ops/dropbox/index.ts'
 export { read as dropboxRead, stream as dropboxStream } from './core/dropbox/read.ts'
 export { readdir as dropboxReaddir } from './core/dropbox/readdir.ts'
 export { stat as dropboxStat } from './core/dropbox/stat.ts'
+export { narrowPaths as dropboxNarrowPaths } from './core/dropbox/search.ts'
 export { DROPBOX_PROMPT } from './resource/dropbox/prompt.ts'
 export {
   BOX_API_BASE,
@@ -920,8 +922,7 @@ export {
   downloadFile as boxDownloadFile,
   downloadFileStream as boxDownloadFileStream,
   listFolderItems as boxListFolderItems,
-  searchItems as boxSearchItems,
-  getExtractedText as boxGetExtractedText,
+  searchContent as boxSearchContent,
 } from './core/box/api.ts'
 export { BoxAccessor } from './accessor/box.ts'
 export { BOX_COMMANDS } from './commands/builtin/box/index.ts'
@@ -930,16 +931,6 @@ export { read as boxRead, stream as boxStream } from './core/box/read.ts'
 export { readdir as boxReaddir } from './core/box/readdir.ts'
 export { stat as boxStat } from './core/box/stat.ts'
 export { BOX_PROMPT } from './resource/box/prompt.ts'
-export {
-  type BoxnoteParagraph,
-  type BoxnoteProcessed,
-  processBoxnote,
-} from './core/filetype/boxnote.ts'
-export {
-  type BoxcanvasProcessed,
-  type BoxcanvasProcessedWidget,
-  processBoxcanvas,
-} from './core/filetype/boxcanvas.ts'
 export { GmailAccessor } from './accessor/gmail.ts'
 export { GMAIL_COMMANDS } from './commands/builtin/gmail/index.ts'
 export { GMAIL_OPS } from './ops/gmail/index.ts'
@@ -1112,6 +1103,7 @@ export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './utils/slash.ts'
 export { mountKey, mountPrefixOf, rekey, stripMount } from './utils/key_prefix.ts'
+export * as keyPrefix from './utils/key_prefix.ts'
 export { fnmatch } from './utils/fnmatch.ts'
 export {
   buildTree,
@@ -1121,8 +1113,10 @@ export {
   evalPredicate,
   type FindEntry,
   keep,
+  optionsTree,
   type PredNode,
   startBasename,
+  treeHasEmpty,
 } from './commands/builtin/findEval.ts'
 export {
   eisdir,

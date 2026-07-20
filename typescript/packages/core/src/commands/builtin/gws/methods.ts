@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TokenManager } from '../../../core/google/_client.ts'
-import { docsBase, driveBase, sheetsBase, slidesBase } from '../../../core/google/_client.ts'
+import {
+  docsBase,
+  driveBase,
+  gmailBase,
+  sheetsBase,
+  slidesBase,
+} from '../../../core/google/_client.ts'
 import { ResourceName } from '../../../types.ts'
 import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
 
@@ -23,7 +29,7 @@ import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
 // Each entry here is one such passthrough method; the bespoke gws_*
 // commands (create/batchUpdate/+read/+append/+write) stay hand-written.
 
-export type GwsService = 'drive' | 'docs' | 'sheets' | 'slides'
+export type GwsService = 'drive' | 'docs' | 'sheets' | 'slides' | 'gmail'
 
 export interface GwsMethod {
   service: GwsService
@@ -171,6 +177,49 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     http: 'DELETE',
     path: '/files/{fileId}/permissions/{permissionId}',
   },
+  {
+    service: 'gmail',
+    resource: 'users labels',
+    method: 'list',
+    http: 'GET',
+    path: '/users/{userId}/labels',
+  },
+  {
+    service: 'gmail',
+    resource: 'users messages',
+    method: 'list',
+    http: 'GET',
+    path: '/users/{userId}/messages',
+  },
+  {
+    service: 'gmail',
+    resource: 'users messages',
+    method: 'get',
+    http: 'GET',
+    path: '/users/{userId}/messages/{id}',
+  },
+  {
+    service: 'gmail',
+    resource: 'users messages',
+    method: 'send',
+    http: 'POST',
+    path: '/users/{userId}/messages/send',
+    needsBody: true,
+  },
+  {
+    service: 'gmail',
+    resource: 'users messages',
+    method: 'trash',
+    http: 'POST',
+    path: '/users/{userId}/messages/{id}/trash',
+  },
+  {
+    service: 'gmail',
+    resource: 'users messages attachments',
+    method: 'get',
+    http: 'GET',
+    path: '/users/{userId}/messages/{messageId}/attachments/{id}',
+  },
 ] as const
 
 export const GWS_API_SPEC = new CommandSpec({
@@ -185,6 +234,7 @@ export const SERVICE_BASES: Record<GwsService, (tm: TokenManager) => string> = {
   docs: docsBase,
   sheets: sheetsBase,
   slides: slidesBase,
+  gmail: gmailBase,
 }
 
 export const SERVICE_RESOURCES: Record<GwsService, string[]> = {
@@ -192,4 +242,5 @@ export const SERVICE_RESOURCES: Record<GwsService, string[]> = {
   docs: [ResourceName.GDOCS, ResourceName.GDRIVE],
   sheets: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   slides: [ResourceName.GSLIDES, ResourceName.GDRIVE],
+  gmail: [ResourceName.GMAIL],
 }

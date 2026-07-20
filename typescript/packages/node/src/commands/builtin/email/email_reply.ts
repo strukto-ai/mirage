@@ -26,7 +26,7 @@ import {
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { fetchMessage } from '../../../core/email/_client.ts'
-import { replyMessage } from '../../../core/email/send.ts'
+import { replyAllMessage, replyMessage } from '../../../core/email/send.ts'
 
 const ENC = new TextEncoder()
 
@@ -35,6 +35,7 @@ const SPEC = new CommandSpec({
     new Option({ long: '--uid', valueKind: OperandKind.TEXT }),
     new Option({ long: '--folder', valueKind: OperandKind.TEXT }),
     new Option({ long: '--body', valueKind: OperandKind.TEXT }),
+    new Option({ long: '--all' }),
   ],
 })
 
@@ -57,13 +58,16 @@ async function emailReplyCommand(
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('--body is required\n') })]
   }
   const original = await fetchMessage(accessor, folder, uid)
-  const result = await replyMessage(accessor.config, original, body)
+  const result =
+    opts.flags.all === true
+      ? await replyAllMessage(accessor.config, original, body)
+      : await replyMessage(accessor.config, original, body)
   const out: ByteSource = ENC.encode(JSON.stringify(result))
   return [out, new IOResult()]
 }
 
 export const EMAIL_REPLY = command({
-  name: 'email-reply',
+  name: 'himalaya message reply',
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailReplyCommand,

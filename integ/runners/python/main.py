@@ -84,6 +84,10 @@ async def main() -> None:
         if (target.get("service") == "gws" and not os.environ.get("GWS_URL")):
             print(f"skip [{target_id}]: GWS_URL not set", file=sys.stderr)
             continue
+        if (target.get("service") == "email"
+                and not os.environ.get("EMAIL_HOST")):
+            print(f"skip [{target_id}]: EMAIL_HOST not set", file=sys.stderr)
+            continue
         await run_target(target, cases, root, report, emit)
 
     if args.emit:

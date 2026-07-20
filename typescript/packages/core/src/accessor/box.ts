@@ -17,9 +17,20 @@ import type { BoxTokenManager } from '../core/box/_client.ts'
 
 export class BoxAccessor extends Accessor {
   readonly tokenManager: BoxTokenManager
+  // Box folder id mounted as the workspace root; "0" is the account root.
+  readonly rootFolderId: string
+  // Opt in to grep/rg content-search push-down (off by default; Box's search
+  // index lags recent writes).
+  readonly contentSearch: boolean
 
-  constructor(opts: { tokenManager: BoxTokenManager }) {
+  constructor(opts: {
+    tokenManager: BoxTokenManager
+    rootFolderId?: string
+    contentSearch?: boolean
+  }) {
     super()
     this.tokenManager = opts.tokenManager
+    this.rootFolderId = opts.rootFolderId ?? '0'
+    this.contentSearch = opts.contentSearch === true
   }
 }

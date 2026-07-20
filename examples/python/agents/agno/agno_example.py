@@ -36,12 +36,7 @@ agent = Agent(
 TASK = "List all files under /data and show the contents of each one."
 
 
-def main() -> None:
-    asyncio.run(ws.execute('echo "hello from mirage" | tee /data/hello.txt'))
-    agent.print_response(TASK)
-
-
-async def amain() -> None:
+async def main() -> None:
     await ws.execute('echo "hello from mirage" | tee /data/hello.txt')
     await agent.aprint_response(TASK)
 
@@ -55,5 +50,4 @@ async def amain() -> None:
 
 
 if __name__ == "__main__":
-    main()
-    asyncio.run(amain())
+    asyncio.run(main())

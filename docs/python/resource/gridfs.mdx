@@ -1,0 +1,175 @@
+---
+title: GridFS
+description: Mount a MongoDB GridFS bucket as a Mirage filesystem with revisions, server-side find, and shell commands.
+icon: database
+---
+The GridFS resource mounts a MongoDB GridFS bucket at some prefix such as
+`/gridfs/`. Files are stored inside MongoDB itself: metadata in the
+`<bucket>.files` collection, content in 255KB chunks in `<bucket>.chunks`.
+Uses pymongo's native async API.
+
+Install the extra:
+
+```bash
+pip install "mirage-ai[gridfs]"
+```
+
+## Config
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.gridfs import GridFSResource, GridFSConfig
+
+config = GridFSConfig(
+    uri="mongodb://localhost:27017",
+    database="app",
+    # Optional:
+    # bucket="fs",  # GridFS bucket name (default "fs")
+    # key_prefix="users/alice",  # scope the mount to a subpath
+    # chunk_size_bytes=261120,  # default 255KB
+)
+
+resource = GridFSResource(config)
+ws = Workspace({"/gridfs": resource}, mode=MountMode.WRITE)
+```
+
+Both `READ` and `WRITE` modes are supported. Small files are fine: a file
+smaller than the chunk size is stored as a single chunk document, so tiny
+config files and large binaries go through the same path.
+
+## Filesystem Layout
+
+GridFS filenames are used as slash-separated keys, exactly like S3 object
+keys. Directories are prefix-based; `mkdir` creates a zero-byte `key/`
+marker document so empty directories stay visible.
+
+```text
+data/file.txt
+data/config.json
+reports/q1.csv
+```
+
+mounted at `/gridfs/` exposes:
+
+```text
+/gridfs/
+  data/
+    file.txt
+    config.json
+  reports/
+    q1.csv
+```
+
+## Revisions
+
+GridFS filenames are not unique: every write uploads a **new revision** and
+keeps the old ones. The resource always reads and lists the newest revision
+per filename, and snapshot-pinned reads resolve old revisions by their file
+`_id`, so time-travel reads work natively. `mv` retags every revision's
+filename server-side (history moves with the file), while `rm` deletes all
+revisions of the file.
+
+## Server-side find
+
+Unlike object stores that page through every key, GridFS metadata lives in
+an ordinary MongoDB collection, so `find` pushes its filters into the
+`fs.files` query itself:
+
+- `-name` / `-iname` globs become anchored regexes on the filename
+- `-type f` / `-type d` filter on the directory-marker shape
+- `-size` bounds map to the stored `length`
+
+`find /gridfs/ -name '*.csv' -size +1M` narrows inside MongoDB and only
+matching metadata comes back, so `find` stays cheap even on large buckets.
+Semantics are identical to every other backend: the shared predicate
+evaluation still runs on the results.
+
+## Cache
+
+The GridFS resource uses `IndexCacheStore` with `index_ttl = 600`
+(10 minutes). Directory listings are cached before being refreshed from
+MongoDB, reducing queries for repeated traversals.
+
+## Example
+
+```python
+import asyncio
+
+from mirage import MountMode, Workspace
+from mirage.resource.gridfs import GridFSResource, GridFSConfig
+
+config = GridFSConfig(
+    uri="mongodb://localhost:27017",
+    database="app",
+    bucket="assets",
+)
+
+resource = GridFSResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/gridfs/": resource}, mode=MountMode.WRITE)
+
+    await ws.execute("echo hello | tee /gridfs/notes/a.txt > /dev/null")
+
+    r = await ws.execute("ls /gridfs/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("cat /gridfs/notes/a.txt")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /gridfs/ -name '*.txt'")
+    print(await r.stdout_str())
+
+    r = await ws.execute("grep hello /gridfs/notes/a.txt")
+    print(await r.stdout_str())
+
+    r = await ws.execute("stat /gridfs/notes/a.txt")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Shell Commands
+
+The GridFS resource supports the same full command surface as the
+[S3 resource](/python/resource/s3): read commands (`cat`, `head`, `tail`,
+`grep`, `rg`, `jq`, `wc`, `stat`, `find`, `tree`, `du`, checksums), text
+processing (`awk`, `sed`, `sort`, `cut`, `diff`, ...), file operations
+(`cp`, `mv`, `rm`, `mkdir`, `touch`, `tee`, `split`, ...), compression, and
+encoding. Range reads (`head -c`, `tail -c`) seek chunk-wise, so large
+files are never downloaded whole.
+
+Columnar data files (`.parquet`, `.feather`, `.orc`, `.hdf5`) render as
+tabular text for `cat`, `head`, `tail`, `wc`, `stat`, `cut`, `grep`, `ls`,
+and `file`.
+
+## Scoping a resource to a key prefix
+
+Pass `key_prefix` to `GridFSConfig` to transparently scope every operation
+to a subpath of the bucket, mirroring the S3 `key_prefix` behavior:
+
+```python
+GridFSResource(GridFSConfig(
+    uri="mongodb://localhost:27017",
+    database="app",
+    bucket="shared",
+    key_prefix=f"users/{user_id}/",
+))
+```
+
+Agents see clean paths like `/data/notes.md`; the underlying GridFS
+filename is `users/{user_id}/data/notes.md`. Leading slashes are stripped
+and a trailing slash is added automatically; `None` and an empty string
+mean "no prefix."
+
+## Use Cases
+
+- **Files next to your data**: keep agent-visible files in the same MongoDB
+  deployment as the rest of your application state, with one backup story
+- **Revision-aware storage**: writes never destroy old content; snapshots
+  can pin reads to the exact revision they saw
+- **Cheap find on big buckets**: metadata queries replace full listings
+- **Multi-tenant mounts**: one bucket, per-tenant `key_prefix` scoping

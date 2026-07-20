@@ -16,12 +16,14 @@ import re
 
 import pytest
 
+from mirage.commands.builtin import grep_helper
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_helper import (NEVER_MATCH, classify_pattern,
                                                  compile_pattern,
                                                  extract_required_literal,
                                                  merge_pattern_list,
                                                  search_query)
+from mirage.types import FileStat, FileType
 
 
 def test_single_pattern_keeps_regex_semantics():
@@ -141,3 +143,36 @@ def test_search_query_regex_extracts_literal():
 
 def test_search_query_regex_no_literal_is_none():
     assert search_query("foo|bar", False) is None
+
+
+@pytest.mark.asyncio
+async def test_grep_files_only_recursive_scans_file_operands():
+    # GNU: `grep -rl pat file` treats the operand as a file; only directory
+    # operands are walked (search-narrowed candidates arrive as files).
+    async def readdir_fn(path):
+        raise FileNotFoundError(path)
+
+    async def stat_fn(path):
+        return FileStat(name=path, type=FileType.TEXT)
+
+    async def read_bytes_fn(path):
+        return b"alpha beta\n"
+
+    hits = await grep_helper.grep_files_only(
+        readdir_fn,
+        stat_fn,
+        read_bytes_fn,
+        "/data/notes.txt",
+        "alpha",
+        recursive=True,
+        ignore_case=False,
+        invert=False,
+        line_numbers=False,
+        count_only=False,
+        fixed_string=False,
+        only_matching=False,
+        max_count=None,
+        whole_word=False,
+        warnings=[],
+    )
+    assert hits == ["/data/notes.txt"]

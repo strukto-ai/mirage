@@ -55,12 +55,27 @@ async function runSession(c: OpencodeClient, title: string): Promise<void> {
     path: { id: sessionId },
     body: { model: MODEL, parts: [{ type: 'text', text: PROMPT }] },
   })
-  const data = result.data as { parts?: Array<{ type: string; text?: string }> }
-  for (const part of data.parts ?? []) {
-    if (part.type === 'text' && part.text !== undefined && part.text.length > 0) {
-      console.log(`[${title}] ${part.text}`)
-    }
+  if (result.error !== undefined) {
+    throw new Error(`[${title}] OpenCode prompt failed: ${JSON.stringify(result.error)}`)
   }
+  if (result.data === undefined) {
+    throw new Error(`[${title}] OpenCode prompt returned no data`)
+  }
+  if (result.data.info.error !== undefined) {
+    throw new Error(
+      `[${title}] OpenCode model failed: ${JSON.stringify(result.data.info.error)}`,
+    )
+  }
+  const text = result.data.parts
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n')
+  if (text.length === 0) {
+    throw new Error(
+      `[${title}] OpenCode returned no text; parts: ${result.data.parts.map((part) => part.type).join(', ')}`,
+    )
+  }
+  console.log(`[${title}] ${text}`)
 }
 
 try {

@@ -1,0 +1,142 @@
+---
+title: Box
+description: Mount a Box account (or a single folder of it) as a read/write Mirage filesystem with async access and shell commands.
+icon: box
+---
+
+The Box resource mounts a Box account at some prefix such as `/box/`. All
+operations involve network I/O to the
+[Box v2 HTTP API](https://developer.box.com/reference/):
+`/2.0/folders/{id}/items` for directories, `/2.0/files/{id}/content` for
+content, and multipart upload / `/2.0/folders` / `delete` / `PUT` (rename or
+move) / `copy` for writes. Files are served as raw bytes. Both `READ` and
+`WRITE` modes are supported.
+
+Box addresses everything by numeric **item id**, not by path (the account
+root is folder id `0`). Mirage resolves each path to its id by listing folders
+level by level and caches the path → id mapping, so nested directories cost
+one API call per level on first access.
+
+Every Box item is served as its raw bytes, keeping its real name. Box's native
+`.boxnote` / `.boxcanvas` come back as their stored ProseMirror-style JSON
+(text, so `cat foo.boxnote | jq .` works), and Box's Google-Workspace files
+(`.gdoc` / `.gsheet` / `.gslides`) come back as the Office Open XML zips
+(`docx` / `xlsx` / `pptx`) Box stores them as, opaque binary like any other
+Office document.
+
+<Note>
+Box exposes no API to edit these formats from a structured payload, so Mirage
+does not decode them, it hands back exactly what Box stores. For a rich,
+editable view of Google-format documents, mount them through
+[Google Drive](/python/resource/gdrive) with Google credentials instead; the
+`gws` commands operate on Google file ids and do not apply to Box.
+</Note>
+
+For credential setup, see the [Box Setup](/home/setup/box) guide. The
+TypeScript packages ship the same backend for Node and the browser, see
+[Box (TypeScript)](/typescript/box).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.box import BoxConfig, BoxResource
+
+config = BoxConfig(
+    # A Box developer token from the app console (~60-minute lifetime):
+    access_token=os.environ["BOX_ACCESS_TOKEN"],
+    # Optional:
+    # root_folder_id="123456789",  # mount a sub-folder as the root
+)
+
+resource = BoxResource(config)
+ws = Workspace({"/box": resource}, mode=MountMode.WRITE)
+```
+
+Box supports three authentication modes:
+
+- **Developer token** (`access_token`): quickest to try; expires after ~60
+  minutes and cannot be refreshed programmatically.
+- **OAuth2 refresh** (`client_id` + `refresh_token`, optional
+  `client_secret`): Box rotates the refresh token on each refresh; supply
+  `on_refresh_token_rotated` to persist the new one across restarts.
+- **Client credentials** (`client_id` + `client_secret` + `enterprise_id`):
+  the app authenticates as its own service account; expired tokens are simply
+  re-fetched.
+
+The access token is cached in memory and refreshed ~5 minutes before expiry
+(refresh and client-credentials modes).
+
+### Config Reference
+
+| Field             | Required | Description                                                                   |
+| ----------------- | -------- | ----------------------------------------------------------------------------- |
+| `access_token`    | One of\* | Box developer token (skips the refresh flow)                                  |
+| `client_id`       | One of\* | Box app client id (with `refresh_token`, or with `client_secret`+`enterprise_id`) |
+| `client_secret`   | No       | Box app client secret                                                         |
+| `refresh_token`   | One of\* | Long-lived OAuth2 refresh token (with `client_id`)                            |
+| `enterprise_id`   | No       | Enterprise id for the client-credentials grant                                |
+| `root_folder_id`  | No       | Mount a sub-folder as the root (default `0`, the account root)                |
+| `endpoint`        | No       | Base URL overriding the real `api.box.com` hosts (test fakes)                 |
+
+\* Provide one of: `access_token`; `client_id` + `refresh_token`; or
+`client_id` + `client_secret` + `enterprise_id`.
+
+## Mount a subfolder
+
+Pass `root_folder_id` to expose a single Box folder as the mount root instead
+of the whole account. Every command and FUSE/VFS op is scoped to that folder;
+paths outside it are unreachable. Folder ids are stable across renames and
+moves, and are visible in the Box web URL (`app.box.com/folder/<id>`), so an
+id-based mount survives reorganization that a path prefix would not.
+
+```python
+config = BoxConfig(
+    access_token=os.environ["BOX_ACCESS_TOKEN"],
+    root_folder_id="123456789",
+)
+```
+
+## Cache
+
+The Box resource caches directory listings via `IndexCacheStore` (24-hour
+TTL) to hold the path → id mapping and reduce repeated API calls during
+traversal; file reads go through the standard read cache
+(`caches_reads = True`). Writes invalidate the affected listings so subsequent
+reads see the new state.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.box import BoxConfig, BoxResource
+
+config = BoxConfig(access_token=os.environ["BOX_ACCESS_TOKEN"])
+
+resource = BoxResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/box": resource}, mode=MountMode.WRITE)
+
+    r = await ws.execute("ls /box/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("grep -rl report /box/docs/")
+    print(await r.stdout_str())
+
+    # Plain text from a Box Note:
+    # A Box Note comes back as raw ProseMirror JSON:
+    r = await ws.execute("cat /box/notes/standup.boxnote | jq .")
+    print(await r.stdout_str())
+
+    await ws.close()
+
+
+asyncio.run(main())
+```

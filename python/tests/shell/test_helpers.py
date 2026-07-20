@@ -17,13 +17,14 @@ import tree_sitter
 import tree_sitter_bash
 
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import RedirectKind
 
 from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_case_word, get_command_name, get_declaration_keyword,
-    get_for_parts, get_function_body, get_function_name, get_heredoc_parts,
-    get_if_branches, get_list_parts, get_negated_command, get_parts,
-    get_pipeline_commands, get_redirects, get_subshell_body, get_text,
-    get_unset_names, get_while_parts)
+    get_for_parts, get_function_body, get_function_name, get_heredoc_meta,
+    get_heredoc_parts, get_if_branches, get_list_parts, get_negated_command,
+    get_parts, get_pipeline_commands, get_process_sub_body, get_redirects,
+    get_subshell_body, get_text, get_unset_names, get_while_parts)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -305,6 +306,13 @@ def test_process_sub_command():
     assert get_command_name(inner) == "echo"
 
 
+def test_process_sub_body_preserves_pipeline_and_list():
+    pipeline = get_parts(_first("cat <(printf x | sort)"))[1]
+    commands = get_parts(_first("cat <(echo one; echo two)"))[1]
+    assert get_process_sub_body(pipeline) == "printf x | sort"
+    assert get_process_sub_body(commands) == "echo one; echo two"
+
+
 # ── expansion nodes ──────────────────────────────
 
 
@@ -516,11 +524,14 @@ def test_redirect_target_cmd_sub():
     assert target_node.type == NT.COMMAND_SUBSTITUTION
 
 
-def test_redirect_target_heredoc_none():
+def test_redirect_target_heredoc_carries_node():
+    # The heredoc_redirect node rides along so the expansion layer can
+    # walk the body's expansion children structurally.
     node = _first("cat <<EOF\nhello\nEOF")
     _, redirects = get_redirects(node)
     target_node = redirects[0].target_node
-    assert target_node is None
+    assert target_node is not None
+    assert target_node.type == "heredoc_redirect"
 
 
 def test_redirect_target_stderr():
@@ -599,3 +610,69 @@ def test_python3_c_with_expansion():
         c for c in string_node.named_children if c.type == NT.SIMPLE_EXPANSION
     ]
     assert len(expansions) == 1
+
+
+def test_get_redirects_bare_redirect_has_no_command():
+    node = _first("> empty.txt")
+    command, redirects = get_redirects(node)
+    assert command is None
+    assert len(redirects) == 1
+    assert redirects[0].target == "empty.txt"
+
+
+def test_get_redirects_hoists_file_redirect_inside_heredoc():
+    # `cat <<END > out.txt` parses the file redirect INSIDE the
+    # heredoc_redirect node; it must surface as a sibling redirect.
+    node = _first("cat <<END > out.txt\nbody\nEND")
+    command, redirects = get_redirects(node)
+    assert command is not None
+    kinds = [r.kind for r in redirects]
+    assert RedirectKind.HEREDOC in kinds
+    assert RedirectKind.STDOUT in kinds
+    stdout_r = [r for r in redirects if r.kind == RedirectKind.STDOUT][0]
+    assert stdout_r.target == "out.txt"
+
+
+def test_get_redirects_hoists_herestring_before_file_redirect():
+    node = _first("cat <<< here < input.txt")
+    _, redirects = get_redirects(node)
+    assert [r.kind for r in redirects
+            ] == [RedirectKind.HERESTRING, RedirectKind.STDIN]
+
+
+def test_get_redirects_recovers_herestring_after_file_redirect():
+    node = _first("cat < input.txt <<< here")
+    _, redirects = get_redirects(node)
+    assert [r.kind for r in redirects
+            ] == [RedirectKind.STDIN, RedirectKind.HERESTRING]
+    assert redirects[1].target == "here"
+
+
+def test_get_heredoc_meta_partially_quoted_delimiter():
+    node = _first("cat <<EN'D'\nx=$v\nEND\n")
+    heredoc = None
+    for c in node.named_children:
+        if c.type == NT.HEREDOC_REDIRECT:
+            heredoc = c
+    assert heredoc is not None
+    body, dash, quoted = get_heredoc_meta(heredoc)
+    assert quoted is True
+    assert dash is False
+    assert body == "x=$v\n"
+
+
+def test_get_heredoc_meta_backslash_quoted_delimiter():
+    node = _first("cat <<\\END\nx=$v\nEND\n")
+    heredoc = node.named_children[1]
+    body, dash, quoted = get_heredoc_meta(heredoc)
+    assert quoted is True
+    assert dash is False
+    assert body == "x=$v\n"
+
+
+def test_get_heredoc_meta_body_gets_trailing_newline():
+    # tree-sitter drops the final newline for concatenated delimiters.
+    node = _first("cat <<EN'D'\nline\nEND\n")
+    heredoc = node.named_children[1]
+    body, _, _ = get_heredoc_meta(heredoc)
+    assert body == "line\n"

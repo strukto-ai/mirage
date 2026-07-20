@@ -193,6 +193,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      nextcloud:
+        image: nextcloud:30-apache
+        ports:
+          - 8080:80
+        env:
+          SQLITE_DATABASE: nextcloud
+          NEXTCLOUD_ADMIN_USER: admin
+          NEXTCLOUD_ADMIN_PASSWORD: admin123
+          NEXTCLOUD_TRUSTED_DOMAINS: localhost
     env:
       REDIS_URL: redis://localhost:6379/0
       S3_BUCKET: mirage-integ
@@ -200,6 +209,9 @@ jobs:
       S3_REGION: us-east-1
       AWS_ACCESS_KEY_ID: minio
       AWS_SECRET_ACCESS_KEY: minio123
+      NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
+      NEXTCLOUD_USERNAME: admin
+      NEXTCLOUD_PASSWORD: admin123
     steps:
       - uses: actions/checkout@v7
 
@@ -228,6 +240,24 @@ jobs:
       - name: Build mirage-browser
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-browser build
+
+      - name: Wait for Nextcloud install
+        shell: bash
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/status.php | grep -q '"installed":true'; then
+              echo "Nextcloud is installed"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Nextcloud did not finish installing in time" >&2
+          curl -s http://localhost:8080/status.php || true
+          exit 1
+
+      - name: Run declarative battery on Nextcloud
+        working-directory: integ
+        run: pnpm exec tsx runners/typescript/main.ts --target nextcloud
 
       - name: Start MinIO
         run: |
@@ -326,8 +356,31 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      greenmail:
+        image: greenmail/standalone:2.1.3
+        ports:
+          - 3025:3025
+          - 3143:3143
+          - 8080:8080
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.all
+            -Dgreenmail.users=integ:secret@example.com
+            -Dgreenmail.users.login=email
+            -Dgreenmail.hostname=0.0.0.0
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379/0
+      EMAIL_HOST: localhost
+      MONGODB_URI: mongodb://localhost:27017
     steps:
       - uses: actions/checkout@v7
 
@@ -414,6 +467,23 @@ jobs:
           done
           cat /tmp/hfsrv.log
           echo "HF_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
+
+      - name: Wait for GreenMail
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf -X POST http://localhost:8080/api/service/reset && break
+            sleep 2
+          done
+
+      - name: Start fake Box API for the typescript host
+        run: |
+          nohup ./python/.venv/bin/python integ/server/box_server.py --port 5096 > /tmp/boxsrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "BOX_ENDPOINT=" /tmp/boxsrv.log && break
+            sleep 1
+          done
+          cat /tmp/boxsrv.log
+          echo "BOX_ENDPOINT=http://127.0.0.1:5096" >> "$GITHUB_ENV"
 
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py

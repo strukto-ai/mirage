@@ -1,0 +1,74 @@
+---
+title: Grok Build
+description: Install Mirage as a Grok Build plugin and use mounted data from its native TUI.
+icon: terminal
+---
+
+[Grok Build](https://x.ai/cli) is xAI's coding-agent CLI; its executable is named `grok`. Mirage ships a Grok-compatible plugin with a guidance skill and six filesystem tools: `read`, `write`, `edit`, `ls`, `grep`, and `execute_command`.
+
+<Note>
+  Grok Build can work on codebases in any programming language. The Mirage tool
+  server itself requires Node.js 20 or newer.
+</Note>
+
+## Install the plugin
+
+Install from GitHub:
+
+```bash
+grok plugin install strukto-ai/mirage
+```
+
+For a local Mirage checkout:
+
+```bash
+grok plugin install /path/to/mirage/plugins/mirage
+```
+
+During plugin development, you can load the bundle without installing it:
+
+```bash
+grok --plugin-dir /path/to/mirage/plugins/mirage
+```
+
+## Configure a workspace
+
+Add `.mirage/workspace.yaml` to the project where you start Grok:
+
+```yaml
+mounts:
+  /scratch:
+    resource: ram
+  /data:
+    resource: disk
+    config:
+      root: ${PWD}/data
+```
+
+Mirage searches the current directory and its parents for the workspace config. Set `MIRAGE_MCP_CONFIG` to an absolute config path when it lives elsewhere.
+
+## Use the Grok UI
+
+Run `grok`, then open `/plugins` to confirm Mirage is enabled. The `/mcps` tab shows its Mirage server and tools.
+
+Use the normal Grok TUI:
+
+```text
+List the files mounted in Mirage.
+Search /data for failed jobs.
+Read and safely edit /data/config.json.
+```
+
+The plugin keeps Grok's TUI, sessions, models, approvals, and authentication. Mirage supplies only the virtual-filesystem tools.
+
+## Stale-write protection
+
+A Mirage `read` records a content fingerprint. If the file changes before `edit`, the edit fails and the plugin instructs Grok to reread before retrying. This is the same behavior as the [Pi integration](/typescript/agents/pi).
+
+## Extension surfaces
+
+Grok plugins may include skills, agents, hooks, MCP servers, and LSP servers. Hooks can observe or deny lifecycle events but cannot replace a tool call with a Mirage filesystem operation. MCP is therefore the stable public custom-tool surface for this integration.
+
+The Grok source tree also contains an xAI-native Rust tool-server protocol, but it is not documented as a public plugin component. Mirage keeps its shared operations transport-independent so a stable native adapter can be added later without rewriting filesystem behavior.
+
+Use a [FUSE mount](/typescript/setup/fuse) when you specifically want Grok's built-in file tools to operate on Mirage through a regular host path.

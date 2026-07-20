@@ -15,13 +15,45 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
+import { expandTilde } from '../../utils/path.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
+import { homeDir } from '../session/shell_dirs.ts'
+import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
-import { expandNode, type ExecuteFn } from './node.ts'
+import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES, SPLIT_TYPES } from './constants.ts'
+import { expandNode, unescapeUnquoted, type ExecuteFn } from './node.ts'
 import { PARAM_OPS, type TSNodeLike } from './variable.ts'
 
-const SPLIT_TYPES: ReadonlySet<string> = new Set([NT.SIMPLE_EXPANSION, NT.EXPANSION])
+// Brace-expand a concatenation or brace_expression into words. Literal
+// word tokens form the brace template; every other child (expansions,
+// strings, substitutions) expands first and joins as an inert atom, so
+// `{a,$v}` alternates on the expanded value while `{1..$n}` stays
+// literal, matching bash's brace-before-parameter ordering. Deliberate
+// divergence: bash rewrites `$v{a,b}` to `$va $vb` before parameter
+// expansion; here the prefix keeps its own expansion (`prea preb`),
+// which is the useful reading.
+async function expandBraceWord(
+  node: TSNodeLike,
+  session: Session,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
+): Promise<string[] | null> {
+  const pieces: string[] = []
+  const values: string[] = []
+  for (const child of node.children) {
+    if (child.isNamed !== true || BRACE_LITERAL_TYPES.has(child.type)) {
+      pieces.push(child.text)
+    } else {
+      values.push(await expandNode(child, session, executeFn, callStack))
+      pieces.push(makeInert(values.length - 1))
+    }
+  }
+  const words = expandTemplate(pieces.join(''))
+  if (words === null) return null
+  const home = homeDir(session)
+  return words.map((w) => substitute(expandTilde(unescapeUnquoted(w), home), values))
+}
 
 function hasAtExpansion(node: TSNodeLike): boolean {
   for (const child of node.children) {
@@ -119,6 +151,16 @@ export async function expandParts(
       const words = await expandStringWithArray(p, session, executeFn, callStack)
       result.push(...words)
       continue
+    }
+    if (BRACE_WORD_TYPES.has(p.type)) {
+      const braceWords = await expandBraceWord(p, session, executeFn, callStack)
+      if (braceWords !== null) {
+        // Empty unquoted words vanish, like bash: {,x} -> x.
+        for (const w of braceWords) {
+          if (w !== '') result.push(w)
+        }
+        continue
+      }
     }
     const expanded = await expandNode(p, session, executeFn, callStack)
     if (p.type === NT.COMMAND_SUBSTITUTION) {

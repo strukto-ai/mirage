@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.commands.builtin.gmail.gws_gmail_delete import gws_gmail_delete
 from mirage.commands.builtin.gmail.gws_gmail_read import gws_gmail_read
 from mirage.commands.builtin.gmail.gws_gmail_send import gws_gmail_send
 from mirage.core.google._client import TokenManager
@@ -96,20 +95,3 @@ async def test_gws_gmail_read(accessor):
 async def test_gws_gmail_read_missing_id(accessor):
     with pytest.raises(ValueError, match="--id is required"):
         await gws_gmail_read(accessor, [])
-
-
-@pytest.mark.asyncio
-async def test_gws_gmail_delete(accessor):
-    with patch(
-            "mirage.commands.builtin.gmail.gws_gmail_delete.trash_message",
-            new_callable=AsyncMock,
-    ) as trash:
-        stream, io = await gws_gmail_delete(accessor, [], id="msg1")
-        assert stream is None
-        trash.assert_awaited_once_with(accessor.token_manager, "msg1")
-
-
-@pytest.mark.asyncio
-async def test_gws_gmail_delete_missing_id(accessor):
-    with pytest.raises(ValueError, match="--id is required"):
-        await gws_gmail_delete(accessor, [])

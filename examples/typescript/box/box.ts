@@ -124,9 +124,10 @@ async function main(): Promise<void> {
     if (json !== undefined) {
       await show(ws, `jq -r "keys | .[]" ${quote(json)} | head -n 5`)
     }
-    const note = files.find((p) => p.endsWith('.boxnote.json') || p.endsWith('.gdoc.json'))
+    // Box Notes come back as raw ProseMirror JSON, so jq works directly.
+    const note = files.find((p) => p.endsWith('.boxnote'))
     if (note !== undefined) {
-      await show(ws, `jq -r .body_text ${quote(note)} | head -n 5`)
+      await show(ws, `jq -r ".doc.content | length" ${quote(note)}`)
     }
   } finally {
     await ws.close()

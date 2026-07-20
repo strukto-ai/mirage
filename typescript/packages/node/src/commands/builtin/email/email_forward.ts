@@ -63,7 +63,7 @@ async function emailForwardCommand(
 }
 
 export const EMAIL_FORWARD = command({
-  name: 'email-forward',
+  name: 'himalaya message forward',
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailForwardCommand,

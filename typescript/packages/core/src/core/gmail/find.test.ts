@@ -86,6 +86,11 @@ describe('gmail core find', () => {
   beforeEach(() => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
+    // walkFind stats the start path to decide whether to emit it; no
+    // fixture entry for '/' keeps these walks root-less.
+    vi.mocked(statMod.stat).mockImplementation((_accessor, spec) =>
+      Promise.reject(enoent(spec.virtual)),
+    )
     mockTree(TREE)
   })
 
@@ -94,7 +99,8 @@ describe('gmail core find', () => {
     expect(files).toEqual(['/INBOX/2026-06-01/Hello__m1.gmail.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
     expect(dirs).toEqual(['/INBOX', '/INBOX/2026-06-01'])
-    expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
+    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
+    expect([...new Set(statted)]).toEqual(['/'])
   })
 
   it('matches message names with globs', async () => {

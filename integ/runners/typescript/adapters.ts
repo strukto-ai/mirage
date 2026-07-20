@@ -14,7 +14,7 @@
 
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import {
   CreateBucketCommand,
   DeleteBucketCommand,
@@ -24,23 +24,29 @@ import {
 } from '@aws-sdk/client-s3'
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import {
+  BoxResource,
   DiskResource,
   DropboxResource,
+  EmailResource,
   GDocsResource,
   GDriveResource,
+  GmailResource,
+  GridFSResource,
   GSheetsResource,
   GSlidesResource,
   HfBucketsResource,
   MountMode,
+  NextcloudResource,
   RAMResource,
   RedisResource,
   S3Resource,
   SSHResource,
   Workspace,
 } from '@struktoai/mirage-node'
+import { ImapFlow } from 'imapflow'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
 import { startFakeDropbox, type FakeDropbox } from '../../server/dropbox.ts'
-import { integRoot } from './harness.ts'
+import { integRoot, walkFiles } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
 
 export interface Open {
@@ -49,10 +55,14 @@ export interface Open {
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
+const MONGODB_URI = process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
 const S3_ENDPOINT = process.env.S3_ENDPOINT
 const S3_REGION = process.env.S3_REGION ?? 'us-east-1'
 const S3_ACCESS = process.env.AWS_ACCESS_KEY_ID ?? 'testing'
 const S3_SECRET = process.env.AWS_SECRET_ACCESS_KEY ?? 'testing'
+const NEXTCLOUD_URL = process.env.NEXTCLOUD_URL
+const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME ?? 'admin'
+const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD ?? 'admin123'
 
 function runId(): string {
   return `${String(process.pid)}-${String(Date.now())}`
@@ -110,6 +120,33 @@ async function openOpfs(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function openGridfs(target: Target): Promise<Open> {
+  const id = runId()
+  const uri = MONGODB_URI
+  const database = `mirage_integ_${id}`
+  const mounts: Record<string, GridFSResource> = {}
+  for (const m of target.mounts) {
+    mounts[m.path] = new GridFSResource({
+      uri,
+      database,
+      bucket: String(m.bucket),
+      keyPrefix: m.prefix,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    const { MongoClient } = await import('mongodb')
+    const client = new MongoClient(uri)
+    try {
+      await client.db(database).dropDatabase()
+    } finally {
+      await client.close()
+    }
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 async function openS3(target: Target): Promise<Open> {
   if (!S3_ENDPOINT) throw new Error('s3 target requires S3_ENDPOINT')
   const id = runId()
@@ -162,6 +199,97 @@ async function openS3(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+function nextcloudMountUrl(root: string | undefined): string {
+  if (NEXTCLOUD_URL === undefined || NEXTCLOUD_URL === '') {
+    throw new Error('nextcloud target requires NEXTCLOUD_URL')
+  }
+  const base = NEXTCLOUD_URL.endsWith('/') ? NEXTCLOUD_URL : `${NEXTCLOUD_URL}/`
+  const relative = (root ?? '')
+    .split('/')
+    .filter((part) => part !== '')
+    .map(encodeURIComponent)
+    .join('/')
+  return relative !== '' ? `${base}${relative}/` : base
+}
+
+async function openNextcloud(target: Target): Promise<Open> {
+  const mounts: Record<string, NextcloudResource> = {}
+  for (const mount of target.mounts) {
+    mounts[mount.path] = new NextcloudResource({
+      url: nextcloudMountUrl(mount.root),
+      username: NEXTCLOUD_USERNAME,
+      password: NEXTCLOUD_PASSWORD,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+const EMAIL_IMAP_PORT = Number(process.env.EMAIL_IMAP_PORT ?? '3143')
+const EMAIL_SMTP_PORT = Number(process.env.EMAIL_SMTP_PORT ?? '3025')
+const EMAIL_API_PORT = Number(process.env.EMAIL_API_PORT ?? '8080')
+const EMAIL_USERNAME = 'integ@example.com'
+const EMAIL_PASSWORD = 'secret'
+
+// The GreenMail server is external and shared; its REST API purges every
+// mailbox between runs. Seeding appends RFC822 payloads over IMAP so folder
+// UIDs are the append order (1, 2, ...) and date dirs come from the
+// manifest Date headers.
+async function openEmail(target: Target): Promise<Open> {
+  const host = process.env.EMAIL_HOST
+  if (host === undefined || host === '') throw new Error('email target requires EMAIL_HOST')
+  const reset = await fetch(`http://${host}:${String(EMAIL_API_PORT)}/api/service/reset`, {
+    method: 'POST',
+  })
+  if (!reset.ok) throw new Error(`greenmail reset failed: ${String(reset.status)}`)
+  if (target.mail !== undefined) {
+    const manifest = join(integRoot(), 'fixtures', `${target.mail}.json`)
+    const entries = JSON.parse(readFileSync(manifest, 'utf8')) as MailEntry[]
+    const imap = new ImapFlow({
+      host,
+      port: EMAIL_IMAP_PORT,
+      secure: false,
+      auth: { user: EMAIL_USERNAME, pass: EMAIL_PASSWORD },
+      logger: false,
+    })
+    await imap.connect()
+    const known = new Set(['INBOX'])
+    for (const entry of entries) {
+      const folder = entry.folder ?? 'INBOX'
+      if (!known.has(folder)) {
+        await imap.mailboxCreate(folder)
+        known.add(folder)
+      }
+      await imap.append(
+        folder,
+        buildRfc822(entry),
+        entry.seen === true ? ['\\Seen'] : [],
+        new Date(entry.date),
+      )
+    }
+    await imap.logout()
+  }
+  const mounts: Record<string, EmailResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new EmailResource({
+      imapHost: host,
+      imapPort: EMAIL_IMAP_PORT,
+      smtpHost: host,
+      smtpPort: EMAIL_SMTP_PORT,
+      username: EMAIL_USERNAME,
+      password: EMAIL_PASSWORD,
+      useSsl: false,
+      maxMessages: 200,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 async function openHf(target: Target): Promise<Open> {
   const endpoint = process.env.HF_ENDPOINT
   if (!endpoint) throw new Error('hf target requires HF_ENDPOINT')
@@ -175,6 +303,87 @@ async function openHf(target: Target): Promise<Open> {
       token: 'integ-token',
       endpoint,
       keyPrefix: m.prefix,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+const BOX_AUTH = { Authorization: 'Bearer integ-box-token' }
+
+async function boxCreateFolder(endpoint: string, parentId: string, name: string): Promise<string> {
+  const r = await fetch(`${endpoint}/2.0/folders`, {
+    method: 'POST',
+    headers: { ...BOX_AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, parent: { id: parentId } }),
+  })
+  if (r.status === 201) return ((await r.json()) as { id: string }).id
+  if (r.status === 409) {
+    const list = await fetch(`${endpoint}/2.0/folders/${parentId}/items?limit=1000`, {
+      headers: BOX_AUTH,
+    })
+    const items = ((await list.json()) as { entries: { id: string; name: string; type: string }[] })
+      .entries
+    const hit = items.find((e) => e.type === 'folder' && e.name === name)
+    if (hit) return hit.id
+  }
+  throw new Error(`box folder create ${name} -> ${String(r.status)}`)
+}
+
+async function boxUpload(
+  endpoint: string,
+  folderId: string,
+  name: string,
+  content: Uint8Array,
+): Promise<void> {
+  const form = new FormData()
+  form.set('attributes', JSON.stringify({ name, parent: { id: folderId } }))
+  form.set('file', new Blob([content]), name)
+  const r = await fetch(`${endpoint}/2.0/files/content`, {
+    method: 'POST',
+    headers: BOX_AUTH,
+    body: form,
+  })
+  if (r.status !== 201) throw new Error(`box upload ${name} -> ${String(r.status)}`)
+}
+
+async function openBox(target: Target): Promise<Open> {
+  const endpoint = process.env.BOX_ENDPOINT
+  if (!endpoint) throw new Error('box target requires BOX_ENDPOINT')
+  const id = runId()
+  const root = integRoot()
+  const mounts: Record<string, BoxResource> = {}
+  for (const m of target.mounts) {
+    // Box is read-only through the workspace, so the harness tee-seeding
+    // can't run; the fixture is uploaded over the Box API instead. The
+    // shared fake server outlives a run, so a per-run folder name isolates
+    // runs, and the folder id becomes the mount root (mirrors how a real
+    // Box app scopes to a folder).
+    const folderId = await boxCreateFolder(endpoint, '0', `integ-${id}-${String(m.folder)}`)
+    if (m.seed !== undefined) {
+      const base = join(root, 'fixtures', m.seed)
+      for (const file of walkFiles(base)) {
+        const rel = relative(base, file).split(sep).join('/')
+        const parts = rel.split('/')
+        let parentId = folderId
+        for (const dir of parts.slice(0, -1)) {
+          parentId = await boxCreateFolder(endpoint, parentId, dir)
+        }
+        await boxUpload(
+          endpoint,
+          parentId,
+          parts[parts.length - 1] ?? '',
+          new Uint8Array(readFileSync(file)),
+        )
+      }
+    }
+    mounts[m.path] = new BoxResource({
+      accessToken: 'integ-box-token',
+      endpoint,
+      rootFolderId: folderId,
+      // The fake supports name+content search, so exercise grep/rg push-down
+      // narrowing in the battery.
+      contentSearch: true,
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
@@ -198,6 +407,9 @@ async function openDropbox(target: Target): Promise<Open> {
       clientId: 'integ-client',
       clientSecret: 'integ-secret',
       refreshToken: 'integ-refresh',
+      // The fake supports full-text search_v2, so exercise grep/rg
+      // narrowing in the battery.
+      contentSearch: true,
       endpoint: fake.endpoint,
       ...(m.root !== undefined ? { rootPath: m.root } : {}),
     })
@@ -316,10 +528,81 @@ async function seedGwsApps(base: string, entries: GwsAppEntry[]): Promise<void> 
   }
 }
 
-function gwsNativeResource(base: string, resource: string): GDocsResource | GSheetsResource | GSlidesResource {
+interface MailEntry {
+  from: string
+  to: string
+  cc?: string[]
+  subject: string
+  date: string
+  body: string
+  labels?: string[]
+  folder?: string
+  seen?: boolean
+  attachments?: { filename: string; content: string }[]
+}
+
+function mimeTextPart(content: string, filename?: string): string {
+  const lines = [
+    'Content-Type: text/plain; charset="utf-8"',
+    'MIME-Version: 1.0',
+    'Content-Transfer-Encoding: base64',
+  ]
+  if (filename !== undefined) {
+    lines.push(`Content-Disposition: attachment; filename="${filename}"`)
+  }
+  return `${lines.join('\r\n')}\r\n\r\n${Buffer.from(content, 'utf-8').toString('base64')}`
+}
+
+// Builds the same constrained RFC822 shape python's email.mime emits: one
+// base64 text/plain body plus base64 text attachments under multipart/mixed.
+function buildRfc822(entry: MailEntry): string {
+  const headers = [`From: ${entry.from}`, `To: ${entry.to}`]
+  if (entry.cc !== undefined && entry.cc.length > 0) headers.push(`Cc: ${entry.cc.join(', ')}`)
+  headers.push(`Subject: ${entry.subject}`, `Date: ${entry.date}`)
+  const attachments = entry.attachments ?? []
+  if (attachments.length === 0) {
+    return `${headers.join('\r\n')}\r\n${mimeTextPart(entry.body)}`
+  }
+  const boundary = 'integ-mime-boundary'
+  const parts = [
+    mimeTextPart(entry.body),
+    ...attachments.map((att) => mimeTextPart(att.content, att.filename)),
+  ]
+  return [
+    ...headers,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    'MIME-Version: 1.0',
+    '',
+    ...parts.map((part) => `--${boundary}\r\n${part}`),
+    `--${boundary}--`,
+  ].join('\r\n')
+}
+
+// Messages are API objects: each manifest entry becomes an RFC822 payload
+// inserted through messages.insert with internalDateSource=dateHeader, so
+// date dirs come from the manifest, not the server clock.
+async function seedGwsMail(base: string, entries: MailEntry[]): Promise<void> {
+  for (const entry of entries) {
+    const raw = Buffer.from(buildRfc822(entry), 'utf-8')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+    await gwsJson(`${base}/gmail/v1/users/me/messages?internalDateSource=dateHeader`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw, labelIds: entry.labels ?? [] }),
+    })
+  }
+}
+
+function gwsNativeResource(
+  base: string,
+  resource: string,
+): GDocsResource | GSheetsResource | GSlidesResource | GmailResource {
   const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
   if (resource === 'gdocs') return new GDocsResource(config)
   if (resource === 'gsheets') return new GSheetsResource(config)
+  if (resource === 'gmail') return new GmailResource(config)
   return new GSlidesResource(config)
 }
 
@@ -334,7 +617,10 @@ async function openGws(target: Target): Promise<Open> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(target.epoch !== undefined ? { epoch: target.epoch } : {}),
   })
-  const mounts: Record<string, GDriveResource | GDocsResource | GSheetsResource | GSlidesResource | RAMResource> = {}
+  const mounts: Record<
+    string,
+    GDriveResource | GDocsResource | GSheetsResource | GSlidesResource | GmailResource | RAMResource
+  > = {}
   const driveIds: Record<string, string> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
@@ -372,6 +658,10 @@ async function openGws(target: Target): Promise<Open> {
     const manifest = join(integRoot(), 'fixtures', `${target.apps}.json`)
     await seedGwsApps(base, JSON.parse(readFileSync(manifest, 'utf8')) as GwsAppEntry[])
   }
+  if (target.mail !== undefined) {
+    const manifest = join(integRoot(), 'fixtures', `${target.mail}.json`)
+    await seedGwsMail(base, JSON.parse(readFileSync(manifest, 'utf8')) as MailEntry[])
+  }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
     await ws.close()
@@ -385,11 +675,16 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   redis: openRedis,
   opfs: openOpfs,
   s3: openS3,
+  nextcloud: openNextcloud,
+  gridfs: openGridfs,
   ssh: openSsh,
   gdrive: openGws,
   gdocs: openGws,
   gsheets: openGws,
   gslides: openGws,
+  gmail: openGws,
+  email: openEmail,
   hf: openHf,
+  box: openBox,
   dropbox: openDropbox,
 }

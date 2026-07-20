@@ -34,6 +34,7 @@
       "langfuse",
       "linear",
       "mongodb",
+      "nextcloud",
       "notion",
       "postgres",
       "qdrant",

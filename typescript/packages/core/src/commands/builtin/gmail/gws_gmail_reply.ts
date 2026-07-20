@@ -62,7 +62,7 @@ async function gwsGmailReplyCommand(
 }
 
 export const GMAIL_GWS_REPLY = command({
-  name: 'gws-gmail-reply',
+  name: 'gws gmail +reply',
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailReplyCommand,

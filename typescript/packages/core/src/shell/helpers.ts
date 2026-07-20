@@ -100,6 +100,12 @@ export function getSubshellBody(node: TSNodeLike): TSNodeLike[] {
   return [...node.namedChildren]
 }
 
+const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
+  NT.FILE_REDIRECT,
+  NT.HEREDOC_REDIRECT,
+  NT.HERESTRING_REDIRECT,
+])
+
 const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.WORD,
   NT.CONCATENATION,
@@ -107,17 +113,116 @@ const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.EXPANSION,
   NT.COMMAND_SUBSTITUTION,
   NT.STRING,
+  NT.PROCESS_SUBSTITUTION,
 ])
 
-export function getRedirects(node: TSNodeLike): [TSNodeLike, Redirect[]] {
+function parseFileRedirect(child: TSNodeLike): Redirect {
+  let fd = 1
+  let target: string | number = ''
+  let targetNode: TSNodeLike | null = null
+  let kind: RedirectKind = RedirectKind.STDOUT
+  let append = false
+  let dupFd: number | null = null
+
+  for (const c of child.children) {
+    if (c.type === NT.FILE_DESCRIPTOR) {
+      fd = parseInt(getText(c), 10)
+    } else if (c.type === NT.REDIRECT_OUT) {
+      // default STDOUT
+    } else if (c.type === NT.REDIRECT_APPEND) {
+      append = true
+    } else if (c.type === NT.REDIRECT_IN) {
+      kind = RedirectKind.STDIN
+      fd = 0
+    } else if (c.type === NT.REDIRECT_STDERR) {
+      kind = RedirectKind.STDERR_TO_STDOUT
+    } else if (c.type === NT.REDIRECT_BOTH) {
+      kind = RedirectKind.STDOUT
+      fd = -1
+    } else if (c.type === NT.REDIRECT_BOTH_APPEND) {
+      kind = RedirectKind.STDOUT
+      fd = -1
+      append = true
+    } else if (c.type === NT.NUMBER) {
+      dupFd = parseInt(getText(c), 10)
+    }
+  }
+
+  for (const c of child.namedChildren) {
+    if (TARGET_TYPES.has(c.type)) {
+      target = getText(c)
+      targetNode = c
+      break
+    }
+  }
+
+  if (dupFd !== null && kind === RedirectKind.STDERR_TO_STDOUT) {
+    if (fd === 2 && dupFd === 1) {
+      kind = RedirectKind.STDERR_TO_STDOUT
+      target = dupFd
+    } else if (fd === 1 && dupFd === 2) {
+      kind = RedirectKind.STDOUT
+      fd = 1
+      target = 2
+    } else {
+      target = dupFd
+    }
+  }
+
+  if (fd === -1) {
+    return new Redirect({ fd: -1, target, targetNode, kind: RedirectKind.STDOUT, append })
+  }
+
+  if (fd === 2 && kind !== RedirectKind.STDERR_TO_STDOUT) {
+    kind = RedirectKind.STDERR
+  }
+
+  return new Redirect({ fd, target, targetNode, kind, append })
+}
+
+function parseHerestringRedirect(child: TSNodeLike): Redirect {
+  let content = ''
+  let targetNode: TSNodeLike | null = null
+  for (const candidate of child.namedChildren) {
+    if (TARGET_TYPES.has(candidate.type)) {
+      content = getText(candidate)
+      targetNode = candidate
+      break
+    }
+  }
+  return new Redirect({ fd: 0, target: content, targetNode, kind: RedirectKind.HERESTRING })
+}
+
+/**
+ * Parse all redirects from a redirected_statement.
+ *
+ * Returns [command, redirects]; command is null for a bare redirect
+ * like `> file` (bash runs the empty command and applies redirects,
+ * creating/truncating the file).
+ */
+export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] {
   const nc = node.namedChildren
-  const command = nc[0]
-  if (command === undefined) throw new Error('redirect: missing command')
+  const first = nc[0]
+  const command = first !== undefined && !REDIRECT_NODE_TYPES.has(first.type) ? first : null
   const redirects: Redirect[] = []
 
-  for (let i = 1; i < nc.length; i++) {
+  if (command !== null && command.type === NT.COMMAND) {
+    for (const child of command.namedChildren) {
+      if (child.type === NT.HERESTRING_REDIRECT) {
+        redirects.push(parseHerestringRedirect(child))
+      }
+    }
+  }
+
+  let recoverHerestring = false
+  for (let i = command === null ? 0 : 1; i < nc.length; i++) {
     const child = nc[i]
     if (child === undefined) continue
+
+    if (child.type === NT.ERROR && getText(child) === '<<') {
+      recoverHerestring = true
+      continue
+    }
 
     if (child.type === NT.HEREDOC_REDIRECT) {
       const [body, , quoted] = getHeredocMeta(child)
@@ -132,91 +237,36 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike, Redirect[]] {
         new Redirect({
           fd: 0,
           target: body,
+          targetNode: child,
           kind: RedirectKind.HEREDOC,
           pipeline: pipeNode,
           expandVars: !quoted,
         }),
       )
+      // A file redirect written before the heredoc body starts
+      // (`cat <<END > out.txt`) parses INSIDE the heredoc_redirect
+      // node; hoist it to a sibling.
+      for (const hc of child.namedChildren) {
+        if (hc.type === NT.FILE_REDIRECT) {
+          redirects.push(parseFileRedirect(hc))
+        }
+      }
       continue
     }
 
     if (child.type === NT.HERESTRING_REDIRECT) {
-      let content = ''
-      for (const sc of child.children) {
-        if (sc.isNamed === true && sc.type !== NT.HERESTRING_TOKEN) {
-          content = getText(sc)
-          break
-        }
-      }
-      redirects.push(new Redirect({ fd: 0, target: content, kind: RedirectKind.HERESTRING }))
+      redirects.push(parseHerestringRedirect(child))
+      recoverHerestring = false
       continue
     }
 
-    if (child.type !== NT.FILE_REDIRECT) continue
-
-    let fd = 1
-    let target: string | number = ''
-    let targetNode: TSNodeLike | null = null
-    let kind: RedirectKind = RedirectKind.STDOUT
-    let append = false
-    let dupFd: number | null = null
-
-    for (const c of child.children) {
-      if (c.type === NT.FILE_DESCRIPTOR) {
-        fd = parseInt(getText(c), 10)
-      } else if (c.type === NT.REDIRECT_OUT) {
-        // default STDOUT
-      } else if (c.type === NT.REDIRECT_APPEND) {
-        append = true
-      } else if (c.type === NT.REDIRECT_IN) {
-        kind = RedirectKind.STDIN
-        fd = 0
-      } else if (c.type === NT.REDIRECT_STDERR) {
-        kind = RedirectKind.STDERR_TO_STDOUT
-      } else if (c.type === NT.REDIRECT_BOTH) {
-        kind = RedirectKind.STDOUT
-        fd = -1
-      } else if (c.type === NT.REDIRECT_BOTH_APPEND) {
-        kind = RedirectKind.STDOUT
-        fd = -1
-        append = true
-      } else if (c.type === NT.NUMBER) {
-        dupFd = parseInt(getText(c), 10)
-      }
-    }
-
-    for (const c of child.namedChildren) {
-      if (TARGET_TYPES.has(c.type)) {
-        target = getText(c)
-        targetNode = c
-        break
-      }
-    }
-
-    if (dupFd !== null && kind === RedirectKind.STDERR_TO_STDOUT) {
-      if (fd === 2 && dupFd === 1) {
-        kind = RedirectKind.STDERR_TO_STDOUT
-        target = dupFd
-      } else if (fd === 1 && dupFd === 2) {
-        kind = RedirectKind.STDOUT
-        fd = 1
-        target = 2
-      } else {
-        target = dupFd
-      }
-    }
-
-    if (fd === -1) {
-      kind = RedirectKind.STDOUT
-      redirects.push(new Redirect({ fd: -1, target, targetNode, kind, append }))
+    if (child.type !== NT.FILE_REDIRECT) {
+      recoverHerestring = false
       continue
     }
 
-    if (fd === 2 && kind !== RedirectKind.STDERR_TO_STDOUT) {
-      kind = RedirectKind.STDERR
-    }
-
-    redirects.push(new Redirect({ fd, target, targetNode, kind, append }))
+    redirects.push(recoverHerestring ? parseHerestringRedirect(child) : parseFileRedirect(child))
+    recoverHerestring = false
   }
 
   return [command, redirects]
@@ -352,9 +402,9 @@ export function getHeredocParts(redirectNode: TSNodeLike): [string, string] {
 
 export function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, boolean] {
   const [delimiter, rawBody] = getHeredocParts(redirectNode)
-  const quoted =
-    (delimiter.startsWith("'") && delimiter.endsWith("'")) ||
-    (delimiter.startsWith('"') && delimiter.endsWith('"'))
+  // Any quoting anywhere in the delimiter (even partial, `EN'D'`)
+  // disables expansion, matching bash.
+  const quoted = delimiter.includes("'") || delimiter.includes('"') || delimiter.includes('\\')
   let dash = false
   for (const c of redirectNode.children) {
     if (c.type === '<<-') {
@@ -369,7 +419,27 @@ export function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, bool
       .map((line) => line.replace(/^\t+/, ''))
       .join('\n')
   }
-  return [body, dash, quoted]
+  return [normalizeHeredocBody(body, delimiter), dash, quoted]
+}
+
+/**
+ * Repair tree-sitter quirks on concatenated delimiters (<<EN'D').
+ *
+ * tree-sitter sometimes fails to match the closing line against a
+ * concatenated delimiter: the body swallows the delimiter line, or
+ * loses its final newline to heredoc_end. Bash strips quoting from
+ * the delimiter before matching and bodies always end with a newline.
+ */
+function normalizeHeredocBody(body: string, delimiter: string): string {
+  const clean = delimiter.replaceAll("'", '').replaceAll('"', '')
+  const suffix = clean + '\n'
+  let out = body
+  if (out.endsWith(suffix)) {
+    const head = out.slice(0, -suffix.length)
+    if (head === '' || head.endsWith('\n')) out = head
+  }
+  if (out !== '' && !out.endsWith('\n')) out += '\n'
+  return out
 }
 
 export function getHerestringContent(node: TSNodeLike): string {
@@ -399,6 +469,14 @@ export function getProcessSubDirection(node: TSNodeLike): ProcessSubDirection | 
   if (open === '<(') return ProcessSubDirection.INPUT
   if (open === '>(') return ProcessSubDirection.OUTPUT
   return null
+}
+
+export function getProcessSubBody(node: TSNodeLike): string {
+  const text = getText(node)
+  if ((text.startsWith('<(') || text.startsWith('>(')) && text.endsWith(')')) {
+    return text.slice(2, -1)
+  }
+  return text
 }
 
 export function getFunctionName(node: TSNodeLike): string {

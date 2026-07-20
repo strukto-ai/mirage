@@ -53,6 +53,7 @@ export class BoxResource implements Resource {
   constructor(config: BoxConfig) {
     this.config = config
     const tm = new BoxTokenManager({
+      ...(config.endpoint !== undefined ? { endpoint: config.endpoint } : {}),
       ...(config.clientId !== undefined ? { clientId: config.clientId } : {}),
       ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
       ...(config.refreshToken !== undefined ? { refreshToken: config.refreshToken } : {}),
@@ -62,7 +63,11 @@ export class BoxResource implements Resource {
         ? { onRefreshTokenRotated: config.onRefreshTokenRotated }
         : {}),
     })
-    this.accessor = new BoxAccessor({ tokenManager: tm })
+    this.accessor = new BoxAccessor({
+      tokenManager: tm,
+      ...(config.rootFolderId !== undefined ? { rootFolderId: config.rootFolderId } : {}),
+      ...(config.contentSearch !== undefined ? { contentSearch: config.contentSearch } : {}),
+    })
     this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }
 

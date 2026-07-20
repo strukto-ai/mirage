@@ -184,11 +184,12 @@ describe('box core find', () => {
     expect(out).toEqual(['/notes.txt'])
   })
 
-  it('stats files for type detection and size filtering only', async () => {
+  it('stats the start path plus files for type detection and size filtering only', async () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT, { name: '*.md', minSize: 1024 })
     const statted = [...new Set(vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual))]
-    expect(statted.sort()).toEqual(['/docs/inner/deep.md', '/docs/readme.md', '/notes.txt'])
+    // '/' is the start-point stat that emits the search root itself.
+    expect(statted.sort()).toEqual(['/', '/docs/inner/deep.md', '/docs/readme.md', '/notes.txt'])
   })
 
   it('filters by mtimeMin and mtimeMax on files and dirs', async () => {

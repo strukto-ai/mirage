@@ -70,8 +70,8 @@ No external setup, these run locally or against a connection string you already 
 | Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | Databricks Volume | read, write | [Databricks Volume](/home/setup/databricks) | [<Icon icon="python" />](/python/resource/databricks_volume) [<Icon icon="node-js" />](/typescript/setup/databricks_volume) | Unity Catalog volume subtree; mv/cp are non-atomic copies |
-| Dropbox | read, write | [Dropbox](/home/setup/dropbox) | [<Icon icon="python" />](/python/resource/dropbox) [<Icon icon="node-js" />](/typescript/dropbox) [<Icon icon="globe" />](/typescript/dropbox) | OAuth2 + PKCE; Python, Node, and browser; `root_path` mounts a subfolder |
-| Box | read | [Box](/home/setup/box) | [<Icon icon="node-js" />](/typescript/box) [<Icon icon="globe" />](/typescript/box) | OAuth2 + PKCE or developer token; `.boxnote.json` / `.boxcanvas.json` / `.gdoc.json` decoded |
+| Dropbox | read, write | [Dropbox](/home/setup/dropbox) | [<Icon icon="python" />](/python/resource/dropbox) [<Icon icon="node-js" />](/typescript/dropbox) [<Icon icon="globe" />](/typescript/dropbox) | OAuth2 + PKCE; Python, Node, and browser; `root_path` mounts a subfolder; `content_search` narrows grep/rg via the search API |
+| Box | read, write | [Box](/home/setup/box) | [<Icon icon="python" />](/python/resource/box) [<Icon icon="node-js" />](/typescript/box) [<Icon icon="globe" />](/typescript/box) | OAuth2 + PKCE or developer token; Python, Node, and browser; `root_folder_id` mounts a subfolder; all items served as raw bytes |
 | Nextcloud | read, write | [Nextcloud](/home/setup/nextcloud) | [<Icon icon="python" />](/python/resource/nextcloud) | Self-hosted Nextcloud / ownCloud / WebDAV; HTTP Basic auth with app password |
 
 ## Code & DevOps
@@ -96,6 +96,7 @@ No external setup, these run locally or against a connection string you already 
 | Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | MongoDB | read | [MongoDB](/home/setup/mongodb) | [<Icon icon="python" />](/python/resource/mongodb) [<Icon icon="node-js" />](/typescript/setup/mongodb) [<Icon icon="globe" />](/typescript/setup/mongodb) | Collection-backed views |
+| GridFS | read, write | [GridFS](/home/setup/gridfs) | [<Icon icon="python" />](/python/resource/gridfs) [<Icon icon="node-js" />](/typescript/setup/gridfs) | File storage on MongoDB with revisions; find runs server-side |
 | Postgres | read | [Postgres](/home/setup/postgres) | [<Icon icon="python" />](/python/resource/postgres) [<Icon icon="node-js" />](/typescript/setup/postgres) [<Icon icon="globe" />](/typescript/setup/postgres) | SQL tables exposed as paths |
 | LanceDB | read | [LanceDB](/home/setup/lancedb) | [<Icon icon="python" />](/python/resource/lancedb) [<Icon icon="node-js" />](/typescript/setup/lancedb) | Label folders + semantic search command |
 | Qdrant | read | [Qdrant](/home/setup/qdrant) | [<Icon icon="python" />](/python/resource/qdrant) [<Icon icon="node-js" />](/typescript/setup/qdrant) [<Icon icon="globe" />](/typescript/setup/qdrant) | Collections as folders + semantic search command |
@@ -125,16 +126,18 @@ Mirage drops into the major agent application frameworks. Each adapter exposes a
 
 | Framework | Docs | Notes |
 | --- | --- | --- |
-| OpenAI Agents SDK | [<Icon icon="python" />](/python/agents/openai-agents) [<Icon icon="node-js" />](/typescript/agents/openai) [<Icon icon="globe" />](/typescript/agents/openai) | `MirageShell` and `MirageEditor` plug into `shellTool` and `applyPatchTool`. |
+| OpenAI Agents SDK | [<Icon icon="python" />](/python/agents/openai-agents) [<Icon icon="node-js" />](/typescript/agents/openai) [<Icon icon="globe" />](/typescript/agents/openai) | Shell, editor, and multimodal file-reading tools for Mirage workspaces. |
 | Vercel AI SDK | [<Icon icon="node-js" />](/typescript/agents/vercel) [<Icon icon="globe" />](/typescript/agents/vercel) | `mirageTools()` returns five typed tools for `generateText` / `streamText`. |
-| LangChain (deepagents) | [<Icon icon="python" />](/python/agents/langchain) [<Icon icon="node-js" />](/typescript/agents/langchain) | `LangchainWorkspace` backend for Python and Node deepagents. |
-| Pi Coding Agent | [<Icon icon="node-js" />](/typescript/agents/pi) | Mirage extension for `@mariozechner/pi-coding-agent`. Node only. |
+| LangChain (Deep Agents) | [<Icon icon="python" />](/python/agents/langchain) [<Icon icon="node-js" />](/typescript/agents/langchain) | `LangchainWorkspace` backend for Python and Node Deep Agents. |
+| Pi Coding Agent | [<Icon icon="node-js" />](/typescript/agents/pi) | Mirage extension for `@earendil-works/pi-coding-agent`. Node only. |
+| OpenCode | [<Icon icon="node-js" />](/typescript/agents/opencode) | Native installable plugin with Mirage tools and per-session stale-write protection. Node only. |
 | Mastra | [<Icon icon="node-js" />](/typescript/agents/mastra) | `mirageTools()` for Mastra `Agent` definitions. Node only. |
 | Pydantic AI | [<Icon icon="python" />](/python/agents/pydantic-ai) | For pydantic-ai and pydantic-deepagents. |
 | CAMEL-AI | [<Icon icon="python" />](/python/agents/camel) | For CAMEL `ChatAgent`. |
 | OpenHands | [<Icon icon="python" />](/python/agents/openhands) | For the OpenHands agent SDK. |
 | Claude Code (CLI) | [<Icon icon="python" />](/python/agents/claude-code) [<Icon icon="node-js" />](/typescript/agents/claude-code) | Mount via FUSE; run `claude` against the mountpoint. |
-| Codex (CLI) | [<Icon icon="python" />](/python/agents/codex) [<Icon icon="node-js" />](/typescript/agents/codex) | Mount via FUSE; run `codex` against the mountpoint. |
+| Codex (CLI and app) | [<Icon icon="python" />](/python/agents/codex) [<Icon icon="node-js" />](/typescript/agents/codex) | Python uses FUSE; TypeScript provides the plugin with Mirage tools and stale-write protection, plus FUSE. |
+| Grok Build | [<Icon icon="python" />](/python/agents/grok-build) [<Icon icon="node-js" />](/typescript/agents/grok-build) | Python uses FUSE; TypeScript provides the Grok plugin with Mirage tools, plus FUSE. |
 
 ## Recommended Starting Points
 

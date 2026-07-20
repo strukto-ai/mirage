@@ -26,10 +26,62 @@ import { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
 
 export type ExecuteFn = (command: string, opts: { sessionId: string }) => Promise<IOResult>
 
-function unescapeUnquoted(text: string): string {
+export function unescapeUnquoted(text: string): string {
   if (!text.includes('\\')) return text
   const parts = shlexSplit(text)
   return parts[0] ?? text
+}
+
+// Unquoted-heredoc escapes: \$, \`, \\, \<newline> only.
+// Unlike double quotes, \" stays literal in heredoc bodies.
+export function unescapeHeredoc(text: string): string {
+  if (!text.includes('\\')) return text
+  const NUL = String.fromCharCode(0)
+  let out = text
+  out = out.replaceAll('\\\\', NUL)
+  out = out.replaceAll('\\$', '$')
+  out = out.replaceAll('\\`', '`')
+  out = out.replaceAll('\\\n', '')
+  return out.replaceAll(NUL, '\\')
+}
+
+const DOLLAR_NODE_TYPES: ReadonlySet<string> = new Set([
+  NT.SIMPLE_EXPANSION,
+  NT.EXPANSION,
+  NT.COMMAND_SUBSTITUTION,
+  NT.ARITHMETIC_EXPANSION,
+])
+
+function collectDollarNodes(node: TSNodeLike, acc: TSNodeLike[]): void {
+  for (const c of node.namedChildren) {
+    if (DOLLAR_NODE_TYPES.has(c.type)) acc.push(c)
+    else collectDollarNodes(c, acc)
+  }
+}
+
+// Textually substitute `$`-expansions inside a node, keeping all other
+// source text verbatim (gap-filled from spans). Used to reconstruct
+// arithmetic expression text when tree-sitter parses `$((expr))` as a
+// command substitution (heredoc bodies do this).
+async function substituteDollarRefs(
+  node: TSNodeLike,
+  session: Session,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
+): Promise<string> {
+  const acc: TSNodeLike[] = []
+  collectDollarNodes(node, acc)
+  const base = node.startIndex ?? 0
+  const text = node.text
+  let out = ''
+  let pos = 0
+  for (const c of acc) {
+    if (c.startIndex === undefined || c.endIndex === undefined) continue
+    out += text.slice(pos, c.startIndex - base)
+    out += await expandNode(c, session, executeFn, callStack)
+    pos = c.endIndex - base
+  }
+  return out + text.slice(pos)
 }
 
 // Reconstruct arithmetic expression text for the shared evaluator.
@@ -118,6 +170,27 @@ export async function expandNode(
   }
 
   if (ntype === NT.COMMAND_SUBSTITUTION) {
+    const rawSub = tsNode.text
+    if (rawSub.startsWith('$((') && rawSub.endsWith('))')) {
+      // Inside heredoc bodies tree-sitter parses `$((expr))` as a
+      // command substitution wrapping a subshell; evaluate it as
+      // arithmetic (python mirrors via a reparse; here the expression
+      // text is reconstructed with `$`-refs substituted).
+      const sub = tsNode.namedChildren
+      const only = sub[0]
+      if (sub.length === 1 && only?.type === NT.SUBSHELL) {
+        const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack)
+        const expr = parenExpr.slice(1, -1)
+        try {
+          const { value, updates } = evaluateArith(expr, session.env)
+          Object.assign(session.env, updates)
+          return value.toString()
+        } catch (err) {
+          if (!(err instanceof ArithError)) throw err
+          return rawSub
+        }
+      }
+    }
     const innerCmds = tsNode.namedChildren.filter(
       (c) =>
         c.type === NT.COMMAND ||

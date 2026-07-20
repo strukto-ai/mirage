@@ -159,12 +159,12 @@ async def main():
     print(await r.stdout_str())
 
     # Triage unread messages
-    r = await ws.execute('gws-gmail-triage --query "is:unread" --max 5')
+    r = await ws.execute('gws gmail +triage --query "is:unread" --max 5')
     print(await r.stdout_str())
 
     # Send an email
     r = await ws.execute(
-        'gws-gmail-send --to "user@example.com"'
+        'gws gmail +send --to "user@example.com"'
         ' --subject "Hello from MIRAGE"'
         ' --body "This email was sent via the MIRAGE Gmail resource."')
     print(await r.stdout_str())
@@ -192,8 +192,8 @@ basename /gmail/INBOX/2026-04-12/Meeting_Notes__msg123.gmail.json .gmail.json
 # The part after "__" is the message ID: msg123
 
 # Read a message then reply
-gws-gmail-read --id msg123
-gws-gmail-reply --message-id msg123 --body "Thanks for the notes"
+gws gmail +read --id msg123
+gws gmail +reply --message-id msg123 --body "Thanks for the notes"
 ```
 
 ## Working with Large Labels
@@ -244,14 +244,17 @@ Standard commands available on the mounted Gmail tree:
 | `realpath`      | Resolve path to absolute form              |
 | `nl`            | Number lines of output                     |
 
-Resource-specific commands:
+Resource-specific commands follow the official
+[Google Workspace CLI](https://github.com/googleworkspace/cli) syntax:
+ergonomic `gws gmail +<helper>` commands for common tasks, plus a raw
+`gws gmail <resource> <method>` passthrough for any Gmail API method.
 
-### `gws-gmail-send`
+### `gws gmail +send`
 
 Send a new email.
 
 ```bash
-gws-gmail-send --to "user@example.com" --subject "Hello" --body "Hi there"
+gws gmail +send --to "user@example.com" --subject "Hello" --body "Hi there"
 ```
 
 | Option      | Required | Description             |
@@ -262,12 +265,12 @@ gws-gmail-send --to "user@example.com" --subject "Hello" --body "Hi there"
 
 Returns the sent message JSON.
 
-### `gws-gmail-reply`
+### `gws gmail +reply`
 
 Reply to a message.
 
 ```bash
-gws-gmail-reply --message-id msg123 --body "Thanks for the update"
+gws gmail +reply --message-id msg123 --body "Thanks for the update"
 ```
 
 | Option         | Required | Description      |
@@ -277,12 +280,12 @@ gws-gmail-reply --message-id msg123 --body "Thanks for the update"
 
 Returns the sent reply JSON.
 
-### `gws-gmail-reply-all`
+### `gws gmail +reply-all`
 
 Reply-all to a message.
 
 ```bash
-gws-gmail-reply-all --message-id msg123 --body "Acknowledged by the team"
+gws gmail +reply-all --message-id msg123 --body "Acknowledged by the team"
 ```
 
 | Option         | Required | Description      |
@@ -292,12 +295,12 @@ gws-gmail-reply-all --message-id msg123 --body "Acknowledged by the team"
 
 Returns the sent reply JSON.
 
-### `gws-gmail-forward`
+### `gws gmail +forward`
 
 Forward a message to another recipient.
 
 ```bash
-gws-gmail-forward --message-id msg123 --to "colleague@example.com"
+gws gmail +forward --message-id msg123 --to "colleague@example.com"
 ```
 
 | Option         | Required | Description             |
@@ -307,12 +310,12 @@ gws-gmail-forward --message-id msg123 --to "colleague@example.com"
 
 Returns the forwarded message JSON.
 
-### `gws-gmail-triage`
+### `gws gmail +triage`
 
 Search and triage emails using Gmail query syntax.
 
 ```bash
-gws-gmail-triage --query "is:unread" --max 10
+gws gmail +triage --query "is:unread" --max 10
 ```
 
 | Option    | Required | Description                         |
@@ -322,12 +325,12 @@ gws-gmail-triage --query "is:unread" --max 10
 
 Returns matching messages as JSON.
 
-### `gws-gmail-read`
+### `gws gmail +read`
 
 Read a message by its ID.
 
 ```bash
-gws-gmail-read --id msg123
+gws gmail +read --id msg123
 ```
 
 | Option | Required | Description      |
@@ -335,3 +338,23 @@ gws-gmail-read --id msg123
 | `--id` | yes      | Gmail message ID |
 
 Returns the full message JSON.
+
+### Raw API passthrough
+
+Every Gmail Discovery method is also reachable directly. `--params`
+carries the path and query parameters (JSON), `--json` the request body,
+and the output is the raw API response. The user id is always `me`.
+
+```bash
+# List labels
+gws gmail users labels list --params '{"userId": "me"}'
+
+# List message ids matching a query
+gws gmail users messages list --params '{"userId": "me", "q": "is:unread"}'
+
+# Fetch one message
+gws gmail users messages get --params '{"userId": "me", "id": "msg123"}'
+
+# Move a message to Trash
+gws gmail users messages trash --params '{"userId": "me", "id": "msg123"}'
+```

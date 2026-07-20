@@ -53,6 +53,7 @@ export class BoxResource extends BaseResource implements Resource {
     super()
     this.config = config
     const tm = new BoxTokenManager({
+      ...(config.endpoint !== undefined ? { endpoint: config.endpoint } : {}),
       ...(config.clientId !== undefined ? { clientId: config.clientId } : {}),
       ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
       ...(config.refreshToken !== undefined ? { refreshToken: config.refreshToken } : {}),
@@ -63,7 +64,11 @@ export class BoxResource extends BaseResource implements Resource {
         ? { onRefreshTokenRotated: config.onRefreshTokenRotated }
         : {}),
     })
-    this.accessor = new BoxAccessor({ tokenManager: tm })
+    this.accessor = new BoxAccessor({
+      tokenManager: tm,
+      ...(config.rootFolderId !== undefined ? { rootFolderId: config.rootFolderId } : {}),
+      ...(config.contentSearch !== undefined ? { contentSearch: config.contentSearch } : {}),
+    })
   }
 
   open(): Promise<void> {

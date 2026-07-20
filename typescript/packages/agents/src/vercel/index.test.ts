@@ -133,7 +133,7 @@ describe('vercel mirageTools.readFile.toModelOutput', () => {
     expect(out).toEqual({ type: 'text', value: 'hello' })
   })
 
-  it('media → {type:"content", value:[text, media]}', () => {
+  it('media → {type:"content", value:[text, file]}', () => {
     const out = callToModelOutput(mirageTools(mkWs()).readFile, {
       kind: 'media',
       path: '/p.png',
@@ -142,12 +142,21 @@ describe('vercel mirageTools.readFile.toModelOutput', () => {
       bytes: 3,
     }) as {
       type: string
-      value: { type: string; text?: string; data?: string; mediaType?: string }[]
+      value: {
+        type: string
+        text?: string
+        data?: { type: string; data: string }
+        mediaType?: string
+      }[]
     }
     expect(out.type).toBe('content')
     expect(out.value).toHaveLength(2)
     expect(out.value[0]).toEqual({ type: 'text', text: '[/p.png] image/png (3 bytes)' })
-    expect(out.value[1]).toEqual({ type: 'media', data: 'AAAA', mediaType: 'image/png' })
+    expect(out.value[1]).toEqual({
+      type: 'file',
+      data: { type: 'data', data: 'AAAA' },
+      mediaType: 'image/png',
+    })
   })
 
   it('binary → text stub', () => {

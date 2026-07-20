@@ -23,7 +23,7 @@ export const GMAIL_PROMPT = `{prefix}
   only. Read with \`cat\`/\`head\`/\`jq\` on \`<path>.gmail.json\` (keep the suffix).
 
   Commands: cat, ls, head, tail, nl, wc, stat, find, tree, grep, rg, jq,
-  basename, dirname, realpath, gws-gmail-read, gws-gmail-triage.
+  basename, dirname, realpath, gws gmail +read, gws gmail +triage.
   No others (no readFile, etc.).
 
   Path: <label>/<yyyy-mm-dd>/<subject>__<message-id>.gmail.json
@@ -72,17 +72,23 @@ export const GMAIL_PROMPT = `{prefix}
     .labels[]
     .attachments[] | .filename
 
-  Read commands:
-    gws-gmail-read --id <message-id>             # same shape as cat
-    gws-gmail-triage --query "is:unread" --max 20  # summary list (id, from,
-                                                   # subject, date, snippet)`
+  Read commands (official Google Workspace CLI helper syntax):
+    gws gmail +read --id <message-id>             # same shape as cat
+    gws gmail +triage --query "is:unread" --max 20  # summary list (id, from,
+                                                    # subject, date, snippet)
 
-export const GMAIL_WRITE_PROMPT = `  Write commands:
-    gws-gmail-send --to "to@email.com" --subject "Hi" --body "..."
+  Raw Gmail API passthrough (one command per Discovery method, --params
+  carries path/query args, --json the request body):
+    gws gmail users messages list --params '{"userId":"me","q":"is:unread"}'
+    gws gmail users messages get --params '{"userId":"me","id":"<id>"}'
+    gws gmail users labels list --params '{"userId":"me"}'`
 
-    gws-gmail-reply     --message-id <id> --body "..."
-    gws-gmail-reply-all --message-id <id> --body "..."
-    gws-gmail-forward   --message-id <id> --to "to@email.com"
+export const GMAIL_WRITE_PROMPT = `  Write commands (official Google Workspace CLI helper syntax):
+    gws gmail +send --to "to@email.com" --subject "Hi" --body "..."
+
+    gws gmail +reply     --message-id <id> --body "..."
+    gws gmail +reply-all --message-id <id> --body "..."
+    gws gmail +forward   --message-id <id> --to "to@email.com"
 
   Body gotcha: bash double-quoted "...\\n..." is NOT a newline.
   Use $'line1\\nline2' (ANSI-C quoting) or "$(printf '...\\n...')"

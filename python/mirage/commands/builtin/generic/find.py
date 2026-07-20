@@ -163,6 +163,8 @@ async def find(
         mindepth=args.mindepth,
         name_exclude=args.name_exclude,
         or_names=args.or_names,
+        mtime_min=args.mtime_min,
+        mtime_max=args.mtime_max,
         iname=args.iname,
         path_pattern=args.path_pattern,
         empty=args.empty,

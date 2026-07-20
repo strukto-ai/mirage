@@ -12,7 +12,7 @@ icon: /images/agno-logo.svg
 uv add 'mirage-ai[agno]'
 ```
 
-Requires `agno>=2.4.0`: the toolkit registers async variants through Agno's `async_tools` parameter, which was added in 2.4.0.
+Requires `agno>=2.7.4`. The toolkit registers both sync and async variants through Agno's `tools` and `async_tools` parameters.
 
 ## Usage
 
@@ -28,7 +28,7 @@ from mirage.agents.agno import MirageToolkit
 ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
 
 agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
+    model=OpenAIChat(id="gpt-5.4-mini"),
     tools=[MirageToolkit(ws)],
     instructions=("You have access to a virtual filesystem via shell "
                   "tools. Use them to explore and read files."),
@@ -53,7 +53,7 @@ Every tool is registered as a sync + async pair under one name; Agno picks the a
 | --- | --- |
 | `execute(command)` | `await ws.execute(command)`, full shell with pipes |
 | `read(path)` | `cat <path>` |
-| `write(path, content)` | `tee <path>` with `stdin=` |
+| `write(path, content)` | `mkdir -p <parent>`, then `tee <path>` with `stdin=` |
 | `ls(path="/")` | `ls <path>` |
 | `grep(pattern, path)` | `grep -r <pattern> <path>` |
 

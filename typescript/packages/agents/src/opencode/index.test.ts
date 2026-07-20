@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { ToolResult } from '@opencode-ai/plugin'
 import { OpsRegistry, RAMResource, MountMode, Workspace } from '@struktoai/mirage-node'
 import { mirageTools, miragePlugin } from './index.ts'
 
@@ -23,7 +24,7 @@ function mkWs(): Workspace {
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 }
 
-async function callTool(t: unknown, input: unknown): Promise<string> {
+async function callTool(t: unknown, input: unknown): Promise<ToolResult> {
   const exec = (t as { execute?: (input: unknown, ctx: unknown) => unknown }).execute
   if (typeof exec !== 'function') throw new Error('tool has no execute')
   const ctx = {
@@ -33,7 +34,7 @@ async function callTool(t: unknown, input: unknown): Promise<string> {
     abort: new AbortController().signal,
   }
   const result = await exec(input, ctx)
-  return result as string
+  return result as ToolResult
 }
 
 describe('opencode mirageTools.read', () => {
@@ -46,7 +47,7 @@ describe('opencode mirageTools.read', () => {
 
   it('returns error message for missing file', async () => {
     const out = await callTool(mirageTools(mkWs()).read, { filePath: '/missing.txt' })
-    expect(out.startsWith('Error:')).toBe(true)
+    expect(out).toMatch(/^Error:/)
   })
 
   it('returns binary stub for non-text files', async () => {
@@ -54,6 +55,21 @@ describe('opencode mirageTools.read', () => {
     await ws.fs.writeFile('/blob.bin', new Uint8Array([0, 1, 2, 3]))
     const out = await callTool(mirageTools(ws).read, { filePath: '/blob.bin' })
     expect(out).toContain('Binary file')
+  })
+
+  it('attaches PDFs for multimodal models', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/paper.pdf', new Uint8Array([0x25, 0x50, 0x44, 0x46]))
+    const out = await callTool(mirageTools(ws).read, { filePath: '/paper.pdf' })
+    expect(out).toMatchObject({
+      attachments: [
+        {
+          type: 'file',
+          mime: 'application/pdf',
+          filename: 'paper.pdf',
+        },
+      ],
+    })
   })
 })
 
@@ -69,6 +85,31 @@ describe('opencode mirageTools.write', () => {
     const ws = mkWs()
     await callTool(mirageTools(ws).write, { filePath: '/a/b/c.txt', content: 'x' })
     expect(await ws.fs.readFileText('/a/b/c.txt')).toBe('x')
+  })
+
+  it('rejects an overwrite after the file changed since the session read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/out.txt', 'original')
+    const tools = mirageTools(ws)
+    await callTool(tools.read, { filePath: '/out.txt' })
+    await ws.fs.writeFile('/out.txt', 'changed elsewhere')
+
+    const out = await callTool(tools.write, { filePath: '/out.txt', content: 'replacement' })
+
+    expect(out).toContain('File changed since it was last read')
+    expect(await ws.fs.readFileText('/out.txt')).toBe('changed elsewhere')
+  })
+
+  it('can disable stale write protection', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/out.txt', 'original')
+    const tools = mirageTools(ws, { staleWriteProtection: false })
+    await callTool(tools.read, { filePath: '/out.txt' })
+    await ws.fs.writeFile('/out.txt', 'changed elsewhere')
+
+    await callTool(tools.write, { filePath: '/out.txt', content: 'replacement' })
+
+    expect(await ws.fs.readFileText('/out.txt')).toBe('replacement')
   })
 })
 
@@ -119,6 +160,23 @@ describe('opencode mirageTools.edit', () => {
     })
     expect(out).toContain('string not found')
   })
+
+  it('rejects an edit after the file changed since the session read it', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/f.txt', 'original')
+    const tools = mirageTools(ws)
+    await callTool(tools.read, { filePath: '/f.txt' })
+    await ws.fs.writeFile('/f.txt', 'changed elsewhere')
+
+    const out = await callTool(tools.edit, {
+      filePath: '/f.txt',
+      oldString: 'changed',
+      newString: 'updated',
+    })
+
+    expect(out).toContain('File changed since it was last read')
+    expect(await ws.fs.readFileText('/f.txt')).toBe('changed elsewhere')
+  })
 })
 
 describe('opencode mirageTools.ls', () => {
@@ -127,6 +185,7 @@ describe('opencode mirageTools.ls', () => {
     await ws.fs.writeFile('/a.txt', 'a')
     await ws.fs.mkdir('/d')
     const out = await callTool(mirageTools(ws).ls, { path: '/' })
+    if (typeof out !== 'string') throw new Error('expected text output')
     const entries = out.split('\n').sort()
     expect(entries).toContain('/a.txt')
     expect(entries).toContain('/d/')
@@ -141,6 +200,7 @@ describe('opencode mirageTools.bash', () => {
 
   it('captures stderr on failure', async () => {
     const out = await callTool(mirageTools(mkWs()).bash, { command: 'cat /nope.txt' })
+    if (typeof out !== 'string') throw new Error('expected text output')
     expect(out.length).toBeGreaterThan(0)
   })
 })
@@ -173,7 +233,7 @@ describe('opencode miragePlugin', () => {
   it('returns a plugin that registers tools', async () => {
     const ws = mkWs()
     const plugin = miragePlugin(ws)
-    const hooks = await plugin({})
+    const hooks = await (plugin as unknown as (input: unknown) => ReturnType<typeof plugin>)({})
     expect(hooks.tool).toBeDefined()
     expect(Object.keys(hooks.tool ?? {}).sort()).toEqual([
       'bash',
@@ -202,5 +262,22 @@ describe('opencode resolver (per-session workspace)', () => {
 
     expect(await exec(tools.read)({ filePath: '/note.txt' }, ctxA)).toBe('alice')
     expect(await exec(tools.read)({ filePath: '/note.txt' }, ctxB)).toBe('bob')
+  })
+
+  it('keeps stale-read state isolated between sessions sharing a workspace', async () => {
+    const ws = mkWs()
+    await ws.fs.writeFile('/note.txt', 'one')
+    const tools = mirageTools(ws)
+    const exec = (t: unknown) =>
+      (t as { execute: (a: unknown, c: unknown) => Promise<string> }).execute
+    const ctxA = { sessionID: 'a', messageID: 'm', agent: '', abort: new AbortController().signal }
+    const ctxB = { sessionID: 'b', messageID: 'm', agent: '', abort: new AbortController().signal }
+
+    await exec(tools.read)({ filePath: '/note.txt' }, ctxA)
+    await exec(tools.write)({ filePath: '/note.txt', content: 'two' }, ctxB)
+    const out = await exec(tools.write)({ filePath: '/note.txt', content: 'three' }, ctxA)
+
+    expect(out).toContain('File changed since it was last read')
+    expect(await ws.fs.readFileText('/note.txt')).toBe('two')
   })
 })

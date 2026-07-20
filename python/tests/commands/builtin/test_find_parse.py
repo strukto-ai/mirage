@@ -74,6 +74,20 @@ def test_size_bounds_follow_gnu_strictness():
     assert (expr.min_size, expr.max_size) == (2, 2)
 
 
+def test_repeated_mtime_windows_merge_to_union():
+    # `-mtime +0 -o -mtime -1` is a tautology in GNU; the flat window
+    # must impose no bounds rather than keep only the last predicate.
+    expr = parse_find_expression(["-mtime", "+0", "-o", "-mtime", "-1"])
+    assert (expr.mtime_min, expr.mtime_max) == (None, None)
+    expr = parse_find_expression(["-mtime", "-1"])
+    assert expr.mtime_min is not None
+    assert expr.mtime_max is None
+    expr = parse_find_expression(["-mtime", "1", "-o", "-mtime", "3"])
+    assert expr.mtime_min is not None
+    assert expr.mtime_max is not None
+    assert expr.mtime_max - expr.mtime_min == pytest.approx(3 * 86400, abs=1)
+
+
 def test_size_rounds_up_to_unit():
     # GNU -size -1k keeps only empty files; 1k keeps 1..1024 bytes;
     # +1k excludes a file of exactly 1024 bytes.
