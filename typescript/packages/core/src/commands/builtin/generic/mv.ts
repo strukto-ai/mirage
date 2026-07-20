@@ -25,71 +25,12 @@ import {
 } from '../utils/copy.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { cpWalk } from './cp.ts'
+import { copyEntries, cpWalk } from './cp.ts'
 
 const ENC = new TextEncoder()
 
 function isPrimitiveMove(strategy: MoveStrategy): strategy is PrimitiveMove {
   return 'readBytes' in strategy
-}
-
-// Copy a walked source tree entry by entry with GNU per-entry errors. A
-// failed mkdir aborts the source (its children cannot be created); a failed
-// read or write is reported and the remaining entries still copy, like GNU
-// cp/mv. Returns whether every entry landed and whether the destination
-// changed at all.
-async function copyEntries(
-  cmdName: string,
-  strategy: PrimitiveMove,
-  stat: StatFn,
-  src: PathSpec,
-  target: PathSpec,
-  entries: { path: string; isDir: boolean }[],
-  errors: string[],
-  index?: IndexCacheStore,
-): Promise<{ copiedAll: boolean; wroteAny: boolean }> {
-  const srcBase = rstripSlash(src.mountPath)
-  const dstBase = rstripSlash(target.mountPath)
-  let copiedAll = true
-  let wroteAny = false
-  for (const { path: entry, isDir } of entries) {
-    const entryDst = dstBase + entry.slice(srcBase.length)
-    const entryDstSpec = PathSpec.fromStrPath(entryDst)
-    if (isDir) {
-      try {
-        if (!(await isDirectory(stat, entryDstSpec, index))) {
-          await strategy.mkdir(entryDstSpec)
-          wroteAny = true
-        }
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        errors.push(`${cmdName}: cannot create directory '${entryDst}': ${String(fsStrerror(err))}`)
-        return { copiedAll: false, wroteAny }
-      }
-      continue
-    }
-    let data: Uint8Array
-    try {
-      data = await strategy.readBytes(PathSpec.fromStrPath(entry))
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      errors.push(`${cmdName}: cannot open '${entry}' for reading: ${String(fsStrerror(err))}`)
-      copiedAll = false
-      continue
-    }
-    try {
-      await strategy.write(entryDstSpec, data)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      errors.push(
-        `${cmdName}: cannot create regular file '${entryDst}': ${String(fsStrerror(err))}`,
-      )
-      copiedAll = false
-      continue
-    }
-    wroteAny = true
-  }
-  return { copiedAll, wroteAny }
 }
 
 // Remove copied source entries children first, GNU rm style. A failed

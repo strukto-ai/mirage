@@ -122,11 +122,12 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
     _, err, code = await run(ws, f"cat {src} {miss}")
     check(f"{label}: cat missing strerror", code == 1
           and err == f"cat: {miss}: No such file or directory\n")
-    # grep still searches the good operand and exits 0 on a match, with the
-    # missing operand reported on stderr (matching single-mount grep).
+    # grep still searches the good operand, but the missing operand's read
+    # error forces exit 1 even though the other operand matched (matching
+    # single-mount grep, which flattens fs errors to 1).
     out, err, code = await run(ws, f"grep aaa {src} {miss}")
     check(
-        f"{label}: grep missing strerror", code == 0 and f"{src}:aaa" in out
+        f"{label}: grep missing strerror", code == 1 and f"{src}:aaa" in out
         and err == f"grep: {miss}: No such file or directory\n")
 
 
@@ -202,10 +203,11 @@ async def check_compare(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: cmp identical", code == 0)
     out, _, code = await run(ws, f"cmp {src} {other}")
     check(f"{label}: cmp differing", code == 1 and "differ" in out)
-    # A missing operand carries the GNU strerror suffix, like single-mount.
+    # A missing operand carries the GNU strerror suffix, like single-mount;
+    # GNU diff exits 2 on trouble.
     miss = f"{dst}/copied/missing.txt"
     _, err, code = await run(ws, f"diff {src} {miss}")
-    check(f"{label}: diff missing strerror", code == 1
+    check(f"{label}: diff missing strerror", code == 2
           and err == f"diff: {miss}: No such file or directory\n")
 
 

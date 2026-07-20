@@ -180,12 +180,13 @@ async function checkReadFamily(
     `${label}: cat missing strerror`,
     cmiss[2] === 1 && cmiss[1] === `cat: ${miss}: No such file or directory\n`,
   );
-  // grep still searches the good operand and exits 0 on a match, with the
-  // missing operand reported on stderr (matching single-mount grep).
+  // grep still searches the good operand, but the missing operand's read
+  // error forces exit 1 even though the other operand matched (matching
+  // single-mount grep, which flattens fs errors to 1).
   const gmiss = await run(ws, `grep aaa ${src} ${miss}`);
   check(
     `${label}: grep missing strerror`,
-    gmiss[2] === 0 &&
+    gmiss[2] === 1 &&
       gmiss[0].includes(`${src}:aaa`) &&
       gmiss[1] === `grep: ${miss}: No such file or directory\n`,
   );
@@ -299,10 +300,11 @@ async function checkCompare(
   check(`${label}: cmp differing`, code === 1 && out.includes("differ"));
   // A missing operand carries the GNU strerror suffix, like single-mount.
   const miss = `${dst}/copied/missing.txt`;
+  // GNU diff exits 2 on trouble.
   const [, err, missCode] = await run(ws, `diff ${src} ${miss}`);
   check(
     `${label}: diff missing strerror`,
-    missCode === 1 && err === `diff: ${miss}: No such file or directory\n`,
+    missCode === 2 && err === `diff: ${miss}: No such file or directory\n`,
   );
 }
 

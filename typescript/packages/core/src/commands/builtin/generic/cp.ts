@@ -20,6 +20,7 @@ import {
   PathSpec,
   type CopyStrategy,
   type PrimitiveCopy,
+  type PrimitiveMove,
   type ReaddirFn,
   type StatFn,
 } from '../../../types.ts'
@@ -68,6 +69,80 @@ export async function cpWalk(
   return entries
 }
 
+// Copy a walked source tree entry by entry with GNU per-entry errors: the
+// shared primitive-transfer loop of cp and mv. A failed mkdir aborts the
+// source (its children cannot be created); a failed read or write is
+// reported and the remaining entries still copy, like GNU cp/mv on a
+// cross-device transfer. `writes` and `lines` are optional per-entry sinks
+// (cp records them; mv keys its IOResult off the returned flags instead);
+// `noClobber` skips file entries whose target already exists. Returns
+// whether every entry landed and whether the destination changed at all.
+export async function copyEntries(
+  cmdName: string,
+  strategy: PrimitiveCopy | PrimitiveMove,
+  stat: StatFn,
+  src: PathSpec,
+  target: PathSpec,
+  entries: { path: string; isDir: boolean }[],
+  errors: string[],
+  index?: IndexCacheStore,
+  opts: {
+    noClobber?: boolean
+    writes?: Record<string, ByteSource>
+    lines?: string[] | undefined
+  } = {},
+): Promise<{ copiedAll: boolean; wroteAny: boolean }> {
+  const srcBase = rstripSlash(src.mountPath)
+  const dstBase = rstripSlash(target.mountPath)
+  let copiedAll = true
+  let wroteAny = false
+  for (const { path: entry, isDir } of entries) {
+    const entryDst = dstBase + entry.slice(srcBase.length)
+    const entryDstSpec = PathSpec.fromStrPath(entryDst)
+    if (isDir) {
+      try {
+        if (!(await isDirectory(stat, entryDstSpec, index))) {
+          await strategy.mkdir(entryDstSpec)
+          wroteAny = true
+          if (opts.writes !== undefined) opts.writes[entryDst] = new Uint8Array()
+          if (opts.lines !== undefined) opts.lines.push(`'${entry}' -> '${entryDst}'`)
+        }
+      } catch (err) {
+        // GNU stops this source: the children of a directory it could
+        // not create cannot land.
+        if (!isFsError(err)) throw err
+        errors.push(`${cmdName}: cannot create directory '${entryDst}': ${String(fsStrerror(err))}`)
+        return { copiedAll: false, wroteAny }
+      }
+      continue
+    }
+    if (opts.noClobber === true && (await pathExists(stat, entryDstSpec))) continue
+    let data: Uint8Array
+    try {
+      data = await strategy.readBytes(PathSpec.fromStrPath(entry))
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      errors.push(`${cmdName}: cannot open '${entry}' for reading: ${String(fsStrerror(err))}`)
+      copiedAll = false
+      continue
+    }
+    try {
+      await strategy.write(entryDstSpec, data)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      errors.push(
+        `${cmdName}: cannot create regular file '${entryDst}': ${String(fsStrerror(err))}`,
+      )
+      copiedAll = false
+      continue
+    }
+    wroteAny = true
+    if (opts.writes !== undefined) opts.writes[entryDst] = new Uint8Array()
+    if (opts.lines !== undefined) opts.lines.push(`'${entry}' -> '${entryDst}'`)
+  }
+  return { copiedAll, wroteAny }
+}
+
 export async function cpGeneric(
   paths: PathSpec[],
   stat: StatFn,
@@ -107,44 +182,12 @@ export async function cpGeneric(
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
       if (isPrimitiveCopy(strategy)) {
-        for (const { path: entry, isDir } of await cpWalk(strategy.readdir, stat, src, index)) {
-          const entryDst = dstBase + entry.slice(srcBase.length)
-          const entryDstSpec = PathSpec.fromStrPath(entryDst)
-          if (isDir) {
-            try {
-              if (!(await isDirectory(stat, entryDstSpec, index))) {
-                await strategy.mkdir(entryDstSpec)
-                writes[entryDst] = new Uint8Array()
-                if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
-              }
-            } catch (err) {
-              // GNU stops this source: the children of a directory it
-              // could not create cannot land.
-              if (!isFsError(err)) throw err
-              errors.push(`cp: cannot create directory '${entryDst}': ${String(fsStrerror(err))}`)
-              break
-            }
-            continue
-          }
-          if (noClobber && (await pathExists(stat, entryDstSpec))) continue
-          let data: Uint8Array
-          try {
-            data = await strategy.readBytes(PathSpec.fromStrPath(entry))
-          } catch (err) {
-            if (!isFsError(err)) throw err
-            errors.push(`cp: cannot open '${entry}' for reading: ${String(fsStrerror(err))}`)
-            continue
-          }
-          try {
-            await strategy.write(entryDstSpec, data)
-          } catch (err) {
-            if (!isFsError(err)) throw err
-            errors.push(`cp: cannot create regular file '${entryDst}': ${String(fsStrerror(err))}`)
-            continue
-          }
-          writes[entryDst] = new Uint8Array()
-          if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
-        }
+        const entries = await cpWalk(strategy.readdir, stat, src, index)
+        await copyEntries('cp', strategy, stat, src, target, entries, errors, index, {
+          noClobber,
+          writes,
+          lines: verbose ? lines : undefined,
+        })
         continue
       }
       if (strategy.dirCopy !== undefined) {

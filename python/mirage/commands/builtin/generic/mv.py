@@ -14,79 +14,13 @@
 
 from typing import Callable
 
-from mirage.commands.builtin.generic.cp import descendant_path, walk
+from mirage.commands.builtin.generic.cp import copy_entries, walk
 from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import MoveStrategy, PathSpec, PrimitiveMove, StatFn
 from mirage.utils.errors import FS_ERRORS, fs_strerror
-
-
-async def _copy_entries(
-    cmd_name: str,
-    strategy: PrimitiveMove,
-    stat: StatFn,
-    src: PathSpec,
-    target: PathSpec,
-    entries: list[tuple[PathSpec, bool]],
-    errors: list[str],
-) -> tuple[bool, bool]:
-    """Copy a walked source tree entry by entry with GNU per-entry errors.
-
-    A failed mkdir aborts the source (its children cannot be created); a
-    failed read or write is reported and the remaining entries still copy,
-    like GNU cp/mv.
-
-    Args:
-        cmd_name (str): Command name for the error prefix (``cp``/``mv``).
-        strategy (PrimitiveMove): Transfer primitives for both mounts.
-        stat (StatFn): Stats a path; raises when missing.
-        src (PathSpec): Source operand the entries were walked from.
-        target (PathSpec): Destination root for the copied tree.
-        entries (list[tuple[PathSpec, bool]]): ``walk`` output, parents
-            first.
-        errors (list[str]): Collected stderr lines, appended in place.
-
-    Returns:
-        tuple[bool, bool]: ``(copied_all, wrote_any)`` — whether every
-        entry landed, and whether the destination changed at all.
-    """
-    copied_all = True
-    wrote_any = False
-    for entry, is_dir in entries:
-        entry_dst = descendant_path(
-            target,
-            target.virtual.rstrip("/") +
-            entry.virtual[len(src.virtual.rstrip("/")):],
-        )
-        if is_dir:
-            try:
-                if not await is_directory(stat, entry_dst):
-                    await strategy.mkdir(entry_dst)
-                    wrote_any = True
-            except FS_ERRORS as exc:
-                errors.append(f"{cmd_name}: cannot create directory "
-                              f"'{entry_dst.virtual}': {fs_strerror(exc)}")
-                return False, wrote_any
-            continue
-        try:
-            data = await strategy.read_bytes(entry)
-        except FS_ERRORS as exc:
-            errors.append(f"{cmd_name}: cannot open '{entry.virtual}' "
-                          f"for reading: {fs_strerror(exc)}")
-            copied_all = False
-            continue
-        try:
-            # write takes bytes, not a stream: file materialized here.
-            await strategy.write(entry_dst, data=data)
-        except FS_ERRORS as exc:
-            errors.append(f"{cmd_name}: cannot create regular file "
-                          f"'{entry_dst.virtual}': {fs_strerror(exc)}")
-            copied_all = False
-            continue
-        wrote_any = True
-    return copied_all, wrote_any
 
 
 async def _entry_gone(strategy: PrimitiveMove, stat: StatFn, entry: PathSpec,
@@ -224,8 +158,9 @@ async def mv(
             continue
         if isinstance(strategy, PrimitiveMove):
             entries = await walk(strategy.readdir, stat, src)
-            copied_all, wrote_any = await _copy_entries(
-                "mv", strategy, stat, src, target, entries, errors)
+            copied_all, wrote_any = await copy_entries("mv", strategy, stat,
+                                                       src, target, entries,
+                                                       errors)
             if wrote_any:
                 writes[target.mount_path] = b""
             if not copied_all:

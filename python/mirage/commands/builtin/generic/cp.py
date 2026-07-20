@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 path_exists)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (CopyStrategy, FileType, PathSpec, PrimitiveCopy,
-                          ReaddirFn, StatFn)
+                          PrimitiveMove, ReaddirFn, StatFn)
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_prefix_of, rekey
 
@@ -67,6 +67,104 @@ async def walk(
             if is_dir:
                 queue.append(child)
     return entries
+
+
+async def copy_entries(
+    cmd_name: str,
+    strategy: PrimitiveCopy | PrimitiveMove,
+    stat: StatFn,
+    src: PathSpec,
+    target: PathSpec,
+    entries: list[tuple[PathSpec, bool]],
+    errors: list[str],
+    *,
+    n: bool = False,
+    writes: dict[str, ByteSource] | None = None,
+    reads: dict[str, ByteSource] | None = None,
+    lines: list[str] | None = None,
+) -> tuple[bool, bool]:
+    """Copy a walked source tree entry by entry with GNU per-entry errors.
+
+    The shared primitive-transfer loop of cp and mv. A failed ``mkdir``
+    aborts the source (the children of a directory that could not be
+    created cannot land); a failed read or write is reported and the
+    remaining entries still copy, like GNU cp/mv on a cross-device
+    transfer. Every error line carries ``fs_strerror``, so a backend
+    missing the needed op (``OperationNotSupportedError``) reports
+    ``Operation not supported`` instead of aborting the command.
+
+    Args:
+        cmd_name (str): Command name for the error prefix (``cp``/``mv``).
+        strategy (PrimitiveCopy | PrimitiveMove): Transfer primitives for
+            both mounts.
+        stat (StatFn): Stats a path; raises when missing.
+        src (PathSpec): Source operand the entries were walked from.
+        target (PathSpec): Destination root for the copied tree.
+        entries (list[tuple[PathSpec, bool]]): ``walk`` output, parents
+            first.
+        errors (list[str]): Collected stderr lines, appended in place.
+        n (bool): No-clobber; skip file entries whose target exists.
+        writes (dict[str, ByteSource] | None): Per-entry write sink keyed
+            by mount path; None skips recording.
+        reads (dict[str, ByteSource] | None): Per-entry read sink keyed by
+            virtual path; None skips recording.
+        lines (list[str] | None): Verbose ``'src' -> 'dst'`` sink; None
+            keeps the copy silent.
+
+    Returns:
+        tuple[bool, bool]: ``(copied_all, wrote_any)`` — whether every
+        entry landed, and whether the destination changed at all.
+    """
+    copied_all = True
+    wrote_any = False
+    for entry, is_dir in entries:
+        entry_dst = descendant_path(
+            target,
+            target.virtual.rstrip("/") +
+            entry.virtual[len(src.virtual.rstrip("/")):],
+        )
+        if is_dir:
+            try:
+                if not await is_directory(stat, entry_dst):
+                    await strategy.mkdir(entry_dst)
+                    wrote_any = True
+                    if writes is not None:
+                        writes[entry_dst.mount_path] = b""
+                    if lines is not None:
+                        lines.append(f"'{entry.virtual}' -> "
+                                     f"'{entry_dst.virtual}'")
+            except FS_ERRORS as exc:
+                # GNU stops this source: the children of a directory it
+                # could not create cannot land.
+                errors.append(f"{cmd_name}: cannot create directory "
+                              f"'{entry_dst.virtual}': {fs_strerror(exc)}")
+                return False, wrote_any
+            continue
+        if n and await path_exists(stat, entry_dst):
+            continue
+        try:
+            data = await strategy.read_bytes(entry)
+        except FS_ERRORS as exc:
+            errors.append(f"{cmd_name}: cannot open '{entry.virtual}' "
+                          f"for reading: {fs_strerror(exc)}")
+            copied_all = False
+            continue
+        try:
+            # write takes bytes, not a stream: file materialized here.
+            await strategy.write(entry_dst, data=data)
+        except FS_ERRORS as exc:
+            errors.append(f"{cmd_name}: cannot create regular file "
+                          f"'{entry_dst.virtual}': {fs_strerror(exc)}")
+            copied_all = False
+            continue
+        wrote_any = True
+        if reads is not None:
+            reads[entry.virtual] = data
+        if writes is not None:
+            writes[entry_dst.mount_path] = b""
+        if lines is not None:
+            lines.append(f"'{entry.virtual}' -> '{entry_dst.virtual}'")
+    return copied_all, wrote_any
 
 
 async def cp(
@@ -132,48 +230,18 @@ async def cp(
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             if isinstance(strategy, PrimitiveCopy):
-                for entry, is_dir in await walk(strategy.readdir, stat, src):
-                    entry_dst = descendant_path(
-                        target,
-                        target.virtual.rstrip("/") +
-                        entry.virtual[len(src.virtual.rstrip("/")):],
-                    )
-                    if is_dir:
-                        try:
-                            if not await is_directory(stat, entry_dst):
-                                await strategy.mkdir(entry_dst)
-                                writes[entry_dst.mount_path] = b""
-                                if v:
-                                    lines.append(f"'{entry.virtual}' -> "
-                                                 f"'{entry_dst.virtual}'")
-                        except FS_ERRORS as exc:
-                            # GNU stops this source: the children of a
-                            # directory it could not create cannot land.
-                            errors.append(
-                                f"cp: cannot create directory "
-                                f"'{entry_dst.virtual}': {fs_strerror(exc)}")
-                            break
-                        continue
-                    if n and await path_exists(stat, entry_dst):
-                        continue
-                    try:
-                        data = await strategy.read_bytes(entry)
-                    except FS_ERRORS as exc:
-                        errors.append(f"cp: cannot open '{entry.virtual}' "
-                                      f"for reading: {fs_strerror(exc)}")
-                        continue
-                    try:
-                        await strategy.write(entry_dst, data=data)
-                    except FS_ERRORS as exc:
-                        errors.append(f"cp: cannot create regular file "
-                                      f"'{entry_dst.virtual}': "
-                                      f"{fs_strerror(exc)}")
-                        continue
-                    reads[entry.virtual] = data
-                    writes[entry_dst.mount_path] = b""
-                    if v:
-                        lines.append(
-                            f"'{entry.virtual}' -> '{entry_dst.virtual}'")
+                entries = await walk(strategy.readdir, stat, src)
+                await copy_entries("cp",
+                                   strategy,
+                                   stat,
+                                   src,
+                                   target,
+                                   entries,
+                                   errors,
+                                   n=n,
+                                   writes=writes,
+                                   reads=reads,
+                                   lines=lines if v else None)
                 continue
             if strategy.dir_copy is not None:
                 if n and await path_exists(stat, target):
