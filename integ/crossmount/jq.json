@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_jq_route",
+      "seq": 602020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '{\"k\":9}\\n' > /data2/xm.json && jq -c . /data2/xm.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"k\":9}\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
