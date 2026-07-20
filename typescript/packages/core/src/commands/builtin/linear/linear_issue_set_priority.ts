@@ -52,7 +52,7 @@ async function linearIssueSetPriorityCommand(
 }
 
 export const LINEAR_ISSUE_SET_PRIORITY = command({
-  name: 'linear-issue-set-priority',
+  name: 'linear issue set-priority',
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueSetPriorityCommand,

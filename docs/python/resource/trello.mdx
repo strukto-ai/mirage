@@ -156,7 +156,7 @@ Each member file is named:
 
 Member JSON includes command-aligned identifiers such as `member_id` and
 `username` so the value can be reused directly in commands like
-`trello-card-assign`.
+`trello card assign`.
 
 ### Labels
 
@@ -273,14 +273,30 @@ Standard commands available on the mounted Trello tree:
 
 ## Resource-Specific Commands
 
-### `trello-card-create`
+The command surface mirrors a Trello CLI: nested `trello <noun> <verb>` names
+that emit normalized JSON to stdout, so you can pipe any of them to `jq`.
+
+### Read commands
+
+```bash
+trello board list                         # all boards
+trello board show brd_001
+trello board members brd_001
+trello list list brd_001                  # lists on a board
+trello label list brd_001
+trello card list lst_001                  # cards in a list
+trello card show crd_001
+trello card comments crd_001
+```
+
+### `trello card create`
 
 Create a new card. Description can be passed via `--desc`, `--desc_file`, or stdin.
 
 ```bash
-trello-card-create --list_id LST123 --name "Fix login"
-trello-card-create --list_id LST123 --name "Fix login" --desc "Details here"
-cat brief.md | trello-card-create --list_id LST123 --name "Agent bug"
+trello card create --list_id LST123 --name "Fix login"
+trello card create --list_id LST123 --name "Fix login" --desc "Details here"
+cat brief.md | trello card create --list_id LST123 --name "Agent bug"
 ```
 
 | Option        | Required | Description                         |
@@ -290,14 +306,14 @@ cat brief.md | trello-card-create --list_id LST123 --name "Agent bug"
 | `--desc`      | no       | Inline description text             |
 | `--desc_file` | no       | Path to file containing description |
 
-### `trello-card-update`
+### `trello card update`
 
 Update an existing card. Description can be passed via `--desc`, `--desc_file`, or stdin.
 
 ```bash
-trello-card-update --card_id CRD123 --name "Updated title"
-trello-card-update --card_id CRD123 --desc "New description"
-trello-card-update --card_id CRD123 --closed true
+trello card update --card_id CRD123 --name "Updated title"
+trello card update --card_id CRD123 --desc "New description"
+trello card update --card_id CRD123 --closed true
 ```
 
 | Option        | Required | Description                         |
@@ -309,12 +325,12 @@ trello-card-update --card_id CRD123 --closed true
 | `--due`       | no       | Due date                            |
 | `--closed`    | no       | Archive card (true/false)           |
 
-### `trello-card-move`
+### `trello card move`
 
 Move a card to a different list.
 
 ```bash
-trello-card-move --card_id CRD123 --list_id LST999
+trello card move --card_id CRD123 --list_id LST999
 ```
 
 | Option      | Required | Description    |
@@ -322,12 +338,12 @@ trello-card-move --card_id CRD123 --list_id LST999
 | `--card_id` | yes      | Trello card ID |
 | `--list_id` | yes      | Trello list ID |
 
-### `trello-card-assign`
+### `trello card assign`
 
 Assign a member to a card.
 
 ```bash
-trello-card-assign --card_id CRD123 --member_id MEM001
+trello card assign --card_id CRD123 --member_id MEM001
 ```
 
 | Option        | Required | Description      |
@@ -335,13 +351,13 @@ trello-card-assign --card_id CRD123 --member_id MEM001
 | `--card_id`   | yes      | Trello card ID   |
 | `--member_id` | yes      | Trello member ID |
 
-### `trello-card-comment-add`
+### `trello card comment`
 
 Add a comment to a card. Text can be passed via `--text`, `--text_file`, or stdin.
 
 ```bash
-trello-card-comment-add --card_id CRD123 --text "Looks good"
-cat note.md | trello-card-comment-add --card_id CRD123
+trello card comment --card_id CRD123 --text "Looks good"
+cat note.md | trello card comment --card_id CRD123
 ```
 
 | Option        | Required | Description                  |
@@ -352,12 +368,12 @@ cat note.md | trello-card-comment-add --card_id CRD123
 
 \* One of `--text`, `--text_file`, or stdin is required.
 
-### `trello-card-comment-update`
+### `trello card comment-update`
 
 Update an existing comment. Text can be passed via `--text`, `--text_file`, or stdin.
 
 ```bash
-trello-card-comment-update --comment_id CMT001 --card_id CRD123 --text "Updated text"
+trello card comment-update --comment_id CMT001 --card_id CRD123 --text "Updated text"
 ```
 
 | Option         | Required | Description                  |
@@ -369,12 +385,12 @@ trello-card-comment-update --comment_id CMT001 --card_id CRD123 --text "Updated 
 
 \* One of `--text`, `--text_file`, or stdin is required.
 
-### `trello-card-label-add`
+### `trello card label`
 
 Add a label to a card.
 
 ```bash
-trello-card-label-add --card_id CRD123 --label_id LBL001
+trello card label --card_id CRD123 --label_id LBL001
 ```
 
 | Option       | Required | Description     |
@@ -382,12 +398,12 @@ trello-card-label-add --card_id CRD123 --label_id LBL001
 | `--card_id`  | yes      | Trello card ID  |
 | `--label_id` | yes      | Trello label ID |
 
-### `trello-card-label-remove`
+### `trello card unlabel`
 
 Remove a label from a card.
 
 ```bash
-trello-card-label-remove --card_id CRD123 --label_id LBL001
+trello card unlabel --card_id CRD123 --label_id LBL001
 ```
 
 | Option       | Required | Description     |

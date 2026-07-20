@@ -44,7 +44,7 @@ async function trelloCardLabelRemoveCommand(
 }
 
 export const TRELLO_CARD_LABEL_REMOVE = command({
-  name: 'trello-card-label-remove',
+  name: 'trello card unlabel',
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardLabelRemoveCommand,

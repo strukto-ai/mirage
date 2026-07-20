@@ -35,11 +35,13 @@ import {
   GSheetsResource,
   GSlidesResource,
   HfBucketsResource,
+  LinearResource,
   MountMode,
   RAMResource,
   RedisResource,
   S3Resource,
   SSHResource,
+  TrelloResource,
   Workspace,
 } from '@struktoai/mirage-node'
 import { ImapFlow } from 'imapflow'
@@ -632,6 +634,43 @@ async function openGws(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function openTrello(target: Target): Promise<Open> {
+  const endpoint = process.env.TRELLO_ENDPOINT
+  if (!endpoint) throw new Error('trello target requires TRELLO_ENDPOINT')
+  const mounts: Record<string, TrelloResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new TrelloResource({
+      apiKey: 'integ-key',
+      apiToken: 'integ-token',
+      baseUrl: endpoint,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+async function openLinear(target: Target): Promise<Open> {
+  const endpoint = process.env.LINEAR_ENDPOINT
+  if (!endpoint) throw new Error('linear target requires LINEAR_ENDPOINT')
+  const mounts: Record<string, LinearResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new LinearResource({
+      apiKey: 'integ-key',
+      baseUrl: endpoint,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
@@ -649,4 +688,6 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   hf: openHf,
   box: openBox,
   dropbox: openDropbox,
+  trello: openTrello,
+  linear: openLinear,
 }

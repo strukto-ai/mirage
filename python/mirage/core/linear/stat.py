@@ -76,7 +76,7 @@ async def stat(
         )
 
     if len(parts) == 3 and parts[0] == "teams" and parts[2] in {
-            "team.json", "members", "issues", "projects", "cycles"
+            "team.json", "members", "issues", "projects", "cycles", "documents"
     }:
         if parts[2] == "team.json":
             team_key = "/" + "/".join(parts[:2])
@@ -138,7 +138,7 @@ async def stat(
             )
 
     if len(parts) == 4 and parts[0] == "teams" and parts[2] in {
-            "projects", "cycles"
+            "projects", "cycles", "documents"
     }:
         result = await index.get(idx_key)
         if result.entry is None:
@@ -146,14 +146,16 @@ async def stat(
             result = await index.get(idx_key)
             if result.entry is None:
                 raise enoent(virtual)
+        id_field = {
+            "projects": "project_id",
+            "cycles": "cycle_id",
+            "documents": "document_id",
+        }[parts[2]]
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
             modified=result.entry.remote_time or None,
-            extra={
-                "project_id" if parts[2] == "projects" else "cycle_id":
-                result.entry.id
-            },
+            extra={id_field: result.entry.id},
         )
 
     raise enoent(virtual)

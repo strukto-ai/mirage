@@ -1,0 +1,141 @@
+{
+  "workspaces": [
+    {
+      "id": "org_strukto",
+      "displayName": "Strukto",
+      "name": "strukto",
+      "boards": [
+        {
+          "id": "brd_roadmap",
+          "name": "Roadmap Q3",
+          "closed": false,
+          "url": "https://trello.com/b/brd_roadmap/roadmap-q3",
+          "dateLastActivity": "2026-06-18T14:20:00.000Z",
+          "members": [
+            {"id": "mem_alex", "username": "alexkim", "fullName": "Alex Kim"},
+            {"id": "mem_sam", "username": "samrivera", "fullName": "Sam Rivera"}
+          ],
+          "labels": [
+            {"id": "lbl_feature", "name": "feature", "color": "green"},
+            {"id": "lbl_bug", "name": "bug", "color": "red"},
+            {"id": "lbl_urgent", "name": "urgent", "color": "orange"}
+          ],
+          "lists": [
+            {
+              "id": "lst_todo",
+              "name": "To Do",
+              "closed": false,
+              "pos": 16384,
+              "cards": [
+                {
+                  "id": "crd_search",
+                  "name": "Add full-text search",
+                  "desc": "Index every mounted document and expose a search command.",
+                  "idMembers": ["mem_alex"],
+                  "labelIds": ["lbl_feature"],
+                  "due": "2026-07-01T00:00:00.000Z",
+                  "dueComplete": false,
+                  "closed": false,
+                  "dateLastActivity": "2026-06-17T09:15:00.000Z",
+                  "comments": [
+                    {"id": "cmt_search_1", "memberId": "mem_alex", "text": "Prototype uses the index cache store.", "date": "2026-06-16T11:00:00.000Z"},
+                    {"id": "cmt_search_2", "memberId": "mem_sam", "text": "Please add grep push-down too.", "date": "2026-06-17T09:15:00.000Z"}
+                  ]
+                },
+                {
+                  "id": "crd_export",
+                  "name": "CSV export for reports",
+                  "desc": "Weekly export of the metrics board.",
+                  "idMembers": [],
+                  "labelIds": ["lbl_feature", "lbl_urgent"],
+                  "due": null,
+                  "dueComplete": false,
+                  "closed": false,
+                  "dateLastActivity": "2026-06-12T16:40:00.000Z",
+                  "comments": []
+                }
+              ]
+            },
+            {
+              "id": "lst_doing",
+              "name": "In Progress",
+              "closed": false,
+              "pos": 32768,
+              "cards": [
+                {
+                  "id": "crd_login",
+                  "name": "Fix login redirect loop",
+                  "desc": "Users bounce between /login and /home on Safari.",
+                  "idMembers": ["mem_sam"],
+                  "labelIds": ["lbl_bug", "lbl_urgent"],
+                  "due": "2026-06-20T00:00:00.000Z",
+                  "dueComplete": false,
+                  "closed": false,
+                  "dateLastActivity": "2026-06-18T14:20:00.000Z",
+                  "comments": [
+                    {"id": "cmt_login_1", "memberId": "mem_sam", "text": "Reproduced on Safari 18, not Chrome.", "date": "2026-06-18T14:20:00.000Z"}
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "lst_done",
+              "name": "Done",
+              "closed": false,
+              "pos": 49152,
+              "cards": [
+                {
+                  "id": "crd_darkmode",
+                  "name": "Dark mode toggle",
+                  "desc": "Ship the dark theme behind a settings switch.",
+                  "idMembers": ["mem_alex", "mem_sam"],
+                  "labelIds": ["lbl_feature"],
+                  "due": null,
+                  "dueComplete": true,
+                  "closed": false,
+                  "dateLastActivity": "2026-06-05T10:00:00.000Z",
+                  "comments": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "brd_ops",
+          "name": "Ops",
+          "closed": false,
+          "url": "https://trello.com/b/brd_ops/ops",
+          "dateLastActivity": "2026-06-10T08:00:00.000Z",
+          "members": [
+            {"id": "mem_alex", "username": "alexkim", "fullName": "Alex Kim"}
+          ],
+          "labels": [
+            {"id": "lbl_infra", "name": "infra", "color": "blue"}
+          ],
+          "lists": [
+            {
+              "id": "lst_backlog",
+              "name": "Backlog",
+              "closed": false,
+              "pos": 16384,
+              "cards": [
+                {
+                  "id": "crd_upgrade",
+                  "name": "Upgrade Redis to 7.4",
+                  "desc": "Rolling upgrade of the cache cluster.",
+                  "idMembers": ["mem_alex"],
+                  "labelIds": ["lbl_infra"],
+                  "due": null,
+                  "dueComplete": false,
+                  "closed": false,
+                  "dateLastActivity": "2026-06-10T08:00:00.000Z",
+                  "comments": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

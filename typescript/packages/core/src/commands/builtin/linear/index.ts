@@ -25,7 +25,7 @@ import { LINEAR_ISSUE_SET_PRIORITY } from './linear_issue_set_priority.ts'
 import { LINEAR_ISSUE_SET_PROJECT } from './linear_issue_set_project.ts'
 import { LINEAR_ISSUE_TRANSITION } from './linear_issue_transition.ts'
 import { LINEAR_ISSUE_UPDATE } from './linear_issue_update.ts'
-import { LINEAR_SEARCH } from './linear_search.ts'
+import { makeLinearReadCommands } from './reads.ts'
 import { LINEAR_IO } from './io.ts'
 
 const LINEAR_OVERRIDES = new Set<string>()
@@ -43,5 +43,5 @@ export const LINEAR_COMMANDS: readonly RegisteredCommand[] = [
   ...LINEAR_ISSUE_SET_PROJECT,
   ...LINEAR_ISSUE_TRANSITION,
   ...LINEAR_ISSUE_UPDATE,
-  ...LINEAR_SEARCH,
+  ...makeLinearReadCommands(),
 ]

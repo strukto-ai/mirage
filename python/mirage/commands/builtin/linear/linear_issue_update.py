@@ -34,7 +34,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("linear-issue-update", resource="linear", spec=SPEC)
+@command("linear issue update", resource="linear", spec=SPEC)
 async def linear_issue_update(
     accessor: LinearAccessor,
     paths: list[PathSpec],

@@ -63,3 +63,8 @@ export function cycleFilename(cycle: Record<string, unknown>): string {
   const label = sanitizeName(pickString(cycle, 'name') || 'cycle')
   return `${label}__${requireId(cycle)}.json`
 }
+
+export function documentFilename(document: Record<string, unknown>): string {
+  const label = sanitizeName(pickString(document, 'title') || 'document')
+  return `${label}__${requireId(document)}.json`
+}

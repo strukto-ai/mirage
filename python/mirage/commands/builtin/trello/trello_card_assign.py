@@ -29,7 +29,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello-card-assign", resource="trello", spec=SPEC)
+@command("trello card assign", resource="trello", spec=SPEC)
 async def trello_card_assign(
     accessor: TrelloAccessor,
     paths: list[PathSpec],

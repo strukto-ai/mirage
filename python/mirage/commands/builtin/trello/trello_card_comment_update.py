@@ -33,7 +33,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello-card-comment-update",
+@command("trello card comment-update",
          resource="trello",
          spec=SPEC,
          write=True)

@@ -27,6 +27,8 @@ PROMPT = """\
         <name>__<project-id>.json
       cycles/
         <name>__<cycle-id>.json
+      documents/
+        <title>__<document-id>.json
   Always ls directories first to discover exact names.
 
   Folder/file name anatomy: every entity-named segment is
@@ -111,37 +113,62 @@ PROMPT = """\
     [inputs] | length                       # comments.jsonl: count
     [inputs | select(.user_email == "x")] | length     # comments.jsonl
 
-  Read commands:
-    linear-search --query "bug login"       # full-text across all issues"""
+  document.json:
+    {{
+      "document_id": "...", "title": "...", "content": "...",
+      "project_id": "...", "project_name": "...",
+      "creator_id": "...", "creator_name": "...", "creator_email": "...",
+      "created_at": "...", "updated_at": "...", "url": "..."
+    }}
+
+  Read commands (nested names, mirror the linear CLI; every command emits
+  normalized JSON to stdout so you can pipe to jq):
+    linear team list                        # all teams
+    linear team get <team-key>              # one team
+    linear team members <team-key>          # team roster
+    linear issue list --team <team-key>     # issues in a team
+    linear issue get <issue-key>            # one issue (e.g. STR-42)
+    linear project list --team <team-key>
+    linear project get <project-id> --team <team-key>
+    linear cycle list --team <team-key>
+    linear cycle current --team <team-key>  # latest cycle
+    linear cycle get <cycle-id> --team <team-key>
+    linear label list --team <team-key>
+    linear comment list <issue-key>
+    linear user list                        # all workspace users
+    linear user get <email>
+    linear document list --team <team-key>
+    linear document get <document-id> --team <team-key>
+    linear search "bug login"               # full-text across all issues"""
 
 WRITE_PROMPT = """\
-  Write commands (flags use UNDERSCORES, not hyphens; --issue_id and
-  --issue_key are interchangeable on every issue command):
+  Write commands (nested names; flags use UNDERSCORES, not hyphens;
+  --issue_id and --issue_key are interchangeable on every issue command):
 
-    linear-issue-create --team_id <team-id> \\
+    linear issue create --team_id <team-id> \\
       --title "Title" --description "Body"
       # or: --description_file /path/to/desc.md
 
-    linear-issue-update --issue_key STR-42 \\
+    linear issue update --issue_key STR-42 \\
       [--title "New title"] [--description "..." | --description_file ...]
 
-    linear-issue-assign --issue_key STR-42 --assignee_email user@example.com
+    linear issue assign --issue_key STR-42 --assignee_email user@example.com
       # or: --assignee_id <user-id>
 
-    linear-issue-transition --issue_key STR-42 --state_name "In Review"
+    linear issue transition --issue_key STR-42 --state_name "In Review"
       # or: --state_id <state-id>
 
-    linear-issue-set-priority --issue_key STR-42 --priority 2
+    linear issue set-priority --issue_key STR-42 --priority 2
       # 0=none 1=urgent 2=high 3=medium 4=low
 
-    linear-issue-set-project --issue_key STR-42 --project_id <project-id>
+    linear issue set-project --issue_key STR-42 --project_id <project-id>
 
-    linear-issue-add-label --issue_key STR-42 --label_id <label-id>
+    linear issue add-label --issue_key STR-42 --label_id <label-id>
 
-    linear-issue-comment-add --issue_key STR-42 --body "comment"
+    linear comment add --issue_key STR-42 --body "comment"
       # or: --body_file /path/to/comment.md
 
-    linear-issue-comment-update --comment_id <comment-id> --body "..."
+    linear comment update --comment_id <comment-id> --body "..."
 
   IDs come from the path:
     {prefix}/teams/STR__Strukto-ai__<team-id>/                  -> --team_id

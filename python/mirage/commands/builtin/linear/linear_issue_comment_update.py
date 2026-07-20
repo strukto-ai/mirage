@@ -32,10 +32,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("linear-issue-comment-update",
-         resource="linear",
-         spec=SPEC,
-         write=True)
+@command("linear comment update", resource="linear", spec=SPEC, write=True)
 async def linear_issue_comment_update(
     accessor: LinearAccessor,
     paths: list[PathSpec],

@@ -16,7 +16,9 @@ import { describe, expect, it } from 'vitest'
 import {
   normalizeComment,
   normalizeCycle,
+  normalizeDocument,
   normalizeIssue,
+  normalizeLabel,
   normalizeProject,
   normalizeTeam,
   normalizeUser,
@@ -178,5 +180,68 @@ describe('normalize', () => {
     expect(lines).toHaveLength(2)
     expect((JSON.parse(lines[0] ?? '') as { body: string }).body).toBe('first')
     expect(text.endsWith('\n')).toBe(true)
+  })
+})
+
+describe('normalizeLabel', () => {
+  it('maps fields', () => {
+    expect(normalizeLabel({ id: 'lbl_1', name: 'bug', color: '#ff0000' })).toEqual({
+      label_id: 'lbl_1',
+      name: 'bug',
+      color: '#ff0000',
+    })
+  })
+
+  it('tolerates missing fields', () => {
+    expect(normalizeLabel({ id: 'lbl_2' })).toEqual({
+      label_id: 'lbl_2',
+      name: null,
+      color: null,
+    })
+  })
+})
+
+describe('normalizeDocument', () => {
+  it('resolves project and creator', () => {
+    expect(
+      normalizeDocument({
+        id: 'doc_1',
+        title: 'Runbook',
+        content: 'restart the worker',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-02T00:00:00.000Z',
+        url: 'https://linear.app/strukto/document/doc_1',
+        project: { id: 'prj_1', name: 'Search' },
+        creator: { id: 'usr_1', name: 'alex', email: 'alex@x.io' },
+      }),
+    ).toEqual({
+      document_id: 'doc_1',
+      title: 'Runbook',
+      content: 'restart the worker',
+      project_id: 'prj_1',
+      project_name: 'Search',
+      creator_id: 'usr_1',
+      creator_name: 'alex',
+      creator_email: 'alex@x.io',
+      created_at: '2026-05-01T00:00:00.000Z',
+      updated_at: '2026-05-02T00:00:00.000Z',
+      url: 'https://linear.app/strukto/document/doc_1',
+    })
+  })
+
+  it('defaults content and nulls', () => {
+    expect(normalizeDocument({ id: 'doc_2', title: 'Empty' })).toEqual({
+      document_id: 'doc_2',
+      title: 'Empty',
+      content: '',
+      project_id: null,
+      project_name: null,
+      creator_id: null,
+      creator_name: null,
+      creator_email: null,
+      created_at: null,
+      updated_at: null,
+      url: null,
+    })
   })
 })

@@ -42,6 +42,9 @@ ws = Workspace({"/linear": resource}, mode=MountMode.READ)
       cycles/
         <name>__<cycle-id>.json
         ...
+      documents/
+        <title>__<document-id>.json
+        ...
 ```
 
 Example:
@@ -65,6 +68,8 @@ Example:
         Mirage__proj_001.json
       cycles/
         Sprint-12__cyc_001.json
+      documents/
+        Search-Architecture__doc_001.json
 ```
 
 Directory and file names embed the Linear ID after `__` so that
@@ -114,7 +119,7 @@ Each member file is named:
 ```
 
 Member JSON includes command-aligned identifiers such as `user_id` and `email`
-so the value can be reused directly in commands like `linear-issue-assign`.
+so the value can be reused directly in commands like `linear issue assign`.
 
 ### Projects and Cycles
 
@@ -126,6 +131,17 @@ Project and cycle files are named:
 
 Project JSON includes lightweight related issue references. Cycle JSON
 includes cycle metadata such as start and end dates.
+
+### Documents
+
+Each team has a `documents/` folder with one JSON file per Linear document:
+
+```text
+<title>__<document-id>.json
+```
+
+Document JSON includes the title, markdown content, the linked project, and
+the creator.
 
 ## Cache
 
@@ -217,14 +233,39 @@ Standard commands available on the mounted Linear tree:
 
 ## Resource-Specific Commands
 
-### `linear-issue-create`
+The command surface mirrors a Linear CLI: nested `linear <noun> <verb>` names
+that emit normalized JSON to stdout, so you can pipe any of them to `jq`.
+
+### Read commands
+
+```bash
+linear team list                          # all teams
+linear team get ENG                       # one team (by key or id)
+linear team members ENG                   # team roster
+linear issue list --team ENG              # issues in a team
+linear issue get ENG-123                  # one issue
+linear project list --team ENG
+linear project get proj_001 --team ENG
+linear cycle list --team ENG
+linear cycle current --team ENG           # latest cycle
+linear cycle get cyc_001 --team ENG
+linear label list --team ENG
+linear comment list ENG-123
+linear user list                          # all workspace users
+linear user get alice@example.com
+linear document list --team ENG
+linear document get doc_001 --team ENG
+linear search "bug login"                 # full-text across all issues
+```
+
+### `linear issue create`
 
 Create a new issue. Description can be passed via `--description`, `--description_file`, or stdin.
 
 ```bash
-linear-issue-create --team_key ENG --title "New bug"
-linear-issue-create --team_id abc123 --title "New bug" --description "Details here"
-cat brief.md | linear-issue-create --team_key ENG --title "Agent bug"
+linear issue create --team_key ENG --title "New bug"
+linear issue create --team_id abc123 --title "New bug" --description "Details here"
+cat brief.md | linear issue create --team_key ENG --title "Agent bug"
 ```
 
 | Option               | Required | Description                         |
@@ -237,13 +278,13 @@ cat brief.md | linear-issue-create --team_key ENG --title "Agent bug"
 
 \* One of `--team_id` or `--team_key` is required.
 
-### `linear-issue-update`
+### `linear issue update`
 
 Update an existing issue. Description can be passed via `--description`, `--description_file`, or stdin.
 
 ```bash
-linear-issue-update --issue_key ENG-123 --title "Updated title"
-linear-issue-update --issue_id iss_001 --description "New description"
+linear issue update --issue_key ENG-123 --title "Updated title"
+linear issue update --issue_id iss_001 --description "New description"
 ```
 
 | Option               | Required | Description                         |
@@ -256,13 +297,13 @@ linear-issue-update --issue_id iss_001 --description "New description"
 
 \* One of `--issue_id` or `--issue_key` is required.
 
-### `linear-issue-assign`
+### `linear issue assign`
 
 Assign an issue to a user.
 
 ```bash
-linear-issue-assign --issue_key ENG-123 --assignee_email "alice@example.com"
-linear-issue-assign --issue_id iss_001 --assignee_id usr_001
+linear issue assign --issue_key ENG-123 --assignee_email "alice@example.com"
+linear issue assign --issue_id iss_001 --assignee_id usr_001
 ```
 
 | Option             | Required | Description                     |
@@ -275,13 +316,13 @@ linear-issue-assign --issue_id iss_001 --assignee_id usr_001
 \* One of `--issue_id` or `--issue_key` is required.
 \*\* One of `--assignee_id` or `--assignee_email` is required.
 
-### `linear-issue-transition`
+### `linear issue transition`
 
 Transition an issue to a different workflow state.
 
 ```bash
-linear-issue-transition --issue_key ENG-123 --state_name "In Progress"
-linear-issue-transition --issue_id iss_001 --state_id state_001
+linear issue transition --issue_key ENG-123 --state_name "In Progress"
+linear issue transition --issue_id iss_001 --state_id state_001
 ```
 
 | Option         | Required | Description                     |
@@ -294,12 +335,12 @@ linear-issue-transition --issue_id iss_001 --state_id state_001
 \* One of `--issue_id` or `--issue_key` is required.
 \*\* One of `--state_id` or `--state_name` is required.
 
-### `linear-issue-set-priority`
+### `linear issue set-priority`
 
 Set the priority of an issue.
 
 ```bash
-linear-issue-set-priority --issue_key ENG-123 --priority 1
+linear issue set-priority --issue_key ENG-123 --priority 1
 ```
 
 | Option        | Required | Description                                                |
@@ -310,12 +351,12 @@ linear-issue-set-priority --issue_key ENG-123 --priority 1
 
 \* One of `--issue_id` or `--issue_key` is required.
 
-### `linear-issue-set-project`
+### `linear issue set-project`
 
 Assign an issue to a project.
 
 ```bash
-linear-issue-set-project --issue_key ENG-123 --project_id proj_001
+linear issue set-project --issue_key ENG-123 --project_id proj_001
 ```
 
 | Option         | Required | Description                     |
@@ -326,12 +367,12 @@ linear-issue-set-project --issue_key ENG-123 --project_id proj_001
 
 \* One of `--issue_id` or `--issue_key` is required.
 
-### `linear-issue-add-label`
+### `linear issue add-label`
 
 Add a label to an issue.
 
 ```bash
-linear-issue-add-label --issue_key ENG-123 --label_id lbl_001
+linear issue add-label --issue_key ENG-123 --label_id lbl_001
 ```
 
 | Option        | Required | Description                     |
@@ -342,13 +383,13 @@ linear-issue-add-label --issue_key ENG-123 --label_id lbl_001
 
 \* One of `--issue_id` or `--issue_key` is required.
 
-### `linear-issue-comment-add`
+### `linear comment add`
 
 Add a comment to an issue. Body can be passed via `--body`, `--body_file`, or stdin.
 
 ```bash
-linear-issue-comment-add --issue_key ENG-123 --body "Looks good"
-cat note.md | linear-issue-comment-add --issue_key ENG-123
+linear comment add --issue_key ENG-123 --body "Looks good"
+cat note.md | linear comment add --issue_key ENG-123
 ```
 
 | Option        | Required | Description                     |
@@ -361,12 +402,12 @@ cat note.md | linear-issue-comment-add --issue_key ENG-123
 \* One of `--issue_id` or `--issue_key` is required.
 \*\* One of `--body`, `--body_file`, or stdin is required.
 
-### `linear-issue-comment-update`
+### `linear comment update`
 
 Update an existing comment. Body can be passed via `--body`, `--body_file`, or stdin.
 
 ```bash
-linear-issue-comment-update --comment_id cmt_001 --body "Updated text"
+linear comment update --comment_id cmt_001 --body "Updated text"
 ```
 
 | Option         | Required | Description                  |
@@ -377,12 +418,12 @@ linear-issue-comment-update --comment_id cmt_001 --body "Updated text"
 
 \*\* One of `--body`, `--body_file`, or stdin is required.
 
-### `linear-search`
+### `linear search`
 
 Search issues across the workspace.
 
 ```bash
-linear-search --query "authentication bug"
+linear search --query "authentication bug"
 ```
 
 | Option    | Required | Description       |

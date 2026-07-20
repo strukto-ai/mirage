@@ -20,6 +20,7 @@ import {
   getIssue,
   listIssueComments,
   listTeamCycles,
+  listTeamDocuments,
   listTeamIssues,
   listTeamMembers,
   listTeamProjects,
@@ -30,6 +31,7 @@ import {
   buildProjectIssue,
   normalizeComment,
   normalizeCycle,
+  normalizeDocument,
   normalizeIssue,
   normalizeProject,
   normalizeTeam,
@@ -131,6 +133,16 @@ export async function readBytes(
     const cycles = await listTeamCycles(transport, teamId)
     for (const cycle of cycles) {
       if (cycle.id === cycleId) return toJsonBytes(normalizeCycle(cycle, teamId))
+    }
+    throw enoent(virtual)
+  }
+
+  if (parts.length === 4 && parts[0] === 'teams' && parts[2] === 'documents') {
+    const [, teamId] = splitSuffixId(parts[1] ?? '')
+    const [, documentId] = splitSuffixId(parts[3] ?? '', '.json')
+    const documents = await listTeamDocuments(transport, teamId)
+    for (const document of documents) {
+      if (document.id === documentId) return toJsonBytes(normalizeDocument(document))
     }
     throw enoent(virtual)
   }

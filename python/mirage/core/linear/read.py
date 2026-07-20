@@ -15,13 +15,14 @@
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.linear._client import (get_issue, list_issue_comments,
-                                        list_team_cycles, list_team_issues,
-                                        list_team_members, list_team_projects,
-                                        list_teams)
+                                        list_team_cycles, list_team_documents,
+                                        list_team_issues, list_team_members,
+                                        list_team_projects, list_teams)
 from mirage.core.linear.normalize import (normalize_comment, normalize_cycle,
-                                          normalize_issue, normalize_project,
-                                          normalize_team, normalize_user,
-                                          to_json_bytes, to_jsonl_bytes)
+                                          normalize_document, normalize_issue,
+                                          normalize_project, normalize_team,
+                                          normalize_user, to_json_bytes,
+                                          to_jsonl_bytes)
 from mirage.core.linear.pathing import split_suffix_id
 from mirage.resource.linear.config import LinearConfig
 from mirage.types import PathSpec
@@ -113,6 +114,15 @@ async def read_bytes(
         for cycle in cycles:
             if cycle.get("id") == cycle_id:
                 return to_json_bytes(normalize_cycle(cycle, team_id=team_id))
+        raise enoent(virtual)
+
+    if len(parts) == 4 and parts[0] == "teams" and parts[2] == "documents":
+        _, team_id = split_suffix_id(parts[1])
+        _, document_id = split_suffix_id(parts[3], suffix=".json")
+        documents = await list_team_documents(config, team_id)
+        for document in documents:
+            if document.get("id") == document_id:
+                return to_json_bytes(normalize_document(document))
         raise enoent(virtual)
 
     raise enoent(virtual)

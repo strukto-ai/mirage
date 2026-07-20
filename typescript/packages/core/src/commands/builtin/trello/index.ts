@@ -26,6 +26,7 @@ import { TRELLO_CARD_LABEL_ADD } from './trello_card_label_add.ts'
 import { TRELLO_CARD_LABEL_REMOVE } from './trello_card_label_remove.ts'
 import { TRELLO_CARD_MOVE } from './trello_card_move.ts'
 import { TRELLO_CARD_UPDATE } from './trello_card_update.ts'
+import { makeTrelloReadCommands } from './reads.ts'
 
 const TRELLO_OVERRIDES = new Set<string>()
 
@@ -46,4 +47,5 @@ export const TRELLO_COMMANDS: readonly RegisteredCommand[] = [
   ...TRELLO_CARD_LABEL_REMOVE,
   ...TRELLO_CARD_MOVE,
   ...TRELLO_CARD_UPDATE,
+  ...makeTrelloReadCommands(),
 ]

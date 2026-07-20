@@ -14,12 +14,12 @@
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.core.linear._client import (list_team_cycles, list_team_issues,
-                                        list_team_members, list_team_projects,
-                                        list_teams)
-from mirage.core.linear.pathing import (cycle_filename, issue_dirname,
-                                        member_filename, project_filename,
-                                        team_dirname)
+from mirage.core.linear._client import (list_team_cycles, list_team_documents,
+                                        list_team_issues, list_team_members,
+                                        list_team_projects, list_teams)
+from mirage.core.linear.pathing import (cycle_filename, document_filename,
+                                        issue_dirname, member_filename,
+                                        project_filename, team_dirname)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -85,6 +85,7 @@ async def readdir(
             f"{prefix}/{key}/issues",
             f"{prefix}/{key}/projects",
             f"{prefix}/{key}/cycles",
+            f"{prefix}/{key}/documents",
         ]
 
     if len(parts) == 3 and parts[0] == "teams" and parts[2] == "members":
@@ -238,6 +239,41 @@ async def readdir(
                     name=cycle.get("name") or cycle["id"],
                     resource_type="linear/cycle",
                     remote_time=cycle.get("updatedAt") or "",
+                    vfs_name=filename,
+                ),
+            ))
+        await index.set_dir(idx_key, entries)
+        return [f"{prefix}/{key}/{name}" for name, _ in entries]
+
+    if len(parts) == 3 and parts[0] == "teams" and parts[2] == "documents":
+        team_vkey = "/" + "/".join(parts[:2])
+        result = await index.get(team_vkey)
+        if result.entry is None:
+            parent = PathSpec(
+                virtual=prefix + "/" + "/".join(parts[:2]),
+                directory=prefix + "/" + "/".join(parts[:2]),
+                resource_path=mount_key(prefix + "/" + "/".join(parts[:2]),
+                                        prefix),
+            )
+            await readdir(accessor, parent, index)
+            result = await index.get(team_vkey)
+        if result.entry is None:
+            raise enoent(virtual)
+        team_id = result.entry.id
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
+        documents = await list_team_documents(accessor.config, team_id)
+        entries = []
+        for document in documents:
+            filename = document_filename(document)
+            entries.append((
+                filename,
+                IndexEntry(
+                    id=document["id"],
+                    name=document.get("title") or document["id"],
+                    resource_type="linear/document",
+                    remote_time=document.get("updatedAt") or "",
                     vfs_name=filename,
                 ),
             ))

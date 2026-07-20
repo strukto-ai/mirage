@@ -1,0 +1,253 @@
+{
+ "teams": [
+  {
+   "id": "team_plat",
+   "key": "PLAT",
+   "name": "Platform",
+   "description": "Core platform and infrastructure.",
+   "timezone": "America/Los_Angeles",
+   "updatedAt": "2026-06-18T14:20:00.000Z",
+   "states": [
+    {
+     "id": "st_todo",
+     "name": "Todo",
+     "type": "unstarted"
+    },
+    {
+     "id": "st_prog",
+     "name": "In Progress",
+     "type": "started"
+    },
+    {
+     "id": "st_done",
+     "name": "Done",
+     "type": "completed"
+    }
+   ],
+   "labels": [
+    {
+     "id": "lbl_feature",
+     "name": "feature"
+    },
+    {
+     "id": "lbl_bug",
+     "name": "bug"
+    }
+   ],
+   "members": [
+    {
+     "id": "usr_alex",
+     "name": "alex",
+     "displayName": "Alex Kim",
+     "email": "alex@strukto.ai",
+     "active": true,
+     "admin": true,
+     "updatedAt": "2026-06-01T00:00:00.000Z",
+     "url": "https://linear.app/strukto/profiles/alex"
+    },
+    {
+     "id": "usr_sam",
+     "name": "sam",
+     "displayName": "Sam Rivera",
+     "email": "sam@strukto.ai",
+     "active": true,
+     "admin": false,
+     "updatedAt": "2026-06-01T00:00:00.000Z",
+     "url": "https://linear.app/strukto/profiles/sam"
+    }
+   ],
+   "projects": [
+    {
+     "id": "prj_search",
+     "name": "Search",
+     "description": "Full-text search across mounts.",
+     "statusType": "started",
+     "url": "https://linear.app/strukto/project/search",
+     "updatedAt": "2026-06-15T00:00:00.000Z",
+     "leadId": "usr_alex"
+    }
+   ],
+   "cycles": [
+    {
+     "id": "cyc_1",
+     "name": "Cycle 1",
+     "number": 1,
+     "startsAt": "2026-06-01T00:00:00.000Z",
+     "endsAt": "2026-06-14T00:00:00.000Z",
+     "updatedAt": "2026-06-14T00:00:00.000Z",
+     "url": "https://linear.app/strukto/cycle/1"
+    },
+    {
+     "id": "cyc_2",
+     "name": "Cycle 2",
+     "number": 2,
+     "startsAt": "2026-06-15T00:00:00.000Z",
+     "endsAt": "2026-06-28T00:00:00.000Z",
+     "updatedAt": "2026-06-18T00:00:00.000Z",
+     "url": "https://linear.app/strukto/cycle/2"
+    }
+   ],
+   "issues": [
+    {
+     "id": "iss_plat_1",
+     "identifier": "PLAT-1",
+     "title": "Add search API",
+     "description": "Expose a GraphQL search endpoint over the index.",
+     "priority": 2,
+     "url": "https://linear.app/strukto/issue/PLAT-1",
+     "createdAt": "2026-06-02T10:00:00.000Z",
+     "updatedAt": "2026-06-18T14:20:00.000Z",
+     "stateId": "st_prog",
+     "projectId": "prj_search",
+     "cycleId": "cyc_2",
+     "assigneeId": "usr_alex",
+     "creatorId": "usr_sam",
+     "labelIds": [
+      "lbl_feature"
+     ],
+     "comments": [
+      {
+       "id": "cmt_plat1_1",
+       "userId": "usr_sam",
+       "body": "Started design doc.",
+       "createdAt": "2026-06-03T09:00:00.000Z",
+       "updatedAt": "2026-06-03T09:00:00.000Z",
+       "url": "https://linear.app/strukto/issue/PLAT-1#comment-1"
+      },
+      {
+       "id": "cmt_plat1_2",
+       "userId": "usr_alex",
+       "body": "Endpoint stubbed, tests pending.",
+       "createdAt": "2026-06-10T15:30:00.000Z",
+       "updatedAt": "2026-06-10T15:30:00.000Z",
+       "url": "https://linear.app/strukto/issue/PLAT-1#comment-2"
+      }
+     ]
+    },
+    {
+     "id": "iss_plat_2",
+     "identifier": "PLAT-2",
+     "title": "Cache eviction bug",
+     "description": "Non-MD5 backends never stop evicting.",
+     "priority": 1,
+     "url": "https://linear.app/strukto/issue/PLAT-2",
+     "createdAt": "2026-06-05T11:00:00.000Z",
+     "updatedAt": "2026-06-12T08:00:00.000Z",
+     "stateId": "st_todo",
+     "projectId": null,
+     "cycleId": "cyc_2",
+     "assigneeId": "usr_sam",
+     "creatorId": "usr_alex",
+     "labelIds": [
+      "lbl_bug"
+     ],
+     "comments": []
+    }
+   ],
+   "documents": [
+    {
+     "id": "doc_plat_arch",
+     "title": "Search Architecture",
+     "content": "The full-text search service builds an inverted index over card and issue bodies. Queries fan out to shards and merge by relevance score.",
+     "projectId": "prj_search",
+     "creatorId": "usr_alex",
+     "createdAt": "2026-05-02T09:00:00.000Z",
+     "updatedAt": "2026-05-10T14:30:00.000Z",
+     "url": "https://linear.app/strukto/document/doc_plat_arch"
+    },
+    {
+     "id": "doc_plat_runbook",
+     "title": "Indexer Runbook",
+     "content": "If the reindex job stalls, drain the queue and restart the worker. Watch memory: the shard cache starts purging entries under pressure.",
+     "projectId": null,
+     "creatorId": "usr_sam",
+     "createdAt": "2026-05-15T11:00:00.000Z",
+     "updatedAt": "2026-05-15T11:00:00.000Z",
+     "url": "https://linear.app/strukto/document/doc_plat_runbook"
+    }
+   ]
+  },
+  {
+   "id": "team_web",
+   "key": "WEB",
+   "name": "Web",
+   "description": "Marketing site and dashboard.",
+   "timezone": "America/New_York",
+   "updatedAt": "2026-06-16T12:00:00.000Z",
+   "states": [
+    {
+     "id": "st_web_todo",
+     "name": "Todo",
+     "type": "unstarted"
+    },
+    {
+     "id": "st_web_done",
+     "name": "Done",
+     "type": "completed"
+    }
+   ],
+   "labels": [
+    {
+     "id": "lbl_web_design",
+     "name": "design"
+    }
+   ],
+   "members": [
+    {
+     "id": "usr_jo",
+     "name": "jo",
+     "displayName": "Jo Park",
+     "email": "jo@strukto.ai",
+     "active": true,
+     "admin": false,
+     "updatedAt": "2026-06-01T00:00:00.000Z",
+     "url": "https://linear.app/strukto/profiles/jo"
+    }
+   ],
+   "projects": [],
+   "cycles": [],
+   "issues": [
+    {
+     "id": "iss_web_1",
+     "identifier": "WEB-1",
+     "title": "Redesign pricing page",
+     "description": "New three-tier layout with annual toggle.",
+     "priority": 3,
+     "url": "https://linear.app/strukto/issue/WEB-1",
+     "createdAt": "2026-06-08T09:00:00.000Z",
+     "updatedAt": "2026-06-16T12:00:00.000Z",
+     "stateId": "st_web_done",
+     "projectId": null,
+     "cycleId": null,
+     "assigneeId": "usr_jo",
+     "creatorId": "usr_jo",
+     "labelIds": [
+      "lbl_web_design"
+     ],
+     "comments": [
+      {
+       "id": "cmt_web1_1",
+       "userId": "usr_jo",
+       "body": "Shipped to staging.",
+       "createdAt": "2026-06-16T12:00:00.000Z",
+       "updatedAt": "2026-06-16T12:00:00.000Z",
+       "url": "https://linear.app/strukto/issue/WEB-1#comment-1"
+      }
+     ]
+    }
+   ],
+   "documents": [
+    {
+     "id": "doc_web_design",
+     "title": "Design System",
+     "content": "Tokens for spacing, color, and typography. Components consume tokens so dark mode is a single switch.",
+     "projectId": null,
+     "creatorId": "usr_jo",
+     "createdAt": "2026-04-20T08:00:00.000Z",
+     "updatedAt": "2026-04-22T16:00:00.000Z",
+     "url": "https://linear.app/strukto/document/doc_web_design"
+    }
+   ]
+  }
+ ]
+}

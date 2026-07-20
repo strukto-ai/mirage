@@ -1,0 +1,329 @@
+{
+ "cases": [
+  {
+   "id": "tr_root_ls",
+   "seq": 550000,
+   "targets": [
+    "trello"
+   ],
+   "command": "ls /board",
+   "expect": {
+    "exit": 0,
+    "stdout": "workspaces\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_workspaces_ls",
+   "seq": 550001,
+   "targets": [
+    "trello"
+   ],
+   "command": "ls /board/workspaces",
+   "expect": {
+    "exit": 0,
+    "stdout": "Strukto__org_strukto\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_boards_ls",
+   "seq": 550002,
+   "targets": [
+    "trello"
+   ],
+   "command": "ls /board/workspaces/Strukto__org_strukto/boards",
+   "expect": {
+    "exit": 0,
+    "stdout": "Ops__brd_ops\nRoadmap_Q3__brd_roadmap\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_board_children_ls",
+   "seq": 550003,
+   "targets": [
+    "trello"
+   ],
+   "command": "ls /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap",
+   "expect": {
+    "exit": 0,
+    "stdout": "board.json\nlabels\nlists\nmembers\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_lists_ls",
+   "seq": 550004,
+   "targets": [
+    "trello"
+   ],
+   "command": "ls /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists",
+   "expect": {
+    "exit": 0,
+    "stdout": "Done__lst_done\nIn_Progress__lst_doing\nTo_Do__lst_todo\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cards_ls",
+   "seq": 550005,
+   "targets": [
+    "trello"
+   ],
+   "command": "ls /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards",
+   "expect": {
+    "exit": 0,
+    "stdout": "Add_full-text_search__crd_search\nCSV_export_for_reports__crd_export\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_board_cat_jq",
+   "seq": 550006,
+   "targets": [
+    "trello"
+   ],
+   "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/board.json | jq -r '.board_name + \" \" + .workspace_id'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Roadmap Q3 org_strukto\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_card_cat_jq",
+   "seq": 550007,
+   "targets": [
+    "trello"
+   ],
+   "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/card.json | jq -r '.card_name + \" | \" + .desc'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Add full-text search | Index every mounted document and expose a search command.\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_card_members_jq",
+   "seq": 550008,
+   "targets": [
+    "trello"
+   ],
+   "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/card.json | jq -c '.member_ids'",
+   "expect": {
+    "exit": 0,
+    "stdout": "[\"mem_alex\"]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_comments_jq",
+   "seq": 550009,
+   "targets": [
+    "trello"
+   ],
+   "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/comments.jsonl | jq -rs '.[].text'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Prototype uses the index cache store.\nPlease add grep push-down too.\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_member_cat_jq",
+   "seq": 550010,
+   "targets": [
+    "trello"
+   ],
+   "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/members/Alex_Kim__mem_alex.json | jq -r '.full_name + \" @\" + .username'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Alex Kim @alexkim\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_label_cat_jq",
+   "seq": 550011,
+   "targets": [
+    "trello"
+   ],
+   "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/labels/feature__lbl_feature.json | jq -r '.label_name + \" \" + .color'",
+   "expect": {
+    "exit": 0,
+    "stdout": "feature green\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_find_type_f_count",
+   "seq": 550012,
+   "targets": [
+    "trello"
+   ],
+   "command": "find /board -type f | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "24\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_find_cards",
+   "seq": 550013,
+   "targets": [
+    "trello"
+   ],
+   "command": "find /board -name 'card.json' | wc -l",
+   "expect": {
+    "exit": 0,
+    "stdout": "5\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_grep_desc",
+   "seq": 550014,
+   "targets": [
+    "trello"
+   ],
+   "command": "grep -rl 'redirect' /board",
+   "expect": {
+    "exit": 0,
+    "stdout": "/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_ops_card_cat_jq",
+   "seq": 550015,
+   "targets": [
+    "trello"
+   ],
+   "command": "cat /board/workspaces/Strukto__org_strukto/boards/Ops__brd_ops/lists/Backlog__lst_backlog/cards/Upgrade_Redis_to_7.4__crd_upgrade/card.json | jq -r '.card_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Upgrade Redis to 7.4\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_crossmount_cp",
+   "seq": 550016,
+   "targets": [
+    "trello"
+   ],
+   "command": "cp /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/card.json /scratch/card.json && cat /scratch/card.json | jq -r '.card_id'",
+   "expect": {
+    "exit": 0,
+    "stdout": "crd_search\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_board_list",
+   "seq": 550017,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello board list | jq -r '.[].board_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Roadmap Q3\nOps\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_board_show",
+   "seq": 550018,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello board show brd_roadmap | jq -r '.board_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Roadmap Q3\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_board_members",
+   "seq": 550019,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello board members brd_roadmap | jq -r '.[].full_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Alex Kim\nSam Rivera\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_list_list",
+   "seq": 550020,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello list list brd_roadmap | jq -r '.[].list_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "To Do\nIn Progress\nDone\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_label_list",
+   "seq": 550021,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello label list brd_roadmap | jq -r '.[].label_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "feature\nbug\nurgent\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_card_list",
+   "seq": 550022,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello card list lst_todo | jq -r '.[].card_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Add full-text search\nCSV export for reports\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_card_show",
+   "seq": 550023,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello card show crd_search | jq -r '.card_name'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Add full-text search\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tr_cmd_card_comments",
+   "seq": 550024,
+   "targets": [
+    "trello"
+   ],
+   "command": "trello card comments crd_search | jq -r '.[].text'",
+   "expect": {
+    "exit": 0,
+    "stdout": "Prototype uses the index cache store.\nPlease add grep push-down too.\n",
+    "stderr": ""
+   }
+  }
+ ]
+}

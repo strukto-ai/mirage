@@ -33,7 +33,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("linear-issue-create", resource="linear", spec=SPEC, write=True)
+@command("linear issue create", resource="linear", spec=SPEC, write=True)
 async def linear_issue_create(
     accessor: LinearAccessor,
     paths: list[PathSpec],

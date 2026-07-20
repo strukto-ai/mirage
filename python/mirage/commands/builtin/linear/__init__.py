@@ -32,13 +32,14 @@ from mirage.commands.builtin.linear.linear_issue_transition import \
     linear_issue_transition
 from mirage.commands.builtin.linear.linear_issue_update import \
     linear_issue_update
-from mirage.commands.builtin.linear.linear_search import linear_search
+from mirage.commands.builtin.linear.reads import make_linear_read_commands
 
 COMMANDS = [
     *make_generic_commands(
         "linear",
         _IO,
     ),
+    *make_linear_read_commands(),
     linear_issue_add_label,
     linear_issue_assign,
     linear_issue_comment_add,
@@ -48,5 +49,4 @@ COMMANDS = [
     linear_issue_set_project,
     linear_issue_transition,
     linear_issue_update,
-    linear_search,
 ]

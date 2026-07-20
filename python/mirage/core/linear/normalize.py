@@ -129,6 +129,32 @@ def normalize_project(
     }
 
 
+def normalize_label(label: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "label_id": label.get("id"),
+        "name": label.get("name"),
+        "color": label.get("color"),
+    }
+
+
+def normalize_document(document: dict[str, Any]) -> dict[str, Any]:
+    project = document.get("project") or {}
+    creator = document.get("creator") or {}
+    return {
+        "document_id": document.get("id"),
+        "title": document.get("title"),
+        "content": document.get("content") or "",
+        "project_id": project.get("id"),
+        "project_name": project.get("name"),
+        "creator_id": creator.get("id"),
+        "creator_name": creator.get("name"),
+        "creator_email": creator.get("email"),
+        "created_at": document.get("createdAt"),
+        "updated_at": document.get("updatedAt"),
+        "url": document.get("url"),
+    }
+
+
 def normalize_cycle(cycle: dict[str, Any], *, team_id: str) -> dict[str, Any]:
     return {
         "cycle_id": cycle.get("id"),

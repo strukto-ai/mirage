@@ -52,7 +52,7 @@ async def _resolve_state_id(
     raise FileNotFoundError(state_name)
 
 
-@command("linear-issue-transition", resource="linear", spec=SPEC)
+@command("linear issue transition", resource="linear", spec=SPEC)
 async def linear_issue_transition(
     accessor: LinearAccessor,
     paths: list[PathSpec],

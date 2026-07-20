@@ -53,3 +53,8 @@ def project_filename(project: dict[str, Any]) -> str:
 def cycle_filename(cycle: dict[str, Any]) -> str:
     label = sanitize_name(cycle.get("name") or "cycle")
     return f"{label}__{cycle['id']}.json"
+
+
+def document_filename(document: dict[str, Any]) -> str:
+    label = sanitize_name(document.get("title") or "document")
+    return f"{label}__{document['id']}.json"

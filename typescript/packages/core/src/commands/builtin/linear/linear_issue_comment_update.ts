@@ -63,7 +63,7 @@ async function linearIssueCommentUpdateCommand(
 }
 
 export const LINEAR_ISSUE_COMMENT_UPDATE = command({
-  name: 'linear-issue-comment-update',
+  name: 'linear comment update',
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueCommentUpdateCommand,

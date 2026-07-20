@@ -52,7 +52,7 @@ async function linearIssueAssignCommand(
 }
 
 export const LINEAR_ISSUE_ASSIGN = command({
-  name: 'linear-issue-assign',
+  name: 'linear issue assign',
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueAssignCommand,

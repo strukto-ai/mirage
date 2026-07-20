@@ -656,6 +656,46 @@
           "backend": "ram"
         }
       ]
+    },
+    {
+      "id": "trello",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "trello",
+      "mounts": [
+        {
+          "path": "/board",
+          "resource": "trello",
+          "backend": "trello"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
+      "id": "linear",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "linear",
+      "mounts": [
+        {
+          "path": "/issues",
+          "resource": "linear",
+          "backend": "linear"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
     }
   ]
 }
