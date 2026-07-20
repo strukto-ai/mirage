@@ -104,6 +104,14 @@ def _scoped_accessor() -> SharePointAccessor:
                          drive="Documents"))
 
 
+def _prefix_scoped_accessor() -> SharePointAccessor:
+    return SharePointAccessor(
+        SharePointConfig(access_token="tok",
+                         site="Engineering",
+                         drive="Documents",
+                         key_prefix="/team/reports/"))
+
+
 def _seed_scoped():
     _site_cache["Engineering"] = _SITE_ID
     _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
@@ -131,6 +139,32 @@ async def test_scoped_resolve_path_is_drive_relative_item():
     assert result.level == "item"
     assert result.drive_id == _DRIVE_ID
     assert result.item_path == "sub/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_prefix_scoped_resolve_root_is_prefix_item():
+    _seed_scoped()
+    result = await resolve(_prefix_scoped_accessor(), _spec("/sp/"))
+    assert result.level == "item"
+    assert result.drive_id == _DRIVE_ID
+    assert result.item_path == "team/reports"
+
+
+@pytest.mark.asyncio
+async def test_prefix_scoped_resolve_path_is_prefix_relative_item():
+    _seed_scoped()
+    result = await resolve(_prefix_scoped_accessor(), _spec("/sp/sub/a.txt"))
+    assert result.level == "item"
+    assert result.drive_id == _DRIVE_ID
+    assert result.item_path == "team/reports/sub/a.txt"
+
+
+def test_prefix_scoped_config_rejects_parent_segments():
+    with pytest.raises(ValueError, match="must not contain"):
+        SharePointConfig(access_token="tok",
+                         site="Engineering",
+                         drive="Documents",
+                         key_prefix="team/../private")
 
 
 @pytest.mark.asyncio

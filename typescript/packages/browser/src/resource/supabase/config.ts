@@ -22,6 +22,7 @@ export interface SupabaseConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface SupabaseConfigRedacted extends Omit<SupabaseConfig, 'presignedUrlProvider'> {
@@ -37,6 +38,7 @@ const SupabaseConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedSupabaseEndpoint(config: SupabaseConfig): string | undefined {
@@ -58,6 +60,7 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

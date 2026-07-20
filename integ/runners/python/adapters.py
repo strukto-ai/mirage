@@ -38,11 +38,17 @@ from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
 from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
+from mirage.resource.aliyun import AliyunConfig, AliyunResource
+from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
 from mirage.resource.box import BoxConfig, BoxResource
+from mirage.resource.ceph import CephConfig, CephResource
+from mirage.resource.digitalocean import (DigitalOceanConfig,
+                                          DigitalOceanResource)
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
 from mirage.resource.email.config import EmailConfig
 from mirage.resource.email.email import EmailResource
+from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
@@ -56,15 +62,24 @@ from mirage.resource.gslides.config import GSlidesConfig
 from mirage.resource.gslides.gslides import GSlidesResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 from mirage.resource.linear import LinearConfig, LinearResource
+from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+from mirage.resource.oci import OCIConfig, OCIResource
 from mirage.resource.onedrive.onedrive import OneDriveResource
+from mirage.resource.qingstor import QingStorConfig, QingStorResource
+from mirage.resource.r2 import R2Config, R2Resource
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.resource.scaleway import ScalewayConfig, ScalewayResource
+from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
 from mirage.resource.sharepoint.sharepoint import SharePointResource
 from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.resource.ssh import SSHConfig, SSHResource
+from mirage.resource.supabase import SupabaseConfig, SupabaseResource
+from mirage.resource.tencent import TencentConfig, TencentResource
 from mirage.resource.trello import TrelloConfig, TrelloResource
+from mirage.resource.wasabi import WasabiConfig, WasabiResource
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
@@ -77,6 +92,57 @@ S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
 S3_ACCESS = os.environ.get("AWS_ACCESS_KEY_ID", "testing")
 S3_SECRET = os.environ.get("AWS_SECRET_ACCESS_KEY", "testing")
+
+
+def object_storage_resource(name: str, bucket: str, endpoint: str,
+                            key_prefix: str | None) -> S3Resource:
+    common = {
+        "bucket": bucket,
+        "region": S3_REGION,
+        "endpoint_url": endpoint,
+        "access_key_id": S3_ACCESS,
+        "secret_access_key": S3_SECRET,
+        "key_prefix": key_prefix,
+    }
+    if name == "s3":
+        return S3Resource(
+            S3Config(bucket=bucket,
+                     region=S3_REGION,
+                     endpoint_url=endpoint,
+                     aws_access_key_id=S3_ACCESS,
+                     aws_secret_access_key=S3_SECRET,
+                     path_style=True,
+                     key_prefix=key_prefix))
+    if name == "aliyun":
+        return AliyunResource(AliyunConfig(**common, path_style=True))
+    if name == "backblaze":
+        return BackblazeResource(BackblazeConfig(**common, path_style=True))
+    if name == "ceph":
+        return CephResource(CephConfig(**common))
+    if name == "digitalocean":
+        return DigitalOceanResource(
+            DigitalOceanConfig(**common, path_style=True))
+    if name == "gcs":
+        return GCSResource(GCSConfig(**common, path_style=True))
+    if name == "minio":
+        return MinIOResource(MinIOConfig(**common))
+    if name == "oci":
+        return OCIResource(OCIConfig(**common, namespace="integ"))
+    if name == "qingstor":
+        return QingStorResource(QingStorConfig(**common, path_style=True))
+    if name == "r2":
+        return R2Resource(R2Config(**common, path_style=True))
+    if name == "scaleway":
+        return ScalewayResource(ScalewayConfig(**common, path_style=True))
+    if name == "seaweedfs":
+        return SeaweedFSResource(SeaweedFSConfig(**common))
+    if name == "supabase":
+        return SupabaseResource(SupabaseConfig(**common))
+    if name == "tencent":
+        return TencentResource(TencentConfig(**common, path_style=True))
+    if name == "wasabi":
+        return WasabiResource(WasabiConfig(**common, path_style=True))
+    raise ValueError(f"unknown object storage resource: {name}")
 
 
 async def _noop() -> None:
@@ -145,14 +211,9 @@ class S3Service:
         return name
 
     def resource(self, mount: dict) -> S3Resource:
-        return S3Resource(
-            S3Config(bucket=self.bucket_for(mount),
-                     region=S3_REGION,
-                     endpoint_url=self.endpoint,
-                     aws_access_key_id=S3_ACCESS,
-                     aws_secret_access_key=S3_SECRET,
-                     path_style=True,
-                     key_prefix=mount.get("prefix")))
+        return object_storage_resource(mount["resource"],
+                                       self.bucket_for(mount), self.endpoint,
+                                       mount.get("prefix"))
 
     async def teardown(self) -> None:
         for bucket in self.buckets:
@@ -797,11 +858,17 @@ class SharePointService:
         return cls(server, runner)
 
     def resource(self, mount: dict) -> SharePointResource:
-        self.server.add_drive(mount["drive"])
+        graph = self.server.drives.get(mount["drive"])
+        if graph is None:
+            graph = self.server.add_drive(mount["drive"])
+        key_prefix = mount.get("prefix")
+        if key_prefix:
+            graph._ensure_parents(f"{key_prefix}/placeholder")
         return SharePointResource(
             SharePointConfig(access_token="integ-token",
                              site="Main",
-                             drive=mount["drive"]))
+                             drive=mount["drive"],
+                             key_prefix=key_prefix))
 
     async def teardown(self) -> None:
         _clear_sharepoint_caches()
@@ -970,6 +1037,20 @@ BUILDERS = {
     "disk": build_disk,
     "redis": build_redis,
     "s3": build_s3,
+    "aliyun": build_s3,
+    "backblaze": build_s3,
+    "ceph": build_s3,
+    "digitalocean": build_s3,
+    "gcs": build_s3,
+    "minio": build_s3,
+    "oci": build_s3,
+    "qingstor": build_s3,
+    "r2": build_s3,
+    "scaleway": build_s3,
+    "seaweedfs": build_s3,
+    "supabase": build_s3,
+    "tencent": build_s3,
+    "wasabi": build_s3,
     "gridfs": build_gridfs,
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,

@@ -48,6 +48,9 @@ No external setup, these run locally or against a connection string you already 
 | HF Models | read, write | [HF Models](/home/setup/hf_models) | [<Icon icon="python" />](/python/resource/hf_models) [<Icon icon="node-js" />](/typescript/setup/hf_models) | Hugging Face Model repos (weights stream on demand) |
 | HF Spaces | read, write | [HF Spaces](/home/setup/hf_spaces) | [<Icon icon="python" />](/python/resource/hf_spaces) [<Icon icon="node-js" />](/typescript/setup/hf_spaces) | Hugging Face Space repos (app code, configs) |
 
+All S3-compatible resources accept `key_prefix` in Python and `keyPrefix` in
+TypeScript to expose only one bucket subtree as the mount root.
+
 ## Google Workspace
 
 | Resource | Access | Setup | Docs | Notes |
@@ -63,7 +66,7 @@ No external setup, these run locally or against a connection string you already 
 | Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | OneDrive | read, write | [OneDrive](/home/setup/onedrive) | [<Icon icon="python" />](/python/resource/onedrive) | Files and folders through Microsoft Graph |
-| SharePoint | read, write | [SharePoint](/home/setup/sharepoint) | [<Icon icon="python" />](/python/resource/sharepoint) | Document libraries through Microsoft Graph |
+| SharePoint | read, write | [SharePoint](/home/setup/sharepoint) | [<Icon icon="python" />](/python/resource/sharepoint) | Document libraries through Microsoft Graph; `site`, `drive`, and `key_prefix` can scope a mount to one folder subtree |
 
 ## Cloud Files
 

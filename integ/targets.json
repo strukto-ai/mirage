@@ -180,6 +180,127 @@
       ]
     },
     {
+      "id": "object-storage-prefix",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "s3",
+      "mounts": [
+        {
+          "path": "/raw",
+          "resource": "s3",
+          "backend": "s3",
+          "bucket": "object-storage"
+        },
+        {
+          "path": "/s3",
+          "resource": "s3",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/s3"
+        },
+        {
+          "path": "/aliyun",
+          "resource": "aliyun",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/aliyun"
+        },
+        {
+          "path": "/backblaze",
+          "resource": "backblaze",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/backblaze"
+        },
+        {
+          "path": "/ceph",
+          "resource": "ceph",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/ceph"
+        },
+        {
+          "path": "/digitalocean",
+          "resource": "digitalocean",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/digitalocean"
+        },
+        {
+          "path": "/gcs",
+          "resource": "gcs",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/gcs"
+        },
+        {
+          "path": "/minio",
+          "resource": "minio",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/minio"
+        },
+        {
+          "path": "/oci",
+          "resource": "oci",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/oci"
+        },
+        {
+          "path": "/qingstor",
+          "resource": "qingstor",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/qingstor"
+        },
+        {
+          "path": "/r2",
+          "resource": "r2",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/r2"
+        },
+        {
+          "path": "/scaleway",
+          "resource": "scaleway",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/scaleway"
+        },
+        {
+          "path": "/seaweedfs",
+          "resource": "seaweedfs",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/seaweedfs"
+        },
+        {
+          "path": "/supabase",
+          "resource": "supabase",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/supabase"
+        },
+        {
+          "path": "/tencent",
+          "resource": "tencent",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/tencent"
+        },
+        {
+          "path": "/wasabi",
+          "resource": "wasabi",
+          "backend": "s3",
+          "bucket": "object-storage",
+          "prefix": "aliases/wasabi"
+        }
+      ]
+    },
+    {
       "id": "gridfs",
       "hosts": [
         "python",
@@ -419,6 +540,38 @@
           "resource": "sharepoint",
           "backend": "sharepoint",
           "drive": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "sharepoint-prefix",
+      "hosts": [
+        "python"
+      ],
+      "service": "sharepoint",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "sharepoint",
+          "backend": "sharepoint",
+          "drive": "shared",
+          "prefix": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "sharepoint",
+          "backend": "sharepoint",
+          "drive": "shared",
+          "prefix": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "sharepoint",
+          "backend": "sharepoint",
+          "drive": "shared",
+          "prefix": "team/reports/res",
           "fixture": "columnar/v1"
         }
       ]

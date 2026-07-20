@@ -24,26 +24,40 @@ import {
 } from '@aws-sdk/client-s3'
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import {
+  AliyunResource,
+  BackblazeResource,
   BoxResource,
+  CephResource,
+  DigitalOceanResource,
   DiskResource,
   DropboxResource,
   EmailResource,
   GDocsResource,
   GDriveResource,
   GmailResource,
+  GCSResource,
   GridFSResource,
   GSheetsResource,
   GSlidesResource,
   HfBucketsResource,
   LinearResource,
+  MinIOResource,
   MountMode,
   NextcloudResource,
+  OCIResource,
+  QingStorResource,
+  R2Resource,
   RAMResource,
   RedisResource,
   S3Resource,
+  ScalewayResource,
+  SeaweedFSResource,
   SlackResource,
   SSHResource,
+  SupabaseResource,
+  TencentResource,
   TrelloResource,
+  WasabiResource,
   Workspace,
 } from '@struktoai/mirage-node'
 import { ImapFlow } from 'imapflow'
@@ -185,6 +199,36 @@ async function openGridfs(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+function objectStorageResource(name: string, bucket: string, keyPrefix: string | undefined): S3Resource {
+  if (S3_ENDPOINT === undefined) throw new Error('s3 target requires S3_ENDPOINT')
+  const common = {
+    bucket,
+    region: S3_REGION,
+    endpoint: S3_ENDPOINT,
+    accessKeyId: S3_ACCESS,
+    secretAccessKey: S3_SECRET,
+    ...(keyPrefix !== undefined ? { keyPrefix } : {}),
+  }
+  if (name === 's3') return new S3Resource({ ...common, forcePathStyle: true })
+  if (name === 'aliyun') return new AliyunResource({ ...common, forcePathStyle: true })
+  if (name === 'backblaze') return new BackblazeResource({ ...common, forcePathStyle: true })
+  if (name === 'ceph') return new CephResource(common)
+  if (name === 'digitalocean') {
+    return new DigitalOceanResource({ ...common, forcePathStyle: true })
+  }
+  if (name === 'gcs') return new GCSResource({ ...common, forcePathStyle: true })
+  if (name === 'minio') return new MinIOResource(common)
+  if (name === 'oci') return new OCIResource({ ...common, namespace: 'integ' })
+  if (name === 'qingstor') return new QingStorResource({ ...common, forcePathStyle: true })
+  if (name === 'r2') return new R2Resource({ ...common, forcePathStyle: true })
+  if (name === 'scaleway') return new ScalewayResource({ ...common, forcePathStyle: true })
+  if (name === 'seaweedfs') return new SeaweedFSResource(common)
+  if (name === 'supabase') return new SupabaseResource(common)
+  if (name === 'tencent') return new TencentResource({ ...common, forcePathStyle: true })
+  if (name === 'wasabi') return new WasabiResource({ ...common, forcePathStyle: true })
+  throw new Error(`unknown object storage resource: ${name}`)
+}
+
 async function openS3(target: Target): Promise<Open> {
   if (!S3_ENDPOINT) throw new Error('s3 target requires S3_ENDPOINT')
   const id = runId()
@@ -206,15 +250,7 @@ async function openS3(target: Target): Promise<Open> {
   const mounts: Record<string, S3Resource> = {}
   for (const m of target.mounts) {
     const bucket = await bucketFor(m)
-    mounts[m.path] = new S3Resource({
-      bucket,
-      region: S3_REGION,
-      endpoint: S3_ENDPOINT,
-      accessKeyId: S3_ACCESS,
-      secretAccessKey: S3_SECRET,
-      forcePathStyle: true,
-      keyPrefix: m.prefix,
-    })
+    mounts[m.path] = objectStorageResource(m.resource, bucket, m.prefix)
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {

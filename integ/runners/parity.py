@@ -21,7 +21,7 @@ from pathlib import Path
 
 INTEG = Path(__file__).resolve().parents[1]
 SHARED_TARGETS = ["ram", "disk", "redis"]
-S3_TARGETS = ["s3", "s3-prefix"]
+S3_TARGETS = ["s3", "s3-prefix", "object-storage-prefix"]
 SSH_TARGETS = ["ssh"]
 GDRIVE_TARGETS = ["gdrive", "gdrive-folder", "gdrive-shared", "gapps", "gmail"]
 

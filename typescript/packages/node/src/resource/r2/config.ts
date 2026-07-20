@@ -23,6 +23,8 @@ export interface R2Config {
   endpoint?: string
   region?: string
   profile?: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -34,6 +36,8 @@ export interface R2ConfigRedacted {
   endpoint: string
   region: string
   profile?: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -45,6 +49,8 @@ const R2ConfigSchema = z.object({
   endpoint: z.string(),
   region: z.string(),
   profile: z.string().optional(),
+  forcePathStyle: z.boolean().optional(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
 })
 
@@ -64,6 +70,8 @@ export function r2ToS3Config(config: R2Config): S3Config {
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
+    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
   }
 }
@@ -84,6 +92,8 @@ export function normalizeR2Config(input: Record<string, unknown>): R2Config {
       secret_access_key: 'secretAccessKey',
       aws_profile: 'profile',
       endpoint_url: 'endpoint',
+      path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {

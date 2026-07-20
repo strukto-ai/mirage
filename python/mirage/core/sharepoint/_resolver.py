@@ -22,6 +22,13 @@ _site_cache: dict[str, str] = {}
 _drive_cache: dict[tuple[str, str], str] = {}
 
 
+def _scoped_item_path(key_prefix: str | None, raw: str) -> str:
+    prefix = (key_prefix or "").strip("/")
+    if prefix and raw:
+        return f"{prefix}/{raw}"
+    return prefix or raw
+
+
 async def _list_sites(accessor: SharePointAccessor) -> list[dict[str, Any]]:
     config = accessor.config
     search = config.site_filter or "*"
@@ -90,14 +97,15 @@ async def resolve(accessor: SharePointAccessor,
         drive_id = await _resolve_drive_id(accessor, site_id, config.drive)
         if drive_id is None:
             return ResolvedPath(level="drive", site_id=site_id, drive_id=None)
-        if not raw:
+        item_path = _scoped_item_path(config.key_prefix, raw)
+        if not item_path:
             return ResolvedPath(level="drive",
                                 site_id=site_id,
                                 drive_id=drive_id)
         return ResolvedPath(level="item",
                             site_id=site_id,
                             drive_id=drive_id,
-                            item_path=raw)
+                            item_path=item_path)
 
     if not raw:
         return ResolvedPath(level="root")
@@ -168,6 +176,6 @@ def drive_loc(resolved: ResolvedPath, virt: str) -> DriveLoc:
     assert resolved.drive_id is not None
     return DriveLoc(drive=resolved.drive_id,
                     path=resolved.item_path or "",
-                    virt=virt,
+                    virt=virt.strip("/"),
                     url=partial(item_url, resolved.drive_id),
                     ref=partial(drive_ref_path, resolved.drive_id))

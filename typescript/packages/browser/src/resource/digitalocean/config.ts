@@ -21,6 +21,7 @@ export interface DigitalOceanConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface DigitalOceanConfigRedacted extends Omit<
@@ -38,6 +39,7 @@ const DigitalOceanConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedDigitalOceanEndpoint(config: DigitalOceanConfig): string | undefined {
@@ -59,6 +61,7 @@ export function digitalOceanToS3Config(config: DigitalOceanConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

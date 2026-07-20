@@ -16,6 +16,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -43,6 +44,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -70,6 +72,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -97,6 +100,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -124,6 +128,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -151,6 +156,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -178,6 +184,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -205,6 +212,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -232,6 +240,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -259,6 +268,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -286,6 +296,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -313,6 +324,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -340,6 +352,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -367,6 +380,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
@@ -394,6 +408,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "box"
