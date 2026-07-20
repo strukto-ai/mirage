@@ -21,6 +21,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import OperationNotSupportedError
 
 
 @command("wget", resource=None, spec=SPECS["wget"])
@@ -58,7 +59,8 @@ async def wget(
         scope = _resolve_target(dest_raw, cwd)
         try:
             await dispatch("write", scope, data=data)
-        except (PermissionError, AttributeError, ValueError) as exc:
+        except (PermissionError, OperationNotSupportedError,
+                ValueError) as exc:
             err = f"wget: {dest_str}: {exc}\n".encode()
             return None, IOResult(exit_code=1, stderr=err)
     output = "" if q else f"saved {len(data)} bytes to {dest_str}"

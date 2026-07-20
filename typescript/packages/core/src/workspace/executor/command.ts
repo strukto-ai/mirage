@@ -36,6 +36,10 @@ import type { RoutingDecision } from './route/index.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
+import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
+import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
+import { Strategy } from '../../commands/builtin/generic/crossmount/types.ts'
+import { resolveGlobs } from '../expand/globs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
@@ -395,6 +399,15 @@ export async function handleCommand(
         new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
       ]
     }
+    let csScopes = pathScopes
+    if (strategyFor(cmdName as Cmd, csFlags) === Strategy.RELAY) {
+      // STREAM and FANOUT run each operand natively on its mount, which
+      // expands the operand's glob. RELAY bypasses the mount command
+      // wrappers entirely, so its glob operands must expand here; an
+      // unmatched glob stays the literal word, like bash.
+      const expanded = await resolveGlobs(pathScopes, registry)
+      csScopes = expanded.filter((p): p is PathSpec => typeof p !== 'string')
+    }
     const runCtx: RunOnMountCtx = {
       registry,
       session,
@@ -408,7 +421,7 @@ export async function handleCommand(
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
-      pathScopes,
+      csScopes,
       csTexts,
       csFlags,
       dispatch,

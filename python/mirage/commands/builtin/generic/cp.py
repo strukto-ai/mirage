@@ -20,6 +20,7 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (CopyStrategy, FileType, PathSpec, PrimitiveCopy,
                           ReaddirFn, StatFn)
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_prefix_of, rekey
 
 
@@ -138,17 +139,36 @@ async def cp(
                         entry.virtual[len(src.virtual.rstrip("/")):],
                     )
                     if is_dir:
-                        if not await is_directory(stat, entry_dst):
-                            await strategy.mkdir(entry_dst)
-                            writes[entry_dst.mount_path] = b""
-                            if v:
-                                lines.append(f"'{entry.virtual}' -> "
-                                             f"'{entry_dst.virtual}'")
+                        try:
+                            if not await is_directory(stat, entry_dst):
+                                await strategy.mkdir(entry_dst)
+                                writes[entry_dst.mount_path] = b""
+                                if v:
+                                    lines.append(f"'{entry.virtual}' -> "
+                                                 f"'{entry_dst.virtual}'")
+                        except FS_ERRORS as exc:
+                            # GNU stops this source: the children of a
+                            # directory it could not create cannot land.
+                            errors.append(
+                                f"cp: cannot create directory "
+                                f"'{entry_dst.virtual}': {fs_strerror(exc)}")
+                            break
                         continue
                     if n and await path_exists(stat, entry_dst):
                         continue
-                    data = await strategy.read_bytes(entry)
-                    await strategy.write(entry_dst, data=data)
+                    try:
+                        data = await strategy.read_bytes(entry)
+                    except FS_ERRORS as exc:
+                        errors.append(f"cp: cannot open '{entry.virtual}' "
+                                      f"for reading: {fs_strerror(exc)}")
+                        continue
+                    try:
+                        await strategy.write(entry_dst, data=data)
+                    except FS_ERRORS as exc:
+                        errors.append(f"cp: cannot create regular file "
+                                      f"'{entry_dst.virtual}': "
+                                      f"{fs_strerror(exc)}")
+                        continue
                     reads[entry.virtual] = data
                     writes[entry_dst.mount_path] = b""
                     if v:
@@ -182,9 +202,20 @@ async def cp(
         if n and await path_exists(stat, target):
             continue
         if isinstance(strategy, PrimitiveCopy):
-            # write takes bytes, not a stream: the file is materialized here.
-            data = await strategy.read_bytes(src)
-            await strategy.write(target, data=data)
+            try:
+                # write takes bytes, not a stream: the file is
+                # materialized here.
+                data = await strategy.read_bytes(src)
+            except FS_ERRORS as exc:
+                errors.append(f"cp: cannot open '{src.virtual}' "
+                              f"for reading: {fs_strerror(exc)}")
+                continue
+            try:
+                await strategy.write(target, data=data)
+            except FS_ERRORS as exc:
+                errors.append(f"cp: cannot create regular file "
+                              f"'{target.virtual}': {fs_strerror(exc)}")
+                continue
             reads[src.virtual] = data
         else:
             await strategy.copy(src, target)

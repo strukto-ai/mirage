@@ -56,10 +56,19 @@ async def test_rm_missing_operand():
 
 
 @pytest.mark.asyncio
-async def test_rm_enoent_propagates_without_force():
-    rm = _make_rm(set(), [])
-    with pytest.raises(FileNotFoundError):
-        await rm(FakeAccessor(), [PathSpec.from_str_path("/owned/x.json")])
+async def test_rm_enoent_reports_and_continues_without_force():
+    files = {"/owned/b.json"}
+    calls: list[tuple] = []
+    rm = _make_rm(files, calls)
+    paths = [
+        PathSpec.from_str_path("/owned/x.json"),
+        PathSpec.from_str_path("/owned/b.json"),
+    ]
+    _, result = await rm(FakeAccessor(), paths)
+    assert result.exit_code == 1
+    assert result.stderr == (b"rm: cannot remove '/owned/x.json': "
+                             b"No such file or directory\n")
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio

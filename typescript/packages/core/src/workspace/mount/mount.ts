@@ -37,6 +37,7 @@ import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import type { Runtime } from '../executor/runtime.ts'
+import { eaccesReadOnly, enotsup } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { effectiveMountMode } from '../../context/session_context.ts'
 
@@ -501,10 +502,10 @@ export class MountEntry {
     const filetype = getExtension(path)
     const levels = this.resolveCascade(opName, filetype, this.ops, this.generalOps)
     if (levels.length === 0) {
-      throw new Error(`${this.resource.kind}: no op ${opName}`)
+      throw enotsup(this.resource.kind, opName, path)
     }
     if (this.effectiveMode() === MountMode.READ && levels.some((o) => o.write)) {
-      throw new Error(`mount ${this.prefix} is read-only`)
+      throw eaccesReadOnly(`mount ${this.prefix} is read-only`, path)
     }
     const mountPrefix = rstripSlash(this.prefix)
     const lastSlash = path.lastIndexOf('/')

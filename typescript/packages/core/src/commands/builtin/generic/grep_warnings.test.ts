@@ -88,7 +88,7 @@ describe('grepGeneric recursive warnings', () => {
     expect(await decode(out)).toBe('/data/a.txt:alice\n')
     expect(io.stderr).not.toBeUndefined()
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data/bad.txt: boom\n')
-    expect(io.exitCode).toBe(0)
+    expect(io.exitCode).toBe(1)
   })
 
   it('grep -rl threads a stderr warning when a file read fails', async () => {

@@ -44,25 +44,44 @@ async function rmCommand(
     ]
   }
   const recursive = opts.flags.r === true || opts.flags.R === true
+  const dirFlag = opts.flags.d === true
+  const force = opts.flags.f === true
+  const errors: string[] = []
+  const writes: Record<string, Uint8Array> = {}
   for (const p of paths) {
     let isDir = false
     try {
       const st = await opfsStat(accessor, p)
       isDir = st.type === FileType.DIRECTORY
     } catch {
-      isDir = false
+      if (force) continue
+      // GNU rm reports the operand and keeps removing the rest.
+      errors.push(`rm: cannot remove '${p.virtual}': No such file or directory`)
+      continue
     }
     if (isDir) {
       if (recursive) {
         await opfsRmR(accessor, p)
-      } else {
+      } else if (dirFlag) {
         await opfsRmdir(accessor, p)
+      } else {
+        errors.push(`rm: cannot remove '${p.virtual}': Is a directory`)
+        continue
       }
     } else {
       await opfsUnlink(accessor, p)
     }
+    writes[p.mountPath] = new Uint8Array()
   }
-  return [null, new IOResult()]
+  const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : undefined
+  return [
+    null,
+    new IOResult({
+      writes,
+      exitCode: errors.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    }),
+  ]
 }
 
 export const OPFS_RM = command({

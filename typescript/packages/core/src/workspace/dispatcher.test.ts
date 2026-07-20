@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { CommandSafeguard, MountMode, PathSpec } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
@@ -64,6 +65,38 @@ describe('dispatch rename addresses dst against the source mount', () => {
       expect(DEC.decode((await ws.execute('cat /a/b/y.txt')).stdout)).toBe('moved-bytes\n')
       expect((await ws.execute('cat /a/x.txt')).exitCode).not.toBe(0)
       expect((await ws.execute('cat /b/y.txt')).exitCode).not.toBe(0)
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
+})
+
+describe('dispatch resolves filetype-registered ops by path extension', () => {
+  it('a read op keyed to a rendered filetype wins over the plain read', async () => {
+    // gdocs/gsheets/gslides/gmail register their rendered reads under a
+    // compound filetype; Python reaches them because its dispatcher goes
+    // through Mount.execute_op, which stamps the extension. The TS
+    // dispatcher must stamp it the same way or every dispatch-based path
+    // (crossmount relay, FUSE) misses the op.
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    registry.register({
+      name: 'read',
+      resource: 'ram',
+      filetype: '.gdoc.json',
+      write: false,
+      fn: () => Promise.resolve(ENC.encode('rendered')),
+    })
+    const ws = new Workspace(
+      { '/m': ram },
+      { mode: MountMode.EXEC, ops: registry, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.execute('echo raw > /m/doc.gdoc.json')
+      const bytes = (await ws.dispatch('read', '/m/doc.gdoc.json')) as Uint8Array
+      expect(DEC.decode(bytes)).toBe('rendered')
     } finally {
       await ws.close()
     }

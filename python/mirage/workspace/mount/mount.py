@@ -35,6 +35,7 @@ from mirage.ops.registry import RegisteredOp
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
+from mirage.utils.errors import enotsup
 from mirage.utils.key_prefix import mount_key
 
 
@@ -587,8 +588,7 @@ class MountEntry:
         levels = self._resolve_cascade(op_name, filetype, self._ops,
                                        self._general_ops)
         if not levels:
-            raise AttributeError(f"{self.resource.name}: "
-                                 f"no op {op_name!r}")
+            raise enotsup(str(self.resource.name), op_name, path)
 
         if (self.effective_mode() == MountMode.READ
                 and any(o.write for o in levels)):

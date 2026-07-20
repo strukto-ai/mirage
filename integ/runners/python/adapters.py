@@ -655,7 +655,10 @@ async def open_target(
     for mount in target["mounts"]:
         builder = BUILDERS[mount["resource"]]
         resource, cleanup = builder(mount, run_id, service)
-        mounts[mount["path"]] = resource
+        if mount.get("mode") == "read":
+            mounts[mount["path"]] = (resource, MountMode.READ)
+        else:
+            mounts[mount["path"]] = resource
         cleanups.append(cleanup)
     ws = Workspace(mounts, mode=MountMode.WRITE)
 

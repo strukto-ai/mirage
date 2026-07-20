@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "xm_cmp_differ",
-      "seq": 744,
+      "id": "xm_rm_partial",
+      "seq": 767,
       "targets": [
         "ram",
         "disk",
@@ -21,16 +21,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cmp /data/xdiff.txt /data2/xdiff.txt",
+      "command": "echo x | tee /data/xr_a.txt /data2/xr_b.txt > /dev/null && rm /data/xr_a.txt /data2/xr_nope.txt /data2/xr_b.txt",
       "expect": {
         "exit": 1,
-        "stdout": "/data/xdiff.txt /data2/xdiff.txt differ: char 6, line 2\n",
-        "stderr": ""
+        "stdout": "",
+        "stderr": "rm: cannot remove '/data2/xr_nope.txt': No such file or directory\n"
       }
     },
     {
-      "id": "xm_cmp_equal",
-      "seq": 745,
+      "id": "xm_rm_partial_check",
+      "seq": 768,
       "targets": [
         "ram",
         "disk",
@@ -49,7 +49,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cp /data/xdiff.txt /data2/xsame.txt && cmp /data/xdiff.txt /data2/xsame.txt && rm /data/xdiff.txt /data2/xdiff.txt /data2/xsame.txt",
+      "command": "find /data -name 'xr_*' && find /data2 -name 'xr_*'",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -57,8 +57,8 @@
       }
     },
     {
-      "id": "xm_cmp_missing",
-      "seq": 776,
+      "id": "xm_rm_r_tree",
+      "seq": 769,
       "targets": [
         "ram",
         "disk",
@@ -77,11 +77,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cmp /data/xrl_nope.txt /data2/xm.txt",
+      "command": "mkdir -p /data/xrt /data2/xrt && echo 1 | tee /data/xrt/f.txt > /dev/null && echo 2 | tee /data2/xrt/f.txt > /dev/null && rm -r /data/xrt /data2/xrt && find /data -name xrt && find /data2 -name xrt",
       "expect": {
-        "exit": 2,
+        "exit": 0,
         "stdout": "",
-        "stderr": "cmp: /data/xrl_nope.txt: No such file or directory\n"
+        "stderr": ""
       }
     }
   ]

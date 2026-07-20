@@ -16,6 +16,7 @@ import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { Resource } from '../resource/base.ts'
 import type { PathSpec } from '../types.ts'
+import { enotsup, type MissingOpError } from '../utils/errors.ts'
 
 export interface OpKwargs {
   index?: IndexCacheStore
@@ -132,7 +133,12 @@ export class OpsRegistry {
     if (byResource) return byResource.fn
     const global = this.registered.get(keyFor(name, null, null))
     if (global) return global.fn
-    throw new Error(`no op registered: ${name} for resource ${resource}`)
+    // No operand here; stamp code + op so callers can still test for the
+    // capability gap by type instead of message text.
+    const err = new Error(`no op registered: ${name} for resource ${resource}`) as MissingOpError
+    err.code = 'ENOTSUP'
+    err.op = name
+    throw err
   }
 
   async call(
@@ -155,7 +161,7 @@ export class OpsRegistry {
     if (global) levels.push(global.fn)
 
     if (levels.length === 0) {
-      throw new Error(`no op registered: ${name} for resource ${resourceKind}`)
+      throw enotsup(resourceKind, name, path)
     }
 
     for (const fn of levels) {

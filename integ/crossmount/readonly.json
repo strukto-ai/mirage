@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "xro_ls_empty",
+      "seq": 770,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "ls /ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xro_tee_refused",
+      "seq": 771,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo x | tee /ro/x.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tee: read-only mount at /ro/\n"
+      }
+    },
+    {
+      "id": "xro_cp_in_refused",
+      "seq": 772,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo src | tee /data/xro_s1.txt > /dev/null && cp /data/xro_s1.txt /ro/xro.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot create regular file '/ro/xro.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "xro_mv_in_refused",
+      "seq": 773,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo keep | tee /data/xro_s2.txt > /dev/null && mv /data/xro_s2.txt /ro/xro2.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot create regular file '/ro/xro2.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "xro_mv_src_kept",
+      "seq": 774,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "cat /data/xro_s2.txt && ls /ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

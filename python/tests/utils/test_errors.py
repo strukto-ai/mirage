@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir, format_fs_error, fs_strerror
+from mirage.utils.errors import (OperationNotSupportedError, enoent, enotdir,
+                                 enotsup, format_fs_error, fs_strerror)
 
 
 def test_fs_strerror_known_types():
@@ -22,6 +25,8 @@ def test_fs_strerror_known_types():
     assert fs_strerror(IsADirectoryError()) == "Is a directory"
     assert fs_strerror(FileExistsError()) == "File exists"
     assert fs_strerror(PermissionError()) == "Permission denied"
+    assert (fs_strerror(
+        OperationNotSupportedError()) == "Operation not supported")
 
 
 def test_fs_strerror_unknown_returns_none():
@@ -59,3 +64,17 @@ def test_format_fs_error_prefers_exc_filename():
     exc = FileNotFoundError(2, "No such file or directory", "/a/gone.txt")
     err = format_fs_error("head", exc)
     assert err == b"head: /a/gone.txt: No such file or directory\n"
+
+
+def test_enotsup_carries_op_and_operand():
+    spec = PathSpec.from_str_path("/mail/inbox/a.txt")
+    exc = enotsup("email", "unlink", spec)
+    assert isinstance(exc, OperationNotSupportedError)
+    assert exc.errno == errno.ENOTSUP
+    assert exc.filename == "/mail/inbox/a.txt"
+    assert "no op 'unlink'" in str(exc)
+
+
+def test_format_fs_error_enotsup_reports_operand():
+    err = format_fs_error("mv", enotsup("email", "unlink", "/mail/a.txt"))
+    assert err == b"mv: /mail/a.txt: Operation not supported\n"

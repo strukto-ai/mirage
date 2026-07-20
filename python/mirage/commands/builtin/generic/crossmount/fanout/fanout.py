@@ -70,7 +70,13 @@ async def run_fanout(cmd_name: str,
                                  list(text_args),
                                  flags,
                                  stdin_bytes=stdin_bytes)
-    exit_code = combined_exit(cmd_name, [r.io.exit_code for r in results])
+    errored = [
+        r.io.exit_code != 0 and r.io.stderr is not None for r in results
+    ]
+    quiet = cmd_name == Cmd.GREP and FlagView(
+        flags, spec=SPECS[Cmd.GREP]).as_bool("q")
+    exit_code = combined_exit(cmd_name, [r.io.exit_code for r in results],
+                              errored, quiet)
 
     if cmd_name == Cmd.WC:
         body = combine_wc(results, flag_kwargs)

@@ -180,9 +180,15 @@ export async function grepGeneric(
           new Uint8Array(0),
           new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
         ]
+      // A failed operand fails the command (deliberate divergence: GNU
+      // grep uses exit 2 for errors, mirage flattens fs errors to 1);
+      // -q above keeps GNU's match-wins rule.
       return [
         ENC.encode(results.join('\n') + '\n'),
-        new IOResult(stderr !== undefined ? { stderr } : {}),
+        new IOResult({
+          exitCode: warnings.length > 0 ? 1 : 0,
+          ...(stderr !== undefined ? { stderr } : {}),
+        }),
       ]
     }
 
@@ -239,7 +245,10 @@ export async function grepGeneric(
         ]
       return [
         ENC.encode(allResults.join('\n') + '\n'),
-        new IOResult({ exitCode: matched ? 0 : 1, ...(stderr !== undefined ? { stderr } : {}) }),
+        new IOResult({
+          exitCode: matched && warnings.length === 0 ? 0 : 1,
+          ...(stderr !== undefined ? { stderr } : {}),
+        }),
       ]
     }
 
@@ -252,13 +261,13 @@ export async function grepGeneric(
           s = await statFn(p.virtual)
         } catch (err) {
           if ((err as { code?: string }).code === 'ENOENT') {
-            multiWarnings.push(`grep: ${p.rawPath}: No such file or directory`)
+            multiWarnings.push(`${name}: ${p.rawPath}: No such file or directory`)
             continue
           }
           throw err
         }
         if (s.type === FileType.DIRECTORY) {
-          multiWarnings.push(`grep: ${p.rawPath}: Is a directory`)
+          multiWarnings.push(`${name}: ${p.rawPath}: Is a directory`)
           continue
         }
         const data = splitLinesNoTrailing(DEC.decode(await materialize(stream(p))))
@@ -294,7 +303,7 @@ export async function grepGeneric(
       return [
         out,
         new IOResult({
-          exitCode: multiMatched ? 0 : 1,
+          exitCode: multiMatched && multiWarnings.length === 0 ? 0 : 1,
           ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
         }),
       ]
@@ -306,7 +315,7 @@ export async function grepGeneric(
         new Uint8Array(0),
         new IOResult({
           exitCode: 1,
-          stderr: ENC.encode(`grep: ${first.rawPath}: Is a directory\n`),
+          stderr: ENC.encode(`${name}: ${first.rawPath}: Is a directory\n`),
         }),
       ]
     }

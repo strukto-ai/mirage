@@ -64,6 +64,53 @@ export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
 }
 
+// A missing-op error also names the op the backend did not register, so
+// capability probes (metadata.ts) can test for one specific gap instead of
+// sniffing message text.
+export interface MissingOpError extends FsError {
+  op: string
+}
+
+// A mount was asked for an op its backend does not register (e.g. unlink on
+// a mail mount). ENOTSUP is the honest POSIX spelling for a capability gap:
+// the fs chokepoints render GNU 'Operation not supported' against the
+// operand, while the message keeps resource + op for tracebacks. Mirrors
+// Python's OperationNotSupportedError/enotsup.
+export function enotsup(
+  resource: string,
+  op: string,
+  path: string | { virtual: string; rawPath?: string },
+): MissingOpError {
+  const err = new Error(`no op registered: ${op} for resource ${resource}`) as MissingOpError
+  err.code = 'ENOTSUP'
+  err.op = op
+  err.virtualPath = virtualOf(path)
+  return err
+}
+
+// True when the error is the missing-op stamp for this specific op — the
+// capability probe used by fallback paths (metadata setattr, FUSE
+// create/truncate) to distinguish "backend lacks the op" from a real
+// failure inside it.
+export function isMissingOp(err: unknown, op: string): boolean {
+  const stamped = err as { code?: unknown; op?: unknown }
+  return stamped.code === 'ENOTSUP' && stamped.op === op
+}
+
+// The read-only mount refusal keeps its human message (executor builtins
+// and the FUSE bridge sniff 'read-only') but is stamped EACCES + operand so
+// fs chokepoints render 'Permission denied', matching Python's
+// PermissionError from the same guard.
+export function eaccesReadOnly(
+  message: string,
+  path: string | { virtual: string; rawPath?: string },
+): FsError {
+  const err = new Error(message) as FsError
+  err.code = 'EACCES'
+  err.virtualPath = virtualOf(path)
+  return err
+}
+
 const STRERROR: Record<string, string> = {
   ENOENT: 'No such file or directory',
   ENOTDIR: 'Not a directory',
@@ -71,6 +118,7 @@ const STRERROR: Record<string, string> = {
   EACCES: 'Permission denied',
   EEXIST: 'File exists',
   ENOTEMPTY: 'Directory not empty',
+  ENOTSUP: 'Operation not supported',
 }
 
 // GNU strerror text for a POSIX error code, or null if not a recognized
@@ -78,6 +126,12 @@ const STRERROR: Record<string, string> = {
 export function gnuStrerror(code: string | undefined): string | null {
   if (code === undefined) return null
   return STRERROR[code] ?? null
+}
+
+// GNU strerror text for a thrown error, read from its stamped code
+// (Python's fs_strerror). Null when the error is not a recognized fs error.
+export function fsStrerror(err: unknown): string | null {
+  return gnuStrerror((err as { code?: string }).code)
 }
 
 // The user-facing path for an error: the stamped virtualPath when present,

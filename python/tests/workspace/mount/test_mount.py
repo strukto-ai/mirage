@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 
 import pytest
 
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.utils.errors import OperationNotSupportedError
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 
@@ -179,8 +181,10 @@ def test_execute_op_readdir(registry):
 
 def test_execute_op_no_such_op(registry):
     mount = registry.mount_for("/data/hello.txt")
-    with pytest.raises(AttributeError, match="no op"):
+    with pytest.raises(OperationNotSupportedError, match="no op") as exc_info:
         _run(mount.execute_op("nonexistent_op", "/file.txt"))
+    assert exc_info.value.filename == "/file.txt"
+    assert exc_info.value.errno == errno.ENOTSUP
 
 
 # ── command resolution ─────────────────────────

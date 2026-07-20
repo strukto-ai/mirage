@@ -79,6 +79,8 @@ def errno_for(exc: BaseException) -> int:
     if isinstance(exc, OSError):
         if exc.errno == host_errno.EXDEV:
             return EXDEV
+        if exc.errno == host_errno.ENOTSUP:
+            return ENOTSUP
         return EIO
     return EINVAL
 

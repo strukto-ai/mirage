@@ -98,3 +98,59 @@ describe('cross-mount errors (port of tests/workspace/test_cross_mount_errors.py
     await ws.close()
   })
 })
+
+async function makeReadonlySrcWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ro = new RAMResource()
+  const rw = new RAMResource()
+  ro.store.files.set('/report.csv', ENC.encode('name,age\nalice,30\n'))
+
+  const registry = new OpsRegistry()
+  registry.registerResource(ro)
+  registry.registerResource(rw)
+
+  return new Workspace(
+    { '/mail': [ro, MountMode.READ], '/scratch': [rw, MountMode.EXEC] },
+    { ops: registry, shellParser: parser },
+  )
+}
+
+describe('cross-mount mv with an unremovable source', () => {
+  it('prints GNU cannot remove and keeps both copies', async () => {
+    // GNU mv on a cross-device move that cannot remove the source: the
+    // copy stays in place and the failure is a per-entry GNU line.
+    const ws = await makeReadonlySrcWs()
+    const r = await runCmd(ws, 'mv /mail/report.csv /scratch/x.csv')
+    expect(r.code).toBe(1)
+    expect(r.err).toBe("mv: cannot remove '/mail/report.csv': Permission denied\n")
+    const kept = await runCmd(ws, 'cat /scratch/x.csv')
+    expect([kept.out, kept.code]).toEqual(['name,age\nalice,30\n', 0])
+    const src = await runCmd(ws, 'cat /mail/report.csv')
+    expect([src.out, src.code]).toEqual(['name,age\nalice,30\n', 0])
+    await ws.close()
+  })
+})
+
+describe('cross-mount relay glob expansion', () => {
+  it('mv expands source globs before relaying', async () => {
+    // RELAY bypasses the mount command wrappers that expand globs for
+    // single-mount runs, so the executor expands relay operands itself.
+    const ws = await makeTwoRamWs()
+    await runCmd(ws, 'echo g1 | tee /a/g1.txt > /dev/null && echo g2 | tee /a/g2.txt > /dev/null')
+    const r = await runCmd(ws, 'mv /a/g*.txt /b/')
+    expect([r.err, r.code]).toEqual(['', 0])
+    const moved = await runCmd(ws, 'cat /b/g1.txt /b/g2.txt')
+    expect([moved.out, moved.code]).toEqual(['g1\ng2\n', 0])
+    const gone = await runCmd(ws, 'ls /a/g1.txt')
+    expect(gone.code).not.toBe(0)
+    await ws.close()
+  })
+
+  it('an unmatched glob stays the literal word, like bash', async () => {
+    const ws = await makeTwoRamWs()
+    const r = await runCmd(ws, 'mv /a/nomatch*.zzz /b/')
+    expect(r.code).toBe(1)
+    expect(r.err).toBe("mv: cannot stat '/a/nomatch*.zzz': No such file or directory\n")
+    await ws.close()
+  })
+})

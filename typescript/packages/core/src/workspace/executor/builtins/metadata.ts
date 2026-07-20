@@ -15,6 +15,7 @@
 import { IOResult } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
+import { isMissingOp } from '../../../utils/errors.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
@@ -274,10 +275,6 @@ interface SetAttrFields {
   gid?: number | string
   atime?: string
   mtime?: string
-}
-
-function isMissingOp(err: unknown, op: string): boolean {
-  return err instanceof Error && err.message.startsWith(`no op registered: ${op}`)
 }
 
 // Apply attributes natively where the backend can hold them; store the

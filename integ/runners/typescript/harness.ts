@@ -24,6 +24,7 @@ export interface Mount {
   path: string
   resource: string
   backend: string
+  mode?: string
   fixture?: string
   bucket?: string
   prefix?: string

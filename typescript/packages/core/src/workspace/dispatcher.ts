@@ -16,7 +16,9 @@ import { NOOPAccessor } from '../accessor/base.ts'
 import { applyIo } from '../cache/file/io.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import { applyOpSafeguard, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
+import { getExtension } from '../commands/resolve.ts'
 import { IOResult } from '../io/types.ts'
+import { eaccesReadOnly } from '../utils/errors.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { runWithRevisions } from '../observe/context.ts'
@@ -86,12 +88,20 @@ export class Dispatcher {
       effectiveMountMode(mountPrefix, mode) === MountMode.READ &&
       this.opsRegistry.find(opName, resource.kind)?.write === true
     ) {
-      throw new Error(`mount at '${p.virtual}' is read-only`)
+      throw eaccesReadOnly(`mount at '${p.virtual}' is read-only`, p)
     }
-    const fullKwargs: OpKwargs =
-      kwargs?.index === undefined && resource.index !== undefined
-        ? { ...(kwargs ?? {}), index: resource.index }
-        : (kwargs ?? {})
+    // Ops registered under a rendered filetype (gdocs/gsheets/gslides/
+    // gmail reads) resolve by the path's extension; Python reaches them
+    // because its dispatcher routes through Mount.execute_op, which
+    // stamps the filetype. Stamp it here the same way.
+    const filetype = getExtension(p.virtual)
+    const fullKwargs: OpKwargs = {
+      ...(kwargs ?? {}),
+      ...(kwargs?.index === undefined && resource.index !== undefined
+        ? { index: resource.index }
+        : {}),
+      ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
+    }
     let fullArgs = args ?? []
     const renameDst = opName === 'rename' && fullArgs[0] instanceof PathSpec ? fullArgs[0] : null
     if (renameDst !== null) {
@@ -151,7 +161,12 @@ export class Dispatcher {
     return [result, new IOResult()]
   }
 
-  async invalidateAfterWriteByPath(path: string): Promise<void> {
+  async invalidateAfterWriteByPath(rawPath: string): Promise<void> {
+    // Directory writes (mkdir/rmdir via tree copies) arrive with a
+    // trailing slash; normalize so the parent computation below does not
+    // invalidate the written directory itself instead of its parent
+    // (Python normalizes the same way via PathSpec.mount_path).
+    const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.mountFor(path)
     if (mount === null) return
     await this.namespace.clearTimes(path)

@@ -10,6 +10,7 @@ from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import FS_ERRORS, format_fs_error
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 
@@ -136,15 +137,22 @@ async def diff(
     if len(paths) < 2:
         raise UsageError("diff: requires two paths")
     flags = _DiffFlags(i=i, w=w, b=b, e=e, u=u, q=q)
-    both_dirs = False
-    if r:
-        both_dirs = ((await stat_fn(paths[0])).type == FileType.DIRECTORY
-                     and (await stat_fn(paths[1])).type == FileType.DIRECTORY)
-    if both_dirs:
-        output = await _diff_dirs(paths[0], paths[1], read_bytes, readdir_fn,
-                                  stat_fn, flags)
-    else:
-        output = await _diff_pair(paths[0], paths[1], read_bytes, flags)
+    try:
+        both_dirs = False
+        if r:
+            both_dirs = ((await stat_fn(paths[0])).type == FileType.DIRECTORY
+                         and
+                         (await stat_fn(paths[1])).type == FileType.DIRECTORY)
+        if both_dirs:
+            output = await _diff_dirs(paths[0], paths[1], read_bytes,
+                                      readdir_fn, stat_fn, flags)
+        else:
+            output = await _diff_pair(paths[0], paths[1], read_bytes, flags)
+    except FS_ERRORS as exc:
+        # GNU diff reserves exit 1 for "files differ"; trouble (a missing
+        # or unreadable operand) is exit 2.
+        return None, IOResult(exit_code=2,
+                              stderr=format_fs_error("diff", exc, paths))
     exit_code = 1 if output else 0
     return output, IOResult(exit_code=exit_code,
                             cache=[paths[0].mount_path, paths[1].mount_path])

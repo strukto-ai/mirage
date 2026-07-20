@@ -27,6 +27,174 @@
         "stdout": "cross\nxm.txt\nxm_copy.txt\nxm_moved.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_mv_multi",
+      "seq": 747,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo one | tee /data/xm2_m1.txt > /dev/null && echo two | tee /data/xm2_m2.txt > /dev/null && mkdir -p /data2/xm2dir && echo d | tee /data2/xm2dir/seed.txt > /dev/null && mv /data/xm2_m1.txt /data/xm2_m2.txt /data2/xm2dir/ && cat /data2/xm2dir/xm2_m1.txt /data2/xm2dir/xm2_m2.txt && find /data -name 'xm2_m*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_mv_tree",
+      "seq": 748,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/xm2tree/sub && echo a | tee /data/xm2tree/a.txt > /dev/null && echo b | tee /data/xm2tree/sub/b.txt > /dev/null && mv /data/xm2tree /data2/xm2tree && cat /data2/xm2tree/a.txt /data2/xm2tree/sub/b.txt && find /data -name 'xm2tree'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_mv_missing_src",
+      "seq": 749,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mv /data/xm2_nope.txt /data2/xm2_dst.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot stat '/data/xm2_nope.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "xm_mv_partial_missing",
+      "seq": 750,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo keep | tee /data/xm2_real.txt > /dev/null && mv /data/xm2_nope.txt /data/xm2_real.txt /data2/xm2dir/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot stat '/data/xm2_nope.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "xm_mv_glob",
+      "seq": 752,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ga | tee /data/xm2_ga.txt > /dev/null && echo gb | tee /data/xm2_gb.txt > /dev/null && mv /data/xm2_g*.txt /data2/ && cat /data2/xm2_ga.txt /data2/xm2_gb.txt && find /data -name 'xm2_g*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "ga\ngb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_mv_partial_check",
+      "seq": 751,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat /data2/xm2dir/xm2_real.txt && find /data -name 'xm2_real*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep\n",
+        "stderr": ""
+      }
     }
   ]
 }

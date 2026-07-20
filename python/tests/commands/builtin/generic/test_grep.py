@@ -617,3 +617,20 @@ async def test_grep_quiet_count_zero_counts_exits_1():
     )
     assert await _drain_async(output) == b""
     assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_multi_file_missing_operand_matches_still_exit_1():
+    readdir, stat, rb, rs = _make_backend({"/a.txt": b"hello\n"})
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/nope.txt")],
+        ["o"],
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/a.txt:hello\n"
+    assert io.stderr == b"grep: /nope.txt: No such file or directory\n"
+    assert io.exit_code == 1

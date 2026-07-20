@@ -40,6 +40,7 @@ async def rm(
     paths = await ops.resolve_glob(accessor, paths, index)
     recursive = r or R
     verbose_parts: list[str] = []
+    errors: list[str] = []
     removed: dict[str, ByteSource] = {}
     for p in paths:
         try:
@@ -47,7 +48,10 @@ async def rm(
         except FileNotFoundError:
             if f:
                 continue
-            raise
+            # GNU rm reports the operand and keeps removing the rest.
+            errors.append(f"rm: cannot remove '{p.virtual}': "
+                          "No such file or directory")
+            continue
         if s.type == FileType.DIRECTORY:
             if recursive:
                 if ops.rm_r is None:
@@ -60,15 +64,19 @@ async def rm(
                         "rm: directory remove not supported on this backend")
                 await ops.rmdir(accessor, p)
             else:
-                raise IsADirectoryError(
+                errors.append(
                     f"rm: cannot remove '{p.virtual}': Is a directory")
+                continue
         else:
             await ops.require(Operation.UNLINK)(accessor, p)
         removed[p.mount_path] = b""
         if v:
             verbose_parts.append(f"removed '{p.virtual}'")
     output = format_optional_records(verbose_parts) if v else None
-    return output, IOResult(writes=removed)
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return output, IOResult(writes=removed,
+                            stderr=stderr,
+                            exit_code=1 if errors else 0)
 
 
 BUILDER = Builder('rm',

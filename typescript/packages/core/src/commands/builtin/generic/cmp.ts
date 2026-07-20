@@ -15,6 +15,7 @@
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
+import { formatFsError, isFsError } from '../../../utils/errors.ts'
 import { formatRecords } from '../utils/output.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
@@ -43,8 +44,17 @@ export async function cmpGeneric(
   const p0 = paths[0]
   const p1 = paths[1]
   if (p0 === undefined || p1 === undefined) return [null, new IOResult()]
-  let data1 = await materialize(stream(p0))
-  let data2 = await materialize(stream(p1))
+  let data1: Uint8Array
+  let data2: Uint8Array
+  try {
+    data1 = await materialize(stream(p0))
+    data2 = await materialize(stream(p1))
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    // GNU cmp reserves exit 1 for "files differ"; trouble (a missing or
+    // unreadable operand) is exit 2.
+    return [null, new IOResult({ exitCode: 2, stderr: formatFsError('cmp', err, paths) })]
+  }
   if (typeof opts.flags.i === 'string') {
     const skip = Number.parseInt(opts.flags.i, 10)
     data1 = data1.slice(skip)

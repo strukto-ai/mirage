@@ -643,3 +643,20 @@ async def test_rg_no_filename_dir_walk():
     )
     decoded = (await _drain_async(output)).decode()
     assert decoded == "alpha one\nalpha two\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_multi_file_missing_operand_reports_and_continues():
+    readdir, stat, rb, rs = _make_backend({"/a.txt": b"hello\nworld\n"})
+    output, io = await rg(
+        [_spec("/a.txt"), _spec("/nope.txt")],
+        ["o"],
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/a.txt:hello\n/a.txt:world\n"
+    assert io.stderr == b"rg: /nope.txt: No such file or directory\n"
+    assert io.exit_code == 1

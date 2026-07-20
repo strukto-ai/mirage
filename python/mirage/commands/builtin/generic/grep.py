@@ -152,7 +152,11 @@ async def grep(
                                      stderr=stderr)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return format_records(results), IOResult(stderr=stderr)
+            # A failed operand fails the command (deliberate divergence:
+            # GNU grep uses exit 2 for errors, mirage flattens fs errors
+            # to 1); -q above keeps GNU's match-wins rule.
+            return format_records(results), IOResult(
+                exit_code=1 if warnings else 0, stderr=stderr)
 
         if f.recursive:
             pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
@@ -209,7 +213,8 @@ async def grep(
             if not matched:
                 return format_records(all_results), IOResult(exit_code=1,
                                                              stderr=stderr)
-            return format_records(all_results), IOResult(stderr=stderr)
+            return format_records(all_results), IOResult(
+                exit_code=1 if warnings else 0, stderr=stderr)
 
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
                               f.whole_word)
@@ -252,7 +257,8 @@ async def grep(
             if not matched:
                 return format_records(all_results), IOResult(exit_code=1,
                                                              stderr=stderr)
-            return format_records(all_results), IOResult(stderr=stderr)
+            return format_records(all_results), IOResult(
+                exit_code=1 if multi_warnings else 0, stderr=stderr)
 
         first_stat = await st(paths[0].virtual)
         if first_stat.type == FileType.DIRECTORY:

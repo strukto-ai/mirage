@@ -38,6 +38,7 @@ export const RM_BUILDER: Builder = {
       throw new Error('rm: backend provides no remove op')
     }
     const lines: string[] = []
+    const errors: string[] = []
     for (const p of resolved) {
       let isDir = false
       try {
@@ -45,7 +46,9 @@ export const RM_BUILDER: Builder = {
         isDir = st.type === FileType.DIRECTORY
       } catch {
         if (force) continue
-        throw new Error(`rm: cannot remove '${p.virtual}': No such file or directory`)
+        // GNU rm reports the operand and keeps removing the rest.
+        errors.push(`rm: cannot remove '${p.virtual}': No such file or directory`)
+        continue
       }
       if (isDir) {
         // rmR/rmdir are resolved lazily so object stores without a real
@@ -61,7 +64,8 @@ export const RM_BUILDER: Builder = {
           }
           await rmdir(accessor, p)
         } else {
-          throw new Error(`rm: cannot remove '${p.virtual}': Is a directory`)
+          errors.push(`rm: cannot remove '${p.virtual}': Is a directory`)
+          continue
         }
       } else {
         await unlink(accessor, p)
@@ -69,6 +73,14 @@ export const RM_BUILDER: Builder = {
       if (verbose) lines.push(`removed '${p.virtual}'`)
     }
     const out = lines.length > 0 ? formatRecords(lines) : null
-    return [out, new IOResult()]
+    const stderr =
+      errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : undefined
+    return [
+      out,
+      new IOResult({
+        exitCode: errors.length > 0 ? 1 : 0,
+        ...(stderr !== undefined ? { stderr } : {}),
+      }),
+    ]
   },
 }

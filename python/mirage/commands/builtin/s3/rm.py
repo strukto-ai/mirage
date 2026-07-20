@@ -37,27 +37,41 @@ async def _rm(
     remove_dir: bool = False,
     *,
     index: IndexCacheStore,
-) -> None:
+) -> str | None:
+    """Remove one operand, returning a GNU stderr line on failure.
+
+    Args:
+        accessor (S3Accessor): Backend handle.
+        path (PathSpec): The operand to remove.
+        recursive (bool): ``-r``; remove directories and their contents.
+        force (bool): ``-f``; a missing operand is not an error.
+        remove_dir (bool): ``-d``; remove empty directories.
+        index (IndexCacheStore): Cache index threaded into the core ops.
+
+    Returns:
+        str | None: ``rm: cannot remove ...`` line, or None when removed
+        (or skipped under ``-f``).
+    """
+    label = path.virtual
     try:
         s = await stat(accessor, path, index=index)
     except (FileNotFoundError, ValueError):
         if force:
-            return
-        raise
-    label = path.virtual
+            return None
+        return f"rm: cannot remove '{label}': No such file or directory"
     if s.type == FileType.DIRECTORY:
         if recursive:
             await rm_r(accessor, path)
         elif remove_dir:
             children = await readdir(accessor, path, index)
             if children:
-                raise OSError(f"directory not empty: {label}")
+                return f"rm: cannot remove '{label}': Directory not empty"
             await rmdir(accessor, path)
         else:
-            raise IsADirectoryError(
-                f"{label}: is a directory (use recursive=True)")
+            return f"rm: cannot remove '{label}': Is a directory"
     else:
         await unlink(accessor, path)
+    return None
 
 
 @command("rm",
@@ -82,16 +96,24 @@ async def rm(
         raise ValueError("rm: missing operand")
     paths = await resolve_glob(accessor, paths, index)
     verbose_parts: list[str] = []
+    errors: list[str] = []
     removed: dict[str, ByteSource] = {}
     for p in paths:
-        await _rm(accessor,
-                  p,
-                  recursive=r or R,
-                  force=f,
-                  remove_dir=d,
-                  index=index)
+        # GNU rm reports the operand and keeps removing the rest.
+        error = await _rm(accessor,
+                          p,
+                          recursive=r or R,
+                          force=f,
+                          remove_dir=d,
+                          index=index)
+        if error is not None:
+            errors.append(error)
+            continue
         removed[p.mount_path] = b""
         if v:
             verbose_parts.append(f"removed '{p.virtual}'")
     output = format_optional_records(verbose_parts) if v else None
-    return output, IOResult(writes=removed)
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return output, IOResult(writes=removed,
+                            stderr=stderr,
+                            exit_code=1 if errors else 0)

@@ -12,7 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+
 from mirage.types import PathSpec
+
+
+class OperationNotSupportedError(OSError):
+    """A mount was asked for an op its backend does not register.
+
+    Raised at the op-resolution boundary (``Mount.execute_op``) so a
+    capability gap surfaces as a recoverable filesystem error
+    (ENOTSUP, "Operation not supported") instead of an internal
+    AttributeError: GNU-wise the backend behaves like a filesystem
+    that does not allow the operation.
+    """
+
 
 _FS_STRERROR: list[tuple[type[OSError], str]] = [
     (FileNotFoundError, "No such file or directory"),
@@ -20,6 +34,7 @@ _FS_STRERROR: list[tuple[type[OSError], str]] = [
     (IsADirectoryError, "Is a directory"),
     (FileExistsError, "File exists"),
     (PermissionError, "Permission denied"),
+    (OperationNotSupportedError, "Operation not supported"),
 ]
 
 # The recoverable per-operand filesystem errors: every catch site that
@@ -43,6 +58,24 @@ def enotdir(path: object) -> NotADirectoryError:
 
 def eisdir(path: object) -> IsADirectoryError:
     return IsADirectoryError(_virtual_of(path))
+
+
+def enotsup(resource: str, op_name: str,
+            path: object) -> OperationNotSupportedError:
+    """Missing-capability error for an op a backend does not register.
+
+    ``filename`` carries the virtual path so ``format_fs_error`` reports
+    the operand, while the strerror text keeps the resource and op name
+    for raw tracebacks.
+
+    Args:
+        resource (str): Resource name of the mount that lacks the op.
+        op_name (str): The unresolvable op (e.g. ``unlink``).
+        path (object): The operand; ``virtual`` is the reported spelling.
+    """
+    return OperationNotSupportedError(errno.ENOTSUP,
+                                      f"{resource}: no op {op_name!r}",
+                                      _virtual_of(path))
 
 
 def fs_strerror(exc: BaseException) -> str | None:

@@ -23,6 +23,12 @@
           "resource": "ram",
           "backend": "memory",
           "fixture": "columnar/v1"
+        },
+        {
+          "path": "/ro",
+          "resource": "ram",
+          "backend": "memory",
+          "mode": "read"
         }
       ]
     },
@@ -49,6 +55,12 @@
           "resource": "disk",
           "backend": "tmpdir",
           "fixture": "columnar/v1"
+        },
+        {
+          "path": "/ro",
+          "resource": "disk",
+          "backend": "tmpdir",
+          "mode": "read"
         }
       ]
     },
@@ -518,6 +530,11 @@
           "path": "/slides",
           "resource": "gslides",
           "backend": "gslides"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "memory"
         }
       ]
     }

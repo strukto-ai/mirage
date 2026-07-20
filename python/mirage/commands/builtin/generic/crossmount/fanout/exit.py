@@ -15,17 +15,26 @@
 from mirage.commands.builtin.generic.crossmount.types import Cmd
 
 
-def combined_exit(cmd_name: str, codes: list[int]) -> int:
-    # grep-style: an error (2) dominates, then any match wins (0), then
-    # no-match (1). Everything else: worst operand wins.
+def combined_exit(cmd_name: str,
+                  codes: list[int],
+                  errored: list[bool] | None = None,
+                  quiet: bool = False) -> int:
+    # grep-style: a usage error (2) dominates, then a failed operand (a
+    # read error, seen as exit 1 with stderr) forces 1 even when another
+    # operand matched, then any match wins (0), then no-match (1).
+    # ``-q`` keeps GNU's match-wins rule over errors. Everything else:
+    # worst operand wins.
     #
     # Deliberate divergence from GNU: a per-operand read error (missing
-    # file) does not raise the exit to 2. The single-mount grep reports the
-    # operand on stderr and still exits 0 on a match, and integ pins that,
-    # so the fan-out combine mirrors it rather than GNU's errors-win rule.
+    # file) exits 1, not GNU's 2 — the single-mount grep/rg generics
+    # flatten fs errors to 1 and this combine mirrors them.
     if cmd_name in (Cmd.GREP, Cmd.RG):
         if any(code > 1 for code in codes):
             return max(codes)
+        if quiet and 0 in codes:
+            return 0
+        if errored is not None and any(errored):
+            return 1
         if 0 in codes:
             return 0
         return max(codes, default=0)

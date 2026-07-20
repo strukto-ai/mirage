@@ -31,6 +31,7 @@ import {
   pathExists,
   type BackendKeyFn,
 } from '../utils/copy.ts'
+import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
@@ -110,15 +111,37 @@ export async function cpGeneric(
           const entryDst = dstBase + entry.slice(srcBase.length)
           const entryDstSpec = PathSpec.fromStrPath(entryDst)
           if (isDir) {
-            if (!(await isDirectory(stat, entryDstSpec, index))) {
-              await strategy.mkdir(entryDstSpec)
-              writes[entryDst] = new Uint8Array()
-              if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
+            try {
+              if (!(await isDirectory(stat, entryDstSpec, index))) {
+                await strategy.mkdir(entryDstSpec)
+                writes[entryDst] = new Uint8Array()
+                if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
+              }
+            } catch (err) {
+              // GNU stops this source: the children of a directory it
+              // could not create cannot land.
+              if (!isFsError(err)) throw err
+              errors.push(`cp: cannot create directory '${entryDst}': ${String(fsStrerror(err))}`)
+              break
             }
             continue
           }
           if (noClobber && (await pathExists(stat, entryDstSpec))) continue
-          await strategy.write(entryDstSpec, await strategy.readBytes(PathSpec.fromStrPath(entry)))
+          let data: Uint8Array
+          try {
+            data = await strategy.readBytes(PathSpec.fromStrPath(entry))
+          } catch (err) {
+            if (!isFsError(err)) throw err
+            errors.push(`cp: cannot open '${entry}' for reading: ${String(fsStrerror(err))}`)
+            continue
+          }
+          try {
+            await strategy.write(entryDstSpec, data)
+          } catch (err) {
+            if (!isFsError(err)) throw err
+            errors.push(`cp: cannot create regular file '${entryDst}': ${String(fsStrerror(err))}`)
+            continue
+          }
           writes[entryDst] = new Uint8Array()
           if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
         }
@@ -146,7 +169,23 @@ export async function cpGeneric(
     }
     if (noClobber && (await pathExists(stat, target))) continue
     if (isPrimitiveCopy(strategy)) {
-      await strategy.write(target, await strategy.readBytes(src))
+      let data: Uint8Array
+      try {
+        data = await strategy.readBytes(src)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(`cp: cannot open '${src.virtual}' for reading: ${String(fsStrerror(err))}`)
+        continue
+      }
+      try {
+        await strategy.write(target, data)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(
+          `cp: cannot create regular file '${target.virtual}': ${String(fsStrerror(err))}`,
+        )
+        continue
+      }
     } else {
       await strategy.copy(src, target)
     }

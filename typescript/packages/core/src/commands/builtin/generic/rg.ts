@@ -17,6 +17,7 @@ import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { rebaseRaw } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
@@ -200,7 +201,10 @@ export async function rgGeneric(
       return [new Uint8Array(0), io]
     }
     const out: ByteSource = ENC.encode(results.join('\n') + '\n')
-    const io = new IOResult(stderr !== undefined ? { stderr } : {})
+    const io = new IOResult({
+      exitCode: warnings.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    })
     return [out, io]
   }
 
@@ -250,7 +254,12 @@ export async function rgGeneric(
       return [new Uint8Array(0), io]
     }
     const out: ByteSource = ENC.encode(results.join('\n') + '\n')
-    const io = new IOResult(stderr !== undefined ? { stderr } : {})
+    // A failed operand fails the command (deliberate divergence: ripgrep
+    // uses exit 2 for errors, mirage flattens fs errors to 1).
+    const io = new IOResult({
+      exitCode: warnings.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    })
     return [out, io]
   }
 
@@ -267,13 +276,33 @@ export async function rgGeneric(
     }
     if (paths.length > 1 || flags.withFilename) {
       const results: string[] = []
+      const warnings: string[] = []
       for (const p of paths) {
-        const counted = await materialize(grepStream(stream(p), pat, streamOpts))
+        let counted: Uint8Array
+        try {
+          counted = await materialize(grepStream(stream(p), pat, streamOpts))
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          // ripgrep reports the failed operand and keeps searching the rest.
+          warnings.push(`rg: ${p.rawPath}: ${String(fsStrerror(err))}`)
+          continue
+        }
         const n = Number.parseInt(DEC.decode(counted).trim() || '0', 10)
         if (n > 0) results.push(label ? `${p.rawPath}:${String(n)}` : String(n))
       }
-      if (results.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(results.join('\n') + '\n'), new IOResult()]
+      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
+      if (results.length === 0)
+        return [
+          new Uint8Array(0),
+          new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
+        ]
+      return [
+        ENC.encode(results.join('\n') + '\n'),
+        new IOResult({
+          exitCode: warnings.length > 0 ? 1 : 0,
+          ...(stderr !== undefined ? { stderr } : {}),
+        }),
+      ]
     }
     const io = new IOResult()
     const counted = nonzeroCountStream(grepStream(stream(first), pat, streamOpts))

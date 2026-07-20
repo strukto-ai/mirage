@@ -37,19 +37,22 @@ interface RmOpts {
   removeDir: boolean
 }
 
+// Remove one operand, returning a GNU stderr line on failure (null when
+// removed, or skipped under -f).
 async function rmOne(
   accessor: S3Accessor,
   path: PathSpec,
   opts: RmOpts,
   index: CommandOpts['index'],
-): Promise<void> {
+): Promise<string | null> {
+  const label = path.virtual
   let isDir = false
   try {
     const st = await s3Stat(accessor, path, index ?? undefined)
     isDir = st.type === FileType.DIRECTORY
-  } catch (err) {
-    if (opts.force) return
-    throw err
+  } catch {
+    if (opts.force) return null
+    return `rm: cannot remove '${label}': No such file or directory`
   }
   if (isDir) {
     if (opts.recursive) {
@@ -57,15 +60,16 @@ async function rmOne(
     } else if (opts.removeDir) {
       const children = await s3Readdir(accessor, path, index ?? undefined)
       if (children.length > 0) {
-        throw new Error(`directory not empty: ${path.virtual}`)
+        return `rm: cannot remove '${label}': Directory not empty`
       }
       await s3Rmdir(accessor, path)
     } else {
-      throw new Error(`${path.virtual}: is a directory (use recursive=True)`)
+      return `rm: cannot remove '${label}': Is a directory`
     }
   } else {
     await s3Unlink(accessor, path)
   }
+  return null
 }
 
 async function rmCommand(
@@ -83,19 +87,28 @@ async function rmCommand(
   const removeDir = opts.flags.d === true
   const verbose = opts.flags.v === true
   const verboseParts: string[] = []
+  const errors: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const p of resolved) {
-    try {
-      await rmOne(accessor, p, { recursive, force, removeDir }, opts.index)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+    // GNU rm reports the operand and keeps removing the rest.
+    const error = await rmOne(accessor, p, { recursive, force, removeDir }, opts.index)
+    if (error !== null) {
+      errors.push(error)
+      continue
     }
     writes[p.mountPath] = new Uint8Array()
     if (verbose) verboseParts.push(`removed '${p.virtual}'`)
   }
   const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
-  return [output, new IOResult({ writes })]
+  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
+  return [
+    output,
+    new IOResult({
+      writes,
+      exitCode: errors.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    }),
+  ]
 }
 
 export const S3_RM = command({

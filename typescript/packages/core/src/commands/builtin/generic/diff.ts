@@ -19,6 +19,7 @@ import { FileType, type FileStat, PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
+import { formatFsError, isFsError } from '../../../utils/errors.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_helper.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
@@ -173,12 +174,19 @@ export async function diffGeneric(
   const p1 = paths[1]
   if (p0 === undefined || p1 === undefined) return [null, new IOResult()]
   let output: Uint8Array | undefined
-  if (opts.flags.r === true && readdir !== undefined && stat !== undefined) {
-    const bothDirs =
-      (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
-    if (bothDirs) output = await diffDirs(readdir, stat, stream, p0, p1, flags)
+  try {
+    if (opts.flags.r === true && readdir !== undefined && stat !== undefined) {
+      const bothDirs =
+        (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
+      if (bothDirs) output = await diffDirs(readdir, stat, stream, p0, p1, flags)
+    }
+    output ??= await diffPair(stream, p0, p1, flags)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    // GNU diff reserves exit 1 for "files differ"; trouble (a missing or
+    // unreadable operand) is exit 2.
+    return [null, new IOResult({ exitCode: 2, stderr: formatFsError('diff', err, paths) })]
   }
-  output ??= await diffPair(stream, p0, p1, flags)
   const exitCode = output.byteLength > 0 ? 1 : 0
   const out: ByteSource = output
   return [out, new IOResult({ exitCode, cache: [p0.mountPath, p1.mountPath] })]

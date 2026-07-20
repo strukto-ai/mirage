@@ -20,6 +20,151 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 path_exists)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import MoveStrategy, PathSpec, PrimitiveMove, StatFn
+from mirage.utils.errors import FS_ERRORS, fs_strerror
+
+
+async def _copy_entries(
+    cmd_name: str,
+    strategy: PrimitiveMove,
+    stat: StatFn,
+    src: PathSpec,
+    target: PathSpec,
+    entries: list[tuple[PathSpec, bool]],
+    errors: list[str],
+) -> tuple[bool, bool]:
+    """Copy a walked source tree entry by entry with GNU per-entry errors.
+
+    A failed mkdir aborts the source (its children cannot be created); a
+    failed read or write is reported and the remaining entries still copy,
+    like GNU cp/mv.
+
+    Args:
+        cmd_name (str): Command name for the error prefix (``cp``/``mv``).
+        strategy (PrimitiveMove): Transfer primitives for both mounts.
+        stat (StatFn): Stats a path; raises when missing.
+        src (PathSpec): Source operand the entries were walked from.
+        target (PathSpec): Destination root for the copied tree.
+        entries (list[tuple[PathSpec, bool]]): ``walk`` output, parents
+            first.
+        errors (list[str]): Collected stderr lines, appended in place.
+
+    Returns:
+        tuple[bool, bool]: ``(copied_all, wrote_any)`` — whether every
+        entry landed, and whether the destination changed at all.
+    """
+    copied_all = True
+    wrote_any = False
+    for entry, is_dir in entries:
+        entry_dst = descendant_path(
+            target,
+            target.virtual.rstrip("/") +
+            entry.virtual[len(src.virtual.rstrip("/")):],
+        )
+        if is_dir:
+            try:
+                if not await is_directory(stat, entry_dst):
+                    await strategy.mkdir(entry_dst)
+                    wrote_any = True
+            except FS_ERRORS as exc:
+                errors.append(f"{cmd_name}: cannot create directory "
+                              f"'{entry_dst.virtual}': {fs_strerror(exc)}")
+                return False, wrote_any
+            continue
+        try:
+            data = await strategy.read_bytes(entry)
+        except FS_ERRORS as exc:
+            errors.append(f"{cmd_name}: cannot open '{entry.virtual}' "
+                          f"for reading: {fs_strerror(exc)}")
+            copied_all = False
+            continue
+        try:
+            # write takes bytes, not a stream: file materialized here.
+            await strategy.write(entry_dst, data=data)
+        except FS_ERRORS as exc:
+            errors.append(f"{cmd_name}: cannot create regular file "
+                          f"'{entry_dst.virtual}': {fs_strerror(exc)}")
+            copied_all = False
+            continue
+        wrote_any = True
+    return copied_all, wrote_any
+
+
+async def _entry_gone(strategy: PrimitiveMove, stat: StatFn, entry: PathSpec,
+                      is_dir: bool) -> bool:
+    """Confirm a failed removal actually left something behind.
+
+    On dirless object stores a directory vanishes with its last child, so
+    a failed ``rmdir`` of a path that no longer exists (or that no longer
+    lists any children — an existing empty directory is impossible there)
+    is a completed removal, not an error. The listing check covers index
+    backends whose per-entry stat can lag a just-unlinked child within a
+    command.
+
+    Args:
+        strategy (PrimitiveMove): Transfer primitives for both mounts.
+        stat (StatFn): Stats a path; raises when missing.
+        entry (PathSpec): The path whose removal failed.
+        is_dir (bool): Whether the entry is a directory.
+
+    Returns:
+        bool: True when nothing of the source remains at ``entry``.
+    """
+    if not await path_exists(stat, entry):
+        return True
+    if not is_dir:
+        return False
+    try:
+        children = await strategy.readdir(entry)
+    except FS_ERRORS:
+        return True
+    return not children
+
+
+async def _remove_entries(
+    strategy: PrimitiveMove,
+    stat: StatFn,
+    entries: list[tuple[PathSpec, bool]],
+    errors: list[str],
+) -> tuple[bool, bool]:
+    """Remove copied source entries children first, GNU rm style.
+
+    A failed removal is reported per entry (``mv: cannot remove ...``) and
+    the remaining entries are still attempted; directories with a failed
+    descendant are skipped silently like GNU, which never reports the
+    not-empty ancestors of a file it could not remove. A failure is
+    confirmed via ``_entry_gone`` first, so a source that already vanished
+    (dirless object stores) is a completed removal, not an error.
+
+    Args:
+        strategy (PrimitiveMove): Transfer primitives for both mounts.
+        stat (StatFn): Stats a path; raises when missing.
+        entries (list[tuple[PathSpec, bool]]): ``walk`` output, parents
+            first; removal runs it in reverse.
+        errors (list[str]): Collected stderr lines, appended in place.
+
+    Returns:
+        tuple[bool, bool]: ``(removed_any, removed_all)`` — whether the
+        source changed at all, and whether it is fully gone.
+    """
+    failed: list[str] = []
+    removed_any = False
+    for entry, is_dir in reversed(entries):
+        base = entry.virtual.rstrip("/")
+        if is_dir and any(f.startswith(base + "/") for f in failed):
+            failed.append(base)
+            continue
+        try:
+            await (strategy.rmdir if is_dir else strategy.unlink)(entry)
+        except FS_ERRORS as exc:
+            if await _entry_gone(strategy, stat, entry, is_dir):
+                removed_any = True
+                continue
+            errors.append(f"mv: cannot remove '{entry.virtual}': "
+                          f"{fs_strerror(exc)}")
+            failed.append(base)
+            continue
+        removed_any = True
+    return removed_any, not failed
 
 
 async def mv(
@@ -36,6 +181,10 @@ async def mv(
     ``NativeMove`` uses an atomic backend rename. ``PrimitiveMove`` handles
     cross-mount moves by copying the tree (parents first, via ``walk`` plus
     ``mkdir``/``write``) and then removing the source children first.
+    Failures follow GNU mv on a cross-device move: a copy failure keeps the
+    whole source and skips removal, a removal failure (e.g. a source mount
+    with no ``unlink``) reports ``cannot remove`` and leaves the copied
+    destination in place; either way the remaining sources still move.
 
     Args:
         paths (list[PathSpec]): Source operands followed by the destination.
@@ -75,25 +224,26 @@ async def mv(
             continue
         if isinstance(strategy, PrimitiveMove):
             entries = await walk(strategy.readdir, stat, src)
-            for entry, is_dir in entries:
-                entry_dst = descendant_path(
-                    target,
-                    target.virtual.rstrip("/") +
-                    entry.virtual[len(src.virtual.rstrip("/")):],
-                )
-                if is_dir:
-                    if not await is_directory(stat, entry_dst):
-                        await strategy.mkdir(entry_dst)
-                else:
-                    # write takes bytes, not a stream: file materialized here.
-                    await strategy.write(entry_dst,
-                                         data=await strategy.read_bytes(entry))
-            for entry, is_dir in reversed(entries):
-                await (strategy.rmdir if is_dir else strategy.unlink)(entry)
+            copied_all, wrote_any = await _copy_entries(
+                "mv", strategy, stat, src, target, entries, errors)
+            if wrote_any:
+                writes[target.mount_path] = b""
+            if not copied_all:
+                # GNU keeps the whole source tree when any copy failed;
+                # the destination keeps the entries that landed.
+                continue
+            removed_any, removed_all = await _remove_entries(
+                strategy, stat, entries, errors)
+            if removed_any:
+                writes[src.mount_path] = b""
+            if not removed_all:
+                # GNU leaves the copied destination in place and reports
+                # the source entries it could not remove.
+                continue
         else:
             await strategy.rename(src, target)
-        writes[src.mount_path] = b""
-        writes[target.mount_path] = b""
+            writes[src.mount_path] = b""
+            writes[target.mount_path] = b""
         if v:
             lines.append(f"'{src.virtual}' -> '{target.virtual}'")
     output = "\n".join(lines) + "\n" if lines else None

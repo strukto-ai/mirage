@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "xm_diff_differ",
-      "seq": 743,
+      "id": "xm_stat_multi",
+      "seq": 765,
       "targets": [
         "ram",
         "disk",
@@ -21,16 +21,16 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf 'same\\nold\\n' | tee /data/xdiff.txt > /dev/null && printf 'same\\nnew\\n' | tee /data2/xdiff.txt > /dev/null && diff /data/xdiff.txt /data2/xdiff.txt",
+      "command": "stat -c '%F %n' /data/b.txt /data2/xm.txt",
       "expect": {
-        "exit": 1,
-        "stdout": "2c2\n< old\n---\n> new\n",
+        "exit": 0,
+        "stdout": "regular file /data/b.txt\nregular file /data2/xm.txt\n",
         "stderr": ""
       }
     },
     {
-      "id": "xm_diff_missing",
-      "seq": 775,
+      "id": "xm_stat_missing",
+      "seq": 766,
       "targets": [
         "ram",
         "disk",
@@ -49,11 +49,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "diff /data/xrl_nope.txt /data2/xm.txt",
+      "command": "stat -c '%n' /data/b.txt /data2/xpr_nope.txt",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "diff: /data/xrl_nope.txt: No such file or directory\n"
+        "exit": 1,
+        "stdout": "/data/b.txt\n",
+        "stderr": "stat: /data2/xpr_nope.txt: No such file or directory\n"
       }
     }
   ]

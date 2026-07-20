@@ -14,7 +14,7 @@
 
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { formatFsError } from '../../../../utils/errors.ts'
+import { formatFsError, isFsError } from '../../../../utils/errors.ts'
 import { strategyFor } from './detect.ts'
 import { runFanout } from './fanout/index.ts'
 import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
@@ -51,6 +51,10 @@ export async function handleCrossMount(
     }
     return await runFanout(cmd, scopes, textArgs, flagKwargs, runSingle, stdin)
   } catch (err) {
+    // Only typed fs errors format as a GNU operand line, matching the
+    // Python chokepoint (FS_ERRORS). Internal errors keep propagating
+    // instead of being mangled into a plausible-looking stderr line.
+    if (!isFsError(err)) throw err
     return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, scopes) })]
   }
 }

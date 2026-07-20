@@ -21,6 +21,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import OperationNotSupportedError
 
 
 def _resolve_target(o: str | PathSpec, cwd: PathSpec | None) -> PathSpec:
@@ -86,7 +87,8 @@ async def curl(
             scope = _resolve_target(o, cwd)
             try:
                 await dispatch("write", scope, data=result)
-            except (PermissionError, AttributeError, ValueError) as exc:
+            except (PermissionError, OperationNotSupportedError,
+                    ValueError) as exc:
                 err = f"curl: {o_str}: {exc}\n".encode()
                 return None, IOResult(exit_code=1, stderr=err)
         msg = f"saved to {o_str}".encode()

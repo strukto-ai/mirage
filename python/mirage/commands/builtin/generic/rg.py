@@ -23,6 +23,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.stream import exit_on_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import rebase_raw
 
@@ -183,16 +184,27 @@ async def rg(
             stderr = format_optional_records(warnings_f)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return format_records(results), IOResult(stderr=stderr)
+            # A failed operand fails the command (deliberate divergence:
+            # ripgrep uses exit 2 for errors, mirage flattens fs errors
+            # to 1).
+            return format_records(results), IOResult(
+                exit_code=1 if warnings_f else 0, stderr=stderr)
 
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
                               f.whole_word)
 
         if len(paths) > 1 or f.with_filename:
             all_results: list[str] = []
+            warnings: list[str] = []
             for p in paths:
-                data = split_lines((await
-                                    rb(p.virtual)).decode(errors="replace"))
+                try:
+                    raw = await rb(p.virtual)
+                except FS_ERRORS as exc:
+                    # ripgrep reports the failed operand and keeps
+                    # searching the rest.
+                    warnings.append(f"rg: {p.raw_path}: {fs_strerror(exc)}")
+                    continue
+                data = split_lines(raw.decode(errors="replace"))
                 hits = grep_lines(p.raw_path, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
                                   f.only_matching, f.max_count)
@@ -206,9 +218,11 @@ async def rg(
                     all_results.extend(f"{p.raw_path}:{r}" for r in hits)
                 else:
                     all_results.extend(hits)
+            stderr = format_optional_records(warnings)
             if not all_results:
-                return b"", IOResult(exit_code=1)
-            return format_records(all_results), IOResult()
+                return b"", IOResult(exit_code=1, stderr=stderr)
+            return format_records(all_results), IOResult(
+                exit_code=1 if warnings else 0, stderr=stderr)
 
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(paths[0])

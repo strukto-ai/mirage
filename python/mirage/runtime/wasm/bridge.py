@@ -16,6 +16,7 @@ import asyncio
 from typing import Any, Callable
 
 from mirage.types import PathSpec
+from mirage.utils.errors import OperationNotSupportedError
 
 
 class SyncDispatch:
@@ -45,8 +46,9 @@ class SyncDispatch:
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         try:
             result, _ = future.result()
-        except AttributeError as exc:
-            # execute_op raises AttributeError for an op the mount's
-            # resource does not register; surface ENOTSUP to the guest.
+        except OperationNotSupportedError as exc:
+            # execute_op raises OperationNotSupportedError for an op the
+            # mount's resource does not register; surface ENOTSUP to the
+            # guest.
             raise NotImplementedError(str(exc)) from exc
         return result

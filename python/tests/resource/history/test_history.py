@@ -20,6 +20,7 @@ from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.resource.history import HistoryViewResource
 from mirage.types import FileType, MountMode
+from mirage.utils.errors import OperationNotSupportedError
 from mirage.workspace.mount.registry import MountRegistry
 
 
@@ -78,7 +79,7 @@ def test_stat_op_reports_file():
 
 def test_write_op_not_registered():
     mount = _mounted(_observer_with([]))
-    with pytest.raises(AttributeError):
+    with pytest.raises(OperationNotSupportedError):
         asyncio.run(mount.execute_op("write", "/.bash_history", b"x"))
 
 

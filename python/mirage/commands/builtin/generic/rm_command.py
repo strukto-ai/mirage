@@ -22,6 +22,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 
 def make_rm(
@@ -57,18 +58,31 @@ def make_rm(
             raise ValueError("rm: missing operand")
         paths = await glob_fn(accessor, paths, index)
         verbose_parts: list[str] = []
+        errors: list[str] = []
         removed: dict[str, ByteSource] = {}
         for p in paths:
             try:
                 await unlink(accessor, p, index)
-            except (FileNotFoundError, ValueError):
+            except FS_ERRORS as exc:
+                if f and isinstance(exc, FileNotFoundError):
+                    continue
+                # GNU rm reports the operand and keeps removing the rest.
+                errors.append(
+                    f"rm: cannot remove '{p.virtual}': {fs_strerror(exc)}")
+                continue
+            except ValueError:
                 if f:
                     continue
-                raise
+                errors.append(f"rm: cannot remove '{p.virtual}': "
+                              "No such file or directory")
+                continue
             removed[p.mount_path] = b""
             if v:
                 verbose_parts.append(f"removed '{p.virtual}'")
         output = format_optional_records(verbose_parts) if v else None
-        return output, IOResult(writes=removed)
+        stderr = ("\n".join(errors) + "\n").encode() if errors else None
+        return output, IOResult(writes=removed,
+                                stderr=stderr,
+                                exit_code=1 if errors else 0)
 
     return rm

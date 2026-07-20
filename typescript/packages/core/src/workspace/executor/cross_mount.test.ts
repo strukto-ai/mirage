@@ -264,7 +264,8 @@ describe('handleCrossMount — cmp', () => {
     })
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/missing')]
     const [, io] = await handleCrossMount('cmp', paths, [], {}, d, runSingleNoop, null, 'cmp')
-    expect(io.exitCode).toBe(1)
+    // GNU cmp reserves exit 1 for "files differ"; trouble is exit 2.
+    expect(io.exitCode).toBe(2)
     expect(decode(await materialize(io.stderr))).toBe(
       'cmp: /disk/missing: No such file or directory\n',
     )
@@ -281,8 +282,13 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
     ) => Promise<[unknown, IOResult]>
   >(() => Promise.resolve<[unknown, IOResult]>([null, new IOResult()]))
 
+  // Per-operand [stdout, exit, stderr?]; stderr present only when the fake
+  // operand run actually errored (a grep no-match is exit 1 with no stderr).
   const runSingleFrom =
-    (perOperand: Record<string, [string, number]>, calls: Record<string, unknown>[]): RunSingle =>
+    (
+      perOperand: Record<string, [string, number, string?]>,
+      calls: Record<string, unknown>[],
+    ): RunSingle =>
     (cmdName, paths, texts, flagKwargs, opts) => {
       calls.push({
         cmd: cmdName,
@@ -294,7 +300,7 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
       const key = paths[0]?.virtual ?? ''
       const entry = perOperand[key] ?? ['', 0]
       const io = new IOResult({ exitCode: entry[1] })
-      if (entry[1] !== 0) io.stderr = new TextEncoder().encode(`${cmdName}: ${key}: error\n`)
+      if (entry[2] !== undefined) io.stderr = new TextEncoder().encode(entry[2])
       return Promise.resolve([new TextEncoder().encode(entry[0]), io])
     }
 
@@ -373,6 +379,21 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
     expect(io.exitCode).toBe(0)
   })
 
+  it('grep failed operand forces exit 1 even when another operand matched', async () => {
+    const calls: Record<string, unknown>[] = []
+    const rs = runSingleFrom(
+      {
+        '/ram/a': ['', 1, 'grep: /ram/a: No such file or directory\n'],
+        '/disk/b': ['/disk/b:x\n', 0],
+      },
+      calls,
+    )
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
+    const [, io] = await handleCrossMount('grep', paths, ['x'], {}, noDispatch, rs, null, 'grep')
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe('grep: /ram/a: No such file or directory\n')
+  })
+
   it('wc re-totals per-operand rows with one shared width', async () => {
     const calls: Record<string, unknown>[] = []
     const rs = runSingleFrom(
@@ -387,7 +408,13 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
 
   it('sha256sum concatenates per-operand lines and fails on any failure', async () => {
     const calls: Record<string, unknown>[] = []
-    const rs = runSingleFrom({ '/ram/a': ['', 1], '/disk/b': ['h  /disk/b\n', 0] }, calls)
+    const rs = runSingleFrom(
+      {
+        '/ram/a': ['', 1, 'sha256sum: /ram/a: No such file or directory\n'],
+        '/disk/b': ['h  /disk/b\n', 0],
+      },
+      calls,
+    )
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
     const [out, io] = await handleCrossMount(
       'sha256sum',

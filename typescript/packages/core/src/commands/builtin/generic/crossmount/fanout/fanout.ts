@@ -82,9 +82,13 @@ export async function runFanout(
   }
 
   const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, stdinBytes)
+  const errored = results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null)
+  const quiet = cmdName === Cmd.GREP && flags.q === true
   const exitCode = combinedExit(
     cmdName,
     results.map((r) => r.io.exitCode),
+    errored,
+    quiet,
   )
 
   let body: Uint8Array

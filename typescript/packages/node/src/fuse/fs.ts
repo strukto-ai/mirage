@@ -16,6 +16,7 @@ import { posix } from 'node:path'
 import {
   type FileStat,
   FileType,
+  isMissingOp,
   type OpRecord,
   PathSpec,
   runWithSession,
@@ -521,10 +522,7 @@ export class MirageFS {
         try {
           await this.ws.dispatch('create', this.resolve(path))
         } catch (dispatchErr) {
-          const msg = (
-            dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr)
-          ).toLowerCase()
-          if (!msg.includes('no op')) throw dispatchErr
+          if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
           await this.writeFile(path, new Uint8Array(0))
         }
         const fh = this.nextFh++
@@ -654,10 +652,7 @@ export class MirageFS {
         try {
           await this.ws.dispatch('truncate', this.resolve(path), [size])
         } catch (dispatchErr) {
-          const msg = (
-            dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr)
-          ).toLowerCase()
-          if (!msg.includes('no op')) throw dispatchErr
+          if (!isMissingOp(dispatchErr, 'truncate')) throw dispatchErr
           const data = await this.ws.fs
             .readFile(this.resolve(path), { raw: true })
             .catch(() => new Uint8Array(0))

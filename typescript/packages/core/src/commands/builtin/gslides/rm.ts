@@ -20,6 +20,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { formatRecords } from '../utils/output.ts'
 
 const resolveGlob = resolveGlobOf(GSLIDES_IO)
@@ -39,6 +40,7 @@ async function rmCommand(
   const force = opts.flags.f === true
   const verbose = opts.flags.v === true
   const verboseParts: string[] = []
+  const errors: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const p of resolved) {
     try {
@@ -46,14 +48,24 @@ async function rmCommand(
     } catch (err) {
       const code = (err as { code?: string }).code
       if (force && code === 'ENOENT') continue
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+      if (!isFsError(err)) throw err
+      // GNU rm reports the operand and keeps removing the rest.
+      errors.push(`rm: cannot remove '${p.virtual}': ${String(fsStrerror(err))}`)
+      continue
     }
     writes[p.mountPath] = new Uint8Array()
     if (verbose) verboseParts.push(`removed '${p.virtual}'`)
   }
   const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
-  return [output, new IOResult({ writes })]
+  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
+  return [
+    output,
+    new IOResult({
+      writes,
+      exitCode: errors.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    }),
+  ]
 }
 
 export const GSLIDES_RM = command({

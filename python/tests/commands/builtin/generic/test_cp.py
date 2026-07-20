@@ -17,6 +17,7 @@ import pytest
 from mirage.commands.builtin.generic.cp import cp
 from mirage.types import (FileStat, FileType, NativeCopy, PathSpec,
                           PrimitiveCopy)
+from mirage.utils.errors import enotsup
 
 
 def _spec(path: str) -> PathSpec:
@@ -211,3 +212,92 @@ async def test_native_copy_records_no_reads():
     _, io = await _run(files, set(), ["/a.txt", "/copy.txt"])
     assert io.reads == {}
     assert io.cache == []
+
+
+def _make_primitive(files: dict[str, bytes],
+                    dirs: set[str],
+                    *,
+                    read_fails: dict | None = None,
+                    write_fails: dict | None = None):
+    stat, _, _ = _make_backend(files, dirs)
+    read_err = read_fails or {}
+    write_err = write_fails or {}
+
+    async def read_bytes(p) -> bytes:
+        if _key(p) in read_err:
+            raise read_err[_key(p)]
+        return files[_key(p)]
+
+    async def write(p, data: bytes) -> None:
+        if _key(p) in write_err:
+            raise write_err[_key(p)]
+        files[_key(p)] = data
+
+    async def mkdir(p) -> None:
+        dirs.add(_key(p))
+
+    async def readdir(p) -> list[str]:
+        base = _key(p) + "/"
+        children = {
+            base + k[len(base):].split("/", 1)[0]
+            for k in set(files) | dirs if k.startswith(base)
+        }
+        return sorted(children)
+
+    strategy = PrimitiveCopy(read_bytes=read_bytes,
+                             write=write,
+                             mkdir=mkdir,
+                             readdir=readdir)
+    return stat, strategy
+
+
+async def _run_primitive(files, dirs, paths, *, recursive=False, **fail_kw):
+    stat, strategy = _make_primitive(files, dirs, **fail_kw)
+    return await cp([_spec(p) for p in paths],
+                    strategy=strategy,
+                    stat=stat,
+                    recursive=recursive,
+                    n=False,
+                    v=False)
+
+
+@pytest.mark.asyncio
+async def test_primitive_read_failure_reports_cannot_open():
+    files = {"/src/a.txt": b"AAA", "/src/b.txt": b"BBB", "/d/keep": b"K"}
+    _, io = await _run_primitive(
+        files, {"/src", "/d"}, ["/src/a.txt", "/src/b.txt", "/d"],
+        read_fails={"/src/a.txt": PermissionError("/src/a.txt")})
+    assert io.exit_code == 1
+    assert io.stderr == (b"cp: cannot open '/src/a.txt' for reading: "
+                         b"Permission denied\n")
+    assert "/d/a.txt" not in files
+    assert files["/d/b.txt"] == b"BBB"
+
+
+@pytest.mark.asyncio
+async def test_primitive_write_failure_reports_cannot_create():
+    files = {"/src/a.txt": b"AAA", "/d/keep": b"K"}
+    _, io = await _run_primitive(
+        files, {"/src", "/d"}, ["/src/a.txt", "/d"],
+        write_fails={"/d/a.txt": enotsup("notion", "write", "/d/a.txt")})
+    assert io.exit_code == 1
+    assert io.stderr == (b"cp: cannot create regular file '/d/a.txt': "
+                         b"Operation not supported\n")
+    assert files["/src/a.txt"] == b"AAA"
+    assert io.reads == {}
+
+
+@pytest.mark.asyncio
+async def test_primitive_recursive_read_failure_copies_rest():
+    files = {"/src/t/a.txt": b"A", "/src/t/nr.txt": b"NR"}
+    dirs = {"/src", "/src/t", "/d"}
+    _, io = await _run_primitive(
+        files,
+        dirs, ["/src/t", "/d/t"],
+        recursive=True,
+        read_fails={"/src/t/nr.txt": PermissionError("/src/t/nr.txt")})
+    assert io.exit_code == 1
+    assert io.stderr == (b"cp: cannot open '/src/t/nr.txt' for reading: "
+                         b"Permission denied\n")
+    assert files["/d/t/a.txt"] == b"A"
+    assert "/d/t/nr.txt" not in files

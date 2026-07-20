@@ -18,13 +18,14 @@ import pytest
 
 from mirage.runtime.wasm.bridge import SyncDispatch
 from mirage.types import PathSpec
+from mirage.utils.errors import enotsup
 
 
 def test_sync_dispatch_bridges_to_the_loop_and_maps_missing_ops():
 
     async def dispatch(op, path, **kwargs):
         if op == "boom":
-            raise AttributeError("ram: no op 'boom'")
+            raise enotsup("ram", "boom", path)
         return (op, path.virtual, kwargs), None
 
     async def run():

@@ -203,6 +203,17 @@ describe('OpsRegistry.resolve fallback chain', () => {
     const registry = new OpsRegistry()
     expect(() => registry.resolve('nope', 'ram')).toThrow(/no op registered/)
   })
+
+  it('stamps the missing-op error with ENOTSUP and the op name', () => {
+    const registry = new OpsRegistry()
+    let caught: unknown
+    try {
+      registry.resolve('nope', 'ram')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toMatchObject({ code: 'ENOTSUP', op: 'nope' })
+  })
 })
 
 describe('OpsRegistry.call', () => {
@@ -245,6 +256,15 @@ describe('OpsRegistry.call', () => {
     await expect(registry.call('nope', 'ram', stubAccessor, stubPath)).rejects.toThrow(
       /no op registered/,
     )
+  })
+
+  it('stamps ENOTSUP, the op name and the operand on the missing-op error', async () => {
+    const registry = new OpsRegistry()
+    await expect(registry.call('nope', 'ram', stubAccessor, stubPath)).rejects.toMatchObject({
+      code: 'ENOTSUP',
+      op: 'nope',
+      virtualPath: '/x',
+    })
   })
 })
 

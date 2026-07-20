@@ -6,6 +6,7 @@ from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import FS_ERRORS, format_fs_error
 
 
 async def cmp_cmd(
@@ -24,8 +25,14 @@ async def cmp_cmd(
     if len(paths) < 2:
         raise UsageError("cmp: requires two paths")
     p0, p1 = paths[0], paths[1]
-    data1 = await read_bytes(p0)
-    data2 = await read_bytes(p1)
+    try:
+        data1 = await read_bytes(p0)
+        data2 = await read_bytes(p1)
+    except FS_ERRORS as exc:
+        # GNU cmp reserves exit 1 for "files differ"; trouble (a missing
+        # or unreadable operand) is exit 2.
+        return None, IOResult(exit_code=2,
+                              stderr=format_fs_error("cmp", exc, paths))
     if skip is not None:
         data1 = data1[skip:]
         data2 = data2[skip:]
