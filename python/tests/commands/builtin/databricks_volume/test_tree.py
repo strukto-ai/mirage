@@ -55,7 +55,7 @@ async def test_tree_max_depth(ws):
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "sub" in out
-    assert "inner.txt" in out
+    assert "inner.txt" not in out
     assert "leaf.txt" not in out
 
 

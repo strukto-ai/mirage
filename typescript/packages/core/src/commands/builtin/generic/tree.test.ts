@@ -81,16 +81,20 @@ async function run(
 
 describe('treeGeneric with trailing-slash folder entries', () => {
   it('shows folder names and hides hidden folders by default', async () => {
-    expect(await run(boxReaddir, {})).toBe('├── docs\n│   └── a.txt\n└── readme.txt\n')
+    expect(await run(boxReaddir, {})).toBe(
+      '/\n|-- docs\n|   `-- a.txt\n`-- readme.txt\n\n2 directories, 2 files\n',
+    )
   })
 
   it('shows hidden folders by name with -a', async () => {
     expect(await run(boxReaddir, { a: true })).toBe(
-      '├── .secret\n├── docs\n│   └── a.txt\n└── readme.txt\n',
+      '/\n|-- .secret\n|-- docs\n|   `-- a.txt\n`-- readme.txt\n\n3 directories, 2 files\n',
     )
   })
 
   it('produces identical output for slash-free entries', async () => {
-    expect(await run(s3Readdir, {})).toBe('├── docs\n│   └── a.txt\n└── readme.txt\n')
+    expect(await run(s3Readdir, {})).toBe(
+      '/\n|-- docs\n|   `-- a.txt\n`-- readme.txt\n\n2 directories, 2 files\n',
+    )
   })
 })

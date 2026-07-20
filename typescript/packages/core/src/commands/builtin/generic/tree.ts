@@ -28,6 +28,7 @@ interface TreeOpts {
   matchPattern: string | null
 }
 
+// GNU tree's ASCII (C-locale) drawing set, matching the docker oracle.
 async function walkTree(
   readdir: (p: PathSpec) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
@@ -36,12 +37,14 @@ async function walkTree(
   lines: string[],
   treeOpts: TreeOpts,
   depth: number,
-): Promise<void> {
+): Promise<{ dirs: number; files: number; failed: boolean }> {
+  let dirs = 0
+  let files = 0
   let entries: string[]
   try {
     entries = await readdir(path)
   } catch {
-    return
+    return { dirs, files, failed: true }
   }
   entries.sort()
   const filtered: { spec: PathSpec; name: string; isDir: boolean }[] = []
@@ -71,14 +74,34 @@ async function walkTree(
     const entry = filtered[i]
     if (entry === undefined) continue
     const last = i === filtered.length - 1
-    const connector = last ? '└── ' : '├── '
+    const connector = last ? '`-- ' : '|-- '
     lines.push(`${prefix}${connector}${entry.name}`)
     if (entry.isDir) {
-      if (treeOpts.maxDepth !== null && depth >= treeOpts.maxDepth) continue
-      const nextPrefix = prefix + (last ? '    ' : '│   ')
-      await walkTree(readdir, stat, entry.spec, nextPrefix, lines, treeOpts, depth + 1)
+      dirs += 1
+      if (treeOpts.maxDepth !== null && depth + 1 >= treeOpts.maxDepth) continue
+      const nextPrefix = prefix + (last ? '    ' : '|   ')
+      const child = await walkTree(
+        readdir,
+        stat,
+        entry.spec,
+        nextPrefix,
+        lines,
+        treeOpts,
+        depth + 1,
+      )
+      dirs += child.dirs
+      files += child.files
+    } else {
+      files += 1
     }
   }
+  return { dirs, files, failed: false }
+}
+
+function treeSummary(dirs: number, files: number, dirsOnly: boolean): string {
+  const dirWord = dirs === 1 ? 'directory' : 'directories'
+  if (dirsOnly) return `${String(dirs)} ${dirWord}`
+  return `${String(dirs)} ${dirWord}, ${String(files)} ${files === 1 ? 'file' : 'files'}`
 }
 
 export async function treeGeneric(
@@ -109,9 +132,25 @@ export async function treeGeneric(
     matchPattern: matchRaw,
   }
   const lines: string[] = []
+  let totalDirs = 0
+  let totalFiles = 0
+  let anyError = false
   for (const p of targets) {
-    await walkTree(readdir, stat, p, '', lines, treeOpts, 0)
+    const label = p.rawPath !== '' ? p.rawPath : p.virtual
+    const before = lines.length
+    lines.push(label)
+    const counts = await walkTree(readdir, stat, p, '', lines, treeOpts, 0)
+    if (counts.failed && lines.length === before + 1) {
+      // The root could not be opened (GNU marks it inline and exits 2).
+      lines[before] = `${label}  [error opening dir]`
+      anyError = true
+    } else if (lines.length > before + 1) {
+      // GNU counts the root as a directory once it has any listed entry.
+      totalDirs += counts.dirs + 1
+      totalFiles += counts.files
+    }
   }
+  lines.push('', treeSummary(totalDirs, totalFiles, treeOpts.dirsOnly))
   const out: ByteSource = formatRecords(lines)
-  return [out, new IOResult()]
+  return [out, new IOResult({ exitCode: anyError ? 2 : 0 })]
 }

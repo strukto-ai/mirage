@@ -44,7 +44,7 @@ async def test_tree_L_max_depth(workspace):
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "sub" in out
-    assert "deep" in out
+    assert "deep" not in out
     assert "file.txt" not in out
 
 
