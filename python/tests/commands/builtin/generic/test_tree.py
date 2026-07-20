@@ -46,7 +46,7 @@ def _make_backend(tree_map: dict[str, FileStat]):
 
 @pytest.mark.asyncio
 async def test_tree_flat_dir():
-    """Two siblings: the last gets `└──`, the others get `├──`."""
+    """Two siblings: the last gets ``-- ``, the others get ``|-- ``."""
     tree_map = {
         "/r": _dir("r"),
         "/r/a.txt": _file("a.txt"),
@@ -63,7 +63,7 @@ async def test_tree_flat_dir():
 
 @pytest.mark.asyncio
 async def test_tree_nested_dir_uses_vertical_continuation():
-    """A non-last directory should continue its children with `│   `."""
+    """A non-last directory should continue its children with ``|   ``."""
     tree_map = {
         "/r": _dir("r"),
         "/r/d1": _dir("d1"),
