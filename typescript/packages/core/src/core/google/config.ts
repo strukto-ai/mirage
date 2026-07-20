@@ -27,18 +27,6 @@ export interface GoogleConfig {
   // token endpoint directly. Useful when the client_secret must stay on a
   // backend (e.g. a Vercel function proxy).
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-  // Single-host override for every Google API (drive/docs/sheets/slides/gmail)
-  // plus the OAuth token endpoint; used to point backends at a fake server.
-  apiBase?: string
-  // Per-service overrides; each wins over `apiBase`, falling back to it then
-  // the real host.
-  tokenUrl?: string
-  driveApiBase?: string
-  driveUploadApiBase?: string
-  docsApiBase?: string
-  sheetsApiBase?: string
-  slidesApiBase?: string
-  gmailApiBase?: string
   // Drive-only: scope the mount to this folder ID instead of the Drive
   // root, the s3 key_prefix analog. Other Google backends ignore it.
   folderId?: string
@@ -48,14 +36,6 @@ export interface GoogleConfigRedacted {
   clientId: string
   clientSecret?: '<REDACTED>'
   refreshToken: '<REDACTED>'
-  apiBase?: string
-  tokenUrl?: string
-  driveApiBase?: string
-  driveUploadApiBase?: string
-  docsApiBase?: string
-  sheetsApiBase?: string
-  slidesApiBase?: string
-  gmailApiBase?: string
   folderId?: string
 }
 
@@ -63,14 +43,6 @@ export const GoogleConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr().optional(),
   refreshToken: secretStr(),
-  apiBase: z.string().optional(),
-  tokenUrl: z.string().optional(),
-  driveApiBase: z.string().optional(),
-  driveUploadApiBase: z.string().optional(),
-  docsApiBase: z.string().optional(),
-  sheetsApiBase: z.string().optional(),
-  slidesApiBase: z.string().optional(),
-  gmailApiBase: z.string().optional(),
   folderId: z.string().optional(),
 })
 
@@ -84,14 +56,6 @@ export function normalizeGoogleConfig(input: Record<string, unknown>): GoogleCon
       client_id: 'clientId',
       client_secret: 'clientSecret',
       refresh_token: 'refreshToken',
-      api_base: 'apiBase',
-      token_url: 'tokenUrl',
-      drive_api_base: 'driveApiBase',
-      drive_upload_api_base: 'driveUploadApiBase',
-      docs_api_base: 'docsApiBase',
-      sheets_api_base: 'sheetsApiBase',
-      slides_api_base: 'slidesApiBase',
-      gmail_api_base: 'gmailApiBase',
       folder_id: 'folderId',
     },
   }) as unknown as GoogleConfig

@@ -19,7 +19,6 @@ export interface GDriveConfig {
   clientSecret: string
   refreshToken: string
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-  apiBase?: string
   folderId?: string
 }
 
@@ -33,7 +32,6 @@ const GDriveConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),
-  apiBase: z.string().optional(),
   folderId: z.string().optional(),
 })
 
@@ -47,7 +45,6 @@ export function normalizeGDriveConfig(input: Record<string, unknown>): GDriveCon
       client_id: 'clientId',
       client_secret: 'clientSecret',
       refresh_token: 'refreshToken',
-      api_base: 'apiBase',
       folder_id: 'folderId',
     },
   }) as unknown as GDriveConfig

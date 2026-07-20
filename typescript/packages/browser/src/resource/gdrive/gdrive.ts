@@ -58,7 +58,6 @@ export class GDriveResource implements Resource {
       ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
       refreshToken: config.refreshToken,
       ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-      ...(config.apiBase !== undefined ? { apiBase: config.apiBase } : {}),
       ...(config.folderId !== undefined ? { folderId: config.folderId } : {}),
     })
     this.accessor = new GDriveAccessor({ tokenManager: tm })

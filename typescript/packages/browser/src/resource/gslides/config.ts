@@ -19,7 +19,6 @@ export interface GSlidesConfig {
   clientSecret?: string
   refreshToken: string
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-  apiBase?: string
 }
 
 export interface GSlidesConfigRedacted {
@@ -32,7 +31,6 @@ const GSlidesConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr().optional(),
   refreshToken: secretStr(),
-  apiBase: z.string().optional(),
 })
 
 export function redactGSlidesConfig(config: GSlidesConfig): GSlidesConfigRedacted {
@@ -45,7 +43,6 @@ export function normalizeGSlidesConfig(input: Record<string, unknown>): GSlidesC
       client_id: 'clientId',
       client_secret: 'clientSecret',
       refresh_token: 'refreshToken',
-      api_base: 'apiBase',
     },
   }) as unknown as GSlidesConfig
 }

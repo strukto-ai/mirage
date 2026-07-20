@@ -36,6 +36,7 @@ from pymongo import AsyncMongoClient
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
+from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.box import BoxConfig, BoxResource
 from mirage.resource.disk import DiskResource
@@ -320,6 +321,16 @@ class NextcloudService:
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
+def _use_fake_google_endpoints(url: str) -> None:
+    google_client.TOKEN_URL = f"{url}/token"
+    google_client.DRIVE_API_BASE = f"{url}/drive/v3"
+    google_client.DRIVE_UPLOAD_BASE = f"{url}/upload/drive/v3"
+    google_client.DOCS_API_BASE = f"{url}/v1"
+    google_client.SLIDES_API_BASE = f"{url}/v1"
+    google_client.SHEETS_API_BASE = f"{url}/v4"
+    google_client.GMAIL_API_BASE = f"{url}/gmail/v1"
+
+
 class GwsService:
     """Points gdrive mounts at the fake Google Workspace server.
 
@@ -336,6 +347,7 @@ class GwsService:
     @classmethod
     async def create(cls, run_id: str, target: dict) -> "GwsService":
         url = os.environ["GWS_URL"].rstrip("/")
+        _use_fake_google_endpoints(url)
         folder_ids: dict[str, str] = {}
         drive_ids: dict[str, str] = {}
         # Native mounts (gdocs/gsheets/gslides) render the modified date
@@ -461,32 +473,23 @@ class GwsService:
         return GoogleDriveResource(
             GoogleDriveConfig(client_id="integ",
                               refresh_token="integ",
-                              api_base=self.url,
                               folder_id=self.folder_ids[mount["path"]]))
 
     def gdocs_resource(self) -> GDocsResource:
         return GDocsResource(
-            GDocsConfig(client_id="integ",
-                        refresh_token="integ",
-                        api_base=self.url))
+            GDocsConfig(client_id="integ", refresh_token="integ"))
 
     def gsheets_resource(self) -> GSheetsResource:
         return GSheetsResource(
-            GSheetsConfig(client_id="integ",
-                          refresh_token="integ",
-                          api_base=self.url))
+            GSheetsConfig(client_id="integ", refresh_token="integ"))
 
     def gslides_resource(self) -> GSlidesResource:
         return GSlidesResource(
-            GSlidesConfig(client_id="integ",
-                          refresh_token="integ",
-                          api_base=self.url))
+            GSlidesConfig(client_id="integ", refresh_token="integ"))
 
     def gmail_resource(self) -> GmailResource:
         return GmailResource(
-            GmailConfig(client_id="integ",
-                        refresh_token="integ",
-                        api_base=self.url))
+            GmailConfig(client_id="integ", refresh_token="integ"))
 
     async def teardown(self) -> None:
         return None

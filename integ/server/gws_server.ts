@@ -16,7 +16,8 @@
 // Slides v1 + Gmail v1 on one in-memory host, plus a fake OAuth /token and
 // a /reset for per-run isolation. Mirrors the real REST surface closely
 // enough that mirage's google backends and the gws passthrough commands run
-// unmodified against it (GoogleConfig.api_base points here). Deliberate
+// unmodified against it; the integration runners redirect Google's fixed
+// production origins to this server. Deliberate
 // simplifications, all deterministic so both language runners see
 // byte-identical responses:
 //   - ids and timestamps are counters over a fixed clock, not random

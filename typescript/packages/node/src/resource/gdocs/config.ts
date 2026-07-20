@@ -19,7 +19,6 @@ export interface GDocsConfig {
   clientSecret: string
   refreshToken: string
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-  apiBase?: string
 }
 
 export interface GDocsConfigRedacted {
@@ -32,7 +31,6 @@ const GDocsConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),
-  apiBase: z.string().optional(),
 })
 
 export function redactGDocsConfig(config: GDocsConfig): GDocsConfigRedacted {
@@ -45,7 +43,6 @@ export function normalizeGDocsConfig(input: Record<string, unknown>): GDocsConfi
       client_id: 'clientId',
       client_secret: 'clientSecret',
       refresh_token: 'refreshToken',
-      api_base: 'apiBase',
     },
   }) as unknown as GDocsConfig
 }

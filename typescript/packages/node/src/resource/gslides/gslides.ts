@@ -59,7 +59,6 @@ export class GSlidesResource extends BaseResource implements Resource {
       clientSecret: config.clientSecret,
       refreshToken: config.refreshToken,
       ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-      ...(config.apiBase !== undefined ? { apiBase: config.apiBase } : {}),
     })
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }
