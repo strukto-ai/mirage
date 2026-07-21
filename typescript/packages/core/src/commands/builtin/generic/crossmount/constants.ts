@@ -43,6 +43,8 @@ const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
   Cmd.LS,
   Cmd.FIND,
   Cmd.RM,
+  Cmd.RMDIR,
+  Cmd.UNLINK,
   Cmd.TOUCH,
   Cmd.MKDIR,
   Cmd.TEE,

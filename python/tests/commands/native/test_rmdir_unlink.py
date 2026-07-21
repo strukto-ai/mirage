@@ -12,16 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.types import Cmd
 
-STREAM_COMMANDS = frozenset(
-    {Cmd.CAT, Cmd.NL, Cmd.SORT, Cmd.CUT, Cmd.SED, Cmd.REV, Cmd.AWK})
-FANOUT_COMMANDS = frozenset({
-    Cmd.GREP, Cmd.RG, Cmd.HEAD, Cmd.TAIL, Cmd.WC, Cmd.DU, Cmd.FILE, Cmd.MD5,
-    Cmd.MD5SUM, Cmd.SHA1SUM, Cmd.SHA256SUM, Cmd.SHA384SUM, Cmd.SHA512SUM,
-    Cmd.STAT, Cmd.STRINGS, Cmd.TAC, Cmd.LS, Cmd.FIND, Cmd.RM, Cmd.RMDIR,
-    Cmd.UNLINK, Cmd.TOUCH, Cmd.MKDIR, Cmd.TEE
-})
-RELAY_COMMANDS = frozenset(
-    {Cmd.CP, Cmd.MV, Cmd.DIFF, Cmd.CMP, Cmd.PASTE, Cmd.COMM, Cmd.JOIN})
-CROSS_MOUNT_COMMANDS = STREAM_COMMANDS | FANOUT_COMMANDS | RELAY_COMMANDS
+def test_rmdir_removes_empty_dir(env):
+    env.mirage("mkdir /data/d")
+    assert "d" in env.mirage("ls /data")
+    out = env.mirage("rmdir /data/d")
+    assert out == ""
+    assert "d" not in env.mirage("ls /data").split()
+
+
+def test_rmdir_verbose(env):
+    env.mirage("mkdir /data/dv")
+    out = env.mirage("rmdir -v /data/dv")
+    assert out == "rmdir: removing directory, '/data/dv'\n"
+
+
+def test_unlink_removes_file(env):
+    env.create_file("f.txt", b"bytes\n")
+    assert "f.txt" in env.mirage("ls /data").split()
+    out = env.mirage("unlink /data/f.txt")
+    assert out == ""
+    assert "f.txt" not in env.mirage("ls /data").split()

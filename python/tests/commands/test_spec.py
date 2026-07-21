@@ -244,6 +244,8 @@ def test_all_commands_have_specs():
         "sha256sum",
         "sha384sum",
         "sha512sum",
+        "rmdir",
+        "unlink",
         "tac",
         "paste",
         "ln",

@@ -82,6 +82,7 @@ class Operation(StrEnum):
     EXISTS = "exists"
     MKDIR = "mkdir"
     UNLINK = "unlink"
+    RMDIR = "rmdir"
     RENAME = "rename"
     COPY = "copy"
 
@@ -134,6 +135,7 @@ class CommandIO:
             Operation.EXISTS: self.exists,
             Operation.MKDIR: self.mkdir,
             Operation.UNLINK: self.unlink,
+            Operation.RMDIR: self.rmdir,
             Operation.RENAME: self.rename,
             Operation.COPY: self.copy,
         }

@@ -1,0 +1,32 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": true,
+    "resources": [
+      "box",
+      "databricks_volume",
+      "disk",
+      "dropbox",
+      "gdrive",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
+      "nextcloud",
+      "ram",
+      "redis",
+      "s3",
+      "ssh"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [],
+  "positional": [],
+  "rest": {
+    "kind": "path",
+    "provided_by": []
+  }
+}

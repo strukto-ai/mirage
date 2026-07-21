@@ -32,6 +32,7 @@ JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "ps"})
 
 # Commands with lstat semantics: they act on the symlink entry itself,
 # so dispatch must not rewrite their operands through the link table.
-NO_FOLLOW_COMMANDS = frozenset({"rm", "mv", "ln", "readlink", "rmdir"})
+NO_FOLLOW_COMMANDS = frozenset(
+    {"rm", "mv", "ln", "readlink", "rmdir", "unlink"})
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS

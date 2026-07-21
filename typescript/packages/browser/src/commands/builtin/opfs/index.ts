@@ -65,6 +65,7 @@ import { OPFS_REALPATH } from './realpath.ts'
 import { OPFS_REV } from './rev.ts'
 import { OPFS_RG } from './rg.ts'
 import { OPFS_RM } from './rm.ts'
+import { OPFS_RMDIR } from './rmdir.ts'
 import { OPFS_SED } from './sed.ts'
 import { OPFS_SHA1SUM } from './sha1sum.ts'
 import { OPFS_SHA256SUM } from './sha256sum.ts'
@@ -85,6 +86,7 @@ import { OPFS_TREE } from './tree.ts'
 import { OPFS_TSORT } from './tsort.ts'
 import { OPFS_UNEXPAND } from './unexpand.ts'
 import { OPFS_UNIQ } from './uniq.ts'
+import { OPFS_UNLINK } from './unlink.ts'
 import { OPFS_UNZIP } from './unzip.ts'
 import { OPFS_WC } from './wc/wc.ts'
 import { OPFS_XXD } from './xxd.ts'
@@ -144,6 +146,7 @@ export const OPFS_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions
     ...OPFS_REV,
     ...OPFS_RG,
     ...OPFS_RM,
+    ...OPFS_RMDIR,
     ...OPFS_SED,
     ...OPFS_SHA1SUM,
     ...OPFS_SHA256SUM,
@@ -164,6 +167,7 @@ export const OPFS_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions
     ...OPFS_TSORT,
     ...OPFS_UNEXPAND,
     ...OPFS_UNIQ,
+    ...OPFS_UNLINK,
     ...OPFS_UNZIP,
     ...OPFS_WC,
     ...OPFS_XXD,

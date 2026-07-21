@@ -38,6 +38,7 @@ export const NO_FOLLOW_COMMANDS: ReadonlySet<string> = new Set([
   'ln',
   'readlink',
   'rmdir',
+  'unlink',
 ])
 
 export const SHELL_NAMES: ReadonlySet<string> = new Set([

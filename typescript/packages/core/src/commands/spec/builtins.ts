@@ -335,6 +335,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
+  rmdir: new CommandSpec({
+    options: [new Option({ short: '-v' })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+  unlink: new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) }),
   sed: new CommandSpec({
     options: [
       new Option({ short: '-i' }),

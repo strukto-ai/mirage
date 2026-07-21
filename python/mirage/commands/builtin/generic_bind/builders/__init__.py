@@ -55,6 +55,7 @@ from mirage.commands.builtin.generic_bind.builders import realpath
 from mirage.commands.builtin.generic_bind.builders import rev
 from mirage.commands.builtin.generic_bind.builders import rg
 from mirage.commands.builtin.generic_bind.builders import rm
+from mirage.commands.builtin.generic_bind.builders import rmdir
 from mirage.commands.builtin.generic_bind.builders import sed
 from mirage.commands.builtin.generic_bind.builders import sha1sum
 from mirage.commands.builtin.generic_bind.builders import sha256sum
@@ -75,6 +76,7 @@ from mirage.commands.builtin.generic_bind.builders import tree
 from mirage.commands.builtin.generic_bind.builders import tsort
 from mirage.commands.builtin.generic_bind.builders import unexpand
 from mirage.commands.builtin.generic_bind.builders import uniq
+from mirage.commands.builtin.generic_bind.builders import unlink
 from mirage.commands.builtin.generic_bind.builders import unzip
 from mirage.commands.builtin.generic_bind.builders import wc
 from mirage.commands.builtin.generic_bind.builders import xxd
@@ -125,6 +127,7 @@ _BUILDERS = (
     rev.BUILDER,
     rg.BUILDER,
     rm.BUILDER,
+    rmdir.BUILDER,
     sed.BUILDER,
     sha1sum.BUILDER,
     sha256sum.BUILDER,
@@ -145,6 +148,7 @@ _BUILDERS = (
     tsort.BUILDER,
     unexpand.BUILDER,
     uniq.BUILDER,
+    unlink.BUILDER,
     unzip.BUILDER,
     wc.BUILDER,
     xxd.BUILDER,

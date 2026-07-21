@@ -62,6 +62,13 @@ SPECS: dict[str, CommandSpec] = {
         ),
         rest=Operand(kind=OperandKind.PATH),
     ),
+    'rmdir':
+    CommandSpec(
+        options=(Option(short="-v"), ),
+        rest=Operand(kind=OperandKind.PATH),
+    ),
+    'unlink':
+    CommandSpec(rest=Operand(kind=OperandKind.PATH)),
     'basename':
     CommandSpec(rest=Operand(kind=OperandKind.TEXT)),
     'dirname':

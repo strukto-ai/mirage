@@ -60,6 +60,8 @@ export enum Cmd {
   LS = 'ls',
   FIND = 'find',
   RM = 'rm',
+  RMDIR = 'rmdir',
+  UNLINK = 'unlink',
   TOUCH = 'touch',
   MKDIR = 'mkdir',
   TEE = 'tee',
