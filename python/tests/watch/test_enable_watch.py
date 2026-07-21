@@ -32,10 +32,38 @@ class OneShotHook:
 
 
 @pytest.mark.asyncio
-async def test_watch_without_runtime_raises():
+async def test_watch_lazily_attaches_default_runtime():
+    # No enable_watch call anywhere: the runtime attaches on first
+    # use, and ws.notify is the consumer's injection point.
+    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    assert ws._watch_runtime is None
+    agen = ws.watch("/data")
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    assert ws._watch_runtime is not None
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.path.virtual == "/data/new.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_idle_workspace_has_no_watch_state():
     ws = Workspace({"/data": RAMResource()})
+    assert ws._watch_runtime is None
+    await ws.close()
+    assert ws._watch_runtime is None
+
+
+@pytest.mark.asyncio
+async def test_enable_watch_after_first_use_raises():
+    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.notify(_change(FileChangeKind.UPDATE, "/data/a.txt"))
     with pytest.raises(RuntimeError):
-        ws.watch(PathSpec.from_str_path("/data"))
+        enable_watch(ws)
     await ws.close()
 
 

@@ -26,7 +26,6 @@ from mirage import MountMode, Workspace
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.types import PathSpec
-from mirage.watch import Watcher, enable_watch
 
 CASE_DIR = Path(__file__).resolve().parent
 EVENT_TIMEOUT = 20.0
@@ -205,14 +204,14 @@ class ConsumerPoller:
     """The poll loop a consumer runs; mirage runs no loop itself.
 
     This is the whole pattern: pull a delta from the resource's hook,
-    feed each change to ``watcher.notify``, keep the checkpoint. In
+    feed each change to ``ws.notify``, keep the checkpoint. In
     production this body runs on an interval (or after a webhook
     doorbell); the integ pumps it once per case for determinism.
     """
 
-    def __init__(self, hook: object, watcher: Watcher, root: PathSpec) -> None:
+    def __init__(self, hook: object, ws: Workspace, root: PathSpec) -> None:
         self._hook = hook
-        self._watcher = watcher
+        self._ws = ws
         self._root = root
         self._checkpoint: str | None = None
 
@@ -220,7 +219,7 @@ class ConsumerPoller:
         delta = await self._hook.pull(self._root, self._checkpoint)
         self._checkpoint = delta.checkpoint
         for change in delta.changes:
-            await self._watcher.notify(change)
+            await self._ws.notify(change)
 
 
 class PullTrigger:
@@ -357,14 +356,13 @@ async def _run_pull(spec: dict, ws: Workspace,
         ws (Workspace): Watched workspace.
         op (object): External writer operator.
     """
-    watcher = enable_watch(ws)
     resource = ws.registry.mount_for(spec["mount"]).resource
     hook_root = _framed_root(spec)
     results: list[tuple[str, bool, str]] = []
 
     await _seed(ws, op, spec)
     agen = ws.watch(spec["watch_dir"])
-    poller = ConsumerPoller(resource.delta_hook(), watcher, hook_root)
+    poller = ConsumerPoller(resource.delta_hook(), ws, hook_root)
     await poller.pump()
     results.extend(await _run_battery(ws, op, PullTrigger(poller), agen,
                                       spec["cases"], "pull"))
@@ -372,7 +370,7 @@ async def _run_pull(spec: dict, ws: Workspace,
     for scope in spec.get("scopes", []):
         await _seed(ws, op, spec)
         agen = ws.watch(scope["watch"])
-        poller = ConsumerPoller(resource.delta_hook(), watcher, hook_root)
+        poller = ConsumerPoller(resource.delta_hook(), ws, hook_root)
         await poller.pump()
         results.extend(await
                        _run_battery(ws, op, PullTrigger(poller), agen,
@@ -395,8 +393,7 @@ async def _run_push(spec: dict, ws: Workspace,
         ws (Workspace): Watched workspace.
         op (object): External writer operator.
     """
-    watcher = enable_watch(ws)
-    runner = web.AppRunner(make_app(watcher, _files_prefix(), spec["mount"]))
+    runner = web.AppRunner(make_app(ws, _files_prefix(), spec["mount"]))
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()

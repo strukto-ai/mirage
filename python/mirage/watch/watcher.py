@@ -19,13 +19,11 @@ from typing import Protocol
 from mirage.types import FileChangeKind, FileEvent, PathSpec
 from mirage.utils.glob_walk import has_glob
 from mirage.utils.path import glob_prefix_match
-from mirage.watch.base import WatchRuntime
+from mirage.watch.base import WatchMount, WatchRegistry, WatchRuntime
 from mirage.watch.errors import QueueClosed
 from mirage.watch.queue.base import QueueFactory, WatchQueue
 from mirage.watch.queue.ram import RAMWatchQueue
 from mirage.watch.source import Subscriber
-from mirage.workspace.mount.mount import MountEntry
-from mirage.workspace.mount.registry import MountRegistry
 
 
 class WatchableWorkspace(Protocol):
@@ -38,7 +36,7 @@ class WatchableWorkspace(Protocol):
     """
 
     @property
-    def registry(self) -> MountRegistry:
+    def registry(self) -> WatchRegistry:
         ...
 
     def attach_watch_runtime(self, runtime: WatchRuntime) -> None:
@@ -58,10 +56,10 @@ class Watcher:
     """
 
     def __init__(self,
-                 registry: MountRegistry,
+                 registry: WatchRegistry,
                  queue_factory: QueueFactory = RAMWatchQueue) -> None:
         """Args:
-            registry (MountRegistry): Mount table of the workspace.
+            registry (WatchRegistry): Mount table of the workspace.
             queue_factory (QueueFactory): Builds the delivery queue for
                 a watch root when the caller does not supply one.
         """
@@ -70,7 +68,7 @@ class Watcher:
         self._subscribers: list[Subscriber] = []
         self._closed = False
 
-    def _frame(self, entry: MountEntry, virtual: str) -> PathSpec:
+    def _frame(self, entry: WatchMount, virtual: str) -> PathSpec:
         """Rebuild a PathSpec with mount-relative framing.
 
         The caller-supplied virtual path may carry any resource_path;
@@ -78,7 +76,7 @@ class Watcher:
         recomputed from the mount prefix.
 
         Args:
-            entry (MountEntry): Mount owning the path.
+            entry (WatchMount): Mount owning the path.
             virtual (str): Workspace-virtual path.
         """
         norm = "/" + virtual.strip("/")
@@ -123,12 +121,12 @@ class Watcher:
             return True
         return "/" not in virtual[len(root) + 1:]
 
-    def _ancestors(self, entry: MountEntry, virtual: str) -> list[PathSpec]:
+    def _ancestors(self, entry: WatchMount, virtual: str) -> list[PathSpec]:
         """Framed ancestor directories of ``virtual`` below the mount
         root, nearest first.
 
         Args:
-            entry (MountEntry): Mount owning the path.
+            entry (WatchMount): Mount owning the path.
             virtual (str): Workspace-virtual path of the change.
         """
         prefix = entry.prefix.rstrip("/")
@@ -140,7 +138,7 @@ class Watcher:
                 return specs
             specs.append(self._frame(entry, current))
 
-    async def _invalidate(self, entry: MountEntry, change: FileEvent) -> None:
+    async def _invalidate(self, entry: WatchMount, change: FileEvent) -> None:
         """Evict cache for one change before it is delivered.
 
         The whole ancestor chain is invalidated, not just the path: an
@@ -151,7 +149,7 @@ class Watcher:
         a Nextcloud webhook hits exactly this).
 
         Args:
-            entry (MountEntry): Mount owning the change path.
+            entry (WatchMount): Mount owning the change path.
             change (FileEvent): Change whose path is now stale.
         """
         manager = entry.cache_manager

@@ -19,6 +19,48 @@ from mirage.types import Delta, FileEvent, PathSpec
 from mirage.watch.queue.base import WatchQueue
 
 
+class CacheInvalidator(Protocol):
+    """Mutation-side cache eviction a mount exposes to the watcher.
+
+    ``mirage.cache.manager.CacheManager`` satisfies this structurally.
+    """
+
+    async def invalidate_after_write(self, path: PathSpec) -> None:
+        ...
+
+    async def invalidate_after_unlink(self, path: PathSpec) -> None:
+        ...
+
+
+class WatchMount(Protocol):
+    """What the watch runtime needs from one mount entry.
+
+    ``mirage.workspace.mount.mount.MountEntry`` satisfies this
+    structurally; depending on the protocol keeps the watch package
+    from importing the workspace package at all, so the dependency
+    arrow can point workspace -> watch without any cycle.
+    """
+
+    @property
+    def prefix(self) -> str:
+        ...
+
+    @property
+    def cache_manager(self) -> CacheInvalidator | None:
+        ...
+
+
+class WatchRegistry(Protocol):
+    """What the watch runtime needs from the mount table.
+
+    ``mirage.workspace.mount.registry.MountRegistry`` satisfies this
+    structurally.
+    """
+
+    def mount_for(self, path: str) -> WatchMount:
+        ...
+
+
 class DeltaHook(Protocol):
     """Checkpointed delta pull for one watch root.
 

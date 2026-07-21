@@ -79,16 +79,16 @@ def nextcloud_change(payload: dict, files_prefix: str,
                      timestamp=observed)
 
 
-def make_app(watcher: object, files_prefix: str,
-             mount: str) -> web.Application:
+def make_app(sink: object, files_prefix: str, mount: str) -> web.Application:
     """Build the webhook receiver a consumer service would host.
 
     One POST route decodes the payload, maps it, and injects it via
-    ``watcher.notify``. Mirage itself hosts no server; this endpoint
+    ``sink.notify``. Mirage itself hosts no server; this endpoint
     lives in the consumer's own service.
 
     Args:
-        watcher (object): The attached ``Watcher`` from ``enable_watch``.
+        sink (object): Anything with ``notify`` — the workspace
+            itself, or a ``Watcher`` from ``enable_watch``.
         files_prefix (str): The ``/<user>/files`` prefix to strip.
         mount (str): Mirage mount root.
     """
@@ -97,7 +97,7 @@ def make_app(watcher: object, files_prefix: str,
         payload = await request.json()
         change = nextcloud_change(payload, files_prefix, mount)
         if change is not None:
-            await watcher.notify(change)
+            await sink.notify(change)
         return web.json_response({"ok": True})
 
     app = web.Application()

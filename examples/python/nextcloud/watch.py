@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from mirage import MountMode, Workspace
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.types import FileChangeKind, FileEvent, PathSpec
-from mirage.watch import Watcher, enable_watch
 
 load_dotenv(".env.development")
 
@@ -37,11 +36,12 @@ class WebhookReceiver:
 
     Mirage hosts no server; this receiver lives in your own service and
     just imports mirage. Each payload is mapped to a FileEvent and
-    injected via watcher.notify — no polling anywhere.
+    injected via ws.notify — no polling anywhere, no setup call: the
+    watch runtime attaches lazily on first use.
     """
 
-    def __init__(self, watcher: Watcher) -> None:
-        self._watcher = watcher
+    def __init__(self, workspace: Workspace) -> None:
+        self._ws = workspace
 
     def to_virtual(self, node_path: str) -> str:
         """Map Nextcloud's real path to the mirage virtual path.
@@ -70,7 +70,7 @@ class WebhookReceiver:
                            timestamp=datetime.fromtimestamp(int(
                                payload.get("time", 0)),
                                                             tz=timezone.utc))
-        await self._watcher.notify(change)
+        await self._ws.notify(change)
         print(f"webhook: {kind.value} {virtual}")
         return web.json_response({"ok": True})
 
@@ -98,8 +98,7 @@ def print_registration_help() -> None:
 
 
 async def main() -> None:
-    watcher = enable_watch(ws)
-    receiver = WebhookReceiver(watcher)
+    receiver = WebhookReceiver(ws)
     app = web.Application()
     app.router.add_post("/nextcloud/webhook", receiver.handle)
     runner = web.AppRunner(app)

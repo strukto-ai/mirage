@@ -56,6 +56,7 @@ from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           MountMode, PathSpec, StateKey, parse_mount_mode)
 from mirage.utils.errors import format_fs_error
 from mirage.utils.ids import new_session_id, new_workspace_id
+from mirage.watch.watcher import Watcher
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
@@ -668,13 +669,34 @@ class Workspace:
     def attach_watch_runtime(self, runtime: WatchDelegate) -> None:
         """Install the watch runtime that ``watch`` delegates to.
 
-        Called by ``mirage.watch.enable_watch``; the workspace closes
-        the runtime on ``close``.
+        Called by ``mirage.watch.enable_watch`` to customize the
+        runtime (e.g. a non-default queue factory); the default runtime
+        attaches lazily on first ``watch``/``notify``, so calling this
+        is never required. The workspace closes the runtime on
+        ``close``.
 
         Args:
             runtime (WatchDelegate): Runtime to attach.
+
+        Raises:
+            RuntimeError: A runtime is already attached (customize
+                before the first ``watch``/``notify``).
         """
+        if self._watch_runtime is not None:
+            raise RuntimeError(
+                "watch runtime already attached: enable_watch must run "
+                "before the first watch()/notify()")
         self._watch_runtime = runtime
+
+    def _watch_delegate(self) -> WatchDelegate:
+        """The attached watch runtime, lazily creating the default one.
+
+        Nothing is constructed until something is actually watched or
+        notified; an idle workspace carries no watch state at all.
+        """
+        if self._watch_runtime is None:
+            self._watch_runtime = Watcher(self._registry)
+        return self._watch_runtime
 
     def watch(self,
               path: str | PathSpec | Sequence[str | PathSpec],
@@ -682,6 +704,8 @@ class Workspace:
               recursive: bool = True) -> AsyncIterator[FileEvent]:
         """Stream externally observed changes under ``path``.
 
+        The default watch runtime attaches lazily on first use; call
+        ``mirage.watch.enable_watch`` beforehand only to customize it.
         The str tolerance lives only here, at the consumer boundary
         (mirroring ``Ops``); the runtime below is PathSpec-only.
 
@@ -691,20 +715,27 @@ class Workspace:
                 may carry glob segments (``/nc/data/*.txt``).
             recursive (bool): Deliver descendants beyond direct
                 children; ignored for glob roots.
-
-        Raises:
-            RuntimeError: No watch runtime is attached.
         """
-        if self._watch_runtime is None:
-            raise RuntimeError(
-                "watch requires an attached watch runtime: call "
-                "mirage.watch.enable_watch(workspace) first")
         raw = [path] if isinstance(path, (str, PathSpec)) else list(path)
         specs = [
             p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
             for p in raw
         ]
-        return self._watch_runtime.watch(specs, recursive=recursive)
+        return self._watch_delegate().watch(specs, recursive=recursive)
+
+    async def notify(self, change: FileEvent) -> None:
+        """Inject one externally observed change into the watch
+        runtime: invalidate its caches, then deliver it to every
+        matching ``watch``.
+
+        The single entry point for consumer-side detection (webhook
+        receiver or poll loop over ``resource.delta_hook()``); see
+        ``mirage.watch.Watcher.notify``.
+
+        Args:
+            change (FileEvent): Observed change.
+        """
+        await self._watch_delegate().notify(change)
 
     async def close(self) -> None:
         async with self._close_lock:
