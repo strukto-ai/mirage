@@ -132,6 +132,90 @@
       ]
     },
     {
+      "id": "mid_wildcard",
+      "watch": ["/nc/data/*/reports/"],
+      "cases": [
+        {
+          "id": "inside_reports_delivered",
+          "mutate": {"op": "write", "path": "data/proj1/reports/spec.md", "body": "quarterly spec\n"},
+          "expect": {"kind": "create", "path": "/nc/data/proj1/reports/spec.md"},
+          "checks": [
+            {"cmd": "cat /nc/data/proj1/reports/spec.md", "contains": "quarterly spec"}
+          ]
+        },
+        {
+          "id": "project_sibling_skipped",
+          "mutate": {"op": "write", "path": "data/proj1/other.txt", "body": "outside reports\n"},
+          "expect": {"kind": "create", "path": "/nc/data/proj1/other.txt", "delivered": false}
+        }
+      ]
+    },
+    {
+      "id": "multi_roots",
+      "watch": ["/nc/data/sub", "/nc/data/*.yaml"],
+      "cases": [
+        {
+          "id": "literal_root_delivered",
+          "mutate": {"op": "write", "path": "data/sub/in.txt", "body": "literal subtree\n"},
+          "expect": {"kind": "create", "path": "/nc/data/sub/in.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/sub/in.txt", "contains": "literal subtree"}
+          ]
+        },
+        {
+          "id": "glob_root_delivered",
+          "mutate": {"op": "write", "path": "data/app.yaml", "body": "yaml root\n"},
+          "expect": {"kind": "create", "path": "/nc/data/app.yaml"},
+          "checks": [
+            {"cmd": "cat /nc/data/app.yaml", "contains": "yaml root"}
+          ]
+        },
+        {
+          "id": "neither_root_skipped",
+          "mutate": {"op": "write", "path": "data/note.md", "body": "matches no root\n"},
+          "expect": {"kind": "create", "path": "/nc/data/note.md", "delivered": false}
+        }
+      ]
+    },
+    {
+      "id": "rename",
+      "watch": ["/nc/data"],
+      "cases": [
+        {
+          "id": "seed_orig",
+          "mutate": {"op": "write", "path": "data/orig.txt", "body": "original content\n"},
+          "expect": {"kind": "create", "path": "/nc/data/orig.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/orig.txt", "contains": "original content"}
+          ]
+        },
+        {
+          "id": "rename_as_move",
+          "modes": ["push"],
+          "warm": ["cat /nc/data/orig.txt", "ls /nc/data"],
+          "mutate": {"op": "rename", "path": "data/orig.txt", "to": "data/renamed.txt"},
+          "expect": {"kind": "move", "path": "/nc/data/renamed.txt", "previous": "/nc/data/orig.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/renamed.txt", "contains": "original content"},
+            {"cmd": "ls /nc/data", "absent": "orig.txt"},
+            {"cmd": "cat /nc/data/orig.txt", "absent": "original content"}
+          ]
+        },
+        {
+          "id": "rename_as_delete_create",
+          "modes": ["pull"],
+          "warm": ["cat /nc/data/orig.txt", "ls /nc/data"],
+          "mutate": {"op": "rename", "path": "data/orig.txt", "to": "data/renamed.txt"},
+          "expect": {"kind": "create", "path": "/nc/data/renamed.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/renamed.txt", "contains": "original content"},
+            {"cmd": "ls /nc/data", "absent": "orig.txt"},
+            {"cmd": "cat /nc/data/orig.txt", "absent": "original content"}
+          ]
+        }
+      ]
+    },
+    {
       "id": "file",
       "watch": ["/nc/data/keep.txt"],
       "cases": [
@@ -161,5 +245,13 @@
         }
       ]
     }
-  ]
+  ],
+  "overflow": {
+    "max_pending": 2,
+    "paths": ["data/f1.txt", "data/f2.txt", "data/f3.txt", "data/f4.txt", "data/f5.txt"],
+    "checks": [
+      {"cmd": "ls /nc/data", "contains": "f5.txt"},
+      {"cmd": "cat /nc/data/f3.txt", "contains": "burst"}
+    ]
+  }
 }

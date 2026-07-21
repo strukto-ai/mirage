@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import sys
+from functools import partial
 from pathlib import Path
 
 import aiohttp
@@ -26,6 +27,7 @@ from mirage import MountMode, Workspace
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.types import PathSpec
+from mirage.watch import RAMWatchQueue, enable_watch
 
 CASE_DIR = Path(__file__).resolve().parent
 EVENT_TIMEOUT = 20.0
@@ -34,6 +36,7 @@ CLASS_BY_KIND = {
     "create": "OCP\\Files\\Events\\Node\\NodeCreatedEvent",
     "update": "OCP\\Files\\Events\\Node\\NodeWrittenEvent",
     "delete": "OCP\\Files\\Events\\Node\\NodeDeletedEvent",
+    "move": "OCP\\Files\\Events\\Node\\NodeRenamedEvent",
 }
 
 
@@ -93,6 +96,8 @@ async def _mutate(op: object, mutate: dict) -> None:
         await op.write(mutate["path"], mutate["body"].encode())
     elif mutate["op"] == "delete":
         await op.delete(mutate["path"])
+    elif mutate["op"] == "rename":
+        await op.rename(mutate["path"], mutate["to"])
     else:
         raise ValueError(f"unknown mutate op: {mutate['op']}")
 
@@ -106,6 +111,22 @@ def _webhook_payload(expect: dict, mount: str) -> dict:
     """
     rel = expect["path"][len(mount.rstrip("/")):]
     node_path = _files_prefix() + rel
+    if expect["kind"] == "move":
+        prev_rel = expect["previous"][len(mount.rstrip("/")):]
+        return {
+            "event": {
+                "class": CLASS_BY_KIND["move"],
+                "source": {
+                    "id": 1,
+                    "path": _files_prefix() + prev_rel
+                },
+                "target": {
+                    "id": 1,
+                    "path": node_path
+                },
+            },
+            "time": 1700000000,
+        }
     return {
         "event": {
             "class": CLASS_BY_KIND[expect["kind"]],
@@ -319,8 +340,8 @@ async def _seed(ws: Workspace, op: object, spec: dict) -> None:
 
 
 async def _run_battery(ws: Workspace, op: object, trigger, agen: object,
-                       cases: list[dict],
-                       label: str) -> list[tuple[str, bool, str]]:
+                       cases: list[dict], label: str,
+                       mode: str) -> list[tuple[str, bool, str]]:
     """Run one battery of cases against one armed watch iterator.
 
     Args:
@@ -328,19 +349,139 @@ async def _run_battery(ws: Workspace, op: object, trigger, agen: object,
         op (object): External writer operator.
         trigger (Callable): Case trigger (pull pump or push POST).
         agen (object): The ``watch`` async iterator for this battery.
-        cases (list[dict]): Cases to run in order.
+        cases (list[dict]): Cases to run in order; a case with a
+            ``modes`` list runs only in those modes (a rename is a
+            MOVE via webhook, but a DELETE + CREATE pair via diff).
         label (str): Result-line prefix (mode and scope).
+        mode (str): "pull" or "push".
     """
     stream = EventStream(agen)
     await stream.start()
     results: list[tuple[str, bool, str]] = []
     try:
         for case in cases:
+            if mode not in case.get("modes", ["pull", "push"]):
+                continue
             ok, detail = await _run_case(ws, op, trigger, stream, case)
             results.append((f"{label}:{case['id']}", ok, detail))
     finally:
         await stream.close()
     return results
+
+
+async def _overflow_core(spec: dict, ws: Workspace, op: object, trigger,
+                         mode: str, results: list) -> None:
+    """Shared body of the overflow battery: many changes against a
+    tiny queue must collapse into one UNKNOWN event at the watch root.
+
+    The stream is armed once (consuming exactly one event); later
+    events accumulate with no active pop, so the cap trips
+    deterministically.
+
+    Args:
+        spec (dict): Parsed case file (needs an ``overflow`` block).
+        ws (Workspace): Overflow-dedicated workspace (tiny queue).
+        op (object): External writer operator.
+        trigger (Callable): Case trigger (pull pump or push POST).
+        mode (str): "pull" or "push".
+        results (list): Result rows to append to.
+    """
+    block = spec["overflow"]
+    agen = ws.watch(spec["watch_dir"])
+    stream = EventStream(agen)
+    await stream.start()
+    try:
+        for path in block["paths"]:
+            await _mutate(op, {"op": "write", "path": path, "body": "burst\n"})
+            await trigger({
+                "expect": {
+                    "kind": "create",
+                    "path": spec["mount"] + "/" + path,
+                }
+            })
+        change = await stream.expect(spec["watch_dir"], "unknown")
+        if change is None:
+            results.append((f"{mode}:overflow:collapse", False,
+                            "no unknown event at watch root"))
+            return
+        ok = True
+        detail = "unknown collapse + fresh reads"
+        for check in block.get("checks", []):
+            check_ok, check_detail = await _run_check(ws, check)
+            if not check_ok:
+                ok, detail = False, f"check failed: {check_detail}"
+                break
+        results.append((f"{mode}:overflow:collapse", ok, detail))
+    finally:
+        await stream.close()
+
+
+def _overflow_workspace(spec: dict) -> tuple[Workspace, object]:
+    """Build the overflow battery's own workspace with a tiny queue.
+
+    A dedicated workspace is required because the custom queue factory
+    must attach via ``enable_watch`` before the first watch.
+
+    Args:
+        spec (dict): Parsed case file.
+    """
+    ws, op = BUILDERS[spec["resource"]](spec)
+    enable_watch(ws,
+                 queue_factory=partial(
+                     RAMWatchQueue,
+                     max_pending=spec["overflow"]["max_pending"]))
+    return ws, op
+
+
+async def _run_overflow_pull(spec: dict, results: list) -> None:
+    """Overflow battery, pull mode.
+
+    Args:
+        spec (dict): Parsed case file.
+        results (list): Result rows to append to.
+    """
+    if "overflow" not in spec:
+        return
+    ws, op = _overflow_workspace(spec)
+    try:
+        await _seed(ws, op, spec)
+        resource = ws.registry.mount_for(spec["mount"]).resource
+        poller = ConsumerPoller(resource.delta_hook(), ws, _framed_root(spec))
+        await poller.pump()
+        await _overflow_core(spec, ws, op, PullTrigger(poller), "pull",
+                             results)
+    finally:
+        await ws.close()
+
+
+async def _run_overflow_push(spec: dict, results: list) -> None:
+    """Overflow battery, push mode (its own receiver bound to the
+    overflow workspace).
+
+    Args:
+        spec (dict): Parsed case file.
+        results (list): Result rows to append to.
+    """
+    if "overflow" not in spec:
+        return
+    ws, op = _overflow_workspace(spec)
+    try:
+        await _seed(ws, op, spec)
+        runner = web.AppRunner(make_app(ws, _files_prefix(), spec["mount"]))
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        url = f"http://127.0.0.1:{port}/nextcloud/webhook"
+        async with aiohttp.ClientSession() as session:
+            try:
+                await _overflow_core(spec, ws, op,
+                                     PushTrigger(session, url, spec["mount"]),
+                                     "push", results)
+            finally:
+                await runner.cleanup()
+    finally:
+        await ws.close()
 
 
 async def _run_pull(spec: dict, ws: Workspace,
@@ -365,16 +506,17 @@ async def _run_pull(spec: dict, ws: Workspace,
     poller = ConsumerPoller(resource.delta_hook(), ws, hook_root)
     await poller.pump()
     results.extend(await _run_battery(ws, op, PullTrigger(poller), agen,
-                                      spec["cases"], "pull"))
+                                      spec["cases"], "pull", "pull"))
 
     for scope in spec.get("scopes", []):
         await _seed(ws, op, spec)
         agen = ws.watch(scope["watch"])
         poller = ConsumerPoller(resource.delta_hook(), ws, hook_root)
         await poller.pump()
-        results.extend(await
-                       _run_battery(ws, op, PullTrigger(poller), agen,
-                                    scope["cases"], f"pull:{scope['id']}"))
+        results.extend(await _run_battery(ws, op, PullTrigger(poller), agen,
+                                          scope["cases"],
+                                          f"pull:{scope['id']}", "pull"))
+    await _run_overflow_pull(spec, results)
     return results
 
 
@@ -407,15 +549,17 @@ async def _run_push(spec: dict, ws: Workspace,
             await _seed(ws, op, spec)
             agen = ws.watch(spec["watch_dir"])
             results.extend(await _run_battery(ws, op, trigger, agen,
-                                              spec["cases"], "push"))
+                                              spec["cases"], "push", "push"))
             for scope in spec.get("scopes", []):
                 await _seed(ws, op, spec)
                 agen = ws.watch(scope["watch"])
-                results.extend(await _run_battery(ws, op, trigger, agen,
-                                                  scope["cases"],
-                                                  f"push:{scope['id']}"))
+                results.extend(await
+                               _run_battery(ws, op, trigger, agen,
+                                            scope["cases"],
+                                            f"push:{scope['id']}", "push"))
         finally:
             await runner.cleanup()
+    await _run_overflow_push(spec, results)
     return results
 
 

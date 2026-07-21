@@ -158,5 +158,6 @@ no interface changes.
 - Python only for now; the TypeScript mirror is planned.
 - Nextcloud is the first backend with a `delta_hook`; push mode works with any
   backend today since `ws.notify` accepts events from any detection you run.
+  See the [Watch Matrix](/python/watch-matrix) for per-resource support.
 - Events are in-memory and at-most-once per subscriber; durable queues and
   acknowledgement are future work.

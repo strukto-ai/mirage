@@ -157,6 +157,30 @@ async def test_notify_invalidates_ancestor_chain():
 
 
 @pytest.mark.asyncio
+async def test_notify_move_evicts_both_sides():
+    # The vacated old path must be evicted as an unlink (plus its
+    # ancestors), or a consumer could cat the old path and get stale
+    # cached bytes.
+    log: list[str] = []
+    w = _watcher(log=log)
+    agen, task = await _start_blocked_watch(w)
+    move = FileEvent(kind=FileChangeKind.MOVE,
+                     path=PathSpec.from_str_path("/nc/data/new.txt"),
+                     previous_path=PathSpec.from_str_path("/nc/old/orig.txt"),
+                     timestamp=_TS)
+    await w.notify(move)
+    await asyncio.wait_for(task, timeout=2)
+    assert log == [
+        "inv:/nc/data/new.txt",
+        "inv:/nc/data",
+        "inv-unlink:/nc/old/orig.txt",
+        "inv:/nc/old",
+    ]
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
 async def test_notify_fans_out_to_all_matching_watches():
     w = _watcher()
     a_gen, a_task = await _start_blocked_watch(w)

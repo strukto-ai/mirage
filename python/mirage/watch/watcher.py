@@ -143,8 +143,9 @@ class Watcher:
                 return specs
             specs.append(self._frame(entry, current))
 
-    async def _invalidate(self, entry: WatchMount, change: FileEvent) -> None:
-        """Evict cache for one change before it is delivered.
+    async def _evict(self, entry: WatchMount, path: PathSpec,
+                     unlink: bool) -> None:
+        """Evict one path and every cached ancestor listing above it.
 
         The whole ancestor chain is invalidated, not just the path: an
         external change is often the only signal mirage gets, and a
@@ -154,18 +155,39 @@ class Watcher:
         a Nextcloud webhook hits exactly this).
 
         Args:
-            entry (WatchMount): Mount owning the change path.
-            change (FileEvent): Change whose path is now stale.
+            entry (WatchMount): Mount owning the path.
+            path (PathSpec): Framed path that is now stale.
+            unlink (bool): Whether the path itself disappeared.
         """
         manager = entry.cache_manager
         if manager is None:
             return
-        if change.kind is FileChangeKind.DELETE:
-            await manager.invalidate_after_unlink(change.path)
+        if unlink:
+            await manager.invalidate_after_unlink(path)
         else:
-            await manager.invalidate_after_write(change.path)
-        for ancestor in self._ancestors(entry, change.path.virtual):
+            await manager.invalidate_after_write(path)
+        for ancestor in self._ancestors(entry, path.virtual):
             await manager.invalidate_after_write(ancestor)
+
+    async def _invalidate(self, entry: WatchMount, change: FileEvent) -> None:
+        """Evict cache for one change before it is delivered.
+
+        A MOVE evicts both sides: the target as a write and the
+        vacated ``previous_path`` as an unlink (on its own mount), so
+        neither the old nor the new location can serve stale bytes.
+
+        Args:
+            entry (WatchMount): Mount owning the change path.
+            change (FileEvent): Change whose path is now stale.
+        """
+        await self._evict(entry, change.path, change.kind
+                          is FileChangeKind.DELETE)
+        if change.kind is FileChangeKind.MOVE \
+                and change.previous_path is not None:
+            prev_virtual = change.previous_path.virtual
+            prev_entry = self._registry.mount_for(prev_virtual)
+            await self._evict(prev_entry, self._frame(prev_entry,
+                                                      prev_virtual), True)
 
     async def notify(self, change: FileEvent) -> None:
         """Inject one externally observed change.

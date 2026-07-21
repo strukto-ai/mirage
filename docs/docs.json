@@ -385,7 +385,8 @@
             "group": "Watch",
             "icon": "bell",
             "pages": [
-              "python/watch"
+              "python/watch",
+              "python/watch-matrix"
             ]
           },
           {
