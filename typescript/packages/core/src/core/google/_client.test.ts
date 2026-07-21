@@ -17,7 +17,6 @@ import {
   DOCS_API_BASE,
   DRIVE_API_BASE,
   DRIVE_UPLOAD_BASE,
-  GMAIL_API_BASE,
   SHEETS_API_BASE,
   SLIDES_API_BASE,
   TOKEN_URL,
@@ -25,7 +24,6 @@ import {
   docsBase,
   driveBase,
   driveUploadBase,
-  gmailBase,
   refreshAccessToken,
   sheetsBase,
   slidesBase,
@@ -147,7 +145,20 @@ describe('api base helpers', () => {
     expect(docsBase(tm)).toBe(DOCS_API_BASE)
     expect(slidesBase(tm)).toBe(SLIDES_API_BASE)
     expect(sheetsBase(tm)).toBe(SHEETS_API_BASE)
-    expect(gmailBase(tm)).toBe(GMAIL_API_BASE)
-    expect(tokenUrl()).toBe(TOKEN_URL)
+    expect(tokenUrl(tm.config)).toBe(TOKEN_URL)
+  })
+
+  it('apiBase override rewrites every service', () => {
+    const tm = new TokenManager({
+      clientId: 'cid',
+      refreshToken: 'rt',
+      apiBase: 'http://127.0.0.1:19999',
+    })
+    expect(driveBase(tm)).toBe('http://127.0.0.1:19999/drive/v3')
+    expect(driveUploadBase(tm)).toBe('http://127.0.0.1:19999/upload/drive/v3')
+    expect(docsBase(tm)).toBe('http://127.0.0.1:19999/v1')
+    expect(slidesBase(tm)).toBe('http://127.0.0.1:19999/v1')
+    expect(sheetsBase(tm)).toBe('http://127.0.0.1:19999/v4')
+    expect(tokenUrl(tm.config)).toBe('http://127.0.0.1:19999/token')
   })
 })
