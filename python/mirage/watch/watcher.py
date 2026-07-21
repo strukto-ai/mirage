@@ -123,9 +123,33 @@ class Watcher:
             return True
         return "/" not in virtual[len(root) + 1:]
 
+    def _ancestors(self, entry: MountEntry, virtual: str) -> list[PathSpec]:
+        """Framed ancestor directories of ``virtual`` below the mount
+        root, nearest first.
+
+        Args:
+            entry (MountEntry): Mount owning the path.
+            virtual (str): Workspace-virtual path of the change.
+        """
+        prefix = entry.prefix.rstrip("/")
+        specs: list[PathSpec] = []
+        current = virtual.rstrip("/")
+        while True:
+            current = current.rsplit("/", 1)[0]
+            if len(current) <= len(prefix):
+                return specs
+            specs.append(self._frame(entry, current))
+
     async def _invalidate(self, entry: MountEntry,
                           change: ResourceChange) -> None:
         """Evict cache for one change before it is delivered.
+
+        The whole ancestor chain is invalidated, not just the path: an
+        external change is often the only signal mirage gets, and a
+        nested create/delete implies intermediate directories appeared
+        or vanished with it, so every cached listing up to the mount
+        root may be stale (a consumer forwarding only file events from
+        a Nextcloud webhook hits exactly this).
 
         Args:
             entry (MountEntry): Mount owning the change path.
@@ -138,6 +162,8 @@ class Watcher:
             await manager.invalidate_after_unlink(change.path)
         else:
             await manager.invalidate_after_write(change.path)
+        for ancestor in self._ancestors(entry, change.path.virtual):
+            await manager.invalidate_after_write(ancestor)
 
     async def notify(self, change: ResourceChange) -> None:
         """Inject one externally observed change.

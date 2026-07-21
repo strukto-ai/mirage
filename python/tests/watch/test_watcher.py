@@ -85,7 +85,7 @@ async def test_notify_invalidate_before_deliver():
     await w.notify(_change(ChangeKind.CREATE, "/nc/data/x.txt"))
     await asyncio.wait_for(task, timeout=2)
     log.append("deliver")
-    assert log == ["inv:/nc/data/x.txt", "deliver"]
+    assert log == ["inv:/nc/data/x.txt", "inv:/nc/data", "deliver"]
     await agen.aclose()
     await w.close()
 
@@ -97,7 +97,7 @@ async def test_notify_delete_routes_to_unlink():
     agen, task = await _start_blocked_watch(w)
     await w.notify(_change(ChangeKind.DELETE, "/nc/data/x.txt"))
     await asyncio.wait_for(task, timeout=2)
-    assert log == ["inv-unlink:/nc/data/x.txt"]
+    assert log == ["inv-unlink:/nc/data/x.txt", "inv:/nc/data"]
     await agen.aclose()
     await w.close()
 
@@ -121,7 +121,34 @@ async def test_notify_reframes_resource_path():
     agen, task = await _start_blocked_watch(w)
     await w.notify(_change(ChangeKind.CREATE, "/nc/data/x.txt"))
     await asyncio.wait_for(task, timeout=2)
-    assert seen == ["data/x.txt"]
+    assert seen == ["data/x.txt", "data"]
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_invalidates_ancestor_chain():
+    # A nested external create implies intermediate dirs appeared, so
+    # every cached listing up to the mount root must be evicted, not
+    # just the file's immediate parent.
+    seen: list[str] = []
+
+    class RecordingManager:
+
+        async def invalidate_after_write(self, path):
+            seen.append(path.virtual)
+
+        async def invalidate_after_unlink(self, path):
+            seen.append(f"unlink:{path.virtual}")
+
+    entry = FakeMountEntry(prefix="/nc/",
+                           resource=PlainResource(),
+                           cache_manager=RecordingManager())
+    w = Watcher(FakeRegistry(entry))
+    agen, task = await _start_blocked_watch(w)
+    await w.notify(_change(ChangeKind.CREATE, "/nc/data/sub/deep.txt"))
+    await asyncio.wait_for(task, timeout=2)
+    assert seen == ["/nc/data/sub/deep.txt", "/nc/data/sub", "/nc/data"]
     await agen.aclose()
     await w.close()
 

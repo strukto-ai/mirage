@@ -26,10 +26,11 @@ from mirage import MountMode, Workspace
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.types import PathSpec
-from mirage.watch import enable_watch
+from mirage.watch import Watcher, enable_watch
 
 CASE_DIR = Path(__file__).resolve().parent
 EVENT_TIMEOUT = 20.0
+ABSENT_WINDOW = 1.0
 CLASS_BY_KIND = {
     "create": "OCP\\Files\\Events\\Node\\NodeCreatedEvent",
     "update": "OCP\\Files\\Events\\Node\\NodeWrittenEvent",
@@ -68,6 +69,16 @@ def _files_prefix() -> str:
     return f"/{os.environ.get('NEXTCLOUD_USERNAME', 'admin')}/files"
 
 
+def _framed_root(spec: dict) -> PathSpec:
+    """Build the mount-framed watch_dir root the delta hook pulls over.
+
+    Args:
+        spec (dict): Parsed case file.
+    """
+    rel = spec["watch_dir"][len(spec["mount"].rstrip("/")):].strip("/")
+    return PathSpec.from_str_path(spec["watch_dir"], resource_path=rel)
+
+
 async def _mutate(op: object, mutate: dict) -> None:
     """Apply one mutation directly to the backend, bypassing the
     watched workspace so its cache is genuinely stale.
@@ -77,6 +88,9 @@ async def _mutate(op: object, mutate: dict) -> None:
         mutate (dict): {"op", "path", "body"?}.
     """
     if mutate["op"] == "write":
+        parent = mutate["path"].rsplit("/", 1)[0]
+        if parent:
+            await op.create_dir(parent + "/")
         await op.write(mutate["path"], mutate["body"].encode())
     elif mutate["op"] == "delete":
         await op.delete(mutate["path"])
@@ -105,21 +119,135 @@ def _webhook_payload(expect: dict, mount: str) -> dict:
     }
 
 
-async def _await_event(agen: object, want_path: str) -> object:
-    """Return the next change for ``want_path``, skipping others.
+class EventStream:
+    """Consume a watch iterator with an always-armed pending task.
 
-    Args:
-        agen (object): The ``watch`` async iterator.
-        want_path (str): Virtual path the case expects.
+    Arming before any mutation matters: an async generator body (which
+    registers the subscriber) only runs on the first ``__anext__``, so
+    consuming lazily would lose events notified before the first await.
     """
 
-    async def _next_matching() -> object:
-        while True:
-            change = await agen.__anext__()
-            if change.path.virtual == want_path:
-                return change
+    def __init__(self, agen: object) -> None:
+        self._agen = agen
+        self._task: asyncio.Task | None = None
 
-    return await asyncio.wait_for(_next_matching(), timeout=EVENT_TIMEOUT)
+    async def start(self) -> None:
+        """Arm the iterator and yield to the loop so the subscriber
+        registers before the first mutation."""
+        self._arm()
+        await asyncio.sleep(0.05)
+
+    def _arm(self) -> None:
+        if self._task is None:
+            self._task = asyncio.ensure_future(self._agen.__anext__())
+
+    async def expect(self, want_path: str, want_kind: str) -> object | None:
+        """Return the next change for ``want_path``, skipping others
+        (a nested create also emits its parent dir), or None on
+        timeout or kind mismatch.
+
+        Args:
+            want_path (str): Virtual path the case expects.
+            want_kind (str): ChangeKind value the case expects.
+        """
+        deadline = asyncio.get_running_loop().time() + EVENT_TIMEOUT
+        while True:
+            self._arm()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return None
+            done, _ = await asyncio.wait({self._task}, timeout=remaining)
+            if not done:
+                return None
+            change = self._task.result()
+            self._task = None
+            if change.path.virtual != want_path:
+                continue
+            if change.kind.value != want_kind:
+                return None
+            return change
+
+    async def absent(self, path: str) -> bool:
+        """Assert no change for ``path`` arrives within the window.
+
+        Unrelated changes (e.g. a parent-dir create) are drained and
+        ignored; only a change for ``path`` itself fails the case.
+
+        Args:
+            path (str): Virtual path that must not be delivered.
+        """
+        deadline = asyncio.get_running_loop().time() + ABSENT_WINDOW
+        while True:
+            self._arm()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return True
+            done, _ = await asyncio.wait({self._task}, timeout=remaining)
+            if not done:
+                return True
+            change = self._task.result()
+            self._task = None
+            if change.path.virtual == path:
+                return False
+
+    async def close(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+            self._task = None
+        await self._agen.aclose()
+
+
+class ConsumerPoller:
+    """The poll loop a consumer runs; mirage runs no loop itself.
+
+    This is the whole pattern: pull a delta from the resource's hook,
+    feed each change to ``watcher.notify``, keep the checkpoint. In
+    production this body runs on an interval (or after a webhook
+    doorbell); the integ pumps it once per case for determinism.
+    """
+
+    def __init__(self, hook: object, watcher: Watcher, root: PathSpec) -> None:
+        self._hook = hook
+        self._watcher = watcher
+        self._root = root
+        self._checkpoint: str | None = None
+
+    async def pump(self) -> None:
+        delta = await self._hook.pull(self._root, self._checkpoint)
+        self._checkpoint = delta.checkpoint
+        for change in delta.changes:
+            await self._watcher.notify(change)
+
+
+class PullTrigger:
+    """Case trigger for pull mode: pump the consumer's poller once."""
+
+    def __init__(self, poller: ConsumerPoller) -> None:
+        self._poller = poller
+
+    async def __call__(self, case: dict) -> None:
+        await self._poller.pump()
+
+
+class PushTrigger:
+    """Case trigger for push mode: POST the webhook payload the case's
+    mutation would have produced. No poller exists, so a delivered
+    event can only have come from the webhook."""
+
+    def __init__(self, session: aiohttp.ClientSession, url: str,
+                 mount: str) -> None:
+        self._session = session
+        self._url = url
+        self._mount = mount
+
+    async def __call__(self, case: dict) -> None:
+        payload = _webhook_payload(case["expect"], self._mount)
+        async with self._session.post(self._url, json=payload) as resp:
+            await resp.read()
 
 
 async def _run_check(ws: Workspace, check: dict) -> tuple[bool, str]:
@@ -138,35 +266,43 @@ async def _run_check(ws: Workspace, check: dict) -> tuple[bool, str]:
     return ok, f"{check['cmd']!r} absent {check['absent']!r}"
 
 
-async def _run_case(ws: Workspace, op: object, trigger, agen: object,
+async def _run_case(ws: Workspace, op: object, trigger, stream: EventStream,
                     case: dict) -> tuple[bool, str]:
-    """Run one mutate -> trigger -> event -> checks case.
+    """Run one warm -> mutate -> trigger -> event -> checks case.
 
-    The event fires only after cache invalidation, so the checks (cat,
-    head, ls, grep) prove the reads are fresh, not stale.
+    ``warm`` reads populate mirage's cache BEFORE the external
+    mutation, so the post-event checks prove invalidation of genuinely
+    cached state, not just cold reads. The event fires only after
+    invalidation, so checks (cat, head, ls, grep) must be fresh.
 
     Args:
         ws (Workspace): Watched workspace.
         op (object): External writer operator.
-        trigger (Callable): Awaitable that fires the change signal for
-            this case (pull nudge or push webhook POST).
-        agen (object): The ``watch`` async iterator.
+        trigger (Callable): Awaitable firing the change signal for
+            this case (pull pump or push webhook POST).
+        stream (EventStream): Armed watch consumer.
         case (dict): One case from the file.
     """
     want = case["expect"]
+    for cmd in case.get("warm", []):
+        await ws.execute(cmd)
     await _mutate(op, case["mutate"])
     await trigger(case)
-    try:
-        change = await _await_event(agen, want["path"])
-    except TimeoutError:
-        return False, f"no event for {want['path']} within {EVENT_TIMEOUT}s"
-    if change.kind.value != want["kind"]:
-        return False, f"kind {change.kind.value} != {want['kind']}"
-    for check in case["checks"]:
+    if want.get("delivered", True):
+        change = await stream.expect(want["path"], want["kind"])
+        if change is None:
+            return False, (f"no {want['kind']} for {want['path']} within "
+                           f"{EVENT_TIMEOUT}s")
+    else:
+        if not await stream.absent(want["path"]):
+            return False, f"unexpected delivery for {want['path']}"
+    for check in case.get("checks", []):
         ok, detail = await _run_check(ws, check)
         if not ok:
             return False, f"check failed: {detail}"
-    return True, f"{want['kind']} + {len(case['checks'])} checks"
+    verdict = "delivered" if want.get("delivered", True) else "skipped"
+    checks = len(case.get("checks", []))
+    return True, f"{want['kind']} {verdict} + {checks} checks"
 
 
 async def _seed(ws: Workspace, op: object, spec: dict) -> None:
@@ -183,79 +319,84 @@ async def _seed(ws: Workspace, op: object, spec: dict) -> None:
         await op.write(f"data/{name}", b"seed")
 
 
-class ConsumerPoller:
-    """The poll loop a consumer runs; mirage runs no loop itself.
+async def _run_battery(ws: Workspace, op: object, trigger, agen: object,
+                       cases: list[dict],
+                       label: str) -> list[tuple[str, bool, str]]:
+    """Run one battery of cases against one armed watch iterator.
 
-    This is the whole pattern: pull a delta from the resource's hook,
-    feed each change to ``watcher.notify``, keep the checkpoint. In
-    production this body runs on an interval (or after a webhook
-    doorbell); the integ pumps it once per case for determinism.
+    Args:
+        ws (Workspace): Watched workspace.
+        op (object): External writer operator.
+        trigger (Callable): Case trigger (pull pump or push POST).
+        agen (object): The ``watch`` async iterator for this battery.
+        cases (list[dict]): Cases to run in order.
+        label (str): Result-line prefix (mode and scope).
     """
-
-    def __init__(self, hook: object, watcher: object, root: PathSpec) -> None:
-        self._hook = hook
-        self._watcher = watcher
-        self._root = root
-        self._checkpoint: str | None = None
-
-    async def pump(self) -> None:
-        delta = await self._hook.pull(self._root, self._checkpoint)
-        self._checkpoint = delta.checkpoint
-        for change in delta.changes:
-            await self._watcher.notify(change)
+    stream = EventStream(agen)
+    await stream.start()
+    results: list[tuple[str, bool, str]] = []
+    try:
+        for case in cases:
+            ok, detail = await _run_case(ws, op, trigger, stream, case)
+            results.append((f"{label}:{case['id']}", ok, detail))
+    finally:
+        await stream.close()
+    return results
 
 
 async def _run_pull(spec: dict, ws: Workspace,
                     op: object) -> list[tuple[str, bool, str]]:
-    """Run the case battery in pull mode (consumer-owned poll loop).
+    """Run all batteries in pull mode (consumer-owned poll loop).
+
+    The poller always pulls the full watch_dir; scope filtering
+    (folder, glob pattern, single file) happens in the watcher at
+    delivery time, which is exactly the production shape.
 
     Args:
         spec (dict): Parsed case file.
         ws (Workspace): Watched workspace.
         op (object): External writer operator.
     """
-    await _seed(ws, op, spec)
     watcher = enable_watch(ws)
-    # The hook needs a mount-framed root: virtual path plus the
-    # mount-relative resource_path.
-    rel = spec["watch_dir"][len(spec["mount"].rstrip("/")):].strip("/")
-    root = PathSpec.from_str_path(spec["watch_dir"], resource_path=rel)
-    agen = ws.watch(root)
     resource = ws.registry.mount_for(spec["mount"]).resource
-    poller = ConsumerPoller(resource.delta_hook(), watcher, root)
-    await poller.pump()
-
-    async def trigger(case: dict) -> None:
-        await poller.pump()
-
+    hook_root = _framed_root(spec)
     results: list[tuple[str, bool, str]] = []
-    try:
-        for case in spec["cases"]:
-            ok, detail = await _run_case(ws, op, trigger, agen, case)
-            results.append((f"pull:{case['id']}", ok, detail))
-    finally:
-        await agen.aclose()
+
+    await _seed(ws, op, spec)
+    agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
+    poller = ConsumerPoller(resource.delta_hook(), watcher, hook_root)
+    await poller.pump()
+    results.extend(await _run_battery(ws, op, PullTrigger(poller), agen,
+                                      spec["cases"], "pull"))
+
+    for scope in spec.get("scopes", []):
+        await _seed(ws, op, spec)
+        roots = [PathSpec.from_str_path(v) for v in scope["watch"]]
+        agen = ws.watch(roots)
+        poller = ConsumerPoller(resource.delta_hook(), watcher, hook_root)
+        await poller.pump()
+        results.extend(await
+                       _run_battery(ws, op, PullTrigger(poller), agen,
+                                    scope["cases"], f"pull:{scope['id']}"))
     return results
 
 
 async def _run_push(spec: dict, ws: Workspace,
                     op: object) -> list[tuple[str, bool, str]]:
-    """Run the case battery in push mode (webhook -> notify).
+    """Run all batteries in push mode (webhook -> notify).
 
     Starts the sample webhook receiver a consumer would host, POSTs the
     Nextcloud payload each case implies, and relies on ``notify`` for
     delivery. No poller exists at all, so a delivered event can only
-    have come from the webhook.
+    have come from the webhook; scope filtering happens in the watcher
+    exactly as in pull mode.
 
     Args:
         spec (dict): Parsed case file.
         ws (Workspace): Watched workspace.
         op (object): External writer operator.
     """
-    await _seed(ws, op, spec)
     watcher = enable_watch(ws)
-    agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
-    await asyncio.sleep(0.2)
     runner = web.AppRunner(make_app(watcher, _files_prefix(), spec["mount"]))
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -265,18 +406,20 @@ async def _run_push(spec: dict, ws: Workspace,
 
     results: list[tuple[str, bool, str]] = []
     async with aiohttp.ClientSession() as session:
-
-        async def trigger(case: dict) -> None:
-            payload = _webhook_payload(case["expect"], spec["mount"])
-            async with session.post(url, json=payload) as resp:
-                await resp.read()
-
+        trigger = PushTrigger(session, url, spec["mount"])
         try:
-            for case in spec["cases"]:
-                ok, detail = await _run_case(ws, op, trigger, agen, case)
-                results.append((f"push:{case['id']}", ok, detail))
+            await _seed(ws, op, spec)
+            agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
+            results.extend(await _run_battery(ws, op, trigger, agen,
+                                              spec["cases"], "push"))
+            for scope in spec.get("scopes", []):
+                await _seed(ws, op, spec)
+                roots = [PathSpec.from_str_path(v) for v in scope["watch"]]
+                agen = ws.watch(roots)
+                results.extend(await _run_battery(ws, op, trigger, agen,
+                                                  scope["cases"],
+                                                  f"push:{scope['id']}"))
         finally:
-            await agen.aclose()
             await runner.cleanup()
     return results
 

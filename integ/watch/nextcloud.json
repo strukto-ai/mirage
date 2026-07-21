@@ -6,6 +6,7 @@
   "cases": [
     {
       "id": "create_file",
+      "warm": ["ls /nc/data"],
       "mutate": {"op": "write", "path": "data/report.txt", "body": "alpha line\nbeta line\n"},
       "expect": {"kind": "create", "path": "/nc/data/report.txt"},
       "checks": [
@@ -16,17 +17,20 @@
       ]
     },
     {
-      "id": "update_file",
+      "id": "update_etag_change",
+      "warm": ["cat /nc/data/report.txt", "grep -rl alpha /nc/data"],
       "mutate": {"op": "write", "path": "data/report.txt", "body": "gamma line\ndelta line\n"},
       "expect": {"kind": "update", "path": "/nc/data/report.txt"},
       "checks": [
         {"cmd": "cat /nc/data/report.txt", "contains": "gamma line"},
+        {"cmd": "cat /nc/data/report.txt", "absent": "alpha"},
         {"cmd": "grep -rl gamma /nc/data", "contains": "report.txt"},
         {"cmd": "grep -r alpha /nc/data", "absent": "report.txt"}
       ]
     },
     {
       "id": "create_nested",
+      "warm": ["ls /nc/data"],
       "mutate": {"op": "write", "path": "data/sub/deep.txt", "body": "deep marker\n"},
       "expect": {"kind": "create", "path": "/nc/data/sub/deep.txt"},
       "checks": [
@@ -36,11 +40,87 @@
     },
     {
       "id": "delete_file",
+      "warm": ["cat /nc/data/report.txt", "ls /nc/data"],
       "mutate": {"op": "delete", "path": "data/report.txt"},
       "expect": {"kind": "delete", "path": "/nc/data/report.txt"},
       "checks": [
         {"cmd": "ls /nc/data", "absent": "report.txt"},
         {"cmd": "grep -rl gamma /nc/data", "absent": "report.txt"}
+      ]
+    }
+  ],
+  "scopes": [
+    {
+      "id": "folder",
+      "watch": ["/nc/data/sub"],
+      "cases": [
+        {
+          "id": "inside_delivered",
+          "mutate": {"op": "write", "path": "data/sub/in.txt", "body": "inside scope\n"},
+          "expect": {"kind": "create", "path": "/nc/data/sub/in.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/sub/in.txt", "contains": "inside scope"}
+          ]
+        },
+        {
+          "id": "outside_skipped",
+          "mutate": {"op": "write", "path": "data/out.txt", "body": "outside scope\n"},
+          "expect": {"kind": "create", "path": "/nc/data/out.txt", "delivered": false}
+        }
+      ]
+    },
+    {
+      "id": "pattern",
+      "watch": ["/nc/data/*.txt"],
+      "cases": [
+        {
+          "id": "txt_delivered",
+          "mutate": {"op": "write", "path": "data/notes.txt", "body": "txt matches\n"},
+          "expect": {"kind": "create", "path": "/nc/data/notes.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/notes.txt", "contains": "txt matches"}
+          ]
+        },
+        {
+          "id": "md_skipped",
+          "mutate": {"op": "write", "path": "data/notes.md", "body": "md does not match\n"},
+          "expect": {"kind": "create", "path": "/nc/data/notes.md", "delivered": false}
+        },
+        {
+          "id": "nested_txt_skipped",
+          "mutate": {"op": "write", "path": "data/sub/deep.txt", "body": "glob does not cross slash\n"},
+          "expect": {"kind": "create", "path": "/nc/data/sub/deep.txt", "delivered": false}
+        }
+      ]
+    },
+    {
+      "id": "file",
+      "watch": ["/nc/data/keep.txt"],
+      "cases": [
+        {
+          "id": "update_delivered",
+          "warm": ["cat /nc/data/keep.txt"],
+          "mutate": {"op": "write", "path": "data/keep.txt", "body": "fresh keep\n"},
+          "expect": {"kind": "update", "path": "/nc/data/keep.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/keep.txt", "contains": "fresh keep"},
+            {"cmd": "cat /nc/data/keep.txt", "absent": "seed"}
+          ]
+        },
+        {
+          "id": "sibling_skipped",
+          "mutate": {"op": "write", "path": "data/other.txt", "body": "sibling file\n"},
+          "expect": {"kind": "create", "path": "/nc/data/other.txt", "delivered": false}
+        },
+        {
+          "id": "delete_delivered",
+          "warm": ["ls /nc/data"],
+          "mutate": {"op": "delete", "path": "data/keep.txt"},
+          "expect": {"kind": "delete", "path": "/nc/data/keep.txt"},
+          "checks": [
+            {"cmd": "ls /nc/data", "absent": "keep.txt"}
+          ]
+        }
       ]
     }
   ]
