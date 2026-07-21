@@ -1,0 +1,62 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": true,
+    "has_write": false,
+    "resources": [
+      "box",
+      "chroma",
+      "databricks_volume",
+      "dify",
+      "discord",
+      "disk",
+      "dropbox",
+      "email",
+      "gdocs",
+      "gdrive",
+      "github",
+      "github_ci",
+      "gmail",
+      "gridfs",
+      "gsheets",
+      "gslides",
+      "hf_buckets",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mem0",
+      "mongodb",
+      "nextcloud",
+      "notion",
+      "onedrive",
+      "postgres",
+      "qdrant",
+      "ram",
+      "redis",
+      "s3",
+      "sharepoint",
+      "slack",
+      "ssh",
+      "trello"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-c",
+      "value_kind": "none",
+      "value_optional": false
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "path",
+    "provided_by": []
+  }
+}

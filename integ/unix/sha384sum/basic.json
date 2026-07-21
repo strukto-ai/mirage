@@ -1,0 +1,137 @@
+{
+  "cases": [
+    {
+      "id": "sha384sum",
+      "seq": 566,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha384sum /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "53ca6807a9cc7686b87cbae6e96a06fecfbbe81780ce301280b3b834fc241dfca0a3eb4c487fdd24674af230967f3a9d  /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha384sum_multi",
+      "seq": 567,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha384sum /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "53ca6807a9cc7686b87cbae6e96a06fecfbbe81780ce301280b3b834fc241dfca0a3eb4c487fdd24674af230967f3a9d  /data/a.txt\nda1443aa6d6c8f8fbc8b8c0586db81efcae552eac235992d5caead121c0605fc0b2007a3afd3397415bfd9351e1ba179  /data/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha384sum_no_input",
+      "seq": 568,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha384sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b  -\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha384sum_c_check",
+      "seq": 601233,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qsha384sum && printf 'hello' > /data/qsha384sum/sh.txt && sha384sum /data/qsha384sum/sh.txt > /data/qsha384sum/sums && sha384sum -c /data/qsha384sum/sums",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/qsha384sum/sh.txt: OK\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

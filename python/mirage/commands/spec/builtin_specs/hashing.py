@@ -43,7 +43,27 @@ SPECS: dict[str, CommandSpec] = {
         ),
         positional=(Operand(kind=OperandKind.PATH), ),
     ),
+    'md5sum':
+    CommandSpec(
+        options=(Option(short="-c"), ),
+        rest=Operand(kind=OperandKind.PATH),
+    ),
+    'sha1sum':
+    CommandSpec(
+        options=(Option(short="-c"), ),
+        rest=Operand(kind=OperandKind.PATH),
+    ),
     'sha256sum':
+    CommandSpec(
+        options=(Option(short="-c"), ),
+        rest=Operand(kind=OperandKind.PATH),
+    ),
+    'sha384sum':
+    CommandSpec(
+        options=(Option(short="-c"), ),
+        rest=Operand(kind=OperandKind.PATH),
+    ),
+    'sha512sum':
     CommandSpec(
         options=(Option(short="-c"), ),
         rest=Operand(kind=OperandKind.PATH),

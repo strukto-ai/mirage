@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sha256Hex } from '../../../utils/hash.ts'
-import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { checksumGeneric, type Stream } from './checksum.ts'
+import { sha512sumGeneric } from '../../generic/sha512sum.ts'
+import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
 
-export async function sha256sumGeneric(
-  paths: PathSpec[],
-  opts: CommandOpts,
-  stream: Stream,
-): Promise<CommandFnResult> {
-  return checksumGeneric(paths, opts, stream, sha256Hex, 'sha256sum')
+export const SHA512SUM_BUILDER: Builder = {
+  name: 'sha512sum',
+  read: true,
+  fn: async (ops, accessor, paths, _texts, opts) => {
+    const idx = opts.index ?? undefined
+    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+    return sha512sumGeneric(resolved, opts, dirAwareStream(ops, accessor, idx))
+  },
 }

@@ -543,9 +543,9 @@ async def pure_provision(
 
 FILE_READ_COMMANDS = frozenset({
     "awk", "base64", "cat", "cmp", "column", "comm", "cut", "diff", "expand",
-    "fmt", "fold", "iconv", "join", "look", "md5", "nl", "paste", "rev",
-    "sha256sum", "shuf", "sort", "strings", "tac", "tr", "tsort", "unexpand",
-    "uniq", "wc", "xxd", "zcat"
+    "fmt", "fold", "iconv", "join", "look", "md5", "md5sum", "nl", "paste",
+    "rev", "sha1sum", "sha256sum", "sha384sum", "sha512sum", "shuf", "sort",
+    "strings", "tac", "tr", "tsort", "unexpand", "uniq", "wc", "xxd", "zcat"
 })
 # file reads a bounded prefix (magic bytes), so it shares head/tail's
 # 0..size range estimate.

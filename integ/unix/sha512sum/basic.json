@@ -1,0 +1,137 @@
+{
+  "cases": [
+    {
+      "id": "sha512sum",
+      "seq": 569,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha512sum /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "e9ba4daf823ceaa55dec246414e6786e315a1ab5dc465b7502c3b816deb43f7c836fe100e2d7190a560b970de5d1488d55a7975150bf3763bc0859a1320c6bbc  /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha512sum_multi",
+      "seq": 570,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha512sum /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "e9ba4daf823ceaa55dec246414e6786e315a1ab5dc465b7502c3b816deb43f7c836fe100e2d7190a560b970de5d1488d55a7975150bf3763bc0859a1320c6bbc  /data/a.txt\n6a8e8f13f75c3dead6c5b542d2282b182d94619292e7c31c551b719a65af7093a621b008868d47d2e85973ae3fa1df5c8ca23f2bcb27919229ad0c5b9a59c8cc  /data/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha512sum_no_input",
+      "seq": 571,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha512sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e  -\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sha512sum_c_check",
+      "seq": 601234,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qsha512sum && printf 'hello' > /data/qsha512sum/sh.txt && sha512sum /data/qsha512sum/sh.txt > /data/qsha512sum/sums && sha512sum -c /data/qsha512sum/sums",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/qsha512sum/sh.txt: OK\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

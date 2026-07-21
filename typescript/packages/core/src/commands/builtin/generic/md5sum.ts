@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sha256Hex } from '../../../utils/hash.ts'
+import { md5Hex } from '../../../utils/hash.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { checksumGeneric, type Stream } from './checksum.ts'
 
-export async function sha256sumGeneric(
+export async function md5sumGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  return checksumGeneric(paths, opts, stream, sha256Hex, 'sha256sum')
+  return checksumGeneric(paths, opts, stream, (b) => Promise.resolve(md5Hex(b)), 'md5sum')
 }

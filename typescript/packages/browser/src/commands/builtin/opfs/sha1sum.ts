@@ -12,15 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sha256Hex } from '../../../utils/hash.ts'
-import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { checksumGeneric, type Stream } from './checksum.ts'
+import { ResourceName, command, sha1sumGeneric, specOf } from '@struktoai/mirage-core'
+import { stream as opfsStream } from '../../../core/opfs/stream.ts'
+import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
-export async function sha256sumGeneric(
-  paths: PathSpec[],
-  opts: CommandOpts,
-  stream: Stream,
-): Promise<CommandFnResult> {
-  return checksumGeneric(paths, opts, stream, sha256Hex, 'sha256sum')
-}
+export const OPFS_SHA1SUM = command({
+  name: 'sha1sum',
+  resource: ResourceName.OPFS,
+  spec: specOf('sha1sum'),
+  fn: (accessor: OPFSAccessor, paths, _texts, opts) =>
+    sha1sumGeneric(paths, opts, (p) => opfsStream(accessor, p)),
+})

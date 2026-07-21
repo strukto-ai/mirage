@@ -6,7 +6,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def sha256sum(
+async def md5sum(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -15,11 +15,11 @@ async def sha256sum(
     check: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     return await hashsum(paths,
-                         factory=hashlib.sha256,
+                         factory=hashlib.md5,
                          read_bytes=read_bytes,
                          read_stream=read_stream,
                          stdin=stdin,
                          check=check)
 
 
-__all__ = ["sha256sum"]
+__all__ = ["md5sum"]
