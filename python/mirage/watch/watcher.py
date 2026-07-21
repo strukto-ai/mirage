@@ -15,6 +15,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Protocol
 
 from mirage.types import ChangeKind, PathSpec, ResourceChange
@@ -86,11 +87,23 @@ class Watcher:
         resource = entry.resource
         if not isinstance(resource, SupportsChanges):
             raise MountCommandUnsupported("watch", resource.name, path.virtual)
-        norm = "/" + path.virtual.strip("/")
+        return entry, self._frame(entry, path.virtual)
+
+    def _frame(self, entry: MountEntry, virtual: str) -> PathSpec:
+        """Rebuild a PathSpec with mount-relative framing.
+
+        The caller-supplied virtual path may carry any resource_path;
+        cache invalidation needs the real mount-relative one, so it is
+        recomputed from the mount prefix.
+
+        Args:
+            entry (MountEntry): Mount owning the path.
+            virtual (str): Workspace-virtual path.
+        """
+        norm = "/" + virtual.strip("/")
         resource_path = norm[len(entry.prefix):] if norm.startswith(
             entry.prefix) else ""
-        root = PathSpec.from_str_path(norm, resource_path=resource_path)
-        return entry, root
+        return PathSpec.from_str_path(norm, resource_path=resource_path)
 
     def _matches(self, sub: Subscriber, change: ResourceChange) -> bool:
         """Whether a change falls inside a subscriber's scope.
@@ -109,21 +122,33 @@ class Watcher:
             return True
         return "/" not in virtual[len(root) + 1:]
 
+    async def _invalidate(self, entry: MountEntry,
+                          change: ResourceChange) -> None:
+        """Evict cache for one change before it is delivered.
+
+        Args:
+            entry (MountEntry): Mount owning the change path.
+            change (ResourceChange): Change whose path is now stale.
+        """
+        manager = entry.cache_manager
+        if manager is None:
+            return
+        if change.kind is ChangeKind.DELETE:
+            await manager.invalidate_after_unlink(change.path)
+        else:
+            await manager.invalidate_after_write(change.path)
+
     async def _dispatch(self, source: Source, changes: tuple[ResourceChange,
                                                              ...]) -> None:
-        """Invalidate caches for ``changes``, then deliver them.
+        """Invalidate caches for ``changes``, then deliver them to the
+        source's subscribers.
 
         Args:
             source (Source): Source that pulled the changes.
             changes (tuple[ResourceChange, ...]): Changes to deliver.
         """
-        manager = source.entry.cache_manager
-        if manager is not None:
-            for change in changes:
-                if change.kind is ChangeKind.DELETE:
-                    await manager.invalidate_after_unlink(change.path)
-                else:
-                    await manager.invalidate_after_write(change.path)
+        for change in changes:
+            await self._invalidate(source.entry, change)
         for change in changes:
             for sub in source.subscribers:
                 if self._matches(sub, change):
@@ -218,11 +243,40 @@ class Watcher:
                 if source.task is not None:
                     source.task.cancel()
 
+    async def notify(self, change: ResourceChange) -> None:
+        """Inject one precise externally-observed change (push path).
+
+        The consumer's own webhook receiver (e.g. a Nextcloud
+        ``webhook_listeners`` endpoint) maps a provider payload to a
+        ``ResourceChange`` and calls this. The change is invalidated and
+        delivered immediately with no poll, so push latency is bounded
+        by the network, not ``poll_interval``. Use ``nudge`` instead
+        when the signal carries no path (an imprecise doorbell).
+
+        A running poller may rediscover the same change on its next
+        pull; per-path coalescing dampens the duplicate and the model
+        is level-triggered, so it is benign.
+
+        Args:
+            change (ResourceChange): Precise change; its path is
+                reframed to the owning mount before use.
+        """
+        if self._closed:
+            return
+        entry = self._registry.mount_for(change.path.virtual)
+        framed = replace(change, path=self._frame(entry, change.path.virtual))
+        await self._invalidate(entry, framed)
+        for source in self._sources.values():
+            for sub in source.subscribers:
+                if self._matches(sub, framed):
+                    await sub.queue.push(framed)
+
     def nudge(self, path: PathSpec) -> None:
         """Request an immediate pull for sources overlapping ``path``.
 
         Idempotent and cheap: a consumer-owned webhook receiver or
-        queue bridge may call this on every signal.
+        queue bridge may call this when a signal carries no exact path.
+        When the signal is precise, prefer ``notify``.
 
         Args:
             path (PathSpec): Dirty path hint.

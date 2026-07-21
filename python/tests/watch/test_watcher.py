@@ -124,6 +124,79 @@ async def test_delete_routes_to_unlink_invalidation():
     await w.close()
 
 
+async def _start_blocked_watch(w, virtual="/nc"):
+    """Start a watch iterator and let it register + block on pop.
+
+    Returns the generator and the pending __anext__ task, so a test can
+    inject via notify() and then await the delivery.
+    """
+    agen = w.watch(PathSpec.from_str_path(virtual))
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    return agen, task
+
+
+@pytest.mark.asyncio
+async def test_notify_delivers_precise_change():
+    w = _watcher(ScriptedHook([]))
+    agen, task = await _start_blocked_watch(w)
+    await w.notify(_change(ChangeKind.CREATE, "/nc/data/x.txt"))
+    change = await asyncio.wait_for(task, timeout=2)
+    assert change.kind is ChangeKind.CREATE
+    assert change.path.virtual == "/nc/data/x.txt"
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_invalidate_before_deliver():
+    log: list[str] = []
+    w = _watcher(ScriptedHook([]), log=log)
+    agen, task = await _start_blocked_watch(w)
+    await w.notify(_change(ChangeKind.CREATE, "/nc/data/x.txt"))
+    await asyncio.wait_for(task, timeout=2)
+    log.append("deliver")
+    assert log == ["inv:/nc/data/x.txt", "deliver"]
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_delete_routes_to_unlink():
+    log: list[str] = []
+    w = _watcher(ScriptedHook([]), log=log)
+    agen, task = await _start_blocked_watch(w)
+    await w.notify(_change(ChangeKind.DELETE, "/nc/data/x.txt"))
+    await asyncio.wait_for(task, timeout=2)
+    assert log == ["inv-unlink:/nc/data/x.txt"]
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_reframes_resource_path():
+    seen: list[str] = []
+
+    class RecordingManager:
+
+        async def invalidate_after_write(self, path):
+            seen.append(path.resource_path)
+
+        async def invalidate_after_unlink(self, path):
+            seen.append(path.resource_path)
+
+    entry = FakeMountEntry(prefix="/nc/",
+                           resource=FakeResource(ScriptedHook([])),
+                           cache_manager=RecordingManager())
+    w = Watcher(FakeRegistry(entry), poll_interval=0.01)
+    agen, task = await _start_blocked_watch(w)
+    await w.notify(_change(ChangeKind.CREATE, "/nc/data/x.txt"))
+    await asyncio.wait_for(task, timeout=2)
+    assert seen == ["data/x.txt"]
+    await agen.aclose()
+    await w.close()
+
+
 @pytest.mark.asyncio
 async def test_shared_source_refcounted():
     hook = RepeatHook(_change(ChangeKind.CREATE, "/nc/a.txt"))

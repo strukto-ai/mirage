@@ -70,6 +70,11 @@ class WatchRuntime(Protocol):
         """Stream changes under ``path``; see ``Watcher.watch``."""
         ...
 
+    async def notify(self, change: ResourceChange) -> None:
+        """Inject a precise change from a push source; see
+        ``Watcher.notify``."""
+        ...
+
     def nudge(self, path: PathSpec) -> None:
         """Request an immediate pull for sources covering ``path``."""
         ...

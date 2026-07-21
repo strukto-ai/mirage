@@ -18,6 +18,10 @@ import os
 import sys
 from pathlib import Path
 
+import aiohttp
+from aiohttp import web
+from webhook_server import make_app
+
 from mirage import MountMode, Workspace
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
@@ -26,6 +30,15 @@ from mirage.watch import enable_watch
 
 CASE_DIR = Path(__file__).resolve().parent
 EVENT_TIMEOUT = 20.0
+# Poll cadence for the push pass: long enough that the poller runs its
+# baseline once and then stays idle, so a delivered event can only have
+# come from the webhook, not a background pull.
+PUSH_POLL_INTERVAL = 3600.0
+CLASS_BY_KIND = {
+    "create": "OCP\\Files\\Events\\Node\\NodeCreatedEvent",
+    "update": "OCP\\Files\\Events\\Node\\NodeWrittenEvent",
+    "delete": "OCP\\Files\\Events\\Node\\NodeDeletedEvent",
+}
 
 
 def _build_nextcloud(spec: dict) -> tuple[Workspace, object] | None:
@@ -54,6 +67,11 @@ def _build_nextcloud(spec: dict) -> tuple[Workspace, object] | None:
 BUILDERS = {"nextcloud": _build_nextcloud}
 
 
+def _files_prefix() -> str:
+    """The ``/<user>/files`` prefix Nextcloud puts in webhook paths."""
+    return f"/{os.environ.get('NEXTCLOUD_USERNAME', 'admin')}/files"
+
+
 async def _mutate(op: object, mutate: dict) -> None:
     """Apply one mutation directly to the backend, bypassing the
     watched workspace so its cache is genuinely stale.
@@ -68,6 +86,27 @@ async def _mutate(op: object, mutate: dict) -> None:
         await op.delete(mutate["path"])
     else:
         raise ValueError(f"unknown mutate op: {mutate['op']}")
+
+
+def _webhook_payload(expect: dict, mount: str) -> dict:
+    """Build the Nextcloud payload a real webhook_listeners would send.
+
+    Args:
+        expect (dict): Case ``expect`` block ({"kind", "path"}).
+        mount (str): Mirage mount root.
+    """
+    rel = expect["path"][len(mount.rstrip("/")):]
+    node_path = _files_prefix() + rel
+    return {
+        "event": {
+            "class": CLASS_BY_KIND[expect["kind"]],
+            "node": {
+                "id": 1,
+                "path": node_path
+            },
+        },
+        "time": 1700000000,
+    }
 
 
 async def _await_event(agen: object, want_path: str) -> object:
@@ -103,9 +142,9 @@ async def _run_check(ws: Workspace, check: dict) -> tuple[bool, str]:
     return ok, f"{check['cmd']!r} absent {check['absent']!r}"
 
 
-async def _run_case(ws: Workspace, op: object, watcher: object, agen: object,
+async def _run_case(ws: Workspace, op: object, trigger, agen: object,
                     case: dict) -> tuple[bool, str]:
-    """Run one mutate -> event -> checks case.
+    """Run one mutate -> trigger -> event -> checks case.
 
     The event fires only after cache invalidation, so the checks (cat,
     head, ls, grep) prove the reads are fresh, not stale.
@@ -113,13 +152,14 @@ async def _run_case(ws: Workspace, op: object, watcher: object, agen: object,
     Args:
         ws (Workspace): Watched workspace.
         op (object): External writer operator.
-        watcher (object): The attached watcher, for ``nudge``.
+        trigger (Callable): Awaitable that fires the change signal for
+            this case (pull nudge or push webhook POST).
         agen (object): The ``watch`` async iterator.
         case (dict): One case from the file.
     """
     want = case["expect"]
     await _mutate(op, case["mutate"])
-    watcher.nudge(PathSpec.from_str_path(want["path"]))
+    await trigger(case)
     try:
         change = await _await_event(agen, want["path"])
     except TimeoutError:
@@ -133,8 +173,92 @@ async def _run_case(ws: Workspace, op: object, watcher: object, agen: object,
     return True, f"{want['kind']} + {len(case['checks'])} checks"
 
 
+async def _seed(ws: Workspace, op: object, spec: dict) -> None:
+    """Reset the watch dir and lay down the seed files.
+
+    Args:
+        ws (Workspace): Watched workspace.
+        op (object): External writer operator.
+        spec (dict): Parsed case file.
+    """
+    await ws.execute(f"rm -rf {spec['watch_dir']}")
+    await ws.execute(f"mkdir -p {spec['watch_dir']}")
+    for name in spec["seed"]:
+        await op.write(f"data/{name}", b"seed")
+
+
+async def _run_pull(spec: dict, ws: Workspace,
+                    op: object) -> list[tuple[str, bool, str]]:
+    """Run the case battery in pull mode (poll + nudge).
+
+    Args:
+        spec (dict): Parsed case file.
+        ws (Workspace): Watched workspace.
+        op (object): External writer operator.
+    """
+    await _seed(ws, op, spec)
+    watcher = enable_watch(ws, poll_interval=spec["poll_interval"])
+    agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
+    await asyncio.sleep(spec["poll_interval"] * 2)
+
+    async def trigger(case: dict) -> None:
+        watcher.nudge(PathSpec.from_str_path(case["expect"]["path"]))
+
+    results: list[tuple[str, bool, str]] = []
+    try:
+        for case in spec["cases"]:
+            ok, detail = await _run_case(ws, op, trigger, agen, case)
+            results.append((f"pull:{case['id']}", ok, detail))
+    finally:
+        await agen.aclose()
+    return results
+
+
+async def _run_push(spec: dict, ws: Workspace,
+                    op: object) -> list[tuple[str, bool, str]]:
+    """Run the case battery in push mode (webhook -> notify).
+
+    Starts the sample webhook receiver a consumer would host, POSTs the
+    Nextcloud payload each case implies, and relies on ``notify`` for
+    delivery. The long poll interval keeps the poller idle so only the
+    webhook can deliver.
+
+    Args:
+        spec (dict): Parsed case file.
+        ws (Workspace): Watched workspace.
+        op (object): External writer operator.
+    """
+    await _seed(ws, op, spec)
+    watcher = enable_watch(ws, poll_interval=PUSH_POLL_INTERVAL)
+    agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
+    await asyncio.sleep(0.2)
+    runner = web.AppRunner(make_app(watcher, _files_prefix(), spec["mount"]))
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    url = f"http://127.0.0.1:{port}/nextcloud/webhook"
+
+    results: list[tuple[str, bool, str]] = []
+    async with aiohttp.ClientSession() as session:
+
+        async def trigger(case: dict) -> None:
+            payload = _webhook_payload(case["expect"], spec["mount"])
+            async with session.post(url, json=payload) as resp:
+                await resp.read()
+
+        try:
+            for case in spec["cases"]:
+                ok, detail = await _run_case(ws, op, trigger, agen, case)
+                results.append((f"push:{case['id']}", ok, detail))
+        finally:
+            await agen.aclose()
+            await runner.cleanup()
+    return results
+
+
 async def _run_file(spec: dict) -> list[tuple[str, bool, str]]:
-    """Run every case in one case file.
+    """Run one case file in both pull and push mode.
 
     Args:
         spec (dict): Parsed case file.
@@ -142,32 +266,23 @@ async def _run_file(spec: dict) -> list[tuple[str, bool, str]]:
     builder = BUILDERS.get(spec["resource"])
     if builder is None:
         return [(spec["resource"], False, "no builder")]
-    built = builder(spec)
-    if built is None:
-        print(f"skip [{spec['resource']}]: deployment env absent",
-              file=sys.stderr)
-        return []
-    ws, op = built
     results: list[tuple[str, bool, str]] = []
-    await ws.execute(f"rm -rf {spec['watch_dir']}")
-    await ws.execute(f"mkdir -p {spec['watch_dir']}")
-    for name in spec["seed"]:
-        await op.write(f"data/{name}", b"seed")
-    watcher = enable_watch(ws, poll_interval=spec["poll_interval"])
-    agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
-    await asyncio.sleep(spec["poll_interval"] * 2)
-    try:
-        for case in spec["cases"]:
-            ok, detail = await _run_case(ws, op, watcher, agen, case)
-            results.append((case["id"], ok, detail))
-    finally:
-        await agen.aclose()
-        await ws.close()
+    for mode in (_run_pull, _run_push):
+        built = builder(spec)
+        if built is None:
+            print(f"skip [{spec['resource']}]: deployment env absent",
+                  file=sys.stderr)
+            return []
+        ws, op = built
+        try:
+            results.extend(await mode(spec, ws, op))
+        finally:
+            await ws.close()
     return results
 
 
 async def main() -> None:
-    files = sorted(CASE_DIR.glob("*.json"))
+    files = sorted(p for p in CASE_DIR.glob("*.json"))
     failed = 0
     for path in files:
         spec = json.loads(path.read_text())
