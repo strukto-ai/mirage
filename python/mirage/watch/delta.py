@@ -14,49 +14,9 @@
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
 
-from mirage.types import ChangeKind, Delta, PathSpec, ResourceChange
+from mirage.types import ChangeKind, Delta, PathSpec, ResourceChange, WalkFn
 from mirage.watch.constants import DIR_FINGERPRINT
-
-
-def default_fingerprint(etag: str | None, modified: str | None,
-                        size: int | None) -> str:
-    """Mirage's default content fingerprint for change detection.
-
-    Prefers the backend's native version (ETag/rev), the same value
-    backends put in ``FileStat.fingerprint``; falls back to a
-    ``mtime|size`` composite, which every listing carries and which
-    still flips on a content write.
-
-    Args:
-        etag (str | None): Native version identifier, if any.
-        modified (str | None): Last-modified stamp.
-        size (int | None): Content size in bytes.
-    """
-    if etag:
-        return etag
-    return f"{modified or ''}|{size}"
-
-
-@dataclass(frozen=True, slots=True)
-class WalkEntry:
-    """One entry produced by a backend walk.
-
-    Args:
-        virtual (str): Workspace-virtual path of the entry.
-        is_dir (bool): Whether the entry is a directory.
-        fingerprint (str | None): Content fingerprint (see
-            ``default_fingerprint``). None means only create/delete are
-            detectable for this entry.
-    """
-    virtual: str
-    is_dir: bool
-    fingerprint: str | None
-
-
-WalkFn = Callable[[PathSpec], AsyncIterator[WalkEntry]]
 
 
 def spec_for(root: PathSpec, virtual: str) -> PathSpec:

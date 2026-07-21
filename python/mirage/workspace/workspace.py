@@ -17,7 +17,7 @@ import builtins
 import logging
 import sys
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from functools import partial
 from types import TracebackType
 from typing import Any, Literal, Protocol, TypeAlias, cast, overload
@@ -125,7 +125,7 @@ class WatchDelegate(Protocol):
     """
 
     def watch(self,
-              path: PathSpec,
+              path: PathSpec | Sequence[PathSpec],
               *,
               recursive: bool = True) -> AsyncIterator[ResourceChange]:
         ...
@@ -677,16 +677,16 @@ class Workspace:
         self._watch_runtime = runtime
 
     def watch(self,
-              path: PathSpec,
+              path: PathSpec | Sequence[PathSpec],
               *,
               recursive: bool = True) -> AsyncIterator[ResourceChange]:
         """Stream externally observed changes under ``path``.
 
         Args:
-            path (PathSpec): Watch root; its mount must have a change
-                capability.
+            path (PathSpec | Sequence[PathSpec]): Watch root or roots;
+                each may carry glob segments (``/nc/data/*.txt``).
             recursive (bool): Deliver descendants beyond direct
-                children.
+                children; ignored for glob roots.
 
         Raises:
             RuntimeError: No watch runtime is attached.

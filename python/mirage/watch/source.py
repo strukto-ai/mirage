@@ -19,14 +19,17 @@ from mirage.watch.queue.base import WatchQueue
 
 @dataclass(slots=True)
 class Subscriber:
-    """One active watch iterator: its queue and match scope.
+    """One active watch iterator: its queue and match scopes.
 
     Args:
         queue (WatchQueue): Delivery queue owned by this subscriber.
-        root_virtual (str): Watch root the subscriber asked for.
+        roots (tuple[str, ...]): Watch roots the subscriber asked for;
+            each is a virtual path that may carry glob segments
+            (``/nc/data/*.txt``).
         recursive (bool): Whether descendants beyond direct children
-            match.
+            match; ignored for glob roots, whose pattern defines the
+            depth.
     """
     queue: WatchQueue
-    root_virtual: str
+    roots: tuple[str, ...]
     recursive: bool

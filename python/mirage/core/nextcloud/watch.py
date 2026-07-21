@@ -17,11 +17,11 @@ from collections.abc import AsyncIterator
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.types import PathSpec
+from mirage.types import PathSpec, WalkEntry
+from mirage.utils.fingerprint import stat_fingerprint
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
-from mirage.watch.poller import (ListingDeltaHook, WalkEntry,
-                                 default_fingerprint)
+from mirage.watch.delta import ListingDeltaHook
 
 
 class NextcloudWalk:
@@ -67,7 +67,7 @@ class NextcloudWalk:
             else:
                 modified = meta.last_modified.isoformat() \
                     if meta and meta.last_modified else None
-                fingerprint = default_fingerprint(
+                fingerprint = stat_fingerprint(
                     meta.etag if meta else None, modified,
                     meta.content_length if meta else None)
             yield WalkEntry(virtual=virtual,

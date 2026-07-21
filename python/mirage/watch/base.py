@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from typing import Protocol, runtime_checkable
 
 from mirage.types import Delta, PathSpec, ResourceChange
@@ -64,7 +64,7 @@ class WatchRuntime(Protocol):
 
     def watch(
             self,
-            path: PathSpec,
+            path: PathSpec | Sequence[PathSpec],
             *,
             recursive: bool = True,
             queue: WatchQueue | None = None) -> AsyncIterator[ResourceChange]:

@@ -2,22 +2,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from mirage.types import ChangeKind, PathSpec
-from mirage.watch.poller import (ListingDeltaHook, WalkEntry,
-                                 default_fingerprint)
-
-
-def test_default_fingerprint_prefers_etag():
-    assert default_fingerprint("etag-1", "2026-01-01T00:00:00", 5) == "etag-1"
-
-
-def test_default_fingerprint_falls_back_to_mtime_size():
-    assert default_fingerprint(None, "2026-01-01T00:00:00",
-                               5) == "2026-01-01T00:00:00|5"
-
-
-def test_default_fingerprint_handles_missing_fields():
-    assert default_fingerprint(None, None, None) == "|None"
+from mirage.types import ChangeKind, PathSpec, WalkEntry
+from mirage.watch.delta import ListingDeltaHook
 
 
 def _walk_from(tree: dict[str, str | None]):
@@ -60,7 +46,7 @@ async def test_create_detected():
 
 
 @pytest.mark.asyncio
-async def test_update_detected_via_detector_change():
+async def test_update_detected_via_fingerprint_change():
     tree: dict[str, str | None] = {"/nc/a.txt": "e1"}
     hook = ListingDeltaHook(_walk_from(tree))
     base = await hook.pull(_root(), None)
@@ -93,7 +79,7 @@ async def test_no_change_between_identical_pulls():
 
 
 @pytest.mark.asyncio
-async def test_directory_detector_not_reported_as_version():
+async def test_directory_fingerprint_not_reported():
     tree: dict[str, str | None] = {"/nc/sub": None}
     hook = ListingDeltaHook(_walk_from(tree))
     base = await hook.pull(_root(), None)

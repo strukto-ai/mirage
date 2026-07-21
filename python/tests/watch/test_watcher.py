@@ -186,13 +186,78 @@ async def test_notify_after_close_is_noop():
 
 def test_matches_recursive_scope():
     w = _watcher()
-    sub = Subscriber(queue=None, root_virtual="/nc", recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc", ), recursive=True)
     assert w._matches(sub, _change(ChangeKind.CREATE, "/nc/sub/deep.txt"))
     assert not w._matches(sub, _change(ChangeKind.CREATE, "/other/x.txt"))
 
 
 def test_matches_nonrecursive_scope():
     w = _watcher()
-    sub = Subscriber(queue=None, root_virtual="/nc", recursive=False)
+    sub = Subscriber(queue=None, roots=("/nc", ), recursive=False)
     assert w._matches(sub, _change(ChangeKind.CREATE, "/nc/top.txt"))
     assert not w._matches(sub, _change(ChangeKind.CREATE, "/nc/sub/deep.txt"))
+
+
+def test_matches_glob_scope_one_level():
+    w = _watcher()
+    sub = Subscriber(queue=None, roots=("/nc/data/*.txt", ), recursive=True)
+    assert w._matches(sub, _change(ChangeKind.CREATE, "/nc/data/a.txt"))
+    assert not w._matches(sub, _change(ChangeKind.CREATE, "/nc/data/a.md"))
+    assert not w._matches(sub, _change(ChangeKind.CREATE,
+                                       "/nc/data/sub/a.txt"))
+
+
+def test_matches_glob_scope_covers_matched_dirs():
+    w = _watcher()
+    sub = Subscriber(queue=None, roots=("/nc/data/sub*", ), recursive=True)
+    assert w._matches(sub,
+                      _change(ChangeKind.CREATE, "/nc/data/subdir/deep.txt"))
+    assert not w._matches(sub, _change(ChangeKind.CREATE, "/nc/data/x.txt"))
+
+
+def test_matches_any_of_multiple_roots():
+    w = _watcher()
+    sub = Subscriber(queue=None,
+                     roots=("/nc/a", "/nc/b/keep.txt"),
+                     recursive=True)
+    assert w._matches(sub, _change(ChangeKind.UPDATE, "/nc/a/x.txt"))
+    assert w._matches(sub, _change(ChangeKind.UPDATE, "/nc/b/keep.txt"))
+    assert not w._matches(sub, _change(ChangeKind.UPDATE, "/nc/b/other.txt"))
+
+
+@pytest.mark.asyncio
+async def test_watch_accepts_path_list():
+    w = _watcher()
+    paths = [
+        PathSpec.from_str_path("/nc/a"),
+        PathSpec.from_str_path("/nc/b"),
+    ]
+    agen = w.watch(paths)
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await w.notify(_change(ChangeKind.CREATE, "/nc/b/y.txt"))
+    change = await asyncio.wait_for(task, timeout=2)
+    assert change.path.virtual == "/nc/b/y.txt"
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
+async def test_watch_glob_delivers_only_matches():
+    w = _watcher()
+    agen, task = await _start_blocked_watch(w, virtual="/nc/data/*.txt")
+    await w.notify(_change(ChangeKind.CREATE, "/nc/data/skip.md"))
+    await w.notify(_change(ChangeKind.CREATE, "/nc/data/hit.txt"))
+    change = await asyncio.wait_for(task, timeout=2)
+    assert change.path.virtual == "/nc/data/hit.txt"
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
+async def test_watch_empty_path_list_raises():
+    w = _watcher()
+    agen = w.watch([])
+    with pytest.raises(ValueError):
+        await agen.__anext__()
+    await w.close()

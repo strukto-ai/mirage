@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from typing import Protocol
 
 from mirage.types import ChangeKind, PathSpec, ResourceChange
+from mirage.utils.glob_walk import has_glob
+from mirage.utils.path import glob_prefix_match
 from mirage.watch.base import WatchRuntime
 from mirage.watch.errors import QueueClosed
 from mirage.watch.queue.base import QueueFactory, WatchQueue
@@ -85,19 +87,39 @@ class Watcher:
         return PathSpec.from_str_path(norm, resource_path=resource_path)
 
     def _matches(self, sub: Subscriber, change: ResourceChange) -> bool:
-        """Whether a change falls inside a subscriber's scope.
+        """Whether a change falls inside any of a subscriber's scopes.
 
         Args:
-            sub (Subscriber): Subscriber scope.
+            sub (Subscriber): Subscriber scopes.
             change (ResourceChange): Candidate change.
         """
-        root = sub.root_virtual.rstrip("/")
-        virtual = change.path.virtual
+        return any(
+            self._in_scope(root, sub.recursive, change.path.virtual)
+            for root in sub.roots)
+
+    def _in_scope(self, root: str, recursive: bool, virtual: str) -> bool:
+        """Whether ``virtual`` falls inside one watch root.
+
+        A glob root (``/nc/data/*.txt``) is matched segment-wise at
+        delivery time, so ``*`` does not cross ``/`` and files created
+        after the watch started still match; ``recursive`` is ignored
+        because the pattern itself defines the depth. A plain root uses
+        prefix containment.
+
+        Args:
+            root (str): One watch root, literal or glob.
+            recursive (bool): Whether descendants beyond direct
+                children match a literal root.
+            virtual (str): Changed virtual path.
+        """
+        if has_glob(root):
+            return glob_prefix_match(virtual, root)
+        root = root.rstrip("/")
         if virtual == root:
             return True
         if not virtual.startswith(root + "/"):
             return False
-        if sub.recursive:
+        if recursive:
             return True
         return "/" not in virtual[len(root) + 1:]
 
@@ -141,7 +163,7 @@ class Watcher:
 
     async def watch(
             self,
-            path: PathSpec,
+            path: PathSpec | Sequence[PathSpec],
             *,
             recursive: bool = True,
             queue: WatchQueue | None = None) -> AsyncIterator[ResourceChange]:
@@ -149,21 +171,31 @@ class Watcher:
         iterating or the watcher closes.
 
         Works on any mount: delivery is notify-driven, so no resource
-        capability is required to subscribe.
+        capability is required to subscribe. Scope matching is done by
+        mirage at delivery time, so glob roots need no backend support
+        and match files created after the watch started.
 
         Args:
-            path (PathSpec): Watch root; the mount is resolved from it.
+            path (PathSpec | Sequence[PathSpec]): Watch root or roots;
+                each may carry glob segments (``/nc/data/*.txt``) and
+                the mount is resolved per root.
             recursive (bool): Deliver descendants beyond direct
-                children.
+                children; ignored for glob roots (the pattern defines
+                the depth).
             queue (WatchQueue | None): Delivery queue override; the
-                watcher's factory builds one when omitted.
+                watcher's factory builds one (for the first root) when
+                omitted.
         """
         if self._closed:
             raise RuntimeError("watcher is closed")
-        entry = self._registry.mount_for(path.virtual)
-        root = self._frame(entry, path.virtual)
-        sub = Subscriber(queue=queue or self._queue_factory(root),
-                         root_virtual=root.virtual,
+        paths = [path] if isinstance(path, PathSpec) else list(path)
+        if not paths:
+            raise ValueError("watch requires at least one path")
+        roots = tuple(
+            self._frame(self._registry.mount_for(p.virtual), p.virtual)
+            for p in paths)
+        sub = Subscriber(queue=queue or self._queue_factory(roots[0]),
+                         roots=tuple(r.virtual for r in roots),
                          recursive=recursive)
         self._subscribers.append(sub)
         try:

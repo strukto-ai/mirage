@@ -478,6 +478,25 @@ class Delta:
     checkpoint: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class WalkEntry:
+    """One entry produced by a backend walk feeding change detection.
+
+    Args:
+        virtual (str): Workspace-virtual path of the entry.
+        is_dir (bool): Whether the entry is a directory.
+        fingerprint (str | None): Content fingerprint (see
+            ``mirage.utils.fingerprint.stat_fingerprint``). None means
+            only create/delete are detectable for this entry.
+    """
+    virtual: str
+    is_dir: bool
+    fingerprint: str | None
+
+
+WalkFn: TypeAlias = Callable[[PathSpec], AsyncIterator[WalkEntry]]
+
+
 class OverflowPolicy(StrEnum):
     """Behaviour of a watch queue when pending changes exceed its cap.
 
