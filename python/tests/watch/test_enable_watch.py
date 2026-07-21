@@ -52,6 +52,39 @@ async def test_notify_delivers_through_workspace_watch():
 
 
 @pytest.mark.asyncio
+async def test_watch_accepts_plain_string_path():
+    # The issue-450 snippet shape: workspace.watch("/dir", recursive=True).
+    # Coercion happens at the workspace boundary; the runtime below
+    # only ever sees PathSpec.
+    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    watcher = enable_watch(ws)
+    agen = ws.watch("/data", recursive=True)
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await watcher.notify(_change(ChangeKind.CREATE, "/data/new.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.path.virtual == "/data/new.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_watch_accepts_string_list_and_glob():
+    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    watcher = enable_watch(ws)
+    agen = ws.watch(["/data/a", "/data/*.txt"])
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await watcher.notify(_change(ChangeKind.CREATE, "/data/hit.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.path.virtual == "/data/hit.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_pull_loop_over_delta_hook_feeds_notify():
     # The consumer-owned poller pattern: pull a delta from the
     # resource hook, feed each change to notify.

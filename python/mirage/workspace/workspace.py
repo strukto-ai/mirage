@@ -677,14 +677,18 @@ class Workspace:
         self._watch_runtime = runtime
 
     def watch(self,
-              path: PathSpec | Sequence[PathSpec],
+              path: str | PathSpec | Sequence[str | PathSpec],
               *,
               recursive: bool = True) -> AsyncIterator[ResourceChange]:
         """Stream externally observed changes under ``path``.
 
+        The str tolerance lives only here, at the consumer boundary
+        (mirroring ``Ops``); the runtime below is PathSpec-only.
+
         Args:
-            path (PathSpec | Sequence[PathSpec]): Watch root or roots;
-                each may carry glob segments (``/nc/data/*.txt``).
+            path (str | PathSpec | Sequence[str | PathSpec]): Watch
+                root or roots; plain strings are coerced. Each root
+                may carry glob segments (``/nc/data/*.txt``).
             recursive (bool): Deliver descendants beyond direct
                 children; ignored for glob roots.
 
@@ -695,7 +699,12 @@ class Workspace:
             raise RuntimeError(
                 "watch requires an attached watch runtime: call "
                 "mirage.watch.enable_watch(workspace) first")
-        return self._watch_runtime.watch(path, recursive=recursive)
+        raw = [path] if isinstance(path, (str, PathSpec)) else list(path)
+        specs = [
+            p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
+            for p in raw
+        ]
+        return self._watch_runtime.watch(specs, recursive=recursive)
 
     async def close(self) -> None:
         async with self._close_lock:

@@ -363,7 +363,7 @@ async def _run_pull(spec: dict, ws: Workspace,
     results: list[tuple[str, bool, str]] = []
 
     await _seed(ws, op, spec)
-    agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
+    agen = ws.watch(spec["watch_dir"])
     poller = ConsumerPoller(resource.delta_hook(), watcher, hook_root)
     await poller.pump()
     results.extend(await _run_battery(ws, op, PullTrigger(poller), agen,
@@ -371,8 +371,7 @@ async def _run_pull(spec: dict, ws: Workspace,
 
     for scope in spec.get("scopes", []):
         await _seed(ws, op, spec)
-        roots = [PathSpec.from_str_path(v) for v in scope["watch"]]
-        agen = ws.watch(roots)
+        agen = ws.watch(scope["watch"])
         poller = ConsumerPoller(resource.delta_hook(), watcher, hook_root)
         await poller.pump()
         results.extend(await
@@ -409,13 +408,12 @@ async def _run_push(spec: dict, ws: Workspace,
         trigger = PushTrigger(session, url, spec["mount"])
         try:
             await _seed(ws, op, spec)
-            agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
+            agen = ws.watch(spec["watch_dir"])
             results.extend(await _run_battery(ws, op, trigger, agen,
                                               spec["cases"], "push"))
             for scope in spec.get("scopes", []):
                 await _seed(ws, op, spec)
-                roots = [PathSpec.from_str_path(v) for v in scope["watch"]]
-                agen = ws.watch(roots)
+                agen = ws.watch(scope["watch"])
                 results.extend(await _run_battery(ws, op, trigger, agen,
                                                   scope["cases"],
                                                   f"push:{scope['id']}"))
