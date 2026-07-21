@@ -12,24 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-import logging
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Protocol
 
 from mirage.types import ChangeKind, PathSpec, ResourceChange
-from mirage.watch.base import SupportsChanges, WatchRuntime
-from mirage.watch.constants import DEFAULT_POLL_INTERVAL
+from mirage.watch.base import WatchRuntime
 from mirage.watch.errors import QueueClosed
 from mirage.watch.queue.base import QueueFactory, WatchQueue
 from mirage.watch.queue.ram import RAMWatchQueue
-from mirage.watch.source import Source, Subscriber
+from mirage.watch.source import Subscriber
 from mirage.workspace.mount.mount import MountEntry
-from mirage.workspace.mount.registry import (MountCommandUnsupported,
-                                             MountRegistry)
-
-logger = logging.getLogger(__name__)
+from mirage.workspace.mount.registry import MountRegistry
 
 
 class WatchableWorkspace(Protocol):
@@ -50,45 +44,29 @@ class WatchableWorkspace(Protocol):
 
 
 class Watcher:
-    """Watch runtime: per-(mount, root) pollers feeding consumer queues.
+    """Notify-driven watch runtime: invalidate, then deliver.
 
-    Ordering guarantee: cache invalidation for a pulled delta completes
-    before any of its changes reach a subscriber queue, so a consumer
+    Mirage runs no background loop. Changes enter through ``notify``,
+    from whatever detection the consumer runs: a webhook receiver, a
+    queue bridge, or their own poll loop over a resource's
+    ``delta_hook()`` (see ``integ/watch/run.py`` for the ~10-line
+    poller). The one guarantee: cache invalidation for a change
+    completes before it reaches any subscriber queue, so a consumer
     reacting to a change always reads fresh content.
     """
 
     def __init__(self,
                  registry: MountRegistry,
-                 poll_interval: float = DEFAULT_POLL_INTERVAL,
                  queue_factory: QueueFactory = RAMWatchQueue) -> None:
         """Args:
             registry (MountRegistry): Mount table of the workspace.
-            poll_interval (float): Seconds between delta pulls.
             queue_factory (QueueFactory): Builds the delivery queue for
                 a watch root when the caller does not supply one.
         """
         self._registry = registry
-        self._poll_interval = poll_interval
         self._queue_factory = queue_factory
-        self._sources: dict[tuple[str, str], Source] = {}
+        self._subscribers: list[Subscriber] = []
         self._closed = False
-
-    def _resolve_root(self, path: PathSpec) -> tuple[MountEntry, PathSpec]:
-        """Resolve a watch path to its mount and a normalized root.
-
-        Args:
-            path (PathSpec): Caller-supplied watch path; only
-                ``virtual`` is trusted, the mount framing is rebuilt.
-
-        Raises:
-            MountCommandUnsupported: The mount's resource has no
-                change capability.
-        """
-        entry = self._registry.mount_for(path.virtual)
-        resource = entry.resource
-        if not isinstance(resource, SupportsChanges):
-            raise MountCommandUnsupported("watch", resource.name, path.virtual)
-        return entry, self._frame(entry, path.virtual)
 
     def _frame(self, entry: MountEntry, virtual: str) -> PathSpec:
         """Rebuild a PathSpec with mount-relative framing.
@@ -139,67 +117,27 @@ class Watcher:
         else:
             await manager.invalidate_after_write(change.path)
 
-    async def _dispatch(self, source: Source, changes: tuple[ResourceChange,
-                                                             ...]) -> None:
-        """Invalidate caches for ``changes``, then deliver them to the
-        source's subscribers.
+    async def notify(self, change: ResourceChange) -> None:
+        """Inject one externally observed change.
+
+        The single entry point for all detection: a consumer's webhook
+        receiver, queue bridge, or poll loop maps its signal to a
+        ``ResourceChange`` and calls this. The change's cache entries
+        are invalidated first, then it is delivered to every watch
+        whose scope matches.
 
         Args:
-            source (Source): Source that pulled the changes.
-            changes (tuple[ResourceChange, ...]): Changes to deliver.
+            change (ResourceChange): Observed change; its path is
+                reframed to the owning mount before use.
         """
-        for change in changes:
-            await self._invalidate(source.entry, change)
-        for change in changes:
-            for sub in source.subscribers:
-                if self._matches(sub, change):
-                    await sub.queue.push(change)
-
-    async def _run_source(self, source: Source) -> None:
-        """Poll loop: pull, invalidate, deliver, wait.
-
-        Args:
-            source (Source): Source to drive.
-        """
-        while True:
-            try:
-                delta = await source.hook.pull(source.root, source.checkpoint)
-                source.checkpoint = delta.checkpoint
-                if delta.changes:
-                    await self._dispatch(source, delta.changes)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # A failed pull must not kill the loop: the checkpoint
-                # is untouched, so the next pull re-derives everything.
-                logger.warning("watch pull failed for %s",
-                               source.root.virtual,
-                               exc_info=True)
-            source.wake.clear()
-            try:
-                await asyncio.wait_for(source.wake.wait(),
-                                       timeout=self._poll_interval)
-            except TimeoutError:
-                # Timeout is the poll cadence, not an error.
-                logger.debug("watch poll tick for %s", source.root.virtual)
-
-    def _get_source(self, entry: MountEntry, root: PathSpec) -> Source:
-        """Return the shared source for (mount, root), starting its
-        poll loop on first use.
-
-        Args:
-            entry (MountEntry): Mount owning the subtree.
-            root (PathSpec): Normalized watch root.
-        """
-        key = (entry.prefix, root.virtual)
-        source = self._sources.get(key)
-        if source is None:
-            resource = entry.resource
-            assert isinstance(resource, SupportsChanges)
-            source = Source(entry=entry, root=root, hook=resource.delta_hook())
-            source.task = asyncio.create_task(self._run_source(source))
-            self._sources[key] = source
-        return source
+        if self._closed:
+            return
+        entry = self._registry.mount_for(change.path.virtual)
+        framed = replace(change, path=self._frame(entry, change.path.virtual))
+        await self._invalidate(entry, framed)
+        for sub in self._subscribers:
+            if self._matches(sub, framed):
+                await sub.queue.push(framed)
 
     async def watch(
             self,
@@ -210,25 +148,24 @@ class Watcher:
         """Stream changes under ``path`` until the caller stops
         iterating or the watcher closes.
 
+        Works on any mount: delivery is notify-driven, so no resource
+        capability is required to subscribe.
+
         Args:
             path (PathSpec): Watch root; the mount is resolved from it.
             recursive (bool): Deliver descendants beyond direct
                 children.
             queue (WatchQueue | None): Delivery queue override; the
                 watcher's factory builds one when omitted.
-
-        Raises:
-            MountCommandUnsupported: The mount's resource has no
-                change capability.
         """
         if self._closed:
             raise RuntimeError("watcher is closed")
-        entry, root = self._resolve_root(path)
-        source = self._get_source(entry, root)
+        entry = self._registry.mount_for(path.virtual)
+        root = self._frame(entry, path.virtual)
         sub = Subscriber(queue=queue or self._queue_factory(root),
                          root_virtual=root.virtual,
                          recursive=recursive)
-        source.subscribers.append(sub)
+        self._subscribers.append(sub)
         try:
             while True:
                 try:
@@ -237,96 +174,31 @@ class Watcher:
                     return
                 yield change
         finally:
-            source.subscribers.remove(sub)
+            self._subscribers.remove(sub)
             await sub.queue.close()
-            if not source.subscribers:
-                self._sources.pop((entry.prefix, root.virtual), None)
-                if source.task is not None:
-                    source.task.cancel()
-
-    async def notify(self, change: ResourceChange) -> None:
-        """Inject one precise externally-observed change (push path).
-
-        The consumer's own webhook receiver (e.g. a Nextcloud
-        ``webhook_listeners`` endpoint) maps a provider payload to a
-        ``ResourceChange`` and calls this. The change is invalidated and
-        delivered immediately with no poll, so push latency is bounded
-        by the network, not ``poll_interval``. Use ``nudge`` instead
-        when the signal carries no path (an imprecise doorbell).
-
-        A running poller may rediscover the same change on its next
-        pull; per-path coalescing dampens the duplicate and the model
-        is level-triggered, so it is benign.
-
-        Args:
-            change (ResourceChange): Precise change; its path is
-                reframed to the owning mount before use.
-        """
-        if self._closed:
-            return
-        entry = self._registry.mount_for(change.path.virtual)
-        framed = replace(change, path=self._frame(entry, change.path.virtual))
-        await self._invalidate(entry, framed)
-        for source in self._sources.values():
-            for sub in source.subscribers:
-                if self._matches(sub, framed):
-                    await sub.queue.push(framed)
-
-    def nudge(self, path: PathSpec) -> None:
-        """Request an immediate pull for sources overlapping ``path``.
-
-        Idempotent and cheap: a consumer-owned webhook receiver or
-        queue bridge may call this when a signal carries no exact path.
-        When the signal is precise, prefer ``notify``.
-
-        Args:
-            path (PathSpec): Dirty path hint.
-        """
-        hint = "/" + path.virtual.strip("/")
-        for source in self._sources.values():
-            root = source.root.virtual.rstrip("/") or "/"
-            if (hint == root or hint.startswith(root + "/")
-                    or root.startswith(hint + "/")):
-                source.wake.set()
 
     async def close(self) -> None:
-        """Stop all pollers and close subscriber queues; active watch
-        iterators finish cleanly."""
+        """Close subscriber queues; active watch iterators finish
+        cleanly."""
         self._closed = True
-        sources = list(self._sources.values())
-        self._sources.clear()
-        for source in sources:
-            if source.task is not None:
-                source.task.cancel()
-        for source in sources:
-            for sub in list(source.subscribers):
-                await sub.queue.close()
-            if source.task is not None:
-                try:
-                    await source.task
-                except asyncio.CancelledError:
-                    # Cancellation is the requested shutdown path.
-                    logger.debug("watch source stopped: %s",
-                                 source.root.virtual)
+        for sub in list(self._subscribers):
+            await sub.queue.close()
 
 
 def enable_watch(workspace: WatchableWorkspace,
                  *,
-                 poll_interval: float = DEFAULT_POLL_INTERVAL,
                  queue_factory: QueueFactory = RAMWatchQueue) -> Watcher:
     """Attach a watch runtime to ``workspace`` and return it.
 
-    Starts nothing: the first ``watch()`` touching a mount lazily
-    starts that (mount, root) poller, and the last exit stops it.
+    The runtime runs nothing in the background; the returned watcher's
+    ``notify`` is where the consumer's detection (webhook receiver or
+    poll loop over ``resource.delta_hook()``) injects changes.
 
     Args:
         workspace (WatchableWorkspace): Workspace to attach to.
-        poll_interval (float): Seconds between delta pulls.
         queue_factory (QueueFactory): Builds delivery queues for
             watches that do not supply their own.
     """
-    watcher = Watcher(workspace.registry,
-                      poll_interval=poll_interval,
-                      queue_factory=queue_factory)
+    watcher = Watcher(workspace.registry, queue_factory=queue_factory)
     workspace.attach_watch_runtime(watcher)
     return watcher

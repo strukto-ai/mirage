@@ -43,9 +43,10 @@ class DeltaHook(Protocol):
 class SupportsChanges(Protocol):
     """Optional resource capability: native change detection.
 
-    A resource that implements this returns a hook whose detector is
-    cheaper or more precise than a generic listing diff (Nextcloud:
-    WebDAV listing walk with ETag/mtime detectors).
+    A resource that implements this returns a hook a consumer's poll
+    loop can pull deltas from (Nextcloud: WebDAV listing walk with
+    ETag fingerprints). Subscribing to changes never requires it;
+    it only powers pull-based detection.
     """
 
     def delta_hook(self) -> DeltaHook:
@@ -71,14 +72,10 @@ class WatchRuntime(Protocol):
         ...
 
     async def notify(self, change: ResourceChange) -> None:
-        """Inject a precise change from a push source; see
+        """Inject an externally observed change; see
         ``Watcher.notify``."""
         ...
 
-    def nudge(self, path: PathSpec) -> None:
-        """Request an immediate pull for sources covering ``path``."""
-        ...
-
     async def close(self) -> None:
-        """Stop all pollers and release queues."""
+        """Release subscriber queues."""
         ...

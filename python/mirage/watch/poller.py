@@ -18,7 +18,26 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 from mirage.types import ChangeKind, Delta, PathSpec, ResourceChange
-from mirage.watch.constants import DIR_DETECTOR
+from mirage.watch.constants import DIR_FINGERPRINT
+
+
+def default_fingerprint(etag: str | None, modified: str | None,
+                        size: int | None) -> str:
+    """Mirage's default content fingerprint for change detection.
+
+    Prefers the backend's native version (ETag/rev), the same value
+    backends put in ``FileStat.fingerprint``; falls back to a
+    ``mtime|size`` composite, which every listing carries and which
+    still flips on a content write.
+
+    Args:
+        etag (str | None): Native version identifier, if any.
+        modified (str | None): Last-modified stamp.
+        size (int | None): Content size in bytes.
+    """
+    if etag:
+        return etag
+    return f"{modified or ''}|{size}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,13 +47,13 @@ class WalkEntry:
     Args:
         virtual (str): Workspace-virtual path of the entry.
         is_dir (bool): Whether the entry is a directory.
-        detector (str | None): Opaque change detector (ETag, or an
-            mtime|size composite). None means only create/delete are
+        fingerprint (str | None): Content fingerprint (see
+            ``default_fingerprint``). None means only create/delete are
             detectable for this entry.
     """
     virtual: str
     is_dir: bool
-    detector: str | None
+    fingerprint: str | None
 
 
 WalkFn = Callable[[PathSpec], AsyncIterator[WalkEntry]]
@@ -59,9 +78,9 @@ def spec_for(root: PathSpec, virtual: str) -> PathSpec:
 class ListingDeltaHook:
     """Generic checkpointed delta over a full backend walk.
 
-    Snapshots the tree under the watch root as ``{virtual: detector}``
+    Snapshots the tree under the watch root as ``{virtual: fingerprint}``
     and diffs consecutive snapshots: new keys are CREATE, missing keys
-    are DELETE, changed detectors are UPDATE. A baseline pull
+    are DELETE, changed fingerprints are UPDATE. A baseline pull
     (``checkpoint=None``) establishes the snapshot and emits nothing.
     The walk callable reads the backend directly and must not go
     through mirage's caches.
@@ -85,9 +104,9 @@ class ListingDeltaHook:
         snapshot: dict[str, str] = {}
         async for entry in self._walk(root):
             if entry.is_dir:
-                snapshot[entry.virtual] = DIR_DETECTOR
+                snapshot[entry.virtual] = DIR_FINGERPRINT
             else:
-                snapshot[entry.virtual] = entry.detector or ""
+                snapshot[entry.virtual] = entry.fingerprint or ""
         serialized = json.dumps(snapshot, sort_keys=True)
         if checkpoint is None:
             return Delta(changes=(), checkpoint=serialized)
@@ -109,6 +128,7 @@ class ListingDeltaHook:
                 ResourceChange(kind=kind,
                                path=spec_for(root, virtual),
                                observed_at_ms=observed,
-                               version=new if new not in (None, DIR_DETECTOR,
-                                                          "") else None))
+                               fingerprint=new if new not in (None,
+                                                              DIR_FINGERPRINT,
+                                                              "") else None))
         return Delta(changes=tuple(changes), checkpoint=serialized)

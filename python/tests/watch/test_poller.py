@@ -3,20 +3,34 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.types import ChangeKind, PathSpec
-from mirage.watch.poller import ListingDeltaHook, WalkEntry
+from mirage.watch.poller import (ListingDeltaHook, WalkEntry,
+                                 default_fingerprint)
+
+
+def test_default_fingerprint_prefers_etag():
+    assert default_fingerprint("etag-1", "2026-01-01T00:00:00", 5) == "etag-1"
+
+
+def test_default_fingerprint_falls_back_to_mtime_size():
+    assert default_fingerprint(None, "2026-01-01T00:00:00",
+                               5) == "2026-01-01T00:00:00|5"
+
+
+def test_default_fingerprint_handles_missing_fields():
+    assert default_fingerprint(None, None, None) == "|None"
 
 
 def _walk_from(tree: dict[str, str | None]):
-    """Build a walk callable from a {virtual: detector|None} tree.
+    """Build a walk callable from a {virtual: fingerprint|None} tree.
 
-    A None detector marks a directory.
+    A None fingerprint marks a directory.
     """
 
     async def _walk(root: PathSpec) -> AsyncIterator[WalkEntry]:
-        for virtual, detector in tree.items():
+        for virtual, fingerprint in tree.items():
             yield WalkEntry(virtual=virtual,
-                            is_dir=detector is None,
-                            detector=detector)
+                            is_dir=fingerprint is None,
+                            fingerprint=fingerprint)
 
     return _walk
 
@@ -54,7 +68,7 @@ async def test_update_detected_via_detector_change():
     delta = await hook.pull(_root(), base.checkpoint)
     assert len(delta.changes) == 1
     assert delta.changes[0].kind is ChangeKind.UPDATE
-    assert delta.changes[0].version == "e2"
+    assert delta.changes[0].fingerprint == "e2"
 
 
 @pytest.mark.asyncio
@@ -86,4 +100,4 @@ async def test_directory_detector_not_reported_as_version():
     tree["/nc/sub/x.txt"] = "e1"
     delta = await hook.pull(_root(), base.checkpoint)
     created = {c.path.virtual: c for c in delta.changes}
-    assert created["/nc/sub/x.txt"].version == "e1"
+    assert created["/nc/sub/x.txt"].fingerprint == "e1"

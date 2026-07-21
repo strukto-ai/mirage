@@ -2,7 +2,6 @@
   "resource": "nextcloud",
   "mount": "/nc",
   "watch_dir": "/nc/data",
-  "poll_interval": 1.0,
   "seed": ["keep.txt"],
   "cases": [
     {

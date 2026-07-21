@@ -78,13 +78,13 @@ class RAMWatchQueue:
                                   path=new.path,
                                   observed_at_ms=new.observed_at_ms,
                                   previous=new.previous,
-                                  version=new.version)
+                                  fingerprint=new.fingerprint)
         if old.kind is ChangeKind.DELETE and new.kind is ChangeKind.CREATE:
             return ResourceChange(kind=ChangeKind.UPDATE,
                                   path=new.path,
                                   observed_at_ms=new.observed_at_ms,
                                   previous=new.previous,
-                                  version=new.version)
+                                  fingerprint=new.fingerprint)
         return new
 
     async def push(self, change: ResourceChange) -> None:
@@ -124,6 +124,9 @@ class RAMWatchQueue:
                 ``OverflowPolicy.ERROR`` since the last pop.
             QueueClosed: The queue was closed while waiting.
         """
+        # Condition-wait loop, not a busy spin: the await at the bottom
+        # suspends until push()/close() sets _ready, and each wake
+        # re-checks state exactly once.
         while True:
             if self._closed:
                 raise QueueClosed(self._root.virtual)

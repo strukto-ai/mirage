@@ -16,10 +16,6 @@
 # the overflow policy fires. Not tied to any provider limit.
 DEFAULT_MAX_PENDING = 4096
 
-# Seconds between delta pulls when a source has no push doorbell. The
-# feature request (#450) is webhook-first and does not specify a cadence;
-# this is a portable default that a caller can override per watcher.
-DEFAULT_POLL_INTERVAL = 30.0
-
-# Snapshot detector value marking a directory entry in the listing diff.
-DIR_DETECTOR = "dir"
+# Snapshot fingerprint value marking a directory entry in the listing
+# diff (directories have no content fingerprint of their own).
+DIR_FINGERPRINT = "dir"

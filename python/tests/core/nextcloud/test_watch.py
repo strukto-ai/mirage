@@ -17,7 +17,7 @@ async def test_walk_yields_files_and_dirs(make_acc):
     assert "/data/sub/b.txt" in entries
     assert entries["/data"].is_dir
     assert not entries["/data/a.txt"].is_dir
-    assert entries["/data/a.txt"].detector is not None
+    assert entries["/data/a.txt"].fingerprint is not None
 
 
 @pytest.mark.asyncio
@@ -25,7 +25,7 @@ async def test_walk_detector_prefers_etag(make_acc):
     acc = make_acc({"data/a.txt": b"x"})
     walk = NextcloudWalk(acc)
     entries = {e.virtual: e async for e in walk(_root())}
-    assert entries["/data/a.txt"].detector == "etag-data/a.txt"
+    assert entries["/data/a.txt"].fingerprint == "etag-data/a.txt"
 
 
 @pytest.mark.asyncio

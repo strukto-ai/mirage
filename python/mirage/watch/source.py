@@ -12,13 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from mirage.types import PathSpec
-from mirage.watch.base import DeltaHook
 from mirage.watch.queue.base import WatchQueue
-from mirage.workspace.mount.mount import MountEntry
 
 
 @dataclass(slots=True)
@@ -34,25 +30,3 @@ class Subscriber:
     queue: WatchQueue
     root_virtual: str
     recursive: bool
-
-
-@dataclass(slots=True)
-class Source:
-    """One poll loop over a (mount, root) pair, shared by subscribers.
-
-    Args:
-        entry (MountEntry): Mount owning the watched subtree.
-        root (PathSpec): Watch root (mount-virtual).
-        hook (DeltaHook): The resource's delta hook.
-        subscribers (list[Subscriber]): Active consumers.
-        wake (asyncio.Event): Set by ``nudge`` to pull immediately.
-        checkpoint (str | None): Opaque state of the last pull.
-        task (asyncio.Task | None): The running poll loop.
-    """
-    entry: MountEntry
-    root: PathSpec
-    hook: DeltaHook
-    subscribers: list[Subscriber] = field(default_factory=list)
-    wake: asyncio.Event = field(default_factory=asyncio.Event)
-    checkpoint: str | None = None
-    task: "asyncio.Task[None] | None" = None

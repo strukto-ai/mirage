@@ -130,7 +130,7 @@ class WatchDelegate(Protocol):
               recursive: bool = True) -> AsyncIterator[ResourceChange]:
         ...
 
-    def nudge(self, path: PathSpec) -> None:
+    async def notify(self, change: ResourceChange) -> None:
         ...
 
     async def close(self) -> None:

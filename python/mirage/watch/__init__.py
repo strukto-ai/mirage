@@ -14,7 +14,8 @@
 
 from mirage.types import ChangeKind, Delta, ResourceChange
 from mirage.watch.base import DeltaHook, SupportsChanges, WatchRuntime
-from mirage.watch.poller import ListingDeltaHook, WalkEntry
+from mirage.watch.poller import (ListingDeltaHook, WalkEntry,
+                                 default_fingerprint)
 from mirage.watch.queue import (OverflowPolicy, QueueClosed, QueueFactory,
                                 QueueOverflowError, RAMWatchQueue, WatchQueue)
 from mirage.watch.watcher import Watcher, enable_watch
@@ -35,5 +36,6 @@ __all__ = [
     "WatchQueue",
     "WatchRuntime",
     "Watcher",
+    "default_fingerprint",
     "enable_watch",
 ]

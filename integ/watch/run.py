@@ -30,10 +30,6 @@ from mirage.watch import enable_watch
 
 CASE_DIR = Path(__file__).resolve().parent
 EVENT_TIMEOUT = 20.0
-# Poll cadence for the push pass: long enough that the poller runs its
-# baseline once and then stays idle, so a delivered event can only have
-# come from the webhook, not a background pull.
-PUSH_POLL_INTERVAL = 3600.0
 CLASS_BY_KIND = {
     "create": "OCP\\Files\\Events\\Node\\NodeCreatedEvent",
     "update": "OCP\\Files\\Events\\Node\\NodeWrittenEvent",
@@ -187,9 +183,31 @@ async def _seed(ws: Workspace, op: object, spec: dict) -> None:
         await op.write(f"data/{name}", b"seed")
 
 
+class ConsumerPoller:
+    """The poll loop a consumer runs; mirage runs no loop itself.
+
+    This is the whole pattern: pull a delta from the resource's hook,
+    feed each change to ``watcher.notify``, keep the checkpoint. In
+    production this body runs on an interval (or after a webhook
+    doorbell); the integ pumps it once per case for determinism.
+    """
+
+    def __init__(self, hook: object, watcher: object, root: PathSpec) -> None:
+        self._hook = hook
+        self._watcher = watcher
+        self._root = root
+        self._checkpoint: str | None = None
+
+    async def pump(self) -> None:
+        delta = await self._hook.pull(self._root, self._checkpoint)
+        self._checkpoint = delta.checkpoint
+        for change in delta.changes:
+            await self._watcher.notify(change)
+
+
 async def _run_pull(spec: dict, ws: Workspace,
                     op: object) -> list[tuple[str, bool, str]]:
-    """Run the case battery in pull mode (poll + nudge).
+    """Run the case battery in pull mode (consumer-owned poll loop).
 
     Args:
         spec (dict): Parsed case file.
@@ -197,12 +215,18 @@ async def _run_pull(spec: dict, ws: Workspace,
         op (object): External writer operator.
     """
     await _seed(ws, op, spec)
-    watcher = enable_watch(ws, poll_interval=spec["poll_interval"])
-    agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
-    await asyncio.sleep(spec["poll_interval"] * 2)
+    watcher = enable_watch(ws)
+    # The hook needs a mount-framed root: virtual path plus the
+    # mount-relative resource_path.
+    rel = spec["watch_dir"][len(spec["mount"].rstrip("/")):].strip("/")
+    root = PathSpec.from_str_path(spec["watch_dir"], resource_path=rel)
+    agen = ws.watch(root)
+    resource = ws.registry.mount_for(spec["mount"]).resource
+    poller = ConsumerPoller(resource.delta_hook(), watcher, root)
+    await poller.pump()
 
     async def trigger(case: dict) -> None:
-        watcher.nudge(PathSpec.from_str_path(case["expect"]["path"]))
+        await poller.pump()
 
     results: list[tuple[str, bool, str]] = []
     try:
@@ -220,8 +244,8 @@ async def _run_push(spec: dict, ws: Workspace,
 
     Starts the sample webhook receiver a consumer would host, POSTs the
     Nextcloud payload each case implies, and relies on ``notify`` for
-    delivery. The long poll interval keeps the poller idle so only the
-    webhook can deliver.
+    delivery. No poller exists at all, so a delivered event can only
+    have come from the webhook.
 
     Args:
         spec (dict): Parsed case file.
@@ -229,7 +253,7 @@ async def _run_push(spec: dict, ws: Workspace,
         op (object): External writer operator.
     """
     await _seed(ws, op, spec)
-    watcher = enable_watch(ws, poll_interval=PUSH_POLL_INTERVAL)
+    watcher = enable_watch(ws)
     agen = ws.watch(PathSpec.from_str_path(spec["watch_dir"]))
     await asyncio.sleep(0.2)
     runner = web.AppRunner(make_app(watcher, _files_prefix(), spec["mount"]))

@@ -452,14 +452,16 @@ class ResourceChange:
         observed_at_ms (int): Epoch milliseconds when the change was
             observed by the poller.
         previous (PathSpec | None): Prior path for MOVE changes.
-        version (str | None): Opaque change detector (ETag/rev) so
+        fingerprint (str | None): Content fingerprint of the path after
+            the change (same concept as ``FileStat.fingerprint``:
+            ETag/rev, or the mtime|size composite default), so
             consumers can skip no-op reprocessing.
     """
     kind: ChangeKind
     path: PathSpec
     observed_at_ms: int
     previous: PathSpec | None = None
-    version: str | None = None
+    fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

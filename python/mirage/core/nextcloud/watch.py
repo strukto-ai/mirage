@@ -20,26 +20,8 @@ from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
-from mirage.watch.poller import ListingDeltaHook, WalkEntry
-
-
-def _detector(meta: object) -> str | None:
-    """Change detector for a WebDAV entry.
-
-    Prefers the ETag; falls back to a ``mtime|size`` composite, which
-    a WebDAV PROPFIND always carries and which still flips on a content
-    write.
-
-    Args:
-        meta (object): opendal entry metadata.
-    """
-    etag = getattr(meta, "etag", None)
-    if etag:
-        return str(etag)
-    last_modified = getattr(meta, "last_modified", None)
-    size = getattr(meta, "content_length", None)
-    stamp = last_modified.isoformat() if last_modified is not None else ""
-    return f"{stamp}|{size}"
+from mirage.watch.poller import (ListingDeltaHook, WalkEntry,
+                                 default_fingerprint)
 
 
 class NextcloudWalk:
@@ -47,7 +29,8 @@ class NextcloudWalk:
 
     Reads through the opendal operator directly (a single recursive
     PROPFIND), never through mirage's caches, as the DeltaHook contract
-    requires.
+    requires. Fingerprints use mirage's default (native ETag when the
+    listing carries one, mtime|size otherwise).
     """
 
     def __init__(self, accessor: NextcloudAccessor) -> None:
@@ -78,10 +61,18 @@ class NextcloudWalk:
             resource_rel = relative.rstrip("/")
             virtual = (prefix.rstrip("/") + "/" +
                        resource_rel if prefix else "/" + resource_rel)
-            yield WalkEntry(
-                virtual=virtual,
-                is_dir=is_dir,
-                detector=None if is_dir else _detector(entry.metadata))
+            meta = entry.metadata
+            if is_dir:
+                fingerprint = None
+            else:
+                modified = meta.last_modified.isoformat() \
+                    if meta and meta.last_modified else None
+                fingerprint = default_fingerprint(
+                    meta.etag if meta else None, modified,
+                    meta.content_length if meta else None)
+            yield WalkEntry(virtual=virtual,
+                            is_dir=is_dir,
+                            fingerprint=fingerprint)
 
 
 def build_delta_hook(accessor: NextcloudAccessor) -> DeltaHook:
