@@ -238,26 +238,66 @@ def test_matches_glob_scope_one_level():
                           _change(FileChangeKind.CREATE, "/nc/data/sub/a.txt"))
 
 
+def test_matches_slashless_glob_is_shallow():
+    # GNU depth semantics: /nc/data/* is the entries themselves —
+    # the glob spelling of a shallow watch, no descent.
+    w = _watcher()
+    sub = Subscriber(queue=None, roots=("/nc/data/*", ), recursive=True)
+    assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/a.txt"))
+    assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/sub"))
+    assert not w._matches(
+        sub, _change(FileChangeKind.CREATE, "/nc/data/sub/deep.txt"))
+
+
+def test_matches_trailing_slash_glob_scopes_dir_subtrees():
+    # GNU */ matches directories only; the watch scope is everything
+    # strictly inside them.
+    w = _watcher()
+    sub = Subscriber(queue=None, roots=("/nc/data/*/", ), recursive=True)
+    assert w._matches(sub,
+                      _change(FileChangeKind.CREATE, "/nc/data/sub/deep.txt"))
+    assert w._matches(
+        sub, _change(FileChangeKind.CREATE, "/nc/data/sub/nested/x.txt"))
+    assert not w._matches(sub,
+                          _change(FileChangeKind.CREATE, "/nc/data/top.txt"))
+
+
 def test_matches_glob_scope_covers_matched_dirs():
     w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc/data/sub*", ), recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc/data/sub*/", ), recursive=True)
     assert w._matches(
         sub, _change(FileChangeKind.CREATE, "/nc/data/subdir/deep.txt"))
     assert not w._matches(sub, _change(FileChangeKind.CREATE,
                                        "/nc/data/x.txt"))
+    shallow = Subscriber(queue=None, roots=("/nc/data/sub*", ), recursive=True)
+    assert w._matches(shallow, _change(FileChangeKind.CREATE,
+                                       "/nc/data/subdir"))
+    assert not w._matches(
+        shallow, _change(FileChangeKind.CREATE, "/nc/data/subdir/deep.txt"))
 
 
 def test_matches_glob_middle_wildcard_fine_grained():
-    # /nc/data/*/abc: any project dir's abc subtree, nothing else.
+    # /nc/data/*/abc/: everything inside any project dir's abc;
+    # /nc/data/*/abc (no slash): the abc entries themselves.
     w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc/data/*/abc", ), recursive=True)
-    assert w._matches(sub, _change(FileChangeKind.CREATE,
-                                   "/nc/data/proj1/abc"))
+    inside = Subscriber(queue=None,
+                        roots=("/nc/data/*/abc/", ),
+                        recursive=True)
     assert w._matches(
-        sub, _change(FileChangeKind.CREATE, "/nc/data/proj1/abc/report.txt"))
+        inside, _change(FileChangeKind.CREATE,
+                        "/nc/data/proj1/abc/report.txt"))
+    assert w._matches(
+        inside, _change(FileChangeKind.CREATE,
+                        "/nc/data/proj1/abc/deep/x.txt"))
     assert not w._matches(
-        sub, _change(FileChangeKind.CREATE, "/nc/data/proj1/other.txt"))
-    assert not w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/abc"))
+        inside, _change(FileChangeKind.CREATE, "/nc/data/proj1/other.txt"))
+    assert not w._matches(inside, _change(FileChangeKind.CREATE,
+                                          "/nc/data/abc"))
+    entry = Subscriber(queue=None, roots=("/nc/data/*/abc", ), recursive=True)
+    assert w._matches(entry,
+                      _change(FileChangeKind.CREATE, "/nc/data/proj1/abc"))
+    assert not w._matches(
+        entry, _change(FileChangeKind.CREATE, "/nc/data/proj1/abc/report.txt"))
 
 
 def test_matches_any_of_multiple_roots():
@@ -284,6 +324,21 @@ async def test_watch_accepts_path_list():
     await w.notify(_change(FileChangeKind.CREATE, "/nc/b/y.txt"))
     change = await asyncio.wait_for(task, timeout=2)
     assert change.path.virtual == "/nc/b/y.txt"
+    await agen.aclose()
+    await w.close()
+
+
+@pytest.mark.asyncio
+async def test_watch_preserves_trailing_slash_scope():
+    # The trailing slash must survive subscription framing: /nc/data/*/
+    # scopes inside child dirs, and framing must not collapse it to
+    # the shallow /nc/data/* form.
+    w = _watcher()
+    agen, task = await _start_blocked_watch(w, virtual="/nc/data/*/")
+    await w.notify(_change(FileChangeKind.CREATE, "/nc/data/top.txt"))
+    await w.notify(_change(FileChangeKind.CREATE, "/nc/data/sub/deep.txt"))
+    change = await asyncio.wait_for(task, timeout=2)
+    assert change.path.virtual == "/nc/data/sub/deep.txt"
     await agen.aclose()
     await w.close()
 

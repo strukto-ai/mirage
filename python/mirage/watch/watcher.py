@@ -98,15 +98,21 @@ class Watcher:
     def _in_scope(self, root: str, recursive: bool, virtual: str) -> bool:
         """Whether ``virtual`` falls inside one watch root.
 
-        A glob root (``/nc/data/*.txt``) is matched segment-wise at
-        delivery time, so ``*`` does not cross ``/`` and files created
-        after the watch started still match; a matched directory
-        covers its whole subtree (``/nc/data/*/abc`` scopes every
-        project's abc subtree; ``/nc/data/*`` therefore means the
-        whole subtree, not direct children — use a literal root with
-        ``recursive=False`` for shallow). ``recursive`` is ignored for
-        glob roots because the pattern itself defines the depth. A
-        plain root uses prefix containment.
+        Glob roots follow GNU shell glob depth semantics, matched
+        segment-wise at delivery time (``*`` does not cross ``/``, and
+        files created after the watch started still match):
+
+        - no trailing slash (``/nc/data/*``, ``/nc/data/*.txt``):
+          the matched entries themselves — exact depth, no descent
+          (the glob equivalent of a shallow watch);
+        - trailing slash (``/nc/data/*/``, ``/nc/data/*/abc/``):
+          directories, scoping everything strictly inside them
+          (mirroring GNU ``*/`` matching only directories, which
+          walkers then descend into).
+
+        ``recursive`` is ignored for glob roots because the pattern
+        itself defines the depth. A plain root uses prefix
+        containment.
 
         Args:
             root (str): One watch root, literal or glob.
@@ -115,7 +121,14 @@ class Watcher:
             virtual (str): Changed virtual path.
         """
         if has_glob(root):
-            return glob_prefix_match(virtual, root)
+            pat = root.rstrip("/")
+            if not glob_prefix_match(virtual, pat):
+                return False
+            path_depth = len(virtual.strip("/").split("/"))
+            pat_depth = len(pat.strip("/").split("/"))
+            if root.endswith("/"):
+                return path_depth > pat_depth
+            return path_depth == pat_depth
         root = root.rstrip("/")
         if virtual == root:
             return True
@@ -221,8 +234,15 @@ class Watcher:
         roots = tuple(
             self._frame(self._registry.mount_for(p.virtual), p.virtual)
             for p in paths)
+        # Scope strings keep a trailing slash: /nc/data/*/ (inside
+        # matched dirs) and /nc/data/* (the entries themselves) are
+        # different scopes, while _frame normalizes it away.
+        scopes = tuple(
+            "/" + p.virtual.strip("/") +
+            ("/" if p.virtual.endswith("/") and p.virtual.strip("/") else "")
+            for p in paths)
         sub = Subscriber(queue=queue or self._queue_factory(roots[0]),
-                         roots=tuple(r.virtual for r in roots),
+                         roots=scopes,
                          recursive=recursive)
         self._subscribers.append(sub)
         try:

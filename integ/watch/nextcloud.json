@@ -94,6 +94,44 @@
       ]
     },
     {
+      "id": "shallow_glob",
+      "watch": ["/nc/data/*"],
+      "cases": [
+        {
+          "id": "top_level_delivered",
+          "mutate": {"op": "write", "path": "data/top.txt", "body": "shallow scope\n"},
+          "expect": {"kind": "create", "path": "/nc/data/top.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/top.txt", "contains": "shallow scope"}
+          ]
+        },
+        {
+          "id": "nested_skipped",
+          "mutate": {"op": "write", "path": "data/sub/deep.txt", "body": "below shallow scope\n"},
+          "expect": {"kind": "create", "path": "/nc/data/sub/deep.txt", "delivered": false}
+        }
+      ]
+    },
+    {
+      "id": "dir_glob",
+      "watch": ["/nc/data/*/"],
+      "cases": [
+        {
+          "id": "inside_dir_delivered",
+          "mutate": {"op": "write", "path": "data/sub/in.txt", "body": "inside a child dir\n"},
+          "expect": {"kind": "create", "path": "/nc/data/sub/in.txt"},
+          "checks": [
+            {"cmd": "cat /nc/data/sub/in.txt", "contains": "inside a child dir"}
+          ]
+        },
+        {
+          "id": "top_level_skipped",
+          "mutate": {"op": "write", "path": "data/top.txt", "body": "not inside a dir\n"},
+          "expect": {"kind": "create", "path": "/nc/data/top.txt", "delivered": false}
+        }
+      ]
+    },
+    {
       "id": "file",
       "watch": ["/nc/data/keep.txt"],
       "cases": [
