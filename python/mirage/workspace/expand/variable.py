@@ -44,6 +44,11 @@ _CASE_OPS = frozenset({"^", "^^", ",", ",,"})
 # spelling (no unescaping) while still expanding nested $-expansions.
 _PATTERN_OPS = _REPLACE_OPS | _STRIP_OPS | _CASE_OPS
 
+# Ops on a "${a[@]...}" splat that act per element, so a quoted splat
+# still splits into one word per element; every other op acts on the
+# space-joined value and stays a single word.
+_MULTIWORD_AT_OPS = frozenset({":"}) | _STRIP_OPS | _REPLACE_OPS | _CASE_OPS
+
 _LITERAL_ARG_TYPES = frozenset({NT.WORD, NT.NUMBER, "regex"})
 
 # Operators that handle unset themselves, so `set -u` must not fire
@@ -440,6 +445,15 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
             (dependency-injected to avoid a cycle with ``expand_node``).
     """
     p = _parse_braces(node)
+    if any(c.type == "}" and c.is_missing for c in node.children):
+        # tree-sitter-bash cannot parse a $-spelled substring offset
+        # (${v:$o}, ${v:$o:n}): it truncates the expansion with a
+        # zero-width `}` and reparses the tail as stray siblings. bash
+        # accepts the form, so emitting the mis-parse would corrupt the
+        # value silently; fail loudly instead. Spell it ${v:o} or
+        # ${v:$((o))}.
+        msg = f"bash: ${{{p.var_name or ''}}}: bad substitution\n"
+        raise ExitSignal(2, stderr=msg.encode(), contained_code=2)
     env = session.env
     arrays = getattr(session, "arrays", {})
 
@@ -565,3 +579,60 @@ def _slice_array(arr: list[str], groups: list[str],
     if length < 0:
         return arr[offset:max(offset, len(arr) + length)]
     return arr[offset:offset + length]
+
+
+def is_multiword_at(node: tree_sitter.Node) -> bool:
+    """Report whether a "${a[@]...}" splat word-splits when quoted.
+
+    True for the ``@``-subscript forms bash keeps as one word per
+    element: plain ``${a[@]}``, slice ``${a[@]:o:l}``, per-element
+    strip/replace/case ops, and ``${!a[@]}`` indices. False for
+    single-word forms (``${a[*]}``, ``${#a[@]}``, non-``@`` subscript,
+    or a default/alternate op that acts on the joined value).
+
+    Args:
+        node (tree_sitter.Node): the ``expansion`` node.
+    """
+    if node.type != NT.EXPANSION:
+        return False
+    p = _parse_braces(node)
+    if p.subscript != "@" or p.length_op:
+        return False
+    if p.indirect_op or p.op is None:
+        return True
+    return p.op in _MULTIWORD_AT_OPS
+
+
+async def expand_array_at(node: tree_sitter.Node, session: Session,
+                          call_stack: CallStack | None,
+                          expand_child: ExpandChild) -> list[str]:
+    """Resolve a multi-word "${a[@]...}" splat to its word list.
+
+    Only call when ``is_multiword_at`` is True; the caller word-splits
+    (or stitches prefix/suffix onto) the returned words, matching bash's
+    quoted-splat semantics.
+
+    Args:
+        node (tree_sitter.Node): the ``expansion`` node.
+        session (Session): shell session (arrays, env).
+        call_stack (CallStack | None): function-call scope, if any.
+        expand_child (ExpandChild): nested-node expander for op operands.
+    """
+    p = _parse_braces(node)
+    arrays = getattr(session, "arrays", {})
+    arr = arrays.get(p.var_name)
+    if arr is None:
+        scalar = session.env.get(p.var_name or "", "")
+        arr = [scalar] if scalar else []
+    if p.indirect_op:
+        return [str(i) for i in range(len(arr))]
+    if p.op is None:
+        return list(arr)
+    groups: list[str] = []
+    for gi, group in enumerate(p.groups):
+        pattern_mode = gi == 0 and p.op in _PATTERN_OPS
+        groups.append(await _expand_group(group, expand_child, pattern_mode,
+                                          session, call_stack))
+    if p.op == ":":
+        return _slice_array(arr, groups, session.env)
+    return [_value_op(p.op, el, groups, session.env) for el in arr]

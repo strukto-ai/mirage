@@ -22,7 +22,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def _seq_generate(texts: tuple[str, ...], separator: str, width: str | None,
+def _seq_generate(texts: tuple[str, ...], separator: str, width: bool,
                   fmt: str | None) -> str:
     nums = [float(t) for t in texts]
     if len(nums) == 1:
@@ -43,8 +43,8 @@ def _seq_generate(texts: tuple[str, ...], separator: str, width: str | None,
             cur += step
     if fmt is not None:
         parts = [fmt % v for v in values]
-    elif width is not None:
-        w = len(str(max(abs(v) for v in values))) if values else 1
+    elif width:
+        w = max((len(str(v)) for v in values), default=1)
         parts = [str(v).zfill(w) for v in values]
     else:
         parts = [str(v) for v in values]
@@ -58,7 +58,7 @@ async def seq(
     *texts: str,
     stdin: bytes | None = None,
     s: str | None = None,
-    w: str | None = None,
+    w: bool = False,
     f: str | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:

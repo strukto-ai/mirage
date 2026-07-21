@@ -21,6 +21,7 @@ export interface SeaweedFSConfig {
   endpoint?: string
   region?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface SeaweedFSConfigRedacted extends Omit<SeaweedFSConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const SeaweedFSConfigSchema = z.object({
   endpoint: z.string().optional(),
   region: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function seaweedfsToS3Config(config: SeaweedFSConfig): S3Config {
@@ -46,6 +48,7 @@ export function seaweedfsToS3Config(config: SeaweedFSConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

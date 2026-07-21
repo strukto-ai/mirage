@@ -26,6 +26,7 @@ class OCIConfig(BaseModel):
     endpoint_url: str | None = None
     access_key_id: SecretStr
     secret_access_key: SecretStr
+    key_prefix: str | None = None
     timeout: int = 30
     proxy: str | None = None
 
@@ -44,6 +45,7 @@ class OCIConfig(BaseModel):
             aws_access_key_id=self.access_key_id,
             aws_secret_access_key=self.secret_access_key,
             path_style=True,
+            key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
         )

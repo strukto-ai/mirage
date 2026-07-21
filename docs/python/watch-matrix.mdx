@@ -1,0 +1,72 @@
+---
+title: Watch Matrix
+description: Which resources support watch today, and which detection path (push mapping or pull delta hook) each one has.
+icon: table-cells
+---
+
+## How To Read This Matrix
+
+Watching splits into two halves, and they have different support stories:
+
+- **Delivery** (`ws.watch()` + `ws.notify()`) works on **every mount** today.
+  Delivery is notify-driven: any detection you run maps its signal to a
+  `FileEvent` and injects it, and Mirage handles invalidation, scope matching,
+  and the event stream. No per-backend code is involved.
+- **Detection** is per-backend. The **Pull** column marks resources whose
+  `delta_hook()` ships with Mirage (checkpointed diff, the self-healing truth
+  path). The **Push signal** column names the provider mechanism your receiver
+  would subscribe to; mapping its payload to a `FileEvent` is consumer code,
+  and Mirage ships a sample where marked.
+
+| Resource | Delivery | Pull (`delta_hook`) | Push signal (provider-side) | Sample |
+| --- | --- | --- | --- | --- |
+| Nextcloud | ✓ | ✓ ETag walk diff | `webhook_listeners` app (Nextcloud 30+) | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py) + integ receiver |
+| S3 / S3-compatible | ✓ | planned | S3 Event Notifications (SQS/EventBridge) | — |
+| Google Drive | ✓ | planned | `changes.watch` push channels | — |
+| Dropbox | ✓ | planned | Dropbox webhooks + cursor delta | — |
+| OneDrive / SharePoint | ✓ | planned | Graph change notifications + delta API | — |
+| GitHub | ✓ | planned | repository webhooks (push events) | — |
+| Slack | ✓ | planned | Events API (`message`, `file_shared`, ...) | — |
+| Disk | ✓ | planned | local inotify / FSEvents / watchdog | — |
+| RAM, Redis, others | ✓ | — | (no external writers to observe) | — |
+
+## What "Delivery ✓" buys you without a hook
+
+Even with no shipped detection, any backend is watchable end to end the moment
+you have a signal from anywhere:
+
+```python
+async for event in ws.watch("/s3/exports/*.csv"):   # any mount, today
+    ...
+
+# your S3 SQS consumer, your GitHub webhook route, your cron diff:
+await ws.notify(FileEvent(kind=FileChangeKind.CREATE,
+                          path=PathSpec.from_str_path("/s3/exports/jan.csv"),
+                          timestamp=datetime.now(timezone.utc)))
+```
+
+The guarantee is identical on every backend: caches for the changed path and
+its ancestor listings are invalidated before delivery, so reads after an event
+are fresh.
+
+## Adding pull detection to a backend
+
+`ListingDeltaHook` is generic; a backend earns the **Pull** column with one
+small walk class that lists entries with fingerprints:
+
+```python
+class S3Walk:
+    async def __call__(self, root):
+        async for obj in list_objects(prefix=root.resource_path):
+            yield WalkEntry(virtual=..., is_dir=False,
+                            fingerprint=obj.etag,      # backend-native version
+                            size=obj.size, modified=obj.last_modified)
+
+def delta_hook(self):
+    return ListingDeltaHook(S3Walk(self.accessor))
+```
+
+Backends with a native cursor API (Dropbox `list_folder/continue`, Graph
+delta) can skip the walk and implement `pull(root, checkpoint)` directly; the
+opaque checkpoint becomes the server cursor, and consumers cannot tell the
+difference.

@@ -23,32 +23,38 @@ export const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1'
 export const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 export const TOKEN_BUFFER_SECONDS = 300
 
-export function tokenUrl(): string {
-  return TOKEN_URL
+export function tokenUrl(config: GoogleConfig): string {
+  return config.apiBase !== undefined ? `${config.apiBase}/token` : TOKEN_URL
 }
 
-export function driveBase(_tokenManager: TokenManager): string {
-  return DRIVE_API_BASE
+export function driveBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/drive/v3` : DRIVE_API_BASE
 }
 
-export function driveUploadBase(_tokenManager: TokenManager): string {
-  return DRIVE_UPLOAD_BASE
+export function driveUploadBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/upload/drive/v3` : DRIVE_UPLOAD_BASE
 }
 
-export function docsBase(_tokenManager: TokenManager): string {
-  return DOCS_API_BASE
+export function docsBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/v1` : DOCS_API_BASE
 }
 
-export function slidesBase(_tokenManager: TokenManager): string {
-  return SLIDES_API_BASE
+export function slidesBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/v1` : SLIDES_API_BASE
 }
 
-export function sheetsBase(_tokenManager: TokenManager): string {
-  return SHEETS_API_BASE
+export function sheetsBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/v4` : SHEETS_API_BASE
 }
 
-export function gmailBase(_tokenManager: TokenManager): string {
-  return GMAIL_API_BASE
+export function gmailBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/gmail/v1` : GMAIL_API_BASE
 }
 
 export class GoogleApiError extends Error {
@@ -69,7 +75,7 @@ export async function refreshAccessToken(config: GoogleConfig): Promise<[string,
   if (config.clientSecret !== undefined && config.clientSecret !== '') {
     body.set('client_secret', config.clientSecret)
   }
-  const r = await fetch(tokenUrl(), {
+  const r = await fetch(tokenUrl(config), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),

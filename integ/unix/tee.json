@@ -1,0 +1,62 @@
+{
+  "cases": [
+    {
+      "id": "tee_a_append",
+      "seq": 601050,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee1 && printf 'hi' > /data/ptee1/t.txt && printf 'MORE' | tee -a /data/ptee1/t.txt > /dev/null && cat /data/ptee1/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hiMORE",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tee_a_stdout",
+      "seq": 601051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee2 && printf 'A' > /data/ptee2/s.txt && printf 'B' | tee -a /data/ptee2/s.txt && printf '|' && cat /data/ptee2/s.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "B|AB",
+        "stderr": ""
+      }
+    }
+  ]
+}

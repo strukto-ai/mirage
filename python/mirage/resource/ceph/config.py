@@ -26,6 +26,7 @@ class CephConfig(BaseModel):
     secret_access_key: SecretStr
     region: str = "us-east-1"
     path_style: bool = True
+    key_prefix: str | None = None
     timeout: int = 30
     proxy: str | None = None
 
@@ -37,6 +38,7 @@ class CephConfig(BaseModel):
             aws_access_key_id=self.access_key_id,
             aws_secret_access_key=self.secret_access_key,
             path_style=self.path_style,
+            key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
         )

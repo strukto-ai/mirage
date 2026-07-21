@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "object_storage_prefix_write",
+      "seq": 900,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "printf 'outside\\n' > /raw/outside.txt; printf 's3\\n' > /s3/identity.txt; printf 'aliyun\\n' > /aliyun/identity.txt; printf 'backblaze\\n' > /backblaze/identity.txt; printf 'ceph\\n' > /ceph/identity.txt; printf 'digitalocean\\n' > /digitalocean/identity.txt; printf 'gcs\\n' > /gcs/identity.txt; printf 'minio\\n' > /minio/identity.txt; printf 'oci\\n' > /oci/identity.txt; printf 'qingstor\\n' > /qingstor/identity.txt; printf 'r2\\n' > /r2/identity.txt; printf 'scaleway\\n' > /scaleway/identity.txt; printf 'seaweedfs\\n' > /seaweedfs/identity.txt; printf 'supabase\\n' > /supabase/identity.txt; printf 'tencent\\n' > /tencent/identity.txt; printf 'wasabi\\n' > /wasabi/identity.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "object_storage_prefix_read",
+      "seq": 901,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "cat /s3/identity.txt /aliyun/identity.txt /backblaze/identity.txt /ceph/identity.txt /digitalocean/identity.txt /gcs/identity.txt /minio/identity.txt /oci/identity.txt /qingstor/identity.txt /r2/identity.txt /scaleway/identity.txt /seaweedfs/identity.txt /supabase/identity.txt /tencent/identity.txt /wasabi/identity.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "s3\naliyun\nbackblaze\nceph\ndigitalocean\ngcs\nminio\noci\nqingstor\nr2\nscaleway\nseaweedfs\nsupabase\ntencent\nwasabi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "object_storage_prefix_virtual_root",
+      "seq": 902,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "find /aliyun -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/aliyun/identity.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "object_storage_prefix_backing_keys",
+      "seq": 903,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "find /raw -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/raw/aliases/aliyun/identity.txt\n/raw/aliases/backblaze/identity.txt\n/raw/aliases/ceph/identity.txt\n/raw/aliases/digitalocean/identity.txt\n/raw/aliases/gcs/identity.txt\n/raw/aliases/minio/identity.txt\n/raw/aliases/oci/identity.txt\n/raw/aliases/qingstor/identity.txt\n/raw/aliases/r2/identity.txt\n/raw/aliases/s3/identity.txt\n/raw/aliases/scaleway/identity.txt\n/raw/aliases/seaweedfs/identity.txt\n/raw/aliases/supabase/identity.txt\n/raw/aliases/tencent/identity.txt\n/raw/aliases/wasabi/identity.txt\n/raw/outside.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -17,36 +17,45 @@ def _build_join_map(
         parts = line.split(delimiter) if delimiter else line.split()
         if field_idx < len(parts):
             key = parts[field_idx]
-            rest = parts[:field_idx] + parts[field_idx + 1:]
             if key not in result:
                 result[key] = []
-            result[key].append(rest)
+            result[key].append(parts)
     return result
+
+
+def _rest(fields: list[str], key_idx: int) -> list[str]:
+    return fields[:key_idx] + fields[key_idx + 1:]
 
 
 def _format_row(
     key: str,
-    rest1: list[str],
-    rest2: list[str],
+    fields1: list[str],
+    field1: int,
+    fields2: list[str],
+    field2: int,
     o_fmt: str | None,
     out_sep: str,
+    empty_value: str | None,
 ) -> str:
     if o_fmt is None:
-        return out_sep.join([key] + rest1 + rest2)
+        return out_sep.join([key] + _rest(fields1, field1) +
+                            _rest(fields2, field2))
+    # -o FILENUM.FIELD indexes the original 1-based field (the join key
+    # included), so map against the full field list, not the key-stripped
+    # rest; a missing field uses the -e replacement (GNU), else empty.
     fields: list[str] = []
     for spec in o_fmt.split(","):
         spec = spec.strip()
         if spec == "0":
             fields.append(key)
+            continue
+        file_part, _, field_part = spec.partition(".")
+        src = fields1 if file_part == "1" else fields2
+        idx = int(field_part) - 1
+        if 0 <= idx < len(src):
+            fields.append(src[idx])
         else:
-            parts = spec.split(".", 1)
-            file_n = int(parts[0])
-            field_m = int(parts[1]) - 1
-            src = rest1 if file_n == 1 else rest2
-            if field_m < len(src):
-                fields.append(src[field_m])
-            else:
-                fields.append("")
+            fields.append(empty_value if empty_value is not None else "")
     return out_sep.join(fields)
 
 
@@ -61,7 +70,6 @@ def _join_lines(
     empty_value: str | None,
     output_format: str | None,
 ) -> list[str]:
-    map1 = _build_join_map(lines1, field1, sep)
     map2 = _build_join_map(lines2, field2, sep)
     out_sep = sep if sep else " "
     out_lines: list[str] = []
@@ -72,24 +80,17 @@ def _join_lines(
         if field1 >= len(parts):
             continue
         key = parts[field1]
-        rest1 = parts[:field1] + parts[field1 + 1:]
         if key in map2:
             matched_keys2.add(key)
             if only_unpairable is None:
-                for rest2 in map2[key]:
+                for fields2 in map2[key]:
                     out_lines.append(
-                        _format_row(key, rest1, rest2, output_format, out_sep))
-        else:
-            if only_unpairable == "1" or also_unpairable == "1":
-                if (output_format is not None and empty_value is not None
-                        and map2):
-                    sample = map2[next(iter(map2))][0]
-                    placeholder = [empty_value] * len(sample)
-                else:
-                    placeholder = []
-                out_lines.append(
-                    _format_row(key, rest1, placeholder, output_format,
-                                out_sep))
+                        _format_row(key, parts, field1, fields2, field2,
+                                    output_format, out_sep, empty_value))
+        elif only_unpairable == "1" or also_unpairable == "1":
+            out_lines.append(
+                _format_row(key, parts, field1, [], field2, output_format,
+                            out_sep, empty_value))
 
     if also_unpairable == "2" or only_unpairable == "2":
         for line in lines2:
@@ -98,16 +99,9 @@ def _join_lines(
                 continue
             key = parts[field2]
             if key not in matched_keys2:
-                rest2 = parts[:field2] + parts[field2 + 1:]
-                if (output_format is not None and empty_value is not None
-                        and map1):
-                    sample = map1[next(iter(map1))][0]
-                    placeholder = [empty_value] * len(sample)
-                else:
-                    placeholder = []
                 out_lines.append(
-                    _format_row(key, placeholder, rest2, output_format,
-                                out_sep))
+                    _format_row(key, [], field1, parts, field2, output_format,
+                                out_sep, empty_value))
 
     return out_lines
 

@@ -65,6 +65,13 @@ function formatWithPrintf(fmt: string, value: number): string {
   )
 }
 
+function zeroPad(value: number, width: number): string {
+  // Pad with leading zeros after any sign, matching Python str.zfill / GNU seq.
+  const s = String(value)
+  if (s.startsWith('-')) return '-' + s.slice(1).padStart(width - 1, '0')
+  return s.padStart(width, '0')
+}
+
 function seqGenerate(
   texts: string[],
   separator: string,
@@ -105,9 +112,8 @@ function seqGenerate(
   if (fmt !== null) {
     parts = values.map((v) => formatWithPrintf(fmt, v))
   } else if (width !== null) {
-    const maxAbs = values.length > 0 ? Math.max(...values.map((v) => Math.abs(v))) : 0
-    const w = values.length > 0 ? String(maxAbs).length : 1
-    parts = values.map((v) => String(v).padStart(w, '0'))
+    const w = values.length > 0 ? Math.max(...values.map((v) => String(v).length)) : 1
+    parts = values.map((v) => zeroPad(v, w))
   } else {
     parts = values.map((v) => String(v))
   }

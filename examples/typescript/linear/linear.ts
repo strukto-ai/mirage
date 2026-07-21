@@ -15,7 +15,13 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { LinearResource, MountMode, Workspace, type FileStat, type LinearConfig } from '@struktoai/mirage-node'
+import {
+  LinearResource,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type LinearConfig,
+} from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
@@ -56,7 +62,14 @@ async function main(): Promise<void> {
       console.log('no teams')
       return
     }
+    const teamKey = t0.split('__')[0] ?? ''
     const teamBase = `/linear/teams/${t0}`
+
+    console.log('\n=== linear team list ===')
+    await run(ws, 'linear team list')
+
+    console.log(`\n=== linear team get ${teamKey} ===`)
+    await run(ws, `linear team get ${teamKey}`)
 
     console.log(`\n=== tree -L 2 ${teamBase} ===`)
     await run(ws, `tree -L 2 "${teamBase}"`)
@@ -67,7 +80,14 @@ async function main(): Promise<void> {
     console.log(`\n=== ls ${teamBase}/issues/ ===`)
     const i0 = (await run(ws, `ls "${teamBase}/issues/" | head -n 1`)).trim()
     if (i0 === '') return
+    const issueKey = i0.split('__')[0] ?? ''
     const issuePath = `${teamBase}/issues/${i0}`
+
+    console.log(`\n=== linear issue list --team ${teamKey} ===`)
+    await run(ws, `linear issue list --team ${teamKey}`)
+
+    console.log(`\n=== linear issue get ${issueKey} ===`)
+    await run(ws, `linear issue get ${issueKey}`)
 
     console.log(`\n=== cat ${i0}/issue.json ===`)
     await run(ws, `cat "${issuePath}/issue.json"`)
@@ -98,7 +118,6 @@ async function main(): Promise<void> {
 
     console.log(`\n=== stat ${i0}/issue.json ===`)
     await run(ws, `stat "${issuePath}/issue.json"`)
-
 
     // chmod/chown/touch never hit the Linear API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into

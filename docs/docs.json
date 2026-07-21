@@ -382,6 +382,14 @@
             ]
           },
           {
+            "group": "Watch",
+            "icon": "bell",
+            "pages": [
+              "python/watch",
+              "python/watch-matrix"
+            ]
+          },
+          {
             "group": "Runtimes",
             "pages": [
               "python/runtime/python",

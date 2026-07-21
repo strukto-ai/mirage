@@ -54,6 +54,16 @@ async def main() -> None:
         print("No teams available")
         return
 
+    team_key = first_team.split("__", 1)[0]
+
+    print("=== linear team list ===")
+    result = await ws.execute("linear team list")
+    print(await result.stdout_str())
+
+    print(f"=== linear team get {team_key} ===")
+    result = await ws.execute(f"linear team get {team_key}")
+    print(await result.stdout_str())
+
     print(f"=== cat /linear/teams/{first_team}/team.json ===")
     result = await ws.execute(f"cat /linear/teams/{first_team}/team.json")
     print(await result.stdout_str())
@@ -111,7 +121,16 @@ async def main() -> None:
         print("No issues available in first team")
         return
 
+    issue_key = first_issue.split("__", 1)[0]
     issue_path = f"/linear/teams/{first_team}/issues/{first_issue}"
+
+    print(f"=== linear issue list --team {team_key} ===")
+    result = await ws.execute(f"linear issue list --team {team_key}")
+    print(await result.stdout_str())
+
+    print(f"=== linear issue get {issue_key} ===")
+    result = await ws.execute(f"linear issue get {issue_key}")
+    print(await result.stdout_str())
 
     print("=== cat issue.json ===")
     result = await ws.execute(f"cat {issue_path}/issue.json")

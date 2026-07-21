@@ -18,6 +18,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -49,6 +50,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -80,6 +82,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -111,6 +114,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -122,6 +126,149 @@
         "exit": 1,
         "stdout": "",
         "stderr": "cp: target '/data/c.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "cp_v_single",
+      "seq": 601000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp1 && printf 'x' > /data/pcp1/s.txt && cp -v /data/pcp1/s.txt /data/pcp1/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/pcp1/s.txt' -> '/data/pcp1/d.txt'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_R_tree",
+      "seq": 601001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp2/tree/sub && printf 'a' > /data/pcp2/tree/f.txt && printf 'b' > /data/pcp2/tree/sub/g.txt && cp -R /data/pcp2/tree /data/pcp2/tcopy && cat /data/pcp2/tcopy/f.txt /data/pcp2/tcopy/sub/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_a_tree",
+      "seq": 601002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp3/at/sub && printf 'a' > /data/pcp3/at/f.txt && cp -a /data/pcp3/at /data/pcp3/atcopy && cat /data/pcp3/atcopy/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_f_over",
+      "seq": 601003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp4 && printf 'A' > /data/pcp4/s.txt && printf 'B' > /data/pcp4/d.txt && cp -f /data/pcp4/s.txt /data/pcp4/d.txt && cat /data/pcp4/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "A",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_n_noclobber",
+      "seq": 601004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp5 && printf 'N' > /data/pcp5/s.txt && printf 'O' > /data/pcp5/d.txt && cp -n /data/pcp5/s.txt /data/pcp5/d.txt && cat /data/pcp5/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "O",
+        "stderr": ""
       }
     }
   ]

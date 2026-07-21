@@ -44,6 +44,12 @@ CASES = [
     ('v=ab; v+=cd; echo "$v"', "abcd\n"),
     ('unset_append_zz+=x; echo "$unset_append_zz"', "x\n"),
     ('a=(one two); echo "pre${a[@]}post"', "preone twopost\n"),
+    ('a=(w x y z); printf "<%s>" "${a[@]:1:2}"; echo', "<x><y>\n"),
+    ('a=(w x y z); set -- "${a[@]:1:2}"; echo "$#"', "2\n"),
+    ('a=(w x y z); printf "<%s>" "p${a[@]:1:2}s"; echo', "<px><ys>\n"),
+    ('a=(cat car cow); printf "<%s>" "${a[@]/c/K}"; echo',
+     "<Kat><Kar><Kow>\n"),
+    ('a=(w x y z); printf "<%s>" "${!a[@]}"; echo', "<0><1><2><3>\n"),
 ]
 
 

@@ -82,20 +82,15 @@ async def main():
     print(f"Created: {sheet_id}")
 
     print("\n=== gws sheets +write ===")
-    params = json.dumps({
-        "spreadsheetId": sheet_id,
-        "range": "Sheet1!A1",
-        "valueInputOption": "USER_ENTERED",
-    })
-    values = json.dumps({
-        "values": [
-            ["Name", "Age", "City"],
-            ["Alice", "30", "NYC"],
-            ["Bob", "25", "SF"],
-        ]
-    })
+    values = json.dumps([
+        ["Name", "Age", "City"],
+        ["Alice", "30", "NYC"],
+        ["Bob", "25", "SF"],
+    ])
     r = await ws.execute(f"gws sheets +write"
-                         f" --params '{params}' --json '{values}'")
+                         f" --spreadsheet {sheet_id}"
+                         f' --range "Sheet1!A1:C3"'
+                         f" --json-values '{values}'")
     print(f"Written: {(await r.stdout_str())[:80]}")
 
     print("\n=== gws sheets +read ===")

@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "id": "seq_s_sep",
+      "seq": 601220,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq -s , 1 5",
+      "expect": {
+        "exit": 0,
+        "stdout": "1,2,3,4,5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "seq_w_width",
+      "seq": 601221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq -w 8 10",
+      "expect": {
+        "exit": 0,
+        "stdout": "08\n09\n10\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "seq_w_negwidth",
+      "seq": 601222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq -w -2 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "-2\n-1\n00\n01\n02\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

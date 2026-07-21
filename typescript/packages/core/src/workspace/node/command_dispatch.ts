@@ -44,6 +44,7 @@ import {
   followPaths,
   handleBash,
   handleCd,
+  handleCommandBuiltin,
   handleEcho,
   handleEval,
   handleExport,
@@ -562,6 +563,10 @@ async function runArgv(
   if (name === SB.BREAK) throw new BreakSignal(null, new IOResult(), loopLevels(args))
   if (name === SB.CONTINUE) throw new ContinueSignal(null, new IOResult(), loopLevels(args))
 
+  if (name === SB.COMMAND) {
+    return handleCommandBuiltin(executeFn, args, session, registry, stdin)
+  }
+
   if (name === SB.XARGS) {
     return handleXargs(executeFn, args, session, stdin)
   }
@@ -577,10 +582,7 @@ async function runArgv(
     return await handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
-    const flags = linkFlags(operands, 'fenm')
-    if (!(flags.has('f') || flags.has('e') || flags.has('m'))) {
-      return handleReadlink(namespace, session, operands)
-    }
+    return handleReadlink(namespace, session, operands)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with

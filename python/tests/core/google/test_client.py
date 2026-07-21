@@ -24,8 +24,9 @@ from mirage.core.google._client import (DOCS_API_BASE, DRIVE_API_BASE,
 from mirage.core.google.config import GoogleConfig
 
 
-def _manager() -> TokenManager:
-    return TokenManager(GoogleConfig(client_id="cid", refresh_token="rt"))
+def _manager(api_base: str | None = None) -> TokenManager:
+    return TokenManager(
+        GoogleConfig(client_id="cid", refresh_token="rt", api_base=api_base))
 
 
 def test_bases_default_to_real_google_hosts():
@@ -36,4 +37,15 @@ def test_bases_default_to_real_google_hosts():
     assert slides_base(tm) == SLIDES_API_BASE
     assert sheets_base(tm) == SHEETS_API_BASE
     assert gmail_base(tm) == GMAIL_API_BASE
-    assert token_url() == TOKEN_URL
+    assert token_url(tm.config) == TOKEN_URL
+
+
+def test_api_base_override_rewrites_every_service():
+    tm = _manager("http://127.0.0.1:19999")
+    assert drive_base(tm) == "http://127.0.0.1:19999/drive/v3"
+    assert drive_upload_base(tm) == "http://127.0.0.1:19999/upload/drive/v3"
+    assert docs_base(tm) == "http://127.0.0.1:19999/v1"
+    assert slides_base(tm) == "http://127.0.0.1:19999/v1"
+    assert sheets_base(tm) == "http://127.0.0.1:19999/v4"
+    assert gmail_base(tm) == "http://127.0.0.1:19999/gmail/v1"
+    assert token_url(tm.config) == "http://127.0.0.1:19999/token"

@@ -17,6 +17,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "mkdir -p /data/metao && echo alpha > /data/metao/f.txt && touch -t 202601021530 /data/metao/f.txt",
@@ -52,6 +53,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "chmod 601 /data/metao/f.txt",
@@ -85,6 +87,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "chmod u+x,go-r /data/metao/f.txt",
@@ -117,6 +120,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "chown 500:dev /data/metao/f.txt",
@@ -150,6 +154,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "chown alice /data/metao/f.txt",
@@ -183,6 +188,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "touch -t 202601021530 /data/metao/new.txt",
@@ -216,6 +222,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "touch -c /data/metao/ghost.txt",
@@ -248,6 +255,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "touch -t 202603041200 /data/metao/f.txt",
@@ -280,6 +288,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "chmod 750 /data/metao",
@@ -310,6 +319,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "mv /data/metao/f.txt /data/metao/g.txt",
@@ -343,6 +353,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "rm /data/metao/g.txt && echo fresh > /data/metao/g.txt",
@@ -375,6 +386,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "ln -s /data/metao/g.txt /data/metao/ln.txt && chmod 604 /data/metao/ln.txt",
@@ -407,6 +419,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "touch -t 202601021530 /data/metao/g.txt && touch -h -t 202603041200 /data/metao/ln.txt",
@@ -439,6 +452,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "chmod 644 /data/metao/missing.txt 2>&1",
@@ -465,6 +479,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "touch -t 99 /data/metao/g.txt 2>&1",
@@ -491,6 +506,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "box"
       ],
       "command": "rm /data/metao/ln.txt && rm -r /data/metao",

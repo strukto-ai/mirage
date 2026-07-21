@@ -31,32 +31,38 @@ DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3"
 TOKEN_BUFFER_SECONDS = 300
 
 
-def token_url() -> str:
-    return TOKEN_URL
+def token_url(config: GoogleConfig) -> str:
+    return f"{config.api_base}/token" if config.api_base else TOKEN_URL
 
 
-def drive_base(_token_manager: "TokenManager") -> str:
-    return DRIVE_API_BASE
+def drive_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/drive/v3" if base else DRIVE_API_BASE
 
 
-def drive_upload_base(_token_manager: "TokenManager") -> str:
-    return DRIVE_UPLOAD_BASE
+def drive_upload_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/upload/drive/v3" if base else DRIVE_UPLOAD_BASE
 
 
-def docs_base(_token_manager: "TokenManager") -> str:
-    return DOCS_API_BASE
+def docs_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/v1" if base else DOCS_API_BASE
 
 
-def slides_base(_token_manager: "TokenManager") -> str:
-    return SLIDES_API_BASE
+def slides_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/v1" if base else SLIDES_API_BASE
 
 
-def sheets_base(_token_manager: "TokenManager") -> str:
-    return SHEETS_API_BASE
+def sheets_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/v4" if base else SHEETS_API_BASE
 
 
-def gmail_base(_token_manager: "TokenManager") -> str:
-    return GMAIL_API_BASE
+def gmail_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/gmail/v1" if base else GMAIL_API_BASE
 
 
 async def refresh_access_token(config: GoogleConfig, ) -> tuple[str, int]:
@@ -77,7 +83,7 @@ async def refresh_access_token(config: GoogleConfig, ) -> tuple[str, int]:
     if client_secret:
         data["client_secret"] = client_secret
     async with aiohttp.ClientSession() as session:
-        async with session.post(token_url(), data=data) as resp:
+        async with session.post(token_url(config), data=data) as resp:
             resp.raise_for_status()
             body = await resp.json()
             return body["access_token"], body["expires_in"]

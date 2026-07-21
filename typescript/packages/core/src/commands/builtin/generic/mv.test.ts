@@ -383,6 +383,6 @@ describe('mvGeneric primitive transfer errors', () => {
       { unlinkFails: new Map([['/src/a.txt', eacces('/src/a.txt')]]) },
       { v: true },
     )
-    expect(new TextDecoder().decode(out as Uint8Array)).toBe("'/src/b.txt' -> '/d/b.txt'\n")
+    expect(new TextDecoder().decode(out as Uint8Array)).toBe("renamed '/src/b.txt' -> '/d/b.txt'\n")
   })
 })

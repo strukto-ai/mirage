@@ -48,7 +48,7 @@ describe('split', () => {
     const r = await runSplit(
       resource,
       [PathSpec.fromStrPath('/f.txt'), PathSpec.fromStrPath('/chunk_')],
-      { l: '2' },
+      { args_l: '2' },
     )
     expect(r.exitCode).toBe(0)
     const aa = resource.store.files.get('/chunk_aa')

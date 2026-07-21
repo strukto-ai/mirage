@@ -363,7 +363,7 @@ async def iter_tree(
         cname = child.get("name", "")
         child_loc = loc.child(cname)
         is_dir = "folder" in child
-        yield child_loc.path, child, is_dir
+        yield child_loc.virt, child, is_dir
         if is_dir:
             async for entry in iter_tree(config, child_loc, session=session):
                 yield entry
@@ -390,7 +390,7 @@ async def du_tree_entries(config: MsGraphConfig,
             size = item.get("size", 0)
             results.append(("/" + rel, size))
             total += size
-    results.append(("/" + loc.path if loc.path else "/", total))
+    results.append(("/" + loc.virt if loc.virt else "/", total))
     return results
 
 
@@ -412,7 +412,7 @@ async def find_items(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    base = loc.path
+    base = loc.virt
     results: list[str] = []
     saw_descendant = False
     tree = tree if tree is not None else build_tree(name=name,

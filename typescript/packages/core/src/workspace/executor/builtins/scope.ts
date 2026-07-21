@@ -20,7 +20,10 @@ import type { ExecutionNode } from '../../types.ts'
 
 export type Result = [ByteSource | null, IOResult, ExecutionNode]
 
-export type ExecuteStringFn = (script: string, opts: { sessionId: string }) => Promise<IOResultType>
+export type ExecuteStringFn = (
+  script: string,
+  opts: { sessionId: string; stdin?: ByteSource | null },
+) => Promise<IOResultType>
 
 export function toScope(path: string): PathSpec {
   const lastSlash = path.lastIndexOf('/')

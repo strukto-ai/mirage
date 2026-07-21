@@ -31,13 +31,14 @@ export interface TSNodeLike {
   namedChildren: TSNodeLike[]
   parent?: TSNodeLike | null
   isNamed?: boolean
+  isMissing?: boolean
   startIndex?: number
   endIndex?: number
 }
 
 export type ExpandChild = (node: TSNodeLike) => Promise<string>
 
-export const PARAM_OPS: ReadonlySet<string> = new Set([
+const PARAM_OPS: ReadonlySet<string> = new Set([
   ':-',
   '-',
   ':+',
@@ -71,6 +72,16 @@ const CASE_OPS: ReadonlySet<string> = new Set(['^', '^^', ',', ',,'])
 // Ops whose first operand is a glob pattern that must keep its literal
 // spelling (no unescaping) while still expanding nested $-expansions.
 const PATTERN_OPS: ReadonlySet<string> = new Set([...REPLACE_OPS, ...STRIP_OPS, ...CASE_OPS])
+
+// Ops on a "${a[@]...}" splat that act per element, so a quoted splat
+// still splits into one word per element; every other op acts on the
+// space-joined value and stays a single word.
+const MULTIWORD_AT_OPS: ReadonlySet<string> = new Set([
+  ':',
+  ...STRIP_OPS,
+  ...REPLACE_OPS,
+  ...CASE_OPS,
+])
 
 const LITERAL_ARG_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, 'regex'])
 
@@ -425,6 +436,46 @@ function sliceArray(arr: string[], groups: string[], env: Record<string, string>
   return arr.slice(offset, offset + length)
 }
 
+// True for the "${a[@]...}" forms bash keeps as one word per element:
+// plain, slice, per-element strip/replace/case ops, and ${!a[@]}
+// indices. False for single-word forms (${a[*]}, ${#a[@]}, non-@
+// subscript, or a default/alternate op acting on the joined value).
+export function isMultiwordAt(node: TSNodeLike): boolean {
+  if (node.type !== NT.EXPANSION) return false
+  const p = parseBraces(node)
+  if (p.subscript !== '@' || p.lengthOp) return false
+  if (p.indirectOp || p.op === null) return true
+  return MULTIWORD_AT_OPS.has(p.op)
+}
+
+// Resolve a multi-word "${a[@]...}" splat to its word list. Only call
+// when isMultiwordAt is true; the caller word-splits (or stitches
+// prefix/suffix onto) the words, matching bash's quoted-splat rule.
+export async function expandArrayAt(
+  node: TSNodeLike,
+  session: Session,
+  callStack: CallStack | null,
+  expandChild: ExpandChild,
+): Promise<string[]> {
+  const p = parseBraces(node)
+  const env = session.env
+  let arr = session.arrays[p.varName ?? '']
+  if (arr === undefined) {
+    const scalar = env[p.varName ?? ''] ?? ''
+    arr = scalar !== '' ? [scalar] : []
+  }
+  if (p.indirectOp) return arr.map((_, i) => String(i))
+  if (p.op === null) return [...arr]
+  const op = p.op
+  const groups: string[] = []
+  for (let gi = 0; gi < p.groups.length; gi++) {
+    const patternMode = gi === 0 && PATTERN_OPS.has(op)
+    groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
+  }
+  if (op === ':') return sliceArray(arr, groups, env)
+  return arr.map((el) => valueOp(op, el, groups, env))
+}
+
 // bash evaluates subscripts in arithmetic context (${a[i+1]});
 // unresolvable expressions index element 0, mirroring bash's
 // unset-name-is-zero arithmetic rule.
@@ -461,6 +512,20 @@ export async function expandBraces(
   expandChild: ExpandChild,
 ): Promise<string> {
   const p = parseBraces(node)
+  if (node.children.some((c) => c.type === '}' && c.isMissing)) {
+    // tree-sitter-bash cannot parse a $-spelled substring offset
+    // (${v:$o}, ${v:$o:n}): it truncates the expansion with a
+    // zero-width `}` and reparses the tail as stray siblings. bash
+    // accepts the form, so emitting the mis-parse would corrupt the
+    // value silently; fail loudly instead. Spell it ${v:o} or
+    // ${v:$((o))}.
+    throw new ExitSignal(
+      2,
+      new TextEncoder().encode(`bash: \${${p.varName ?? ''}}: bad substitution\n`),
+      null,
+      2,
+    )
+  }
   const env = session.env
   const arrays = session.arrays
 

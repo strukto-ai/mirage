@@ -15,7 +15,7 @@
 import { resolvePath } from '../../../utils/path.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
-import { CycleError } from '../../../utils/path.ts'
+import { CycleError, norm } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -241,10 +241,23 @@ export function handleReadlink(
   if (operands.length === 0) {
     return errorResult('readlink', 'readlink: missing operand\n')
   }
+  const canonical = flags.has('f') || flags.has('e') || flags.has('m')
   const lines: string[] = []
   let exitCode = 0
   for (const op of operands) {
-    const target = namespace.readlink(abs(op, session.cwd))
+    const absOp = abs(op, session.cwd)
+    if (canonical) {
+      // -f/-e/-m canonicalize: resolve every symlink (including a trailing
+      // one) and normalize the path, GNU realpath-style.
+      try {
+        lines.push(norm(namespace.follow(absOp)))
+      } catch (err) {
+        if (!(err instanceof CycleError)) throw err
+        exitCode = 1
+      }
+      continue
+    }
+    const target = namespace.readlink(absOp)
     if (target === null) {
       exitCode = 1
       continue

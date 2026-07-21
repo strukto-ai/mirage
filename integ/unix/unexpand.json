@@ -20,6 +20,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -53,6 +54,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -63,6 +65,37 @@
       "expect": {
         "exit": 0,
         "stdout": "    hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unexpand_t_spaces",
+      "seq": 601260,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qun && printf '        x\\n' > /data/qun/un.txt && unexpand -t 4 /data/qun/un.txt | cat -A",
+      "expect": {
+        "exit": 0,
+        "stdout": "^I^Ix$\n",
         "stderr": ""
       }
     }

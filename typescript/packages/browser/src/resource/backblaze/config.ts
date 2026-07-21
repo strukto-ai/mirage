@@ -21,6 +21,7 @@ export interface BackblazeConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface BackblazeConfigRedacted extends Omit<BackblazeConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const BackblazeConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedBackblazeEndpoint(config: BackblazeConfig): string | undefined {
@@ -56,6 +58,7 @@ export function backblazeToS3Config(config: BackblazeConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

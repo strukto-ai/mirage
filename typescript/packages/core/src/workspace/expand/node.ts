@@ -14,7 +14,7 @@
 
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import type { IOResult } from '../../io/types.ts'
+import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Session } from '../session/session.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -24,7 +24,10 @@ import { ArithError } from '../../shell/errors.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
 
-export type ExecuteFn = (command: string, opts: { sessionId: string }) => Promise<IOResult>
+export type ExecuteFn = (
+  command: string,
+  opts: { sessionId: string; stdin?: ByteSource | null },
+) => Promise<IOResult>
 
 export function unescapeUnquoted(text: string): string {
   if (!text.includes('\\')) return text

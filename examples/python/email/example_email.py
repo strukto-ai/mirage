@@ -76,7 +76,10 @@ async def main() -> None:
     if not msg_files:
         print("No messages")
         return
-    first_msg = f"/email/{folder}/{first_date}/{msg_files[0]}"
+    first_filename = msg_files[0]
+    first_msg = f"/email/{folder}/{first_date}/{first_filename}"
+    uid = first_filename.rsplit("__",
+                                maxsplit=1)[-1].removesuffix(".email.json")
 
     print(f"=== cat {first_msg} ===")
     result = await ws.execute(f"cat {first_msg}")
@@ -123,9 +126,14 @@ async def main() -> None:
     print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
           f"gid={meta_st.gid} mtime={meta_st.modified}")
 
-    print("=== email-triage --unseen --max 5 ===")
+    print("=== himalaya envelope list --unseen --max 5 ===")
     result = await ws.execute(
-        f'email-triage --folder {folder} --unseen --max 5')
+        f'himalaya envelope list --folder "{folder}" --unseen --max 5')
+    print((await result.stdout_str())[:500])
+
+    print(f"=== himalaya message read --uid {uid} ===")
+    result = await ws.execute(
+        f'himalaya message read --folder "{folder}" --uid {uid}')
     print((await result.stdout_str())[:500])
 
     print(f"\n=== tree -L 2 /email/{folder}/ ===")

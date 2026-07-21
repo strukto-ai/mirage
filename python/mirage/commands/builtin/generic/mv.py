@@ -180,7 +180,7 @@ async def mv(
             writes[src.mount_path] = b""
             writes[target.mount_path] = b""
         if v:
-            lines.append(f"'{src.virtual}' -> '{target.virtual}'")
+            lines.append(f"renamed '{src.virtual}' -> '{target.virtual}'")
     output = "\n".join(lines) + "\n" if lines else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return output.encode() if output else None, IOResult(

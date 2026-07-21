@@ -21,6 +21,7 @@ export interface QingStorConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface QingStorConfigRedacted extends Omit<QingStorConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const QingStorConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedQingStorEndpoint(config: QingStorConfig): string | undefined {
@@ -56,6 +58,7 @@ export function qingStorToS3Config(config: QingStorConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

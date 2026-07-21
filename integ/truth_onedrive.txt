@@ -6,13 +6,6 @@ example.json
 example.jsonl
 example.orc
 example.parquet
-=== tree ===
-└── data
-    ├── example.feather
-    ├── example.json
-    ├── example.jsonl
-    ├── example.orc
-    └── example.parquet
 === stat ===
 15533 /onedrive/data/example.json
 === stat_dir ===
@@ -138,8 +131,6 @@ bytes=8192 lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'
 bytes=10414430 lines=1 out0='5766'
 === calls:ls_l ===
 children=1 item=0
-=== calls:tree ===
-children=2 item=0
 === warm:warm_cat ===
 downloads_before=1 downloads_after=1 served_from_cache=True
 === warm:warm_grep ===

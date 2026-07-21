@@ -67,7 +67,7 @@ export async function splitGeneric(
 ): Promise<CommandFnResult> {
   if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
   const prefixPath = paths.length >= 2 && paths[1] !== undefined ? paths[1].mountPath : 'x'
-  const linesFlag = typeof opts.flags.l === 'string' ? opts.flags.l : null
+  const linesFlag = typeof opts.flags.args_l === 'string' ? opts.flags.args_l : null
   const bFlag = typeof opts.flags.b === 'string' ? opts.flags.b : null
   const nFlag = typeof opts.flags.n === 'string' ? opts.flags.n : null
   const aFlag = typeof opts.flags.a === 'string' ? opts.flags.a : null

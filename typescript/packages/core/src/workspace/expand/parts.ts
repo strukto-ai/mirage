@@ -23,7 +23,7 @@ import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
 import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES, SPLIT_TYPES } from './constants.ts'
 import { expandNode, unescapeUnquoted, type ExecuteFn } from './node.ts'
-import { PARAM_OPS, type TSNodeLike } from './variable.ts'
+import { expandArrayAt, isMultiwordAt, type TSNodeLike } from './variable.ts'
 
 // Brace-expand a concatenation or brace_expression into words. Literal
 // word tokens form the brace template; every other child (expansions,
@@ -69,34 +69,9 @@ function getPositionalArgs(session: Session, callStack: CallStack | null): strin
   return session.positionalArgs
 }
 
-function arrayAtName(child: TSNodeLike): string | null {
-  if (child.type !== NT.EXPANSION) return null
-  // Any operator (length #, slice :, strip/replace, indirection !)
-  // disqualifies the plain-splat fast path; expandBraces owns those.
-  for (const c of child.children) {
-    if (PARAM_OPS.has(c.type) && c.isNamed !== true) return null
-  }
-  let subscript: TSNodeLike | null = null
-  for (const c of child.namedChildren) {
-    if (c.type === 'subscript') {
-      subscript = c
-      break
-    }
-  }
-  if (subscript === null) return null
-  let varName: string | null = null
-  let idxText = ''
-  for (const sc of subscript.namedChildren) {
-    if (sc.type === NT.VARIABLE_NAME) varName = sc.text
-    else idxText = sc.text
-  }
-  if (varName !== null && idxText === '@') return varName
-  return null
-}
-
 function stringHasArrayAt(node: TSNodeLike): boolean {
   for (const c of node.children) {
-    if (arrayAtName(c) !== null) return true
+    if (isMultiwordAt(c)) return true
   }
   return false
 }
@@ -107,21 +82,20 @@ async function expandStringWithArray(
   executeFn: ExecuteFn,
   callStack: CallStack | null,
 ): Promise<string[]> {
-  const arrays = session.arrays
+  const expandChild = (n: TSNodeLike) => expandNode(n, session, executeFn, callStack)
   const fragments: string[] = ['']
   for (const child of node.children) {
     if (child.type === NT.DQUOTE) continue
-    const arrName = arrayAtName(child)
-    if (arrName !== null) {
-      const arr = arrays[arrName]
-      if (arr === undefined || arr.length === 0) continue
+    if (isMultiwordAt(child)) {
+      const words = await expandArrayAt(child, session, callStack, expandChild)
+      if (words.length === 0) continue
       const last = fragments.length - 1
-      if (arr.length === 1) {
-        fragments[last] = (fragments[last] ?? '') + (arr[0] ?? '')
+      if (words.length === 1) {
+        fragments[last] = (fragments[last] ?? '') + (words[0] ?? '')
       } else {
-        fragments[last] = (fragments[last] ?? '') + (arr[0] ?? '')
-        for (let i = 1; i < arr.length - 1; i++) fragments.push(arr[i] ?? '')
-        fragments.push(arr[arr.length - 1] ?? '')
+        fragments[last] = (fragments[last] ?? '') + (words[0] ?? '')
+        for (let i = 1; i < words.length - 1; i++) fragments.push(words[i] ?? '')
+        fragments.push(words[words.length - 1] ?? '')
       }
       continue
     }

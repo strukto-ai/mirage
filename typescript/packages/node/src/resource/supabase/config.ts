@@ -23,6 +23,7 @@ export interface SupabaseConfig {
   projectRef?: string
   endpoint?: string
   sessionToken?: string
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -34,6 +35,7 @@ export interface SupabaseConfigRedacted {
   accessKeyId: string
   secretAccessKey: string
   sessionToken?: string
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -45,6 +47,7 @@ const SupabaseConfigSchema = z.object({
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),
   sessionToken: secretStr().optional(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
 })
 
@@ -65,6 +68,7 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
     secretAccessKey: config.secretAccessKey,
     forcePathStyle: true,
     ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
   }
 }
@@ -84,6 +88,7 @@ export function normalizeSupabaseConfig(input: Record<string, unknown>): Supabas
       secret_access_key: 'secretAccessKey',
       session_token: 'sessionToken',
       endpoint_url: 'endpoint',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {

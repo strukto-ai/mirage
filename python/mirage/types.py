@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, TypeAlias
 
@@ -413,6 +414,132 @@ class StateKey(StrEnum):
     FINGERPRINTS = "fingerprints"
     LIVE_ONLY_MOUNTS = "live_only_mounts"
     NODES = "nodes"
+
+
+class FileChangeKind(StrEnum):
+    """Kind of an externally observed file change.
+
+    Shared vocabulary of the watch feature; the producer
+    (``Workspace.watch``) and the watch machinery both depend on it, so
+    it lives here as a leaf type next to ``PathSpec`` / ``FileStat``.
+
+    Values:
+        CREATE: path appeared since the previous checkpoint.
+        UPDATE: path content or metadata changed.
+        DELETE: path disappeared.
+        MOVE: path was renamed; reserved for sources that can express
+            it, poll-diff sources emit DELETE + CREATE instead.
+        UNKNOWN: precision was lost (queue overflow, checkpoint reset);
+            everything under the path must be re-inventoried.
+    """
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+    MOVE = "move"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class FileMetadata:
+    """Post-change metadata a change source can attach to an event.
+
+    Every field is optional: producers fill only what their signal
+    honestly carries (a listing walk knows fingerprint/size/modified; a
+    webhook payload usually knows none). Growth point for future
+    backend facts (owner, inode) as sources that can supply them
+    appear.
+
+    Args:
+        fingerprint (str | None): Content fingerprint after the change
+            (same concept as ``FileStat.fingerprint``: ETag/rev, or the
+            mtime|size composite), so consumers can skip no-op
+            reprocessing.
+        size (int | None): Content size in bytes after the change.
+        modified (str | None): Last-modified stamp after the change.
+    """
+    fingerprint: str | None = None
+    size: int | None = None
+    modified: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileEvent:
+    """One externally observed change to a mounted file path.
+
+    Level-triggered: an event tells the consumer *what is dirty*, not
+    every intermediate edit. Consumers read current content through the
+    workspace after receiving an event; the watch runtime guarantees
+    caches were invalidated before delivery, so that read is fresh.
+
+    Args:
+        kind (FileChangeKind): What happened to the path.
+        path (PathSpec): Virtual path of the changed entry.
+        timestamp (datetime): UTC time the change was observed (not
+            when it happened; webhook lag and poll cadence sit in
+            between).
+        previous_path (PathSpec | None): Prior path for MOVE events.
+        metadata (FileMetadata | None): Post-change metadata when the
+            source carries it; None otherwise.
+    """
+    kind: FileChangeKind
+    path: PathSpec
+    timestamp: datetime
+    previous_path: PathSpec | None = None
+    metadata: FileMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Delta:
+    """Result of one checkpointed delta pull.
+
+    Args:
+        changes (tuple[FileEvent, ...]): Changes since the given
+            checkpoint; empty on a baseline pull.
+        checkpoint (str | None): Opaque serialized state to pass to the
+            next pull.
+    """
+    changes: tuple[FileEvent, ...]
+    checkpoint: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class WalkEntry:
+    """One entry produced by a backend walk feeding change detection.
+
+    Args:
+        virtual (str): Workspace-virtual path of the entry.
+        is_dir (bool): Whether the entry is a directory.
+        fingerprint (str | None): Content fingerprint (see
+            ``mirage.utils.fingerprint.stat_fingerprint``). None means
+            only create/delete are detectable for this entry.
+        size (int | None): Content size in bytes, when the listing
+            carries it.
+        modified (str | None): Last-modified stamp, when the listing
+            carries it.
+    """
+    virtual: str
+    is_dir: bool
+    fingerprint: str | None
+    size: int | None = None
+    modified: str | None = None
+
+
+WalkFn: TypeAlias = Callable[[PathSpec], AsyncIterator[WalkEntry]]
+
+
+class OverflowPolicy(StrEnum):
+    """Behaviour of a watch queue when pending changes exceed its cap.
+
+    Values:
+        COLLAPSE: drop all pending entries and replace them with one
+            UNKNOWN change at the watch root (default; level-triggered
+            "rescan" semantics).
+        DROP_OLDEST: evict the oldest pending entry.
+        ERROR: surface QueueOverflowError to the consumer iterator.
+    """
+    COLLAPSE = "collapse"
+    DROP_OLDEST = "drop_oldest"
+    ERROR = "error"
 
 
 class DriftPolicy(StrEnum):

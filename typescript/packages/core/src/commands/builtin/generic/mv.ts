@@ -167,7 +167,7 @@ export async function mvGeneric(
       writes[src.mountPath] = new Uint8Array()
       writes[target.mountPath] = new Uint8Array()
     }
-    if (verbose) lines.push(`'${src.virtual}' -> '${target.virtual}'`)
+    if (verbose) lines.push(`renamed '${src.virtual}' -> '${target.virtual}'`)
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
   const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null

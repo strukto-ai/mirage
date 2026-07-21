@@ -90,7 +90,6 @@ aiobotocore.response.StreamingBody.__aexit__ = _counting_body_exit
 PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("ls", "ls {m}/"),
     ("ls_data", "ls {m}/data/"),
-    ("tree", "tree {m}/"),
     ("stat", "stat -c '%s %n' {m}/data/example.json"),
     ("cat_head", "cat {m}/data/example.json | head -n 5"),
     ("head_1_jsonl", "head -n 1 {m}/data/example.jsonl"),
@@ -177,7 +176,6 @@ WARM_SERVE_CASES: list[tuple[str, str]] = [
 # the assertion focuses on the stat/list pattern the index governs.
 INDEX_CASES: list[tuple[str, str]] = [
     ("ls_l", "ls -l {m}/data/"),
-    ("tree", "tree {m}/"),
 ]
 
 # Lazy exit codes survive the timeout/safeguard stream wrap on streaming

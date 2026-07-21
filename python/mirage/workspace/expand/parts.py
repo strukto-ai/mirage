@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import tree_sitter
@@ -28,7 +29,7 @@ from mirage.workspace.expand.classify import classify_word
 from mirage.workspace.expand.constants import (BRACE_LITERAL_TYPES,
                                                BRACE_WORD_TYPES, SPLIT_TYPES)
 from mirage.workspace.expand.node import _unescape_unquoted, expand_node
-from mirage.workspace.expand.variable import _PARAM_OPS
+from mirage.workspace.expand.variable import expand_array_at, is_multiword_at
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
@@ -41,33 +42,8 @@ def _has_at_expansion(node: tree_sitter.Node) -> bool:
     return False
 
 
-def _array_at_name(child: tree_sitter.Node) -> str | None:
-    if child.type != NT.EXPANSION:
-        return None
-    # Any operator (length #, slice :, strip/replace, indirection !)
-    # disqualifies the plain-splat fast path; expand_braces owns those.
-    has_op = any(c.type in _PARAM_OPS and not c.is_named
-                 for c in child.children)
-    if has_op:
-        return None
-    sub = next((c for c in child.named_children if c.type == "subscript"),
-               None)
-    if sub is None:
-        return None
-    idx_text = ""
-    var_name = None
-    for sc in sub.named_children:
-        if sc.type == NT.VARIABLE_NAME:
-            var_name = get_text(sc)
-        else:
-            idx_text = get_text(sc)
-    if var_name and idx_text == "@":
-        return var_name
-    return None
-
-
 def _string_has_array_at(node: tree_sitter.Node) -> bool:
-    return any(_array_at_name(c) is not None for c in node.children)
+    return any(is_multiword_at(c) for c in node.children)
 
 
 async def _expand_string_with_array(
@@ -76,28 +52,33 @@ async def _expand_string_with_array(
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
 ) -> list[str]:
-    """Expand a string containing one or more "${a[@]}" into multiple words.
+    """Expand a string containing one or more "${a[@]...}" into words.
 
     Bash semantics: "prefix${a[@]}suffix" with a=(1 2 3) produces three
-    words: "prefix1", "2", "3suffix". Single-element arrays merge prefix
-    and suffix into one word; empty arrays still produce prefix+suffix.
+    words: "prefix1", "2", "3suffix". Slices ("${a[@]:o:l}"), per-element
+    ops ("${a[@]/x/y}"), and indices ("${!a[@]}") word-split the same
+    way. A single-element result merges prefix and suffix into one word;
+    an empty result still yields prefix+suffix.
     """
-    arrays = getattr(session, "arrays", {})
+    expand_child = partial(expand_node,
+                           session=session,
+                           execute_fn=execute_fn,
+                           call_stack=call_stack)
     fragments: list[str] = [""]
     for child in node.children:
         if child.type == NT.DQUOTE:
             continue
-        arr_name = _array_at_name(child)
-        if arr_name is not None:
-            arr = arrays.get(arr_name)
-            if not arr:
+        if is_multiword_at(child):
+            words = await expand_array_at(child, session, call_stack,
+                                          expand_child)
+            if not words:
                 continue
-            if len(arr) == 1:
-                fragments[-1] = fragments[-1] + arr[0]
+            if len(words) == 1:
+                fragments[-1] = fragments[-1] + words[0]
             else:
-                fragments[-1] = fragments[-1] + arr[0]
-                fragments.extend(arr[1:-1])
-                fragments.append(arr[-1])
+                fragments[-1] = fragments[-1] + words[0]
+                fragments.extend(words[1:-1])
+                fragments.append(words[-1])
             continue
         text = await expand_node(child, session, execute_fn, call_stack)
         fragments[-1] = fragments[-1] + text

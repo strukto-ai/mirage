@@ -20,6 +20,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -53,6 +54,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -86,6 +88,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -96,6 +99,130 @@
       "expect": {
         "exit": 0,
         "stdout": "apple\ncherry\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_default",
+      "seq": 601180,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qjoin && printf '1 a\\n2 b\\n3 c\\n' > /data/qjoin/j1 && printf '1 x\\n3 z\\n' > /data/qjoin/j2 && join /data/qjoin/j1 /data/qjoin/j2",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 a x\n3 c z\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_o_e_format",
+      "seq": 601360,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pjo && printf '1 a\\n2 b\\n' > /data/pjo/a && printf '1 x\\n3 z\\n' > /data/pjo/b && join -a 1 -e NA -o '0,1.2,2.2' /data/pjo/a /data/pjo/b",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 a x\n2 b NA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_v1_unpairable",
+      "seq": 601361,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pjv && printf '1 a\\n2 b\\n3 c\\n' > /data/pjv/c && printf '1 x\\n3 z\\n' > /data/pjv/d && join -v 1 /data/pjv/c /data/pjv/d",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_keys_1_2",
+      "seq": 601362,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pjk && printf 'a 1\\nb 2\\n' > /data/pjk/g && printf '1 x\\n2 y\\n' > /data/pjk/h && join -1 2 -2 1 /data/pjk/g /data/pjk/h",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 a x\n2 b y\n",
         "stderr": ""
       }
     }

@@ -17,10 +17,10 @@ import builtins
 import logging
 import sys
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from functools import partial
 from types import TracebackType
-from typing import Any, Literal, TypeAlias, cast, overload
+from typing import Any, Literal, Protocol, TypeAlias, cast, overload
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
@@ -52,10 +52,11 @@ from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
                                   runtime_bindings_for, whole_line_runtime)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
-from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, StateKey, parse_mount_mode)
+from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
+                          MountMode, PathSpec, StateKey, parse_mount_mode)
 from mirage.utils.errors import format_fs_error
 from mirage.utils.ids import new_session_id, new_workspace_id
+from mirage.watch.watcher import Watcher
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
@@ -114,6 +115,25 @@ def _reject_config_script(kind: str, value: object) -> None:
             f"{kind} must be a callable taking the RouteContext; config "
             f"scripts reference a .py file (script:/route: in the "
             f"workspace yaml)")
+
+
+class WatchDelegate(Protocol):
+    """What ``Workspace.watch`` needs from an attached watch runtime.
+
+    ``mirage.watch.Watcher`` satisfies this structurally; the workspace
+    never imports the watch package, keeping the dependency one-way
+    (watch -> workspace), the same pattern as ``ReadReconciler``.
+    """
+
+    def watch(self,
+              path: PathSpec | Sequence[PathSpec]) -> AsyncIterator[FileEvent]:
+        ...
+
+    async def notify(self, change: FileEvent) -> None:
+        ...
+
+    async def close(self) -> None:
+        ...
 
 
 class Workspace:
@@ -210,6 +230,7 @@ class Workspace:
         self._dispatcher = Dispatcher(self._namespace, self._cache,
                                       consistency)
         self._registry.set_reconciler(self._dispatcher.reconciler)
+        self._watch_runtime: WatchDelegate | None = None
 
         fuse_targets: list[tuple[str, bool | str]] = []
         for prefix, value in resources.items():
@@ -638,10 +659,103 @@ class Workspace:
             task.cancel()
         self._cache._drain_tasks.clear()
 
+    @property
+    def registry(self) -> MountRegistry:
+        """Mount table; consumed by the watch runtime."""
+        return self._registry
+
+    def attach_watch_runtime(self, runtime: WatchDelegate) -> None:
+        """Install the watch runtime that ``watch`` delegates to.
+
+        Only needed to customize the runtime, e.g.
+        ``ws.attach_watch_runtime(Watcher(ws.registry,
+        queue_factory=...))``; the default runtime attaches lazily on
+        first ``watch``/``notify``, so calling this is never required.
+        The workspace closes the runtime on ``close``.
+
+        Args:
+            runtime (WatchDelegate): Runtime to attach.
+
+        Raises:
+            RuntimeError: A runtime is already attached (call
+                ``detach_watch_runtime`` first to replace it).
+        """
+        if self._watch_runtime is not None:
+            raise RuntimeError(
+                "watch runtime already attached: detach_watch_runtime "
+                "first, or attach before the first watch()/notify()")
+        self._watch_runtime = runtime
+
+    async def detach_watch_runtime(self) -> None:
+        """Close and drop the attached watch runtime, if any.
+
+        Closing the runtime closes every subscriber queue, so active
+        ``watch`` iterators finish cleanly. Afterwards the workspace is
+        back to its idle state: the next ``watch``/``notify`` lazily
+        attaches a fresh default runtime, or ``attach_watch_runtime``
+        installs a custom one. A no-op when nothing is attached.
+        """
+        if self._watch_runtime is not None:
+            await self._watch_runtime.close()
+            self._watch_runtime = None
+
+    def _watch_delegate(self) -> WatchDelegate:
+        """The attached watch runtime, lazily creating the default one.
+
+        Nothing is constructed until something is actually watched or
+        notified; an idle workspace carries no watch state at all.
+        """
+        if self._watch_runtime is None:
+            self._watch_runtime = Watcher(self._registry)
+        return self._watch_runtime
+
+    def watch(
+        self, path: str | PathSpec | Sequence[str | PathSpec]
+    ) -> AsyncIterator[FileEvent]:
+        """Stream externally observed changes under ``path``.
+
+        The root's shape defines the depth, GNU shell glob style: a
+        literal directory is its whole subtree, ``/dir/*`` is the
+        entries at that level (shallow), ``/dir/*/`` is everything
+        inside child directories. The default watch runtime attaches
+        lazily on first use; call ``attach_watch_runtime`` beforehand
+        only to customize it. The str tolerance lives only
+        here, at the consumer boundary (mirroring ``Ops``); the
+        runtime below is PathSpec-only.
+
+        Args:
+            path (str | PathSpec | Sequence[str | PathSpec]): Watch
+                root or roots; plain strings are coerced. Each root
+                may carry glob segments (``/nc/data/*.txt``).
+        """
+        raw = [path] if isinstance(path, (str, PathSpec)) else list(path)
+        specs = [
+            p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
+            for p in raw
+        ]
+        return self._watch_delegate().watch(specs)
+
+    async def notify(self, change: FileEvent) -> None:
+        """Inject one externally observed change into the watch
+        runtime: invalidate its caches, then deliver it to every
+        matching ``watch``.
+
+        The single entry point for consumer-side detection (webhook
+        receiver or poll loop over ``resource.delta_hook()``); see
+        ``mirage.watch.Watcher.notify``.
+
+        Args:
+            change (FileEvent): Observed change.
+        """
+        await self._watch_delegate().notify(change)
+
     async def close(self) -> None:
         async with self._close_lock:
             if self._async_closed:
                 return
+            if self._watch_runtime is not None:
+                await self._watch_runtime.close()
+                self._watch_runtime = None
             drain_tasks = list(self._cache._drain_tasks.values())
             for line_runtime in self._runtime_entries:
                 await line_runtime.close()

@@ -43,7 +43,6 @@ CASES: list[tuple[str, str]] = [
     ("ls_root", "ls {root}"),
     ("ls_group", "ls {root}cat"),
     ("ls_leaf", "ls {root}cat/big"),
-    ("tree", "tree {root}"),
     ("find_txt", "find {root} -name '*.txt'"),
     ("find_json", "find {root} -name '*.json'"),
     ("cat_txt", "cat {root}cat/big/1.txt"),

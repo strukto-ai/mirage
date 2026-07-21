@@ -21,6 +21,7 @@ export interface WasabiConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface WasabiConfigRedacted extends Omit<WasabiConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const WasabiConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedWasabiEndpoint(config: WasabiConfig): string {
@@ -52,6 +54,7 @@ export function wasabiToS3Config(config: WasabiConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

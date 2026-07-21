@@ -5,7 +5,9 @@
       "seq": 204000,
       "targets": [
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "mkdir -p /data/office && printf slide-bytes | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
       "expect": {
@@ -19,7 +21,9 @@
       "seq": 204001,
       "targets": [
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "wc -c /data/office/deck.pptx",
       "expect": {
@@ -33,7 +37,9 @@
       "seq": 204002,
       "targets": [
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "cat /data/office/deck.pptx && cat /data/office/deck.pptx",
       "expect": {
@@ -47,7 +53,9 @@
       "seq": 204003,
       "targets": [
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "cp /data/office/deck.pptx /data/office/copy.pptx && wc -c /data/office/copy.pptx",
       "expect": {
@@ -61,7 +69,9 @@
       "seq": 204004,
       "targets": [
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "cp /data/office/deck.pptx /data2/deck.pptx && wc -c /data2/deck.pptx && rm /data2/deck.pptx",
       "expect": {
@@ -75,7 +85,9 @@
       "seq": 204005,
       "targets": [
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "printf v2 | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
       "expect": {
@@ -91,7 +103,9 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "printf plain | tee /data/office/notes.txt > /dev/null && cat /data/office/notes.txt",
       "expect": {
@@ -107,7 +121,9 @@
         "hf",
         "hf-prefix",
         "onedrive",
-        "sharepoint"
+        "sharepoint",
+
+        "sharepoint-prefix"
       ],
       "command": "rm -r /data/office && echo cleaned",
       "expect": {

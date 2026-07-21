@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "unzip_l_list",
+      "seq": 601330,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punz && printf hi > /data/punz/a.txt && zip -q -j /data/punz/az.zip /data/punz/a.txt && unzip -l /data/punz/az.zip | grep -c 'a.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_o_d_extract",
+      "seq": 601331,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punz && printf extract > /data/punz/e.txt && zip -q -j /data/punz/ez.zip /data/punz/e.txt && mkdir -p /data/punz/out && unzip -o -q -d /data/punz/out /data/punz/ez.zip && cat /data/punz/out/e.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "extract",
+        "stderr": ""
+      }
+    }
+  ]
+}

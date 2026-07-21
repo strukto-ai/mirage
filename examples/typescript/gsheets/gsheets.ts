@@ -15,10 +15,19 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GSheetsResource, MountMode, Workspace, type FileStat, type GSheetsConfig } from '@struktoai/mirage-node'
+import {
+  GSheetsResource,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type GSheetsConfig,
+} from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
+dotenv.config({
+  path: resolve(__HERE, '../../../.env.development'),
+  override: true,
+})
 
 function buildConfig(): GSheetsConfig {
   const clientId = process.env.GOOGLE_CLIENT_ID ?? ''
@@ -30,12 +39,19 @@ function buildConfig(): GSheetsConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
-async function run(ws: Workspace, cmd: string): Promise<{ out: string; err: string; code: number }> {
+async function run(
+  ws: Workspace,
+  cmd: string,
+): Promise<{ out: string; err: string; code: number }> {
   try {
     const r = await ws.execute(cmd)
     return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
   } catch (err) {
-    return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
+    return {
+      out: '',
+      err: err instanceof Error ? err.message : String(err),
+      code: 1,
+    }
   }
 }
 
@@ -67,7 +83,6 @@ async function main(): Promise<void> {
     console.log('=== stat ===')
     console.log(`  ${stat.out.trim()}`)
 
-
     // chmod/chown/touch never hit the Sheets API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
@@ -95,7 +110,7 @@ async function main(): Promise<void> {
     console.log('\n=== gws sheets spreadsheets create ===')
     const create = await run(
       ws,
-      "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"MIRAGE TS Example Sheet\"}}'",
+      'gws sheets spreadsheets create --json \'{"properties": {"title": "MIRAGE TS Example Sheet"}}\'',
     )
     if (create.code !== 0) {
       printOut('create FAILED', create.out, create.err)
@@ -110,16 +125,13 @@ async function main(): Promise<void> {
     console.log(`Created: ${sheetId}`)
 
     console.log('\n=== gws sheets +write (A1:B2) ===')
-    const writeParams = JSON.stringify({ spreadsheetId: sheetId, range: 'A1:B2' })
-    const writeBody = JSON.stringify({
-      values: [
-        ['hello', 'world'],
-        ['foo', 'bar'],
-      ],
-    })
+    const writeValues = JSON.stringify([
+      ['hello', 'world'],
+      ['foo', 'bar'],
+    ])
     const write = await run(
       ws,
-      `gws sheets +write --params '${writeParams}' --json '${writeBody}'`,
+      `gws sheets +write --spreadsheet ${sheetId} --range "A1:B2" --json-values '${writeValues}'`,
     )
     console.log(`Written: ${write.out.slice(0, 80)}`)
 

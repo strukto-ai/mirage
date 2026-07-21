@@ -21,6 +21,8 @@ export interface TencentConfig {
   secretAccessKey: string
   region: string
   endpoint?: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -30,6 +32,8 @@ export interface TencentConfigRedacted {
   secretAccessKey: string
   region: string
   endpoint: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -39,6 +43,8 @@ const TencentConfigSchema = z.object({
   secretAccessKey: secretStr(),
   region: z.string(),
   endpoint: z.string(),
+  forcePathStyle: z.boolean().optional(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
 })
 
@@ -55,6 +61,8 @@ export function tencentToS3Config(config: TencentConfig): S3Config {
     endpoint: resolvedTencentEndpoint(config),
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
+    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
   }
 }
@@ -72,6 +80,8 @@ export function normalizeTencentConfig(input: Record<string, unknown>): TencentC
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
       endpoint_url: 'endpoint',
+      path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {

@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_xxd_route",
+      "seq": 602040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abcd' > /data2/xm_x.bin && xxd /data2/xm_x.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 6162 6364                                abcd\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

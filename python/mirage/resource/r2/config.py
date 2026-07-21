@@ -27,6 +27,8 @@ class R2Config(BaseModel):
     secret_access_key: SecretStr | None = None
     aws_profile: str | None = None
     region: str = "auto"
+    path_style: bool = False
+    key_prefix: str | None = None
     timeout: int = 30
     proxy: str | None = None
 
@@ -45,6 +47,8 @@ class R2Config(BaseModel):
             aws_access_key_id=self.access_key_id,
             aws_secret_access_key=self.secret_access_key,
             aws_profile=self.aws_profile,
+            path_style=self.path_style,
+            key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
         )

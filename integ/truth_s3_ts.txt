@@ -3,10 +3,6 @@ data
 === s3:ls_data ===
 example.json
 example.jsonl
-=== s3:tree ===
-└── data
-    ├── example.json
-    └── example.jsonl
 === s3:stat ===
 15533 /s3/data/example.json
 === s3:cat_head ===
@@ -103,10 +99,6 @@ data
 === gcs:ls_data ===
 example.json
 example.jsonl
-=== gcs:tree ===
-└── data
-    ├── example.json
-    └── example.jsonl
 === gcs:stat ===
 15533 /gcs/data/example.json
 === gcs:cat_head ===
@@ -203,10 +195,6 @@ data
 === minio:ls_data ===
 example.json
 example.jsonl
-=== minio:tree ===
-└── data
-    ├── example.json
-    └── example.jsonl
 === minio:stat ===
 15533 /minio/data/example.json
 === minio:cat_head ===
@@ -303,10 +291,6 @@ data
 === seaweedfs:ls_data ===
 example.json
 example.jsonl
-=== seaweedfs:tree ===
-└── data
-    ├── example.json
-    └── example.jsonl
 === seaweedfs:stat ===
 15533 /seaweedfs/data/example.json
 === seaweedfs:cat_head ===
@@ -488,20 +472,12 @@ bytes=0 served_from_cache=true
 bytes=0 served_from_cache=true
 === s3:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== s3:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === gcs:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== gcs:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === minio:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== minio:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === seaweedfs:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
-=== seaweedfs:calls:tree ===
-ListObjectsV2=2 HeadObject=0
 === s3:exit:grep_match ===
 exit=0
 === s3:exit:grep_no_match ===

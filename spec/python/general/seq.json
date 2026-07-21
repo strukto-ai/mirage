@@ -24,7 +24,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
-      "value_kind": "text",
+      "value_kind": "none",
       "value_optional": false
     },
     {

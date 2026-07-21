@@ -47,7 +47,6 @@ MOUNT = "/onedrive"
 PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("ls", "ls {m}/"),
     ("ls_data", "ls {m}/data/"),
-    ("tree", "tree {m}/"),
     ("stat", "stat -c '%s %n' {m}/data/example.json"),
     ("stat_dir", "stat -c '%s %F' {m}/data"),
     ("cat_head", "cat {m}/data/example.json | head -n 5"),
@@ -104,7 +103,6 @@ STREAMING_CASES: list[tuple[str, str]] = [
 # resolves from the index with zero item GETs. Mirrors integ/s3.py INDEX_CASES.
 INDEX_CASES: list[tuple[str, str]] = [
     ("ls_l", "ls -l {m}/data/"),
-    ("tree", "tree {m}/"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [

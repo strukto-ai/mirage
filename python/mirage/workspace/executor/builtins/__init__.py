@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.workspace.executor.builtins.command import handle_command_builtin
 from mirage.workspace.executor.builtins.condition import handle_test
 from mirage.workspace.executor.builtins.dirs import handle_cd
 from mirage.workspace.executor.builtins.history import handle_history
@@ -51,6 +52,7 @@ __all__ = [
     '_to_scope',
     'handle_bash',
     'handle_cd',
+    'handle_command_builtin',
     'handle_echo',
     'handle_eval',
     'handle_exit',

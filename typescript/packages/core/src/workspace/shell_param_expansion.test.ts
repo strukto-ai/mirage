@@ -89,6 +89,11 @@ const ERROR_CASES: [string, number, string, string][] = [
     'after code=0\n',
     'bash: UNSET: parameter null or not set\n',
   ],
+  // tree-sitter-bash cannot parse a $-spelled offset (${v:$o}); mirage
+  // fails loudly (exit 2) rather than emit the mis-parse. Spell it
+  // ${v:o} or ${v:$((o))}, both supported.
+  ['v=hello; o=2; echo "X${v:$o}Y"', 2, '', 'bash: ${v}: bad substitution\n'],
+  ['v=hello; o=2; echo "${v:$o:2}"', 2, '', 'bash: ${v}: bad substitution\n'],
 ]
 
 describe('parameter expansion error operators', () => {

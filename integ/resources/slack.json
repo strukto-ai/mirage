@@ -1,511 +1,511 @@
 {
- "cases": [
-  {
-   "id": "slack_ls_root",
-   "seq": 520000,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "channels\ndms\nusers\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_ls_channels",
-   "seq": 520001,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/channels/",
-   "expect": {
-    "exit": 0,
-    "stdout": "design-partners__C10\ndesign__C4\neng-agents__C8\nengineering__C3\ngeneral__C1\nleadership__C5\nproduct-runtime__C7\nrandom__C2\nsales__C9\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_ls_dms",
-   "seq": 520002,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/dms/",
-   "expect": {
-    "exit": 0,
-    "stdout": "U12__D4\nU15__D6\nU6__D3\nbob__D5\ndave__D7\njack__D8\nkara__D10\nmarcus__D1\nmia__D2\nnoah__D9\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_ls_users",
-   "seq": 520003,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/users/",
-   "expect": {
-    "exit": 0,
-    "stdout": "alice__U1.json\nbob__U2.json\ncarol__U3.json\ndave__U4.json\nhenry__U11.json\njack__U13.json\nkara__U14.json\nmarcus__U8.json\nmia__U16.json\nnoah__U17.json\npriya__U7.json\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_ls_channel_window",
-   "seq": 520004,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/channels/sales__C9/",
-   "expect": {
-    "exit": 0,
-    "stdout": "2025-11-03\n2025-11-04\n2025-11-05\n2025-11-06\n2025-11-07\n2025-11-08\n2025-11-09\n2025-11-10\n2025-11-11\n2025-11-12\n2025-11-13\n2025-11-14\n2025-11-15\n2025-11-16\n2025-11-17\n2025-11-18\n2025-11-19\n2025-11-20\n2025-11-21\n2025-11-22\n2025-11-23\n2025-11-24\n2025-11-25\n2025-11-26\n2025-11-27\n2025-11-28\n2025-11-29\n2025-11-30\n2025-12-01\n2025-12-02\n2025-12-03\n2025-12-04\n2025-12-05\n2025-12-06\n2025-12-07\n2025-12-08\n2025-12-09\n2025-12-10\n2025-12-11\n2025-12-12\n2025-12-13\n2025-12-14\n2025-12-15\n2025-12-16\n2025-12-17\n2025-12-18\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_ls_day",
-   "seq": 520005,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/channels/eng-agents__C8/2026-02-06/",
-   "expect": {
-    "exit": 0,
-    "stdout": "chat.jsonl\nfiles\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_ls_files",
-   "seq": 520006,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/channels/eng-agents__C8/2026-02-06/files/",
-   "expect": {
-    "exit": 0,
-    "stdout": "model_eval_results__F7.csv\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_tree_day",
-   "seq": 520007,
-   "targets": [
-    "slack"
-   ],
-   "command": "tree /slack/channels/eng-agents__C8/2026-02-06/",
-   "expect": {
-    "exit": 0,
-    "stdout": "\u251c\u2500\u2500 chat.jsonl\n\u2514\u2500\u2500 files\n    \u2514\u2500\u2500 model_eval_results__F7.csv\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_ls_archived_missing",
-   "seq": 520008,
-   "targets": [
-    "slack"
-   ],
-   "command": "ls /slack/channels/product-reply__C6/",
-   "expect": {
-    "exit": 1,
-    "stdout": "",
-    "stderr": "ls: cannot access '/slack/channels/product-reply__C6': No such file or directory\n"
-   }
-  },
-  {
-   "id": "slack_find_subtree",
-   "seq": 520009,
-   "targets": [
-    "slack"
-   ],
-   "command": "find /slack/channels/eng-agents__C8/2026-02-06/",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/channels/eng-agents__C8/2026-02-06\n/slack/channels/eng-agents__C8/2026-02-06/chat.jsonl\n/slack/channels/eng-agents__C8/2026-02-06/files\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_find_pptx",
-   "seq": 520010,
-   "targets": [
-    "slack"
-   ],
-   "command": "find /slack/channels/ -name '*.pptx'",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/channels/general__C1/2026-01-09/files/all_hands_2026-01__F12.pptx\n/slack/channels/product-runtime__C7/2026-03-11/files/runtime_launch__F13.pptx\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_find_pdf",
-   "seq": 520011,
-   "targets": [
-    "slack"
-   ],
-   "command": "find /slack/channels/ -name '*.pdf'",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_find_csv",
-   "seq": 520012,
-   "targets": [
-    "slack"
-   ],
-   "command": "find /slack/channels/ -name '*.csv'",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/channels/design-partners__C10/2026-02-12/files/design_partner_pipeline__F8.csv\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_cat_thread",
-   "seq": 520013,
-   "targets": [
-    "slack"
-   ],
-   "command": "cat /slack/channels/engineering__C3/2026-01-19/chat.jsonl",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"type\":\"message\",\"user\":\"U8\",\"text\":\"PR #326 is up for the cache refactor, can someone review\",\"ts\":\"1768819073.000650\"}\n{\"type\":\"message\",\"user\":\"U4\",\"text\":\"approved, ship it\",\"ts\":\"1768819111.000651\",\"thread_ts\":\"1768819073.000650\"}\n{\"type\":\"message\",\"user\":\"U5\",\"text\":\"deploy #2064 succeeded on preview\",\"ts\":\"1768827382.000652\"}\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_cat_reactions",
-   "seq": 520014,
-   "targets": [
-    "slack"
-   ],
-   "command": "cat /slack/channels/engineering__C3/2026-01-11/chat.jsonl",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"type\":\"message\",\"user\":\"U14\",\"text\":\"the queue timeout needs a longer budget\",\"ts\":\"1768128917.000584\",\"reactions\":[{\"name\":\"pray\",\"users\":[\"U15\",\"U4\"],\"count\":2}]}\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_cat_layoff",
-   "seq": 520015,
-   "targets": [
-    "slack"
-   ],
-   "command": "cat /slack/channels/general__C1/2025-12-19/chat.jsonl",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"type\":\"message\",\"user\":\"U1\",\"text\":\"kudos to Frank for the customer save\",\"ts\":\"1766149911.000425\"}\n{\"type\":\"message\",\"user\":\"U7\",\"text\":\"today we made the hard decision to reduce our team, thank you erin and frank for everything\",\"ts\":\"1766165985.000426\",\"reactions\":[{\"name\":\"pray\",\"users\":[\"U8\",\"U1\",\"U2\"],\"count\":3},{\"name\":\"heart\",\"users\":[\"U3\"],\"count\":1}]}\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_cat_dm",
-   "seq": 520016,
-   "targets": [
-    "slack"
-   ],
-   "command": "cat /slack/dms/dave__D7/2026-03-10/chat.jsonl",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"type\":\"message\",\"user\":\"U4\",\"text\":\"nice work today, genuinely\",\"ts\":\"1773157281.001128\"}\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_cat_csv_file",
-   "seq": 520017,
-   "targets": [
-    "slack"
-   ],
-   "command": "cat /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv",
-   "expect": {
-    "exit": 0,
-    "stdout": "suite,cases,passed,accuracy\nrouting,500,472,0.944\ntool_selection,500,461,0.922\npermission,300,300,1.000\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_cat_user",
-   "seq": 520018,
-   "targets": [
-    "slack"
-   ],
-   "command": "cat /slack/users/priya__U7.json",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_head_chat",
-   "seq": 520019,
-   "targets": [
-    "slack"
-   ],
-   "command": "head -1 /slack/channels/engineering__C3/2026-01-19/chat.jsonl",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"type\":\"message\",\"user\":\"U8\",\"text\":\"PR #326 is up for the cache refactor, can someone review\",\"ts\":\"1768819073.000650\"}\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_wc_chat",
-   "seq": 520020,
-   "targets": [
-    "slack"
-   ],
-   "command": "wc -l /slack/channels/general__C1/2026-02-20/chat.jsonl",
-   "expect": {
-    "exit": 0,
-    "stdout": "1 /slack/channels/general__C1/2026-02-20/chat.jsonl\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_grep_pushdown",
-   "seq": 520021,
-   "targets": [
-    "slack"
-   ],
-   "command": "grep -r Quokka /slack/channels/product-runtime__C7/",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[henry] quokka milestone 27 is basically done\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[marcus] kicking off project Quokka, the runtime for building agents over company tools\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:[file] Runtime Spec\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_rg_pushdown",
-   "seq": 520022,
-   "targets": [
-    "slack"
-   ],
-   "command": "rg Quokka /slack/channels/product-runtime__C7/",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[henry] quokka milestone 27 is basically done\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[marcus] kicking off project Quokka, the runtime for building agents over company tools\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:[file] Runtime Spec\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_grep_searchonly",
-   "seq": 520023,
-   "targets": [
-    "slack"
-   ],
-   "command": "grep -r 'reply moat' /slack/channels/leadership__C5/",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/channels/leadership__C5/2025-11-24/chat.jsonl:[priya] the reply moat is basically gone after this week's model launches\n/slack/channels/leadership__C5/2026-01-06/files/pivot_memo__F4.md:[file] Pivot Memo\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_grep_empty",
-   "seq": 520024,
-   "targets": [
-    "slack"
-   ],
-   "command": "grep -r zzzznomatch /slack/channels/general__C1/",
-   "expect": {
-    "exit": 1,
-    "stdout": "",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_grep_users",
-   "seq": 520025,
-   "targets": [
-    "slack"
-   ],
-   "command": "grep -rn Anderson /slack/users/",
-   "expect": {
-    "exit": 0,
-    "stdout": "/slack/users/alice__U1.json:1:{\"id\":\"U1\",\"name\":\"alice\",\"real_name\":\"Alice Anderson\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Alice Anderson\",\"display_name\":\"alice\",\"email\":\"alice@kestrel.example.com\"}}\n",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_get_users",
-   "seq": 520026,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-get-users --query priya /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "[{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}]",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_get_users_deleted",
-   "seq": 520027,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-get-users --query iris /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "[]",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_get_user_profile",
-   "seq": 520028,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-get-user-profile --user_id U8 /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"id\":\"U8\",\"name\":\"marcus\",\"real_name\":\"Marcus Webb\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Marcus Webb\",\"display_name\":\"marcus\",\"email\":\"marcus@kestrel.example.com\"}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_search",
-   "seq": 520029,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-search --query Quokka /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"query\":\"Quokka\",\"messages\":{\"total\":4,\"pagination\":{\"total_count\":4,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":4,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767691369.000536\",\"text\":\"Quokka is the right bet, let us commit to the runtime\",\"channel\":{\"id\":\"D1\",\"name\":\"marcus\"}},{\"type\":\"message\",\"user\":\"U11\",\"username\":\"henry\",\"ts\":\"1767863370.000558\",\"text\":\"quokka milestone 27 is basically done\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1767878065.000559\",\"text\":\"kicking off project Quokka, the runtime for building agents over company tools\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767888155.000553\",\"text\":\"we are pivoting to Kestrel Runtime, an agent infrastructure play, codename Quokka\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_search_from",
-   "seq": 520030,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-search --query 'from:@priya Quokka' /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"query\":\"from:@priya Quokka\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767691369.000536\",\"text\":\"Quokka is the right bet, let us commit to the runtime\",\"channel\":{\"id\":\"D1\",\"name\":\"marcus\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767888155.000553\",\"text\":\"we are pivoting to Kestrel Runtime, an agent infrastructure play, codename Quokka\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_search_after",
-   "seq": 520031,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-search --query 'bridge after:2026-02-01' /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"query\":\"bridge after:2026-02-01\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U16\",\"username\":\"mia\",\"ts\":\"1771406854.000951\",\"text\":\"runway model spreadsheet after the bridge attached\",\"channel\":{\"id\":\"C5\",\"name\":\"leadership\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1771581029.000961\",\"text\":\"we closed a bridge round to fund the runtime pivot\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_search_in",
-   "seq": 520032,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-search --query 'in:#product-runtime beta' /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"query\":\"in:#product-runtime beta\",\"messages\":{\"total\":5,\"pagination\":{\"total_count\":5,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":5,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1767980755.000568\",\"text\":\"prepping the private beta build for Henry\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1768303399.000606\",\"text\":\"prepping the private beta build for Jack\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U17\",\"username\":\"noah\",\"ts\":\"1768843921.000654\",\"text\":\"prepping the private beta build for Jack\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U11\",\"username\":\"henry\",\"ts\":\"1772818308.001093\",\"text\":\"prepping the private beta build for Priya\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1773247518.001140\",\"text\":\"Kestrel Runtime private beta is live for design partners\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}}]}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_search_archived",
-   "seq": 520033,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-search --query 'tone control' /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"query\":\"tone control\",\"messages\":{\"total\":4,\"pagination\":{\"total_count\":4,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":4,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1762259676.000007\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U3\",\"username\":\"carol\",\"ts\":\"1763024882.000099\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1763401150.000148\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1765475491.000347\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}}]}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_search_searchonly",
-   "seq": 520034,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-search --query 'reply moat' /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"query\":\"reply moat\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1763985579.000212\",\"text\":\"the reply moat is basically gone after this week's model launches\",\"channel\":{\"id\":\"C5\",\"name\":\"leadership\"}},{\"type\":\"message\",\"user\":\"U12\",\"username\":\"iris\",\"ts\":\"1764090866.000220\",\"text\":\"are we sure the reply moat still holds, customers can do this in the box now\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}}]}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_post_message",
-   "seq": 520035,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-post-message --channel_id C1 --text shipping /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000001\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"shipping\",\"ts\":\"1775000000.000001\"}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_reply_to_thread",
-   "seq": 520036,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-reply-to-thread --channel_id C1 --ts 1766165985.000426 --text acknowledged /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000002\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"acknowledged\",\"ts\":\"1775000000.000002\",\"thread_ts\":\"1766165985.000426\"}}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_add_reaction",
-   "seq": 520037,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-add-reaction --channel_id C1 --ts 1766165985.000426 --reaction eyes /slack/",
-   "expect": {
-    "exit": 0,
-    "stdout": "{\"ok\":true}",
-    "stderr": ""
-   }
-  },
-  {
-   "id": "slack_add_reaction_missing",
-   "seq": 520038,
-   "targets": [
-    "slack"
-   ],
-   "command": "slack-add-reaction --channel_id C1 --ts 9999.9999 --reaction shrug /slack/",
-   "expect": {
-    "exit": 1,
-    "stdout": "",
-    "stderr": "slack-add-reaction: Slack API error (reactions.add): message_not_found\n"
-   }
-  }
- ]
+  "cases": [
+    {
+      "id": "slack_ls_root",
+      "seq": 520000,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "channels\ndms\nusers\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_ls_channels",
+      "seq": 520001,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/channels/",
+      "expect": {
+        "exit": 0,
+        "stdout": "design-partners__C10\ndesign__C4\neng-agents__C8\nengineering__C3\ngeneral__C1\nleadership__C5\nproduct-runtime__C7\nrandom__C2\nsales__C9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_ls_dms",
+      "seq": 520002,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/dms/",
+      "expect": {
+        "exit": 0,
+        "stdout": "U12__D4\nU15__D6\nU6__D3\nbob__D5\ndave__D7\njack__D8\nkara__D10\nmarcus__D1\nmia__D2\nnoah__D9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_ls_users",
+      "seq": 520003,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/users/",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice__U1.json\nbob__U2.json\ncarol__U3.json\ndave__U4.json\nhenry__U11.json\njack__U13.json\nkara__U14.json\nmarcus__U8.json\nmia__U16.json\nnoah__U17.json\npriya__U7.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_ls_channel_window",
+      "seq": 520004,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/channels/sales__C9/",
+      "expect": {
+        "exit": 0,
+        "stdout": "2025-11-03\n2025-11-04\n2025-11-05\n2025-11-06\n2025-11-07\n2025-11-08\n2025-11-09\n2025-11-10\n2025-11-11\n2025-11-12\n2025-11-13\n2025-11-14\n2025-11-15\n2025-11-16\n2025-11-17\n2025-11-18\n2025-11-19\n2025-11-20\n2025-11-21\n2025-11-22\n2025-11-23\n2025-11-24\n2025-11-25\n2025-11-26\n2025-11-27\n2025-11-28\n2025-11-29\n2025-11-30\n2025-12-01\n2025-12-02\n2025-12-03\n2025-12-04\n2025-12-05\n2025-12-06\n2025-12-07\n2025-12-08\n2025-12-09\n2025-12-10\n2025-12-11\n2025-12-12\n2025-12-13\n2025-12-14\n2025-12-15\n2025-12-16\n2025-12-17\n2025-12-18\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_ls_day",
+      "seq": 520005,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/channels/eng-agents__C8/2026-02-06/",
+      "expect": {
+        "exit": 0,
+        "stdout": "chat.jsonl\nfiles\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_ls_files",
+      "seq": 520006,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/channels/eng-agents__C8/2026-02-06/files/",
+      "expect": {
+        "exit": 0,
+        "stdout": "model_eval_results__F7.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_tree_day",
+      "seq": 520007,
+      "targets": [
+        "slack"
+      ],
+      "command": "tree /slack/channels/eng-agents__C8/2026-02-06/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/eng-agents__C8/2026-02-06\n|-- chat.jsonl\n`-- files\n    `-- model_eval_results__F7.csv\n\n2 directories, 2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_ls_archived_missing",
+      "seq": 520008,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/channels/product-reply__C6/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ls: cannot access '/slack/channels/product-reply__C6': No such file or directory\n"
+      }
+    },
+    {
+      "id": "slack_find_subtree",
+      "seq": 520009,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/eng-agents__C8/2026-02-06/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/eng-agents__C8/2026-02-06\n/slack/channels/eng-agents__C8/2026-02-06/chat.jsonl\n/slack/channels/eng-agents__C8/2026-02-06/files\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_find_pptx",
+      "seq": 520010,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -name '*.pptx'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/general__C1/2026-01-09/files/all_hands_2026-01__F12.pptx\n/slack/channels/product-runtime__C7/2026-03-11/files/runtime_launch__F13.pptx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_find_pdf",
+      "seq": 520011,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -name '*.pdf'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_find_csv",
+      "seq": 520012,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -name '*.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/design-partners__C10/2026-02-12/files/design_partner_pipeline__F8.csv\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_thread",
+      "seq": 520013,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/engineering__C3/2026-01-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U8\",\"text\":\"PR #326 is up for the cache refactor, can someone review\",\"ts\":\"1768819073.000650\"}\n{\"type\":\"message\",\"user\":\"U4\",\"text\":\"approved, ship it\",\"ts\":\"1768819111.000651\",\"thread_ts\":\"1768819073.000650\"}\n{\"type\":\"message\",\"user\":\"U5\",\"text\":\"deploy #2064 succeeded on preview\",\"ts\":\"1768827382.000652\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_reactions",
+      "seq": 520014,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/engineering__C3/2026-01-11/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U14\",\"text\":\"the queue timeout needs a longer budget\",\"ts\":\"1768128917.000584\",\"reactions\":[{\"name\":\"pray\",\"users\":[\"U15\",\"U4\"],\"count\":2}]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_layoff",
+      "seq": 520015,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U1\",\"text\":\"kudos to Frank for the customer save\",\"ts\":\"1766149911.000425\"}\n{\"type\":\"message\",\"user\":\"U7\",\"text\":\"today we made the hard decision to reduce our team, thank you erin and frank for everything\",\"ts\":\"1766165985.000426\",\"reactions\":[{\"name\":\"pray\",\"users\":[\"U8\",\"U1\",\"U2\"],\"count\":3},{\"name\":\"heart\",\"users\":[\"U3\"],\"count\":1}]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_dm",
+      "seq": 520016,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/dms/dave__D7/2026-03-10/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U4\",\"text\":\"nice work today, genuinely\",\"ts\":\"1773157281.001128\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_csv_file",
+      "seq": 520017,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "suite,cases,passed,accuracy\nrouting,500,472,0.944\ntool_selection,500,461,0.922\npermission,300,300,1.000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_user",
+      "seq": 520018,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/users/priya__U7.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_head_chat",
+      "seq": 520019,
+      "targets": [
+        "slack"
+      ],
+      "command": "head -1 /slack/channels/engineering__C3/2026-01-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U8\",\"text\":\"PR #326 is up for the cache refactor, can someone review\",\"ts\":\"1768819073.000650\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_wc_chat",
+      "seq": 520020,
+      "targets": [
+        "slack"
+      ],
+      "command": "wc -l /slack/channels/general__C1/2026-02-20/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 /slack/channels/general__C1/2026-02-20/chat.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_pushdown",
+      "seq": 520021,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -r Quokka /slack/channels/product-runtime__C7/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[henry] quokka milestone 27 is basically done\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[marcus] kicking off project Quokka, the runtime for building agents over company tools\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:[file] Runtime Spec\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_rg_pushdown",
+      "seq": 520022,
+      "targets": [
+        "slack"
+      ],
+      "command": "rg Quokka /slack/channels/product-runtime__C7/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[henry] quokka milestone 27 is basically done\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[marcus] kicking off project Quokka, the runtime for building agents over company tools\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:[file] Runtime Spec\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_searchonly",
+      "seq": 520023,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -r 'reply moat' /slack/channels/leadership__C5/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/leadership__C5/2025-11-24/chat.jsonl:[priya] the reply moat is basically gone after this week's model launches\n/slack/channels/leadership__C5/2026-01-06/files/pivot_memo__F4.md:[file] Pivot Memo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_empty",
+      "seq": 520024,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -r zzzznomatch /slack/channels/general__C1/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_users",
+      "seq": 520025,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rn Anderson /slack/users/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/users/alice__U1.json:1:{\"id\":\"U1\",\"name\":\"alice\",\"real_name\":\"Alice Anderson\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Alice Anderson\",\"display_name\":\"alice\",\"email\":\"alice@kestrel.example.com\"}}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_get_users",
+      "seq": 520026,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-get-users --query priya /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_get_users_deleted",
+      "seq": 520027,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-get-users --query iris /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_get_user_profile",
+      "seq": 520028,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-get-user-profile --user_id U8 /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":\"U8\",\"name\":\"marcus\",\"real_name\":\"Marcus Webb\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Marcus Webb\",\"display_name\":\"marcus\",\"email\":\"marcus@kestrel.example.com\"}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search",
+      "seq": 520029,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query Quokka /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"Quokka\",\"messages\":{\"total\":4,\"pagination\":{\"total_count\":4,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":4,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767691369.000536\",\"text\":\"Quokka is the right bet, let us commit to the runtime\",\"channel\":{\"id\":\"D1\",\"name\":\"marcus\"}},{\"type\":\"message\",\"user\":\"U11\",\"username\":\"henry\",\"ts\":\"1767863370.000558\",\"text\":\"quokka milestone 27 is basically done\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1767878065.000559\",\"text\":\"kicking off project Quokka, the runtime for building agents over company tools\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767888155.000553\",\"text\":\"we are pivoting to Kestrel Runtime, an agent infrastructure play, codename Quokka\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_from",
+      "seq": 520030,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'from:@priya Quokka' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"from:@priya Quokka\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767691369.000536\",\"text\":\"Quokka is the right bet, let us commit to the runtime\",\"channel\":{\"id\":\"D1\",\"name\":\"marcus\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767888155.000553\",\"text\":\"we are pivoting to Kestrel Runtime, an agent infrastructure play, codename Quokka\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_after",
+      "seq": 520031,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'bridge after:2026-02-01' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"bridge after:2026-02-01\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U16\",\"username\":\"mia\",\"ts\":\"1771406854.000951\",\"text\":\"runway model spreadsheet after the bridge attached\",\"channel\":{\"id\":\"C5\",\"name\":\"leadership\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1771581029.000961\",\"text\":\"we closed a bridge round to fund the runtime pivot\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_in",
+      "seq": 520032,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'in:#product-runtime beta' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"in:#product-runtime beta\",\"messages\":{\"total\":5,\"pagination\":{\"total_count\":5,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":5,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1767980755.000568\",\"text\":\"prepping the private beta build for Henry\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1768303399.000606\",\"text\":\"prepping the private beta build for Jack\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U17\",\"username\":\"noah\",\"ts\":\"1768843921.000654\",\"text\":\"prepping the private beta build for Jack\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U11\",\"username\":\"henry\",\"ts\":\"1772818308.001093\",\"text\":\"prepping the private beta build for Priya\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1773247518.001140\",\"text\":\"Kestrel Runtime private beta is live for design partners\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_archived",
+      "seq": 520033,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'tone control' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"tone control\",\"messages\":{\"total\":4,\"pagination\":{\"total_count\":4,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":4,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1762259676.000007\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U3\",\"username\":\"carol\",\"ts\":\"1763024882.000099\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1763401150.000148\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1765475491.000347\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_searchonly",
+      "seq": 520034,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'reply moat' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"reply moat\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1763985579.000212\",\"text\":\"the reply moat is basically gone after this week's model launches\",\"channel\":{\"id\":\"C5\",\"name\":\"leadership\"}},{\"type\":\"message\",\"user\":\"U12\",\"username\":\"iris\",\"ts\":\"1764090866.000220\",\"text\":\"are we sure the reply moat still holds, customers can do this in the box now\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_post_message",
+      "seq": 520035,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-post-message --channel_id C1 --text shipping /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000001\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"shipping\",\"ts\":\"1775000000.000001\"}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_reply_to_thread",
+      "seq": 520036,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-reply-to-thread --channel_id C1 --ts 1766165985.000426 --text acknowledged /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000002\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"acknowledged\",\"ts\":\"1775000000.000002\",\"thread_ts\":\"1766165985.000426\"}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_add_reaction",
+      "seq": 520037,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-add-reaction --channel_id C1 --ts 1766165985.000426 --reaction eyes /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_add_reaction_missing",
+      "seq": 520038,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-add-reaction --channel_id C1 --ts 9999.9999 --reaction shrug /slack/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "slack-add-reaction: Slack API error (reactions.add): message_not_found\n"
+      }
+    }
+  ]
 }

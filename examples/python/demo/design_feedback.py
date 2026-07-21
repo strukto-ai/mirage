@@ -86,7 +86,7 @@ async def main() -> None:
             "incident channel: read the message and any attached screenshot, "
             "find the relevant code in the Mirage GitHub repo, then file a "
             "design issue in the Strukto-ai team on Linear using "
-            "`linear-issue-create` with the feedback and code references.")
+            "`linear issue create` with the feedback and code references.")
 
     result = await Runner.run(
         agent,

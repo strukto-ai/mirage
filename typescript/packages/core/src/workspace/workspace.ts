@@ -1103,7 +1103,7 @@ export class Workspace {
 
     const dispatch: DispatchFn = this.dispatcher.dispatch
 
-    const executeFn: ExecuteFn = async (cmd) => {
+    const executeFn: ExecuteFn = async (cmd, opts) => {
       // The executor's internal evals ($(), eval, source, xargs) are
       // never a typed line: they must not record a history entry or open
       // their own recording context, so their ops flow into this line's
@@ -1113,6 +1113,10 @@ export class Workspace {
       // Nested lines never re-route: the evaluator's inner lines keep
       // the typed line's decision (runtime argument, route, or scripts).
       if (routingDecision !== null) innerOpts.routingDecision = routingDecision
+      // `command NAME` re-runs the inner line and must forward the pipe
+      // stdin so `... | command cat` filters the upstream output; the same
+      // path carries `echo hi | bash -c 'cat'` into the inner line.
+      if (opts.stdin !== undefined && opts.stdin !== null) innerOpts.stdin = opts.stdin
       const res = await this.execute(cmd, innerOpts)
       return new IOResult({
         exitCode: res.exitCode,

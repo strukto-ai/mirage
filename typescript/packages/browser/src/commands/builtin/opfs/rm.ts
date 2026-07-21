@@ -17,11 +17,16 @@ import {
   IOResult,
   ResourceName,
   command,
+  cpWalk,
+  formatRecords,
+  removalLines,
   specOf,
+  type ByteSource,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
 } from '@struktoai/mirage-core'
+import { readdir as opfsReaddir } from '../../../core/opfs/readdir.ts'
 import { rmdir as opfsRmdir } from '../../../core/opfs/rmdir.ts'
 import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import { unlink as opfsUnlink } from '../../../core/opfs/unlink.ts'
@@ -46,7 +51,9 @@ async function rmCommand(
   const recursive = opts.flags.r === true || opts.flags.R === true
   const dirFlag = opts.flags.d === true
   const force = opts.flags.f === true
+  const verbose = opts.flags.v === true
   const errors: string[] = []
+  const verboseParts: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const p of paths) {
     let isDir = false
@@ -59,23 +66,42 @@ async function rmCommand(
       errors.push(`rm: cannot remove '${p.virtual}': No such file or directory`)
       continue
     }
+    let entryLines: string[] = []
     if (isDir) {
       if (recursive) {
+        if (verbose) {
+          entryLines = removalLines(
+            await cpWalk(
+              (dir) => opfsReaddir(accessor, dir),
+              (spec) => opfsStat(accessor, spec),
+              p,
+            ),
+          )
+        }
         await opfsRmR(accessor, p)
       } else if (dirFlag) {
+        if ((await opfsReaddir(accessor, p)).length > 0) {
+          errors.push(`rm: cannot remove '${p.virtual}': Directory not empty`)
+          continue
+        }
         await opfsRmdir(accessor, p)
+        entryLines = [`removed directory '${p.virtual.replace(/\/+$/, '') || '/'}'`]
       } else {
         errors.push(`rm: cannot remove '${p.virtual}': Is a directory`)
         continue
       }
     } else {
       await opfsUnlink(accessor, p)
+      entryLines = [`removed '${p.virtual.replace(/\/+$/, '') || '/'}'`]
     }
     writes[p.mountPath] = new Uint8Array()
+    if (verbose) verboseParts.push(...entryLines)
   }
+  const output: ByteSource | null =
+    verbose && verboseParts.length > 0 ? formatRecords(verboseParts) : null
   const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : undefined
   return [
-    null,
+    output,
     new IOResult({
       writes,
       exitCode: errors.length > 0 ? 1 : 0,

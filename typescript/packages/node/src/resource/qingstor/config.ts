@@ -21,6 +21,8 @@ export interface QingStorConfig {
   secretAccessKey: string
   region: string
   endpoint?: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -30,6 +32,8 @@ export interface QingStorConfigRedacted {
   secretAccessKey: string
   region: string
   endpoint: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -39,6 +43,8 @@ const QingStorConfigSchema = z.object({
   secretAccessKey: secretStr(),
   region: z.string(),
   endpoint: z.string(),
+  forcePathStyle: z.boolean().optional(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
 })
 
@@ -55,6 +61,8 @@ export function qingStorToS3Config(config: QingStorConfig): S3Config {
     endpoint: resolvedQingStorEndpoint(config),
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
+    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
   }
 }
@@ -72,6 +80,8 @@ export function normalizeQingStorConfig(input: Record<string, unknown>): QingSto
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
       endpoint_url: 'endpoint',
+      path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {

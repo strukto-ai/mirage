@@ -1,5 +1,9 @@
+import pytest
+
+import mirage.core.msgraph.drive_ops as drive_ops
+from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive_ops import (DriveLoc, _move_body,
-                                           _parent_reference)
+                                           _parent_reference, iter_tree)
 
 
 def _url(path: str, action: str = "") -> str:
@@ -16,6 +20,12 @@ def _loc(drive: str, path: str) -> DriveLoc:
                     virt=f"/{path}",
                     url=_url,
                     ref=_ref)
+
+
+async def _list_one_file(config: MsGraphConfig,
+                         url: str,
+                         session=None) -> list[dict]:
+    return [{"name": "a.txt", "size": 3, "file": {}}]
 
 
 def test_child_extends_path_and_virt():
@@ -48,3 +58,22 @@ def test_move_body_same_parent_is_rename_only():
 def test_move_body_new_parent_includes_reference():
     body = _move_body(_loc("d1", "a.txt"), _loc("d1", "sub/b.txt"))
     assert body["parentReference"] == {"path": _ref("sub")}
+
+
+@pytest.mark.asyncio
+async def test_iter_tree_emits_virtual_not_backend_path(monkeypatch):
+    monkeypatch.setattr(drive_ops, "graph_list", _list_one_file)
+    loc = DriveLoc(drive="d1",
+                   path="team/reports",
+                   virt="reports",
+                   url=_url,
+                   ref=_ref)
+    entries = [
+        entry
+        async for entry in iter_tree(MsGraphConfig(access_token="token"), loc)
+    ]
+    assert entries == [("reports/a.txt", {
+        "name": "a.txt",
+        "size": 3,
+        "file": {}
+    }, False)]

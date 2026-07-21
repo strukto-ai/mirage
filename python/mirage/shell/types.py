@@ -212,6 +212,7 @@ class ShellBuiltin(StrEnum):
     # commands handled by executor
     XARGS = "xargs"
     TIMEOUT = "timeout"
+    COMMAND = "command"
     BREAK = "break"
     CONTINUE = "continue"
     RETURN = "return"

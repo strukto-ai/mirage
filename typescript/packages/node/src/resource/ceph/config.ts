@@ -22,6 +22,7 @@ export interface CephConfig {
   secretAccessKey: string
   region?: string
   forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -32,6 +33,7 @@ export interface CephConfigRedacted {
   secretAccessKey: string
   region: string
   forcePathStyle: boolean
+  keyPrefix?: string
   timeoutMs?: number
 }
 
@@ -42,6 +44,7 @@ const CephConfigSchema = z.object({
   secretAccessKey: secretStr(),
   region: z.string(),
   forcePathStyle: z.boolean(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
 })
 
@@ -53,6 +56,7 @@ export function cephToS3Config(config: CephConfig): S3Config {
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
     forcePathStyle: config.forcePathStyle ?? true,
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
   }
 }
@@ -72,6 +76,7 @@ export function normalizeCephConfig(input: Record<string, unknown>): CephConfig 
       secret_access_key: 'secretAccessKey',
       endpoint_url: 'endpoint',
       path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {
