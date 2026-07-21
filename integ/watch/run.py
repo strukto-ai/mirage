@@ -87,23 +87,28 @@ async def _await_event(agen: object, want_path: str) -> object:
     return await asyncio.wait_for(_next_matching(), timeout=EVENT_TIMEOUT)
 
 
-def _check_verify(verify: dict, out: str) -> tuple[bool, str]:
-    """Assert a post-event read.
+async def _run_check(ws: Workspace, check: dict) -> tuple[bool, str]:
+    """Run one post-event read and assert its output.
 
     Args:
-        verify (dict): {"cmd", "contains"?|"absent"?}.
-        out (str): Stripped command stdout.
+        ws (Workspace): Watched workspace.
+        check (dict): {"cmd", "contains"?|"absent"?}.
     """
-    if "contains" in verify:
-        return verify["contains"] in out, f"contains {verify['contains']!r}"
-    if "absent" in verify:
-        return verify["absent"] not in out, f"absent {verify['absent']!r}"
-    return True, "no-op"
+    result = await ws.execute(check["cmd"])
+    out = (await result.stdout_str()).strip()
+    if "contains" in check:
+        ok = check["contains"] in out
+        return ok, f"{check['cmd']!r} contains {check['contains']!r}"
+    ok = check["absent"] not in out
+    return ok, f"{check['cmd']!r} absent {check['absent']!r}"
 
 
 async def _run_case(ws: Workspace, op: object, watcher: object, agen: object,
                     case: dict) -> tuple[bool, str]:
-    """Run one mutate -> event -> verify case.
+    """Run one mutate -> event -> checks case.
+
+    The event fires only after cache invalidation, so the checks (cat,
+    head, ls, grep) prove the reads are fresh, not stale.
 
     Args:
         ws (Workspace): Watched workspace.
@@ -121,12 +126,11 @@ async def _run_case(ws: Workspace, op: object, watcher: object, agen: object,
         return False, f"no event for {want['path']} within {EVENT_TIMEOUT}s"
     if change.kind.value != want["kind"]:
         return False, f"kind {change.kind.value} != {want['kind']}"
-    result = await ws.execute(case["verify"]["cmd"])
-    out = (await result.stdout_str()).strip()
-    ok, detail = _check_verify(case["verify"], out)
-    if not ok:
-        return False, f"verify failed ({detail}) got {out!r}"
-    return True, f"{want['kind']} + verify {detail}"
+    for check in case["checks"]:
+        ok, detail = await _run_check(ws, check)
+        if not ok:
+            return False, f"check failed: {detail}"
+    return True, f"{want['kind']} + {len(case['checks'])} checks"
 
 
 async def _run_file(spec: dict) -> list[tuple[str, bool, str]]:

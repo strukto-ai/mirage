@@ -16,66 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
 from mirage.types import Delta, PathSpec, ResourceChange
-
-
-class QueueOverflowError(Exception):
-    """Raised to a watch consumer when its queue overflowed under
-    ``OverflowPolicy.ERROR``.
-
-    The queue is cleared when this is raised; the consumer should
-    re-inventory the watch root (``find``) before resuming.
-    """
-
-
-class QueueClosed(Exception):
-    """Terminal signal from ``WatchQueue.pop`` after ``close``.
-
-    The watch iterator translates it into normal iterator exhaustion;
-    consumers never see it.
-    """
-
-
-class WatchQueue(Protocol):
-    """Delivery queue between the poller and one watch consumer.
-
-    Implementations own coalescing and overflow policy. The default
-    ``RAMWatchQueue`` merges changes per path (level-triggered, latest
-    state wins) and collapses to one UNKNOWN change on overflow; a
-    journal-style implementation that keeps every event is equally
-    valid. ``push`` may perform I/O but must never wait on consumer
-    progress: the poller's checkpoint has to keep advancing regardless
-    of consumer speed.
-    """
-
-    async def push(self, change: ResourceChange) -> None:
-        """Enqueue a change; never blocks on consumer progress.
-
-        Args:
-            change (ResourceChange): Change to deliver.
-        """
-        ...
-
-    async def pop(self) -> ResourceChange:
-        """Wait until a change is pending and return it.
-
-        Raises:
-            QueueOverflowError: The queue overflowed under
-                ``OverflowPolicy.ERROR`` since the last pop.
-        """
-        ...
-
-    async def pending(self) -> int | None:
-        """Number of changes waiting, or None when only approximate
-        counts are available (remote queues)."""
-        ...
-
-    async def clear(self) -> None:
-        """Drop all pending changes."""
-        ...
-
-    async def close(self) -> None:
-        """Release queue resources; pending changes are dropped."""
-        ...
+from mirage.watch.queue.base import WatchQueue
 
 
 class DeltaHook(Protocol):

@@ -18,8 +18,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 from mirage.types import ChangeKind, Delta, PathSpec, ResourceChange
-
-DIR_DETECTOR = "dir"
+from mirage.watch.constants import DIR_DETECTOR
 
 
 @dataclass(frozen=True, slots=True)

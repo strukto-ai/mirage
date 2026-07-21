@@ -12,28 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.types import ChangeKind, Delta, ResourceChange
-from mirage.watch.base import DeltaHook, SupportsChanges, WatchRuntime
-from mirage.watch.poller import ListingDeltaHook, WalkEntry
-from mirage.watch.queue import (OverflowPolicy, QueueClosed, QueueFactory,
-                                QueueOverflowError, RAMWatchQueue, WatchQueue)
-from mirage.watch.watcher import Watcher, enable_watch
+from mirage.watch.queue.base import (OverflowPolicy, QueueClosed, QueueFactory,
+                                     QueueOverflowError, WatchQueue)
+from mirage.watch.queue.ram import RAMWatchQueue
 
 __all__ = [
-    "ChangeKind",
-    "Delta",
-    "DeltaHook",
-    "ListingDeltaHook",
     "OverflowPolicy",
     "QueueClosed",
     "QueueFactory",
     "QueueOverflowError",
     "RAMWatchQueue",
-    "ResourceChange",
-    "SupportsChanges",
-    "WalkEntry",
     "WatchQueue",
-    "WatchRuntime",
-    "Watcher",
-    "enable_watch",
 ]

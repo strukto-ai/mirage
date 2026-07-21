@@ -4,7 +4,8 @@ from dataclasses import dataclass
 import pytest
 
 from mirage.types import ChangeKind, Delta, PathSpec, ResourceChange
-from mirage.watch.watcher import Watcher, _Subscriber
+from mirage.watch.source import Source, Subscriber
+from mirage.watch.watcher import Watcher
 from mirage.workspace.mount.registry import MountCommandUnsupported
 
 
@@ -151,23 +152,22 @@ async def test_unsupported_resource_raises():
 
 def test_matches_recursive_scope():
     w = _watcher(ScriptedHook([]))
-    sub = _Subscriber(queue=None, root_virtual="/nc", recursive=True)
+    sub = Subscriber(queue=None, root_virtual="/nc", recursive=True)
     assert w._matches(sub, _change(ChangeKind.CREATE, "/nc/sub/deep.txt"))
     assert not w._matches(sub, _change(ChangeKind.CREATE, "/other/x.txt"))
 
 
 def test_matches_nonrecursive_scope():
     w = _watcher(ScriptedHook([]))
-    sub = _Subscriber(queue=None, root_virtual="/nc", recursive=False)
+    sub = Subscriber(queue=None, root_virtual="/nc", recursive=False)
     assert w._matches(sub, _change(ChangeKind.CREATE, "/nc/top.txt"))
     assert not w._matches(sub, _change(ChangeKind.CREATE, "/nc/sub/deep.txt"))
 
 
 def test_nudge_wakes_matching_source():
-    from mirage.watch.watcher import _Source
     w = _watcher(ScriptedHook([]))
     root = PathSpec.from_str_path("/nc")
-    source = _Source(entry=None, root=root, hook=ScriptedHook([]))
+    source = Source(entry=None, root=root, hook=ScriptedHook([]))
     w._sources[("/nc/", "/nc")] = source
     assert not source.wake.is_set()
     w.nudge(PathSpec.from_str_path("/nc/data/file.txt"))
@@ -175,10 +175,9 @@ def test_nudge_wakes_matching_source():
 
 
 def test_nudge_ignores_unrelated_source():
-    from mirage.watch.watcher import _Source
     w = _watcher(ScriptedHook([]))
     root = PathSpec.from_str_path("/nc")
-    source = _Source(entry=None, root=root, hook=ScriptedHook([]))
+    source = Source(entry=None, root=root, hook=ScriptedHook([]))
     w._sources[("/nc/", "/nc")] = source
     w.nudge(PathSpec.from_str_path("/other/file.txt"))
     assert not source.wake.is_set()

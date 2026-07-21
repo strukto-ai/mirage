@@ -1,8 +1,8 @@
 import pytest
 
-from mirage.types import ChangeKind, OverflowPolicy, PathSpec, ResourceChange
-from mirage.watch.base import QueueOverflowError
-from mirage.watch.store import RAMWatchQueue
+from mirage.types import ChangeKind, PathSpec, ResourceChange
+from mirage.watch.queue import (OverflowPolicy, QueueOverflowError,
+                                RAMWatchQueue)
 
 
 def _change(kind: ChangeKind, virtual: str) -> ResourceChange:

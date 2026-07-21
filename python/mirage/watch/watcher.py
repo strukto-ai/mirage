@@ -14,14 +14,15 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
 from typing import Protocol
 
 from mirage.types import ChangeKind, PathSpec, ResourceChange
-from mirage.watch.base import (DeltaHook, QueueClosed, SupportsChanges,
-                               WatchQueue, WatchRuntime)
-from mirage.watch.store import RAMWatchQueue
+from mirage.watch.base import SupportsChanges, WatchRuntime
+from mirage.watch.constants import DEFAULT_POLL_INTERVAL
+from mirage.watch.queue.base import QueueClosed, QueueFactory, WatchQueue
+from mirage.watch.queue.ram import RAMWatchQueue
+from mirage.watch.source import Source, Subscriber
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import (MountCommandUnsupported,
                                              MountRegistry)
@@ -46,57 +47,6 @@ class WatchableWorkspace(Protocol):
         ...
 
 
-QueueFactory = Callable[[PathSpec], WatchQueue]
-
-DEFAULT_POLL_INTERVAL = 30.0
-
-
-def default_queue(root: PathSpec) -> WatchQueue:
-    """Default queue factory: an in-memory coalescing queue.
-
-    Args:
-        root (PathSpec): Watch root passed by the watcher.
-    """
-    return RAMWatchQueue(root)
-
-
-@dataclass(slots=True)
-class _Subscriber:
-    """One active watch iterator: its queue and match scope.
-
-    Args:
-        queue (WatchQueue): Delivery queue owned by this subscriber.
-        root_virtual (str): Watch root the subscriber asked for.
-        recursive (bool): Whether descendants beyond direct children
-            match.
-    """
-    queue: WatchQueue
-    root_virtual: str
-    recursive: bool
-
-
-@dataclass(slots=True)
-class _Source:
-    """One poll loop over a (mount, root) pair, shared by subscribers.
-
-    Args:
-        entry (MountEntry): Mount owning the watched subtree.
-        root (PathSpec): Watch root (mount-virtual).
-        hook (DeltaHook): The resource's delta hook.
-        subscribers (list[_Subscriber]): Active consumers.
-        wake (asyncio.Event): Set by ``nudge`` to pull immediately.
-        checkpoint (str | None): Opaque state of the last pull.
-        task (asyncio.Task | None): The running poll loop.
-    """
-    entry: MountEntry
-    root: PathSpec
-    hook: DeltaHook
-    subscribers: list[_Subscriber] = field(default_factory=list)
-    wake: asyncio.Event = field(default_factory=asyncio.Event)
-    checkpoint: str | None = None
-    task: "asyncio.Task[None] | None" = None
-
-
 class Watcher:
     """Watch runtime: per-(mount, root) pollers feeding consumer queues.
 
@@ -108,7 +58,7 @@ class Watcher:
     def __init__(self,
                  registry: MountRegistry,
                  poll_interval: float = DEFAULT_POLL_INTERVAL,
-                 queue_factory: QueueFactory = default_queue) -> None:
+                 queue_factory: QueueFactory = RAMWatchQueue) -> None:
         """Args:
             registry (MountRegistry): Mount table of the workspace.
             poll_interval (float): Seconds between delta pulls.
@@ -118,7 +68,7 @@ class Watcher:
         self._registry = registry
         self._poll_interval = poll_interval
         self._queue_factory = queue_factory
-        self._sources: dict[tuple[str, str], _Source] = {}
+        self._sources: dict[tuple[str, str], Source] = {}
         self._closed = False
 
     def _resolve_root(self, path: PathSpec) -> tuple[MountEntry, PathSpec]:
@@ -142,11 +92,11 @@ class Watcher:
         root = PathSpec.from_str_path(norm, resource_path=resource_path)
         return entry, root
 
-    def _matches(self, sub: _Subscriber, change: ResourceChange) -> bool:
+    def _matches(self, sub: Subscriber, change: ResourceChange) -> bool:
         """Whether a change falls inside a subscriber's scope.
 
         Args:
-            sub (_Subscriber): Subscriber scope.
+            sub (Subscriber): Subscriber scope.
             change (ResourceChange): Candidate change.
         """
         root = sub.root_virtual.rstrip("/")
@@ -159,12 +109,12 @@ class Watcher:
             return True
         return "/" not in virtual[len(root) + 1:]
 
-    async def _dispatch(self, source: _Source, changes: tuple[ResourceChange,
-                                                              ...]) -> None:
+    async def _dispatch(self, source: Source, changes: tuple[ResourceChange,
+                                                             ...]) -> None:
         """Invalidate caches for ``changes``, then deliver them.
 
         Args:
-            source (_Source): Source that pulled the changes.
+            source (Source): Source that pulled the changes.
             changes (tuple[ResourceChange, ...]): Changes to deliver.
         """
         manager = source.entry.cache_manager
@@ -179,11 +129,11 @@ class Watcher:
                 if self._matches(sub, change):
                     await sub.queue.push(change)
 
-    async def _run_source(self, source: _Source) -> None:
+    async def _run_source(self, source: Source) -> None:
         """Poll loop: pull, invalidate, deliver, wait.
 
         Args:
-            source (_Source): Source to drive.
+            source (Source): Source to drive.
         """
         while True:
             try:
@@ -207,7 +157,7 @@ class Watcher:
                 # Timeout is the poll cadence, not an error.
                 logger.debug("watch poll tick for %s", source.root.virtual)
 
-    def _get_source(self, entry: MountEntry, root: PathSpec) -> _Source:
+    def _get_source(self, entry: MountEntry, root: PathSpec) -> Source:
         """Return the shared source for (mount, root), starting its
         poll loop on first use.
 
@@ -220,9 +170,7 @@ class Watcher:
         if source is None:
             resource = entry.resource
             assert isinstance(resource, SupportsChanges)
-            source = _Source(entry=entry,
-                             root=root,
-                             hook=resource.delta_hook())
+            source = Source(entry=entry, root=root, hook=resource.delta_hook())
             source.task = asyncio.create_task(self._run_source(source))
             self._sources[key] = source
         return source
@@ -251,9 +199,9 @@ class Watcher:
             raise RuntimeError("watcher is closed")
         entry, root = self._resolve_root(path)
         source = self._get_source(entry, root)
-        sub = _Subscriber(queue=queue or self._queue_factory(root),
-                          root_virtual=root.virtual,
-                          recursive=recursive)
+        sub = Subscriber(queue=queue or self._queue_factory(root),
+                         root_virtual=root.virtual,
+                         recursive=recursive)
         source.subscribers.append(sub)
         try:
             while True:
@@ -310,14 +258,14 @@ class Watcher:
 def enable_watch(workspace: WatchableWorkspace,
                  *,
                  poll_interval: float = DEFAULT_POLL_INTERVAL,
-                 queue_factory: QueueFactory = default_queue) -> Watcher:
+                 queue_factory: QueueFactory = RAMWatchQueue) -> Watcher:
     """Attach a watch runtime to ``workspace`` and return it.
 
     Starts nothing: the first ``watch()`` touching a mount lazily
     starts that (mount, root) poller, and the last exit stops it.
 
     Args:
-        workspace (Workspace): Workspace to attach to.
+        workspace (WatchableWorkspace): Workspace to attach to.
         poll_interval (float): Seconds between delta pulls.
         queue_factory (QueueFactory): Builds delivery queues for
             watches that do not supply their own.

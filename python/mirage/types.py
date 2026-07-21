@@ -418,6 +418,10 @@ class StateKey(StrEnum):
 class ChangeKind(StrEnum):
     """Kind of an externally observed resource change.
 
+    Shared vocabulary of the watch feature; the producer
+    (``Workspace.watch``) and the watch machinery both depend on it, so
+    it lives here as a leaf type next to ``PathSpec`` / ``FileStat``.
+
     Values:
         CREATE: path appeared since the previous checkpoint.
         UPDATE: path content or metadata changed.
@@ -432,21 +436,6 @@ class ChangeKind(StrEnum):
     DELETE = "delete"
     MOVE = "move"
     UNKNOWN = "unknown"
-
-
-class OverflowPolicy(StrEnum):
-    """Behaviour of a watch queue when pending changes exceed its cap.
-
-    Values:
-        COLLAPSE: drop all pending entries and replace them with one
-            UNKNOWN change at the watch root (default; level-triggered
-            "rescan" semantics).
-        DROP_OLDEST: evict the oldest pending entry.
-        ERROR: surface QueueOverflowError to the consumer iterator.
-    """
-    COLLAPSE = "collapse"
-    DROP_OLDEST = "drop_oldest"
-    ERROR = "error"
 
 
 @dataclass(frozen=True, slots=True)
