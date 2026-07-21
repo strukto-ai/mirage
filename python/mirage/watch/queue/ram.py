@@ -15,10 +15,9 @@
 import asyncio
 import time
 
-from mirage.types import ChangeKind, PathSpec, ResourceChange
+from mirage.types import ChangeKind, OverflowPolicy, PathSpec, ResourceChange
 from mirage.watch.constants import DEFAULT_MAX_PENDING
-from mirage.watch.queue.base import (OverflowPolicy, QueueClosed,
-                                     QueueOverflowError)
+from mirage.watch.errors import QueueClosed, QueueOverflowError
 
 
 class RAMWatchQueue:

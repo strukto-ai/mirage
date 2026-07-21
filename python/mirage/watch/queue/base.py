@@ -13,42 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
-from enum import StrEnum
 from typing import Protocol
 
 from mirage.types import PathSpec, ResourceChange
-
-
-class OverflowPolicy(StrEnum):
-    """Behaviour of a watch queue when pending changes exceed its cap.
-
-    Values:
-        COLLAPSE: drop all pending entries and replace them with one
-            UNKNOWN change at the watch root (default; level-triggered
-            "rescan" semantics).
-        DROP_OLDEST: evict the oldest pending entry.
-        ERROR: surface QueueOverflowError to the consumer iterator.
-    """
-    COLLAPSE = "collapse"
-    DROP_OLDEST = "drop_oldest"
-    ERROR = "error"
-
-
-class QueueOverflowError(Exception):
-    """Raised to a watch consumer when its queue overflowed under
-    ``OverflowPolicy.ERROR``.
-
-    The queue is cleared when this is raised; the consumer should
-    re-inventory the watch root (``find``) before resuming.
-    """
-
-
-class QueueClosed(Exception):
-    """Terminal signal from ``WatchQueue.pop`` after ``close``.
-
-    The watch iterator translates it into normal iterator exhaustion;
-    consumers never see it.
-    """
 
 
 class WatchQueue(Protocol):

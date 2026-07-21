@@ -21,7 +21,8 @@ from typing import Protocol
 from mirage.types import ChangeKind, PathSpec, ResourceChange
 from mirage.watch.base import SupportsChanges, WatchRuntime
 from mirage.watch.constants import DEFAULT_POLL_INTERVAL
-from mirage.watch.queue.base import QueueClosed, QueueFactory, WatchQueue
+from mirage.watch.errors import QueueClosed
+from mirage.watch.queue.base import QueueFactory, WatchQueue
 from mirage.watch.queue.ram import RAMWatchQueue
 from mirage.watch.source import Source, Subscriber
 from mirage.workspace.mount.mount import MountEntry

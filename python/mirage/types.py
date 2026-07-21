@@ -476,6 +476,21 @@ class Delta:
     checkpoint: str | None
 
 
+class OverflowPolicy(StrEnum):
+    """Behaviour of a watch queue when pending changes exceed its cap.
+
+    Values:
+        COLLAPSE: drop all pending entries and replace them with one
+            UNKNOWN change at the watch root (default; level-triggered
+            "rescan" semantics).
+        DROP_OLDEST: evict the oldest pending entry.
+        ERROR: surface QueueOverflowError to the consumer iterator.
+    """
+    COLLAPSE = "collapse"
+    DROP_OLDEST = "drop_oldest"
+    ERROR = "error"
+
+
 class DriftPolicy(StrEnum):
     """Behaviour when a remote resource's live fingerprint differs from
     the value recorded at snapshot time.

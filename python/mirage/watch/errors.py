@@ -12,16 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.types import OverflowPolicy
-from mirage.watch.errors import QueueClosed, QueueOverflowError
-from mirage.watch.queue.base import QueueFactory, WatchQueue
-from mirage.watch.queue.ram import RAMWatchQueue
 
-__all__ = [
-    "OverflowPolicy",
-    "QueueClosed",
-    "QueueFactory",
-    "QueueOverflowError",
-    "RAMWatchQueue",
-    "WatchQueue",
-]
+class QueueOverflowError(Exception):
+    """Raised to a watch consumer when its queue overflowed under
+    ``OverflowPolicy.ERROR``.
+
+    The queue is cleared when this is raised; the consumer should
+    re-inventory the watch root (``find``) before resuming.
+    """
+
+
+class QueueClosed(Exception):
+    """Terminal signal from ``WatchQueue.pop`` after ``close``.
+
+    The watch iterator translates it into normal iterator exhaustion;
+    consumers never see it.
+    """
