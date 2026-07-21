@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './_client.ts'
 import { copyPath, deletePath, getMetadata } from './api.ts'
-import { invalidateAncestors } from './invalidate.ts'
+import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 
 // copy_v2 copies files and folder subtrees server-side; an existing

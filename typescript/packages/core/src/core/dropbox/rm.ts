@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './_client.ts'
 import { deletePath } from './api.ts'
-import { invalidateAncestors } from './invalidate.ts'
+import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 
 // delete_v2 removes folders recursively, so rm -r maps to one call.

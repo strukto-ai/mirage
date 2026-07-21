@@ -17,9 +17,8 @@ import time
 from opendal.exceptions import NotFound
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.cache.context import invalidate_after_unlink
+from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hf_buckets.invalidate import invalidate_ancestors
 from mirage.core.hf_buckets.stat import stat
 from mirage.observe.context import record
 from mirage.types import FileType, PathSpec

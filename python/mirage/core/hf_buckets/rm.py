@@ -15,8 +15,7 @@
 import time
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.cache.context import invalidate_after_unlink
-from mirage.core.hf_buckets.invalidate import invalidate_ancestors
+from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.observe.context import record
 from mirage.types import PathSpec
 

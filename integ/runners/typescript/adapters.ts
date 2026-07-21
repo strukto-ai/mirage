@@ -25,6 +25,7 @@ import {
 import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import {
   BoxResource,
+  DatabricksVolumeResource,
   DifyResource,
   DiskResource,
   DropboxResource,
@@ -64,6 +65,7 @@ const S3_ENDPOINT = process.env.S3_ENDPOINT
 const S3_REGION = process.env.S3_REGION ?? 'us-east-1'
 const S3_ACCESS = process.env.AWS_ACCESS_KEY_ID ?? 'testing'
 const S3_SECRET = process.env.AWS_SECRET_ACCESS_KEY ?? 'testing'
+const DATABRICKS_ENDPOINT = process.env.DATABRICKS_ENDPOINT
 const NEXTCLOUD_URL = process.env.NEXTCLOUD_URL
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME ?? 'admin'
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD ?? 'admin123'
@@ -184,6 +186,37 @@ async function openGridfs(target: Target): Promise<Open> {
     }
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openDatabricksVolume(target: Target): Promise<Open> {
+  if (DATABRICKS_ENDPOINT === undefined || DATABRICKS_ENDPOINT === '') {
+    throw new Error('databricks target requires DATABRICKS_ENDPOINT')
+  }
+  const endpoint = DATABRICKS_ENDPOINT
+  const id = runId()
+  const token = 'integ-token'
+  const mounts: Record<string, DatabricksVolumeResource> = {}
+  for (const m of target.mounts) {
+    const volume = `mirage-integ-${id}-${String(m.volume)}`
+    const rootPath = m.prefix ?? '/'
+    const root = `/Volumes/main/default/${volume}${rootPath === '/' ? '' : `/${rootPath}`}`
+    const created = await fetch(`${endpoint}/api/2.0/fs/directories${root}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!created.ok) throw new Error(`databricks mkdir root failed: ${String(created.status)}`)
+    mounts[m.path] = await DatabricksVolumeResource.create({
+      catalog: 'main',
+      schema: 'default',
+      volume,
+      rootPath,
+      host: endpoint,
+      token,
+      timeout: 30,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
 async function openS3(target: Target): Promise<Open> {
@@ -789,6 +822,7 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   redis: openRedis,
   opfs: openOpfs,
   s3: openS3,
+  databricks_volume: openDatabricksVolume,
   nextcloud: openNextcloud,
   gridfs: openGridfs,
   ssh: openSsh,

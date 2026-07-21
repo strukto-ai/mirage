@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '@struktoai/mirage-core'
+import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, resolveDirHandle, resolveParentDirHandle, splitSegments } from './utils.ts'
 
@@ -27,6 +27,8 @@ export async function mkdir(
   if (segs.length === 0) return
   if (parents) {
     await resolveDirHandle(root, virtual, { create: true })
+    await invalidateAfterWrite(path)
+    await invalidateAncestors(path)
     return
   }
   let parentDir: FileSystemDirectoryHandle

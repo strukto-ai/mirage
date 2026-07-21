@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './_client.ts'
 import { deletePath, getMetadata } from './api.ts'
-import { invalidateAncestors } from './invalidate.ts'
+import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 
 export async function unlink(accessor: DropboxAccessor, path: PathSpec): Promise<void> {

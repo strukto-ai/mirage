@@ -229,7 +229,7 @@ function mountRoot(prefix: string): string {
   return stripped !== '' ? stripped : '/'
 }
 
-export function virtualPath(path: string, prefix: string): string {
+function virtualPath(path: string, prefix: string): string {
   const root = mountRoot(prefix)
   if (path === '/') return root
   if (root === '/') return path

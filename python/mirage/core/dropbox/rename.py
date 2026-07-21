@@ -16,10 +16,9 @@ import time
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import (invalidate_after_unlink,
-                                  invalidate_after_write)
+                                  invalidate_after_write, invalidate_ancestors)
 from mirage.core.dropbox._client import DropboxApiError
 from mirage.core.dropbox.api import delete_path, get_metadata, move_path
-from mirage.core.dropbox.invalidate import invalidate_ancestors
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.observe.context import record
 from mirage.types import PathSpec

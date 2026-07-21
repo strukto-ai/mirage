@@ -153,11 +153,6 @@ jobs:
           ./python/.venv/bin/python integ/s3.py > /tmp/s3.out
           diff integ/truth_s3.txt /tmp/s3.out
 
-      - name: Run Databricks Volume cache-drain integ and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/databricks_volume.py > /tmp/databricks-volume.out
-          diff integ/truth_databricks_volume.txt /tmp/databricks-volume.out
-
       - name: Run onedrive integ (fake Graph) and diff against truth
         run: |
           ./python/.venv/bin/python integ/onedrive.py > /tmp/onedrive.out
@@ -313,12 +308,6 @@ jobs:
         run: |
           pnpm exec tsx s3.ts > /tmp/ts-s3-native.out
           diff truth_s3_ts.txt /tmp/ts-s3-native.out
-
-      - name: Run Databricks Volume cache-drain integ and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx databricks_volume.ts > /tmp/ts-databricks-volume.out
-          diff truth_databricks_volume.txt /tmp/ts-databricks-volume.out
 
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ
@@ -528,6 +517,16 @@ jobs:
           done
           cat /tmp/difysrv.log
           echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
+
+      - name: Start fake Databricks API for the typescript host
+        run: |
+          nohup ./python/.venv/bin/python integ/server/databricks_server.py --port 5095 > /tmp/databrickssrv.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "DATABRICKS_ENDPOINT=" /tmp/databrickssrv.log && break
+            sleep 1
+          done
+          cat /tmp/databrickssrv.log
+          echo "DATABRICKS_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
 
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.s3._client import _client_kwargs, _prefix, async_session
 from mirage.types import PathSpec
 
@@ -30,3 +30,5 @@ async def mkdir(accessor: S3Accessor,
         async with session.client(**_client_kwargs(config)) as client:
             await client.put_object(Bucket=config.bucket, Key=pfx, Body=b"")
         await invalidate_after_write(path_spec)
+        if parents:
+            await invalidate_ancestors(path_spec)

@@ -33,7 +33,7 @@ export function segmentText(segment: Record<string, unknown>): string {
   return ''
 }
 
-export function segmentsToBytes(segments: Record<string, unknown>[]): Uint8Array {
+function segmentsToBytes(segments: Record<string, unknown>[]): Uint8Array {
   return ENC.encode(segments.map((segment) => segmentText(segment)).join('\n'))
 }
 

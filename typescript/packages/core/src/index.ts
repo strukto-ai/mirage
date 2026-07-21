@@ -408,6 +408,7 @@ export {
   activeCacheManager,
   invalidateAfterUnlink,
   invalidateAfterWrite,
+  invalidateAncestors,
   runWithCacheManager,
   type CacheInvalidator,
 } from './cache/context.ts'

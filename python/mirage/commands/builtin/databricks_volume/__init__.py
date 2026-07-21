@@ -12,17 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.databricks_volume.head import head
+from mirage.commands.builtin.databricks_volume._provision import \
+    file_read_provision as _ft_provision
 from mirage.commands.builtin.databricks_volume.io import IO as _IO
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-
-_DATABRICKS_OVERRIDES = {"head"}
+from mirage.core.databricks_volume.read import read_bytes as _read
 
 COMMANDS = [
-    *make_generic_commands(
-        "databricks_volume",
-        _IO,
-        overrides=_DATABRICKS_OVERRIDES,
-    ),
-    head,
+    *make_filetype_commands(
+        "databricks_volume", _IO.resolve_glob, _read, provision=_ft_provision),
+    *make_generic_commands("databricks_volume", _IO),
 ]

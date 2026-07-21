@@ -14,7 +14,7 @@
 
 import type { DifyAccessor, DifyRequestOptions } from '../../accessor/dify.ts'
 
-export class DifyHttpError extends Error {
+class DifyHttpError extends Error {
   readonly status: number
   readonly retryAfter: string | null
 
@@ -63,7 +63,7 @@ async function requestOnce(
   return payload as Record<string, unknown>
 }
 
-export async function difyRequest(
+async function difyRequest(
   accessor: DifyAccessor,
   method: string,
   endpoint: string,
@@ -83,7 +83,7 @@ export async function difyRequest(
   throw lastError
 }
 
-export function difyGet(
+function difyGet(
   accessor: DifyAccessor,
   endpoint: string,
   params?: Record<string, string | number | boolean>,
@@ -110,7 +110,7 @@ function asRecordList(value: unknown): Record<string, unknown>[] {
   return out
 }
 
-export function isVisibleDocument(document: Record<string, unknown>): boolean {
+function isVisibleDocument(document: Record<string, unknown>): boolean {
   return (
     document.enabled === true &&
     document.indexing_status === 'completed' &&

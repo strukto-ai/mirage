@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { loadS3Module, rawPathOf, s3Prefix, withClient } from './_client.ts'
 
-export async function mkdir(accessor: S3Accessor, path: PathSpec): Promise<void> {
+export async function mkdir(accessor: S3Accessor, path: PathSpec, parents = false): Promise<void> {
   const { PutObjectCommand } = await loadS3Module(accessor.config)
   const raw = rawPathOf(path)
   const pfx = s3Prefix(raw, accessor.config)
@@ -32,4 +32,5 @@ export async function mkdir(accessor: S3Accessor, path: PathSpec): Promise<void>
     )
   })
   await invalidateAfterWrite(path)
+  if (parents) await invalidateAncestors(path)
 }

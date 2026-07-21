@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 from mirage.utils.path import norm, parent
@@ -37,6 +37,8 @@ async def mkdir(
             mod = await store.get_modified(current)
             if mod is None:
                 await store.set_modified(current, now)
+        await invalidate_after_write(path_spec)
+        await invalidate_ancestors(path_spec)
         return
     parent_dir = parent(p)
     if parent_dir != "/" and not await store.has_dir(parent_dir):

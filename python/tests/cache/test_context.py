@@ -16,7 +16,9 @@ import asyncio
 
 from mirage.cache.context import (active_cache_manager,
                                   invalidate_after_unlink,
-                                  invalidate_after_write, push_cache_manager)
+                                  invalidate_after_write, invalidate_ancestors,
+                                  push_cache_manager)
+from mirage.types import PathSpec
 
 
 def _run(coro):
@@ -78,3 +80,17 @@ def test_push_returns_previous_manager():
     assert prev1 is not None
     assert active is not restored
     assert restored is prev1
+
+
+async def _ancestors() -> FakeManager:
+    manager = FakeManager()
+    prev = push_cache_manager(manager)
+    await invalidate_ancestors(PathSpec.from_str_path("/xmdp/a/b/c"))
+    push_cache_manager(prev)
+    return manager
+
+
+def test_invalidate_ancestors_walks_chain_to_root():
+    manager = _run(_ancestors())
+    seen = [getattr(p, "mount_path", p) for p in manager.writes]
+    assert seen == ["/xmdp/a/b", "/xmdp/a", "/xmdp"]

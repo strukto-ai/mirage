@@ -36,9 +36,12 @@ from pymongo import AsyncMongoClient
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
+from mirage.core.databricks_volume.path import configured_root
 from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.box import BoxConfig, BoxResource
+from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
+                                               DatabricksVolumeResource)
 from mirage.resource.dify import DifyConfig, DifyResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
@@ -186,6 +189,36 @@ class GridFSService:
             await client.close()
 
 
+class DatabricksVolumeService:
+
+    def __init__(self, run_id: str, module: ModuleType, store: object,
+                 runner: object, base: str) -> None:
+        self.run_id = run_id
+        self.module = module
+        self.store = store
+        self.runner = runner
+        self.base = base
+
+    @classmethod
+    async def create(cls, run_id: str) -> "DatabricksVolumeService":
+        module = _load_databricks_server()
+        store, runner, base = await module.start_fake_databricks()
+        return cls(run_id, module, store, runner, base)
+
+    def resource(self, mount: dict) -> DatabricksVolumeResource:
+        volume = f"mirage-integ-{self.run_id}-{mount['volume']}"
+        config = DatabricksVolumeConfig(catalog="main",
+                                        schema="default",
+                                        volume=volume,
+                                        root_path=mount.get("prefix") or "/")
+        self.store.make_dir(configured_root(config))
+        client = self.module.HttpFilesClient(self.base, "integ-token")
+        return DatabricksVolumeResource(config, client=client)
+
+    async def teardown(self) -> None:
+        await self.runner.cleanup()
+
+
 def _load_module(path: Path) -> ModuleType:
     # Modules at the integ root never go on sys.path (integ/redis.py would
     # shadow the redis package); load them by file.
@@ -224,6 +257,12 @@ def _load_box_server() -> ModuleType:
 def _load_dify_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "dify_server.py")
+
+
+def _load_databricks_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" /
+        "databricks_server.py")
 
 
 def _load_trello_server() -> ModuleType:
@@ -840,7 +879,7 @@ class SharePointService:
 Service = (S3Service | OneDriveService | SharePointService | SSHService
            | NextcloudService | GwsService | HfService | BoxService
            | DropboxService | GridFSService | SlackService | TrelloService
-           | LinearService | DifyService)
+           | LinearService | DifyService | DatabricksVolumeService)
 
 
 def build_ram(
@@ -879,6 +918,13 @@ def build_gridfs(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GridFSService)
+    return service.resource(mount), _noop
+
+
+def build_databricks_volume(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, DatabricksVolumeService)
     return service.resource(mount), _noop
 
 
@@ -1007,6 +1053,7 @@ BUILDERS = {
     "redis": build_redis,
     "s3": build_s3,
     "gridfs": build_gridfs,
+    "databricks_volume": build_databricks_volume,
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,
     "ssh": build_ssh,
@@ -1035,6 +1082,8 @@ async def open_target(
         service = S3Service(run_id)
     elif target.get("service") == "gridfs":
         service = GridFSService(run_id)
+    elif target.get("service") == "databricks":
+        service = await DatabricksVolumeService.create(run_id)
     elif target.get("service") == "onedrive":
         service = await OneDriveService.create()
     elif target.get("service") == "sharepoint":

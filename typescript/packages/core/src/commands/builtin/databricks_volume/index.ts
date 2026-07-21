@@ -13,27 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
+import { readBytes as databricksRead } from '../../../core/databricks_volume/read.ts'
+import { stat as databricksStat } from '../../../core/databricks_volume/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
+import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { DATABRICKS_VOLUME_HEAD } from './head.ts'
-import { DATABRICKS_VOLUME_MKDIR } from './mkdir.ts'
 import { DATABRICKS_VOLUME_IO } from './io.ts'
-import { DATABRICKS_VOLUME_RM } from './rm.ts'
-import { DATABRICKS_VOLUME_TOUCH } from './touch.ts'
-
-const DATABRICKS_VOLUME_OVERRIDES = new Set(['head', 'mkdir', 'touch', 'rm'])
 
 export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
+  ...makeFiletypeCommands<DatabricksVolumeAccessor>({
+    resource: ResourceName.DATABRICKS_VOLUME,
+    readBytes: databricksRead,
+    statEntry: databricksStat,
+  }),
   ...makeGenericCommands<DatabricksVolumeAccessor>(
     ResourceName.DATABRICKS_VOLUME,
     DATABRICKS_VOLUME_IO,
-    {
-      overrides: DATABRICKS_VOLUME_OVERRIDES,
-    },
   ),
-  ...DATABRICKS_VOLUME_HEAD,
-  ...DATABRICKS_VOLUME_MKDIR,
-  ...DATABRICKS_VOLUME_TOUCH,
-  ...DATABRICKS_VOLUME_RM,
 ]

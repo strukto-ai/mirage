@@ -243,6 +243,69 @@
       ]
     },
     {
+      "id": "databricks",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "databricks",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "databricks_volume",
+          "backend": "databricks_volume",
+          "volume": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "databricks_volume",
+          "backend": "databricks_volume",
+          "volume": "data2"
+        },
+        {
+          "path": "/res",
+          "resource": "databricks_volume",
+          "backend": "databricks_volume",
+          "volume": "res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "databricks-prefix",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "databricks",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "databricks_volume",
+          "backend": "databricks_volume",
+          "volume": "shared",
+          "prefix": "team/reports/data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "resource": "databricks_volume",
+          "backend": "databricks_volume",
+          "volume": "shared",
+          "prefix": "team/reports/data2"
+        },
+        {
+          "path": "/res",
+          "resource": "databricks_volume",
+          "backend": "databricks_volume",
+          "volume": "shared",
+          "prefix": "team/reports/res",
+          "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
       "id": "dropbox",
       "hosts": [
         "python",

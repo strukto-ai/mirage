@@ -31,6 +31,7 @@ export interface Mount {
   seed?: string
   folder?: string
   bucket?: string
+  volume?: string
   prefix?: string
   root?: string
   drive?: string

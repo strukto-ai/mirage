@@ -14,6 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { NativeCopy, PathSpec } from '../../../../types.ts'
+import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric } from '../../generic/cp.ts'
 import type { Builder } from '../adapter.ts'
 
@@ -27,14 +28,32 @@ export const CP_BUILDER: Builder = {
         new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
       ])
     }
-    const { copy, dirCopy, find } = ops
-    if (copy === undefined || find === undefined) {
-      throw new Error('cp: backend provides no copy/find op')
+    const { copy, dirCopy, find, isDirName } = ops
+    if (copy === undefined) {
+      throw new Error('cp: backend provides no copy op')
     }
+    // No native find op: fall back to a readdir walk (mirrors Python's
+    // _make_find). Passing the index lets stat classify entries from the
+    // cache instead of re-fetching, matching the find command.
+    const findFn: NativeCopy['find'] =
+      find !== undefined
+        ? (src, options) => find(accessor, src, options)
+        : (src, options) =>
+            walkFind(
+              src,
+              {
+                readdir: (spec, i) => ops.readdir(accessor, spec, i),
+                stat: (spec, i) => ops.stat(accessor, spec, i),
+                isDirName:
+                  isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
+              },
+              options,
+              opts.index ?? undefined,
+            )
     const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
     const strategy: NativeCopy = {
       copy: (src: PathSpec, target: PathSpec) => copy(accessor, src, target),
-      find: (src, options) => find(accessor, src, options),
+      find: findFn,
       ...(dirCopy === undefined
         ? {}
         : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),

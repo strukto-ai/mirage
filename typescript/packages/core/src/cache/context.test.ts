@@ -14,11 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { PathSpec } from '../types.ts'
+import { PathSpec } from '../types.ts'
 import {
   activeCacheManager,
   invalidateAfterUnlink,
   invalidateAfterWrite,
+  invalidateAncestors,
   runWithCacheManager,
 } from './context.ts'
 
@@ -76,5 +77,14 @@ describe('cache context', () => {
       })
       expect(activeCacheManager()).toBe(outer)
     })
+  })
+
+  it('invalidateAncestors walks the chain to root', async () => {
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, async () => {
+      await invalidateAncestors(PathSpec.fromStrPath('/xmdp/a/b/c'))
+    })
+    const seen = manager.writes.map((w) => (w as unknown as PathSpec).mountPath)
+    expect(seen).toEqual(['/xmdp/a/b', '/xmdp/a', '/xmdp'])
   })
 })

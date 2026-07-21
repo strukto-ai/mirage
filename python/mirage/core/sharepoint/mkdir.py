@@ -1,7 +1,7 @@
 import posixpath
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.msgraph.drive_ops import create_child_folder
 from mirage.core.sharepoint._client import item_url, split_path
 from mirage.core.sharepoint._resolver import resolve
@@ -38,3 +38,5 @@ async def mkdir(accessor: SharePointAccessor,
     else:
         await _create_dir(accessor, drive_id, item_p)
     await invalidate_after_write(path)
+    if parents:
+        await invalidate_ancestors(path)

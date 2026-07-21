@@ -56,7 +56,7 @@ export async function resolvePath(
   throw enoent(spec.virtual)
 }
 
-export function virtualKeyFor(path: PathSpec): string {
+function virtualKeyFor(path: PathSpec): string {
   const raw = path.pattern !== null ? path.directory : path.virtual
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   if (prefix !== '') {
