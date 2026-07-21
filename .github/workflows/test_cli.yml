@@ -662,7 +662,7 @@ jobs:
 
       - name: Cache the quickjs WASI build
         id: quickjs-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/quickjs
           key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
@@ -678,7 +678,7 @@ jobs:
 
       - name: Cache the CPython WASI build
         id: wasi-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/cpython-wasi
           key: cpython-wasi-${{ env.WASI_BUILD }}
