@@ -1,31 +1,32 @@
 {
-  "poll_interval": 1.0,
+  "resource": "nextcloud",
   "mount": "/nc",
   "watch_dir": "/nc/data",
+  "poll_interval": 1.0,
   "seed": ["keep.txt"],
   "cases": [
     {
-      "name": "create_file",
+      "id": "create_file",
       "mutate": {"op": "write", "path": "data/new.txt", "body": "hello"},
-      "event": {"kind": "create", "path": "/nc/data/new.txt"},
+      "expect": {"kind": "create", "path": "/nc/data/new.txt"},
       "verify": {"cmd": "cat /nc/data/new.txt", "contains": "hello"}
     },
     {
-      "name": "update_file",
+      "id": "update_file",
       "mutate": {"op": "write", "path": "data/new.txt", "body": "hello-v2"},
-      "event": {"kind": "update", "path": "/nc/data/new.txt"},
+      "expect": {"kind": "update", "path": "/nc/data/new.txt"},
       "verify": {"cmd": "cat /nc/data/new.txt", "contains": "hello-v2"}
     },
     {
-      "name": "create_nested",
+      "id": "create_nested",
       "mutate": {"op": "write", "path": "data/sub/deep.txt", "body": "deep"},
-      "event": {"kind": "create", "path": "/nc/data/sub/deep.txt"},
+      "expect": {"kind": "create", "path": "/nc/data/sub/deep.txt"},
       "verify": {"cmd": "cat /nc/data/sub/deep.txt", "contains": "deep"}
     },
     {
-      "name": "delete_file",
+      "id": "delete_file",
       "mutate": {"op": "delete", "path": "data/new.txt"},
-      "event": {"kind": "delete", "path": "/nc/data/new.txt"},
+      "expect": {"kind": "delete", "path": "/nc/data/new.txt"},
       "verify": {"cmd": "ls /nc/data", "absent": "new.txt"}
     }
   ]
