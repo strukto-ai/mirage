@@ -16,7 +16,9 @@ import {
   IOResult,
   ResourceName,
   command,
+  formatRecords,
   specOf,
+  type ByteSource,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
@@ -31,6 +33,7 @@ async function mkdirCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const parents = opts.flags.p === true
+  const verbose = opts.flags.v === true
   if (paths.length === 0) {
     return [
       null,
@@ -40,10 +43,13 @@ async function mkdirCommand(
       }),
     ]
   }
+  const lines: string[] = []
   for (const p of paths) {
     await opfsMkdir(accessor, p, parents)
+    if (verbose) lines.push(`mkdir: created directory '${p.virtual.replace(/\/+$/, '') || '/'}'`)
   }
-  return [null, new IOResult()]
+  const output: ByteSource | null = verbose && lines.length > 0 ? formatRecords(lines) : null
+  return [output, new IOResult()]
 }
 
 export const OPFS_MKDIR = command({
