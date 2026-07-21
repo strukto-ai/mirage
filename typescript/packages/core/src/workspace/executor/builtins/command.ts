@@ -143,6 +143,107 @@ function probe(
 }
 
 /**
+ * Split `type`'s options from its name operands.
+ *
+ * Recognizes `-t` (type word only), `-p`/`-P` (path; empty for mirage's
+ * pathless builtins), `-a` (all locations; one in mirage), and `-f` (skip
+ * the function table). Non-permuting like bash. Returns
+ * `[mode, nofunc, rest, bad]` where `bad` is the first invalid option.
+ */
+function parseTypeFlags(
+  args: readonly string[],
+): ['t' | 'p' | null, boolean, string[], string | null] {
+  let mode: 't' | 'p' | null = null
+  let nofunc = false
+  let i = 0
+  while (i < args.length) {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (!(tok.startsWith('-') && tok.length > 1)) break
+    for (const ch of tok.slice(1)) {
+      if (ch === 't') mode = 't'
+      else if (ch === 'p' || ch === 'P') mode = 'p'
+      else if (ch === 'a') continue
+      else if (ch === 'f') nofunc = true
+      else return [null, false, [], `-${ch}`]
+    }
+    i += 1
+  }
+  return [mode, nofunc, [...args.slice(i)], null]
+}
+
+function typeWord(kind: string): string {
+  if (kind === 'keyword') return 'keyword'
+  if (kind === 'function') return 'function'
+  return 'builtin'
+}
+
+/**
+ * Run the `type` builtin (`type [-afptP] name [name ...]`).
+ *
+ * Mirrors `command -V` resolution (every mirage-native runnable name is a
+ * shell builtin; no external paths) but uses `type`'s all-found exit rule:
+ * 0 only when every name resolves. `-t` prints the classification word,
+ * `-p`/`-P` print a path (always empty here), and a missing name warns on
+ * stderr unless a word-only mode (`-t`/`-p`) is active.
+ */
+export function handleType(
+  args: readonly string[],
+  session: Session,
+  registry: MountRegistry,
+): Result {
+  const [mode, nofunc, rest, bad] = parseTypeFlags(args)
+  const enc = new TextEncoder()
+  if (bad !== null) {
+    const err = enc.encode(
+      `type: ${bad}: invalid option\ntype: usage: type [-afptP] name [name ...]\n`,
+    )
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'type', exitCode: 2, stderr: err }),
+    ]
+  }
+  const outLines: string[] = []
+  const errLines: string[] = []
+  let allFound = true
+  for (const name of rest) {
+    let kind: string
+    const savedFn = session.functions[name]
+    if (nofunc && savedFn !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.functions[name]
+      try {
+        kind = classify(name, session, registry)
+      } finally {
+        session.functions[name] = savedFn
+      }
+    } else {
+      kind = classify(name, session, registry)
+    }
+    if (kind === 'not_found') {
+      allFound = false
+      if (mode === null) errLines.push(`type: ${name}: not found`)
+      continue
+    }
+    if (mode === 't') outLines.push(typeWord(kind))
+    else if (mode === 'p') continue
+    else outLines.push(describe(name, kind))
+  }
+  const out = outLines.length > 0 ? enc.encode(`${outLines.join('\n')}\n`) : null
+  const err = errLines.length > 0 ? enc.encode(`${errLines.join('\n')}\n`) : new Uint8Array()
+  const code = rest.length === 0 || allFound ? 0 : 1
+  return [
+    out,
+    new IOResult({ exitCode: code, stderr: err }),
+    new ExecutionNode({ command: 'type', exitCode: code, stderr: err }),
+  ]
+}
+
+/**
  * Run the `command` builtin (`command [-pVv] name [arg ...]`).
  *
  * Without `-v`/`-V` it runs the target ignoring any shell function of the

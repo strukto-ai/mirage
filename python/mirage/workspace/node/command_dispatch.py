@@ -43,8 +43,9 @@ from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_history, handle_ln, handle_local, handle_man,
     handle_printenv, handle_printf, handle_read, handle_readlink,
     handle_return, handle_set, handle_shift, handle_sleep, handle_source,
-    handle_test, handle_timeout, handle_touch, handle_trap, handle_unset,
-    handle_whoami, handle_xargs, link_flags, prepare_mv, strip_link_operands)
+    handle_test, handle_timeout, handle_touch, handle_trap, handle_type,
+    handle_unset, handle_whoami, handle_xargs, link_flags, prepare_mv,
+    strip_link_operands)
 
 _CdArgs = list[str | PathSpec]
 
@@ -345,6 +346,9 @@ async def _run_argv(
     if name == SB.TRUE:
         return None, IOResult(), ExecutionNode(command="true", exit_code=0)
 
+    if name == SB.COLON:
+        return None, IOResult(), ExecutionNode(command=":", exit_code=0)
+
     if name == SB.FALSE:
         return None, IOResult(exit_code=1), ExecutionNode(command="false",
                                                           exit_code=1)
@@ -426,6 +430,9 @@ async def _run_argv(
     if name == SB.COMMAND:
         return await handle_command_builtin(execute_fn, args, session,
                                             registry, stdin)
+
+    if name == SB.TYPE:
+        return handle_type(args, session, registry)
 
     if name == SB.XARGS:
         return await handle_xargs(execute_fn, args, session, stdin)

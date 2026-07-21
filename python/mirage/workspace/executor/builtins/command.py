@@ -133,6 +133,19 @@ def _describe(name: str, kind: str) -> str:
     return f"{name} is a shell builtin"
 
 
+def _type_word(kind: str) -> str:
+    """The single classification word printed by ``type -t``.
+
+    Args:
+        kind (str): the classification from ``_classify``.
+    """
+    if kind == "keyword":
+        return "keyword"
+    if kind == "function":
+        return "function"
+    return "builtin"
+
+
 def _probe(
     mode: str, rest: list[str], session: Session, registry: MountRegistry
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -166,6 +179,107 @@ def _probe(
     code = 0 if (not rest or any_found) else 1
     return out, IOResult(exit_code=code,
                          stderr=err), ExecutionNode(command="command",
+                                                    exit_code=code,
+                                                    stderr=err)
+
+
+def _parse_type_flags(
+        args: list[str]) -> tuple[str | None, bool, list[str], str | None]:
+    """Split ``type``'s options from its name operands.
+
+    Recognizes ``-t`` (type word only), ``-p``/``-P`` (path; empty for
+    mirage's pathless builtins), ``-a`` (all locations; one in mirage),
+    and ``-f`` (skip the function table). Non-permuting like bash: option
+    scanning stops at the first non-option word or ``--``.
+
+    Args:
+        args (list[str]): words after the ``type`` name.
+
+    Returns:
+        ``(mode, nofunc, rest, bad)`` where ``mode`` is ``"t"``/``"p"``/
+        ``None``, ``nofunc`` skips functions, ``rest`` is the operands,
+        and ``bad`` is the first invalid option (as ``-x``) or ``None``.
+    """
+    mode: str | None = None
+    nofunc = False
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--":
+            i += 1
+            break
+        if not (tok.startswith("-") and len(tok) > 1):
+            break
+        for ch in tok[1:]:
+            if ch == "t":
+                mode = "t"
+            elif ch in ("p", "P"):
+                mode = "p"
+            elif ch == "a":
+                continue
+            elif ch == "f":
+                nofunc = True
+            else:
+                return None, False, [], f"-{ch}"
+        i += 1
+    return mode, nofunc, args[i:], None
+
+
+def handle_type(
+    args: list[str],
+    session: Session,
+    registry: MountRegistry,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run the ``type`` builtin (``type [-afptP] name [name ...]``).
+
+    Mirrors ``command -V`` resolution (every mirage-native runnable name
+    is reported as a shell builtin; there are no external paths), but uses
+    ``type``'s all-found exit rule: 0 only when every name resolves. ``-t``
+    prints the classification word, ``-p``/``-P`` print a path (always
+    empty here), and a missing name warns on stderr unless a word-only
+    mode (``-t``/``-p``) is active.
+
+    Args:
+        args (list[str]): words after the ``type`` name.
+        session (Session): shell session (function table).
+        registry (MountRegistry): mount registry for name resolution.
+    """
+    mode, nofunc, rest, bad = _parse_type_flags(args)
+    if bad is not None:
+        err = (f"type: {bad}: invalid option\n"
+               "type: usage: type [-afptP] name [name ...]\n").encode()
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="type",
+                                                         exit_code=2,
+                                                         stderr=err)
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+    all_found = True
+    for name in rest:
+        if nofunc and name in session.functions:
+            saved = session.functions.pop(name)
+            try:
+                kind = _classify(name, session, registry)
+            finally:
+                session.functions[name] = saved
+        else:
+            kind = _classify(name, session, registry)
+        if kind == "not_found":
+            all_found = False
+            if mode is None:
+                err_lines.append(f"type: {name}: not found")
+            continue
+        if mode == "t":
+            out_lines.append(_type_word(kind))
+        elif mode == "p":
+            continue
+        else:
+            out_lines.append(_describe(name, kind))
+    out = ("\n".join(out_lines) + "\n").encode() if out_lines else None
+    err = ("\n".join(err_lines) + "\n").encode() if err_lines else b""
+    code = 0 if (not rest or all_found) else 1
+    return out, IOResult(exit_code=code,
+                         stderr=err), ExecutionNode(command="type",
                                                     exit_code=code,
                                                     stderr=err)
 

@@ -181,6 +181,7 @@ class ShellBuiltin(StrEnum):
     # control
     TRUE = "true"
     FALSE = "false"
+    COLON = ":"
     SOURCE = "source"
     DOT = "."
     EVAL = "eval"
@@ -213,6 +214,7 @@ class ShellBuiltin(StrEnum):
     XARGS = "xargs"
     TIMEOUT = "timeout"
     COMMAND = "command"
+    TYPE = "type"
     BREAK = "break"
     CONTINUE = "continue"
     RETURN = "return"

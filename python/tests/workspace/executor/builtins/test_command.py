@@ -4,7 +4,8 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.workspace.executor.builtins.command import (_classify, _describe,
                                                         _parse_flags,
-                                                        handle_command_builtin)
+                                                        handle_command_builtin,
+                                                        handle_type)
 from mirage.workspace.session.session import Session
 
 
@@ -224,3 +225,64 @@ async def test_run_mode_masks_function_then_restores():
     await handle_command_builtin(shell, ["cat"], session, make_registry())
     assert seen["masked"] is True
     assert session.functions["cat"] is body
+
+
+def _type_out(result) -> str:
+    out, _io, _node = result
+    return out.decode() if out is not None else ""
+
+
+def test_type_reports_builtin():
+    out, io, _ = handle_type(["cd"], make_session(), make_registry())
+    assert out.decode() == "cd is a shell builtin\n"
+    assert io.exit_code == 0
+
+
+def test_type_reports_keyword():
+    assert _type_out(handle_type(["if"], make_session(),
+                                 make_registry())) == "if is a shell keyword\n"
+
+
+def test_type_t_prints_word():
+    assert _type_out(handle_type(["-t", "cd"], make_session(),
+                                 make_registry())) == "builtin\n"
+    assert _type_out(handle_type(["-t", "if"], make_session(),
+                                 make_registry())) == "keyword\n"
+
+
+def test_type_mount_command_is_builtin():
+    assert _type_out(
+        handle_type(["cat"], make_session(),
+                    make_registry())) == "cat is a shell builtin\n"
+
+
+def test_type_not_found_warns_and_exits_1():
+    out, io, _ = handle_type(["nope"], make_session(), make_registry())
+    assert out is None
+    assert io.exit_code == 1
+    assert io.stderr == b"type: nope: not found\n"
+
+
+def test_type_t_not_found_is_silent():
+    out, io, _ = handle_type(["-t", "nope"], make_session(), make_registry())
+    assert out is None
+    assert io.exit_code == 1
+    assert io.stderr == b""
+
+
+def test_type_all_found_exit_rule():
+    out, io, _ = handle_type(["cd", "nope"], make_session(), make_registry())
+    assert out.decode() == "cd is a shell builtin\n"
+    assert io.exit_code == 1
+
+
+def test_type_path_mode_empty_for_builtin():
+    out, io, _ = handle_type(["-p", "cd"], make_session(), make_registry())
+    assert out is None
+    assert io.exit_code == 0
+
+
+def test_type_invalid_option():
+    out, io, _ = handle_type(["-x", "cd"], make_session(), make_registry())
+    assert io.exit_code == 2
+    assert io.stderr.startswith(b"type: -x: invalid option\n")

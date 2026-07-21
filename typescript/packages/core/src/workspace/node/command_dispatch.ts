@@ -45,6 +45,7 @@ import {
   handleBash,
   handleCd,
   handleCommandBuiltin,
+  handleType,
   handleEcho,
   handleEval,
   handleExport,
@@ -498,6 +499,10 @@ async function runArgv(
     return [null, new IOResult(), new ExecutionNode({ command: 'true', exitCode: 0 })]
   }
 
+  if (name === SB.COLON) {
+    return [null, new IOResult(), new ExecutionNode({ command: ':', exitCode: 0 })]
+  }
+
   if (name === SB.FALSE) {
     return [
       null,
@@ -565,6 +570,10 @@ async function runArgv(
 
   if (name === SB.COMMAND) {
     return handleCommandBuiltin(executeFn, args, session, registry, stdin)
+  }
+
+  if (name === SB.TYPE) {
+    return handleType(args, session, registry)
   }
 
   if (name === SB.XARGS) {

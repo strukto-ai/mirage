@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "type_invalid_option",
+      "seq": 503212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "type -x cd 2>&1; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "type: -x: invalid option\ntype: usage: type [-afptP] name [name ...]\nrc=2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

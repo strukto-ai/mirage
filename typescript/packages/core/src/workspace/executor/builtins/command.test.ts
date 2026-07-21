@@ -17,7 +17,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { Session } from '../../session/session.ts'
-import { handleCommandBuiltin, parseFlags } from './command.ts'
+import { handleCommandBuiltin, handleType, parseFlags } from './command.ts'
 
 const MOUNT_COMMANDS = new Set(['cat', 'grep', 'ls', 'jq'])
 
@@ -245,5 +245,60 @@ describe('handleCommandBuiltin run mode', () => {
     await handleCommandBuiltin(shell, ['cat'], session, makeRegistry())
     expect(maskedDuringCall).toBe(true)
     expect(session.functions.cat).toBe(fnBody)
+  })
+})
+
+describe('handleType', () => {
+  it('reports a builtin', async () => {
+    const [out, io] = handleType(['cd'], makeSession(), makeRegistry())
+    expect(await body(out)).toBe('cd is a shell builtin\n')
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('reports a keyword', async () => {
+    const [out] = handleType(['if'], makeSession(), makeRegistry())
+    expect(await body(out)).toBe('if is a shell keyword\n')
+  })
+
+  it('-t prints the classification word', async () => {
+    expect(await body(handleType(['-t', 'cd'], makeSession(), makeRegistry())[0])).toBe('builtin\n')
+    expect(await body(handleType(['-t', 'if'], makeSession(), makeRegistry())[0])).toBe('keyword\n')
+  })
+
+  it('classifies a mount command as a builtin', async () => {
+    const [out] = handleType(['cat'], makeSession(), makeRegistry())
+    expect(await body(out)).toBe('cat is a shell builtin\n')
+  })
+
+  it('warns and exits 1 for an unknown name', async () => {
+    const [out, io] = handleType(['nope'], makeSession(), makeRegistry())
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe('type: nope: not found\n')
+  })
+
+  it('-t is silent for an unknown name', async () => {
+    const [out, io] = handleType(['-t', 'nope'], makeSession(), makeRegistry())
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe('')
+  })
+
+  it('uses the all-found exit rule', async () => {
+    const [out, io] = handleType(['cd', 'nope'], makeSession(), makeRegistry())
+    expect(await body(out)).toBe('cd is a shell builtin\n')
+    expect(io.exitCode).toBe(1)
+  })
+
+  it('-p is empty for a builtin', () => {
+    const [out, io] = handleType(['-p', 'cd'], makeSession(), makeRegistry())
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('rejects an invalid option', async () => {
+    const [, io] = handleType(['-x', 'cd'], makeSession(), makeRegistry())
+    expect(io.exitCode).toBe(2)
+    expect(decode(await materialize(io.stderr)).startsWith('type: -x: invalid option\n')).toBe(true)
   })
 })
