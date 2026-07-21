@@ -382,6 +382,13 @@
             ]
           },
           {
+            "group": "Watch",
+            "icon": "bell",
+            "pages": [
+              "python/watch"
+            ]
+          },
+          {
             "group": "Runtimes",
             "pages": [
               "python/runtime/python",
