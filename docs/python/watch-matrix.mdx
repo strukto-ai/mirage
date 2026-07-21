@@ -18,17 +18,17 @@ Watching splits into two halves, and they have different support stories:
   would subscribe to; mapping its payload to a `FileEvent` is consumer code,
   and Mirage ships a sample where marked.
 
-| Resource | Delivery | Pull (`delta_hook`) | Push signal (provider-side) | Sample |
-| --- | --- | --- | --- | --- |
-| Nextcloud | ✓ | ✓ ETag walk diff | `webhook_listeners` app (Nextcloud 30+) | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py) + integ receiver |
-| S3 / S3-compatible | ✓ | planned | S3 Event Notifications (SQS/EventBridge) | — |
-| Google Drive | ✓ | planned | `changes.watch` push channels | — |
-| Dropbox | ✓ | planned | Dropbox webhooks + cursor delta | — |
-| OneDrive / SharePoint | ✓ | planned | Graph change notifications + delta API | — |
-| GitHub | ✓ | planned | repository webhooks (push events) | — |
-| Slack | ✓ | planned | Events API (`message`, `file_shared`, ...) | — |
-| Disk | ✓ | planned | local inotify / FSEvents / watchdog | — |
-| RAM, Redis, others | ✓ | — | (no external writers to observe) | — |
+| Resource | Pull (`delta_hook`) | Push signal (provider-side) | Sample |
+| --- | --- | --- | --- |
+| Nextcloud | ✓ ETag walk diff | `webhook_listeners` app (Nextcloud 30+) | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py) + integ receiver |
+| S3 / S3-compatible | planned | S3 Event Notifications (SQS/EventBridge) | — |
+| Google Drive | planned | `changes.watch` push channels | — |
+| Dropbox | planned | Dropbox webhooks + cursor delta | — |
+| OneDrive / SharePoint | planned | Graph change notifications + delta API | — |
+| GitHub | planned | repository webhooks (push events) | — |
+| Slack | planned | Events API (`message`, `file_shared`, ...) | — |
+| Disk | planned | local inotify / FSEvents / watchdog | — |
+| RAM, Redis, others | — | (no external writers to observe) | — |
 
 ## What "Delivery ✓" buys you without a hook
 
