@@ -184,6 +184,35 @@ describe('RemoteSandbox', () => {
     }
   })
 
+  it('rewrites virtual mount paths in a line to sandbox mountpoints', async () => {
+    const box = new RecordingSandbox({ captures: ['python3'] })
+    const ws = await sandboxWorkspace(box)
+    try {
+      await ws.execute('python3 /data/a.py --out /data/r.json /tmp/x /data.txt')
+      const [line] = box.execs[box.execs.length - 1] ?? ['']
+      expect(line).toContain('/workspace/data/a.py')
+      expect(line).toContain('/workspace/data/r.json')
+      // A system path and a sibling file are left untouched.
+      expect(line).toContain(' /tmp/x ')
+      expect(line).toContain('/data.txt')
+      expect(line).not.toContain('/workspace/data.txt')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('exposes mount mountpoints as env vars', async () => {
+    const box = new RecordingSandbox({ captures: ['python3'] })
+    const ws = await sandboxWorkspace(box)
+    try {
+      await ws.execute('python3 x')
+      const [, , env] = box.execs[box.execs.length - 1] ?? ['', null, {}, '']
+      expect(env.MIRAGE_DATA).toBe('/workspace/data')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('reattaches by sandboxId instead of creating', async () => {
     const box = new RecordingSandbox({ captures: ['python3'], sandboxId: 'sb-live' })
     const ws = await sandboxWorkspace(box)

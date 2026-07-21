@@ -35,6 +35,7 @@ class RecordingSandbox(RemoteSandbox):
         self.created = 0
         self.connected: list[str] = []
         self.mounted = False
+        self.last_env: dict[str, str] = {}
 
     async def create_sandbox(self) -> str:
         self.created += 1
@@ -46,6 +47,7 @@ class RecordingSandbox(RemoteSandbox):
     async def exec_line(self, line: str, stdin: bytes | None,
                         env: dict[str, str], cwd: str) -> RunResult:
         self.execs.append((line, stdin, cwd))
+        self.last_env = dict(env)
         return RunResult(stdout=b"ran:" + line.encode(),
                          stderr=None,
                          exit_code=0)
@@ -131,6 +133,39 @@ async def test_cwd_resolves_under_workspace_root_and_env_merges():
                                     "/data/deep")
         assert result.exit_code == 0
         assert box.execs[-1][2] == "/workspace/data/deep"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_line_paths_translate_to_sandbox_mountpoints():
+    box = RecordingSandbox(captures=("python3", ))
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    try:
+        await ws.execute(
+            "python3 /data/a.py --out /data/r.json /tmp/x /data.txt")
+        line = box.execs[-1][0]
+        assert "/workspace/data/a.py" in line
+        assert "/workspace/data/r.json" in line
+        # A system path and a sibling file are left untouched.
+        assert " /tmp/x " in line
+        assert "/data.txt" in line
+        assert "/workspace/data.txt" not in line
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_mount_mountpoints_exposed_as_env_vars():
+    box = RecordingSandbox(captures=("python3", ))
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    try:
+        await ws.execute("python3 x")
+        assert box.last_env["MIRAGE_DATA"] == "/workspace/data"
     finally:
         await ws.close()
 

@@ -21,6 +21,10 @@ import { scriptStringError, type RunArgs, type RunResult, type Runtime } from '.
 // Virtual mounts the workspace synthesizes; the sandbox has its own.
 export const SYSTEM_MOUNTS: ReadonlySet<string> = new Set(['/dev', HISTORY_PREFIX])
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /** Per-prefix remote mount specs; null = not remotely mountable. */
 export type MountSpecs = Record<string, Record<string, unknown> | null>
 
@@ -96,6 +100,12 @@ export abstract class RemoteSandbox implements Runtime {
   private dispatch: BridgeDispatchFn | null = null
   private mountPrefixes: (() => string[]) | null = null
   private mountSpecs: (() => MountSpecs) | null = null
+  // virtual mount prefix -> its physical mountpoint in this sandbox, and
+  // the same as MIRAGE_<PREFIX> env vars, both built once the workspace
+  // is mounted. mirage is the control plane: the agent speaks virtual
+  // paths and these rewrite them onto the provider.
+  private mountMap: Record<string, string> | null = null
+  private mountEnv: Record<string, string> = {}
 
   constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
     const opts = options as RemoteSandboxOptions
@@ -151,8 +161,46 @@ export abstract class RemoteSandbox implements Runtime {
     cwd: string,
   ): Promise<RunResult> {
     await this.ensureStarted()
-    const merged = { ...this.env, ...env }
-    return this.execLine(line, stdin, merged, this.sandboxCwd(cwd))
+    const merged = { ...this.env, ...this.mountEnv, ...env }
+    return this.execLine(this.translateLine(line), stdin, merged, this.sandboxCwd(cwd))
+  }
+
+  // Named mounts (/s3, /data) rewrite cleanly; a bare "/" world mount is
+  // skipped, as rebasing every absolute path would capture the sandbox's
+  // own /usr and /bin.
+  private buildTranslation(): void {
+    const root = rstripSlash(this.workspaceRoot ?? '/workspace')
+    const mountMap: Record<string, string> = {}
+    const mountEnv: Record<string, string> = {}
+    if (this.mountPrefixes !== null) {
+      for (const prefix of this.userMountPrefixes()) {
+        if (prefix === '/') continue
+        const mountpoint = `${root}/${lstripSlash(prefix)}`
+        mountMap[prefix] = mountpoint
+        const name = prefix
+          .replace(/^\/+|\/+$/g, '')
+          .toUpperCase()
+          .replace(/[^A-Z0-9]+/g, '_')
+        mountEnv[`MIRAGE_${name}`] = mountpoint
+      }
+    }
+    this.mountMap = mountMap
+    this.mountEnv = mountEnv
+  }
+
+  // Rewrite path tokens that begin exactly at a mount prefix (/s3 or
+  // /s3/...); siblings (/s3.txt), system paths (/usr/bin), and relative
+  // paths are left alone. Longest prefix wins so nested mounts stay right.
+  private translateLine(line: string): string {
+    const map = this.mountMap
+    if (map === null) return line
+    let out = line
+    for (const prefix of Object.keys(map).sort((a, b) => b.length - a.length)) {
+      const target = map[prefix] ?? ''
+      const re = new RegExp(`(?<![\\w/.\\-])${escapeRegExp(prefix)}(?=/|$|[^\\w.\\-])`, 'g')
+      out = out.replace(re, () => target)
+    }
+    return out
   }
 
   // Single-flight provisioning: concurrent first lines share one start,
@@ -174,6 +222,7 @@ export abstract class RemoteSandbox implements Runtime {
     }
     this.workspaceRoot ??= await this.defaultWorkspaceRoot()
     await this.mountWorkspace()
+    this.buildTranslation()
   }
 
   /**

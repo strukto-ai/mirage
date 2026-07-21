@@ -15,6 +15,7 @@
 import asyncio
 import json
 import posixpath
+import re
 import shlex
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -55,9 +56,10 @@ class RemoteSandbox(Runtime):
     Subclasses adapt one provider by implementing the hooks
     (create_sandbox, exec_line, upload, download, close); everything
     else is inherited: routing and captures, per-line scripts, lazy
-    provisioning on the first line, workspace mounting, and reattach
-    to a live sandbox by id. The sandbox is created on the first line,
-    never at workspace construction.
+    provisioning on the first line, workspace mounting, control-plane
+    translation of virtual mount paths onto the provider's mountpoints,
+    and reattach to a live sandbox by id. The sandbox is created on the
+    first line, never at workspace construction.
 
     Args:
         captures (Sequence[str]): commands that place a whole line
@@ -116,6 +118,12 @@ class RemoteSandbox(Runtime):
         self._mount_prefixes: Callable[[], list[str]] | None = None
         self._mount_specs: Callable[[], dict[str, dict[str, Any]
                                              | None]] | None = None
+        # virtual mount prefix -> its physical mountpoint in this sandbox,
+        # and the same as MIRAGE_<PREFIX> env vars, both built once the
+        # workspace is mounted. mirage is the control plane: the agent
+        # speaks virtual paths and these rewrite them onto the provider.
+        self._mount_map: dict[str, str] | None = None
+        self._mount_env: dict[str, str] = {}
 
     @property
     def sandbox_id(self) -> str | None:
@@ -173,9 +181,54 @@ class RemoteSandbox(Runtime):
                 if self.workspace_root is None:
                     self.workspace_root = await self.default_workspace_root()
                 await self.mount_workspace()
+                self._build_translation()
                 self._started = True
-        merged = {**self.env, **env}
-        return await self.exec_line(line, stdin, merged, self.sandbox_cwd(cwd))
+        merged = {**self.env, **self._mount_env, **env}
+        return await self.exec_line(self._translate_line(line), stdin, merged,
+                                    self.sandbox_cwd(cwd))
+
+    def _build_translation(self) -> None:
+        """Map each virtual mount onto its physical sandbox mountpoint.
+
+        Named mounts (``/s3``, ``/data``) rewrite cleanly; a bare ``/``
+        world mount is skipped, as rebasing every absolute path would
+        capture the sandbox's own ``/usr`` and ``/bin``.
+        """
+        root = self.workspace_root or "/workspace"
+        mount_map: dict[str, str] = {}
+        mount_env: dict[str, str] = {}
+        if self._mount_prefixes is not None:
+            for prefix in self._user_mount_prefixes():
+                if prefix == "/":
+                    continue
+                mountpoint = posixpath.join(root, prefix.lstrip("/"))
+                mount_map[prefix] = mountpoint
+                var = "MIRAGE_" + re.sub(r"[^A-Z0-9]+", "_",
+                                         prefix.strip("/").upper())
+                mount_env[var] = mountpoint
+        self._mount_map = mount_map
+        self._mount_env = mount_env
+
+    def _translate_line(self, line: str) -> str:
+        """Rewrite virtual mount paths in a line to sandbox mountpoints.
+
+        Only path tokens that begin exactly at a mount prefix (``/s3``
+        or ``/s3/...``) are rewritten; siblings (``/s3.txt``), deeper
+        system paths (``/usr/bin``), and relative paths are left alone.
+        Longest prefix wins so nested mounts stay correct.
+
+        Args:
+            line (str): the raw line in the virtual namespace.
+        """
+        if not self._mount_map:
+            return line
+        for prefix in sorted(self._mount_map, key=len, reverse=True):
+            # A mountpoint is a plain posix path: no backslashes or group
+            # refs, so it is safe as a literal replacement string.
+            target = self._mount_map[prefix].replace("\\", r"\\")
+            pattern = rf"(?<![\w/.\-]){re.escape(prefix)}(?=/|\Z|[^\w.\-])"
+            line = re.sub(pattern, target, line)
+        return line
 
     def sandbox_cwd(self, cwd: str) -> str:
         """The session cwd as a path inside the sandbox.
