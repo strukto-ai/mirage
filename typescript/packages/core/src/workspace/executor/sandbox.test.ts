@@ -206,7 +206,12 @@ describe('RemoteSandbox', () => {
     const ws = await sandboxWorkspace(box)
     try {
       await ws.execute('python3 x')
-      const [, , env] = box.execs[box.execs.length - 1] ?? ['', null, {}, '']
+      const [, , env] = box.execs[box.execs.length - 1] ?? [
+        '',
+        null,
+        {} as Record<string, string>,
+        '',
+      ]
       expect(env.MIRAGE_DATA).toBe('/workspace/data')
     } finally {
       await ws.close()
