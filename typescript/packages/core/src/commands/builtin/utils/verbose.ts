@@ -22,5 +22,10 @@
 // exactly on a single-child chain. Mirrors Python `removal_lines`.
 export function removalLines(entries: { path: string; isDir: boolean }[]): string[] {
   const ordered = [...entries].sort((a, b) => (a.path < b.path ? 1 : a.path > b.path ? -1 : 0))
-  return ordered.map((e) => (e.isDir ? `removed directory '${e.path}'` : `removed '${e.path}'`))
+  return ordered.map((e) => {
+    // Object stores hand back directory paths with a trailing slash; GNU never
+    // prints one, so normalize (root "/" excepted).
+    const p = e.path.replace(/\/+$/, '') || '/'
+    return e.isDir ? `removed directory '${p}'` : `removed '${p}'`
+  })
 }

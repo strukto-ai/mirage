@@ -38,10 +38,13 @@ def removal_lines(entries: list[tuple[PathSpec, bool]]) -> list[str]:
     ordered = sorted(entries, key=lambda e: e[0].virtual, reverse=True)
     lines: list[str] = []
     for path, is_dir in ordered:
+        # Object stores hand back directory paths with a trailing slash; GNU
+        # never prints one, so normalize (root "/" excepted).
+        virtual = path.virtual.rstrip("/") or "/"
         if is_dir:
-            lines.append(f"removed directory '{path.virtual}'")
+            lines.append(f"removed directory '{virtual}'")
         else:
-            lines.append(f"removed '{path.virtual}'")
+            lines.append(f"removed '{virtual}'")
     return lines
 
 
