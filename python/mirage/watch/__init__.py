@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.types import ChangeKind, Delta, ResourceChange, WalkEntry, WalkFn
+from mirage.types import (Delta, FileChangeKind, FileEvent, FileMetadata,
+                          WalkEntry, WalkFn)
 from mirage.utils.fingerprint import stat_fingerprint
 from mirage.watch.base import DeltaHook, SupportsChanges, WatchRuntime
 from mirage.watch.delta import ListingDeltaHook
@@ -21,16 +22,17 @@ from mirage.watch.queue import (OverflowPolicy, QueueClosed, QueueFactory,
 from mirage.watch.watcher import Watcher, enable_watch
 
 __all__ = [
-    "ChangeKind",
     "Delta",
     "DeltaHook",
+    "FileChangeKind",
+    "FileEvent",
+    "FileMetadata",
     "ListingDeltaHook",
     "OverflowPolicy",
     "QueueClosed",
     "QueueFactory",
     "QueueOverflowError",
     "RAMWatchQueue",
-    "ResourceChange",
     "SupportsChanges",
     "WalkEntry",
     "WalkFn",

@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, TypeAlias
 
@@ -415,8 +416,8 @@ class StateKey(StrEnum):
     NODES = "nodes"
 
 
-class ChangeKind(StrEnum):
-    """Kind of an externally observed resource change.
+class FileChangeKind(StrEnum):
+    """Kind of an externally observed file change.
 
     Shared vocabulary of the watch feature; the producer
     (``Workspace.watch``) and the watch machinery both depend on it, so
@@ -439,29 +440,52 @@ class ChangeKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceChange:
-    """One externally observed change to a mounted resource path.
+class FileMetadata:
+    """Post-change metadata a change source can attach to an event.
+
+    Every field is optional: producers fill only what their signal
+    honestly carries (a listing walk knows fingerprint/size/modified; a
+    webhook payload usually knows none). Growth point for future
+    backend facts (owner, inode) as sources that can supply them
+    appear.
+
+    Args:
+        fingerprint (str | None): Content fingerprint after the change
+            (same concept as ``FileStat.fingerprint``: ETag/rev, or the
+            mtime|size composite), so consumers can skip no-op
+            reprocessing.
+        size (int | None): Content size in bytes after the change.
+        modified (str | None): Last-modified stamp after the change.
+    """
+    fingerprint: str | None = None
+    size: int | None = None
+    modified: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileEvent:
+    """One externally observed change to a mounted file path.
 
     Level-triggered: an event tells the consumer *what is dirty*, not
     every intermediate edit. Consumers read current content through the
-    workspace after receiving a change.
+    workspace after receiving an event; the watch runtime guarantees
+    caches were invalidated before delivery, so that read is fresh.
 
     Args:
-        kind (ChangeKind): What happened to the path.
+        kind (FileChangeKind): What happened to the path.
         path (PathSpec): Virtual path of the changed entry.
-        observed_at_ms (int): Epoch milliseconds when the change was
-            observed by the poller.
-        previous (PathSpec | None): Prior path for MOVE changes.
-        fingerprint (str | None): Content fingerprint of the path after
-            the change (same concept as ``FileStat.fingerprint``:
-            ETag/rev, or the mtime|size composite default), so
-            consumers can skip no-op reprocessing.
+        timestamp (datetime): UTC time the change was observed (not
+            when it happened; webhook lag and poll cadence sit in
+            between).
+        previous_path (PathSpec | None): Prior path for MOVE events.
+        metadata (FileMetadata | None): Post-change metadata when the
+            source carries it; None otherwise.
     """
-    kind: ChangeKind
+    kind: FileChangeKind
     path: PathSpec
-    observed_at_ms: int
-    previous: PathSpec | None = None
-    fingerprint: str | None = None
+    timestamp: datetime
+    previous_path: PathSpec | None = None
+    metadata: FileMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,12 +493,12 @@ class Delta:
     """Result of one checkpointed delta pull.
 
     Args:
-        changes (tuple[ResourceChange, ...]): Changes since the given
+        changes (tuple[FileEvent, ...]): Changes since the given
             checkpoint; empty on a baseline pull.
         checkpoint (str | None): Opaque serialized state to pass to the
             next pull.
     """
-    changes: tuple[ResourceChange, ...]
+    changes: tuple[FileEvent, ...]
     checkpoint: str | None
 
 
@@ -488,10 +512,16 @@ class WalkEntry:
         fingerprint (str | None): Content fingerprint (see
             ``mirage.utils.fingerprint.stat_fingerprint``). None means
             only create/delete are detectable for this entry.
+        size (int | None): Content size in bytes, when the listing
+            carries it.
+        modified (str | None): Last-modified stamp, when the listing
+            carries it.
     """
     virtual: str
     is_dir: bool
     fingerprint: str | None
+    size: int | None = None
+    modified: str | None = None
 
 
 WalkFn: TypeAlias = Callable[[PathSpec], AsyncIterator[WalkEntry]]

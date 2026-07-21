@@ -63,16 +63,18 @@ class NextcloudWalk:
                        resource_rel if prefix else "/" + resource_rel)
             meta = entry.metadata
             if is_dir:
-                fingerprint = None
-            else:
-                modified = meta.last_modified.isoformat() \
-                    if meta and meta.last_modified else None
-                fingerprint = stat_fingerprint(
-                    meta.etag if meta else None, modified,
-                    meta.content_length if meta else None)
+                yield WalkEntry(virtual=virtual, is_dir=True, fingerprint=None)
+                continue
+            modified = meta.last_modified.isoformat() \
+                if meta and meta.last_modified else None
+            size = meta.content_length if meta else None
+            fingerprint = stat_fingerprint(meta.etag if meta else None,
+                                           modified, size)
             yield WalkEntry(virtual=virtual,
-                            is_dir=is_dir,
-                            fingerprint=fingerprint)
+                            is_dir=False,
+                            fingerprint=fingerprint,
+                            size=size,
+                            modified=modified)
 
 
 def build_delta_hook(accessor: NextcloudAccessor) -> DeltaHook:

@@ -1,17 +1,20 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import ChangeKind, Delta, MountMode, PathSpec, ResourceChange
+from mirage.types import Delta, FileChangeKind, FileEvent, MountMode, PathSpec
 from mirage.watch import enable_watch
 from mirage.workspace import Workspace
 
+_TS = datetime.fromtimestamp(0, tz=timezone.utc)
+
 
 def _change(kind, virtual):
-    return ResourceChange(kind=kind,
-                          path=PathSpec.from_str_path(virtual),
-                          observed_at_ms=0)
+    return FileEvent(kind=kind,
+                     path=PathSpec.from_str_path(virtual),
+                     timestamp=_TS)
 
 
 class OneShotHook:
@@ -23,7 +26,8 @@ class OneShotHook:
         self.calls += 1
         if checkpoint is None:
             return Delta(changes=(), checkpoint="base")
-        return Delta(changes=(_change(ChangeKind.UPDATE, "/data/doc.txt"), ),
+        return Delta(changes=(_change(FileChangeKind.UPDATE,
+                                      "/data/doc.txt"), ),
                      checkpoint="next")
 
 
@@ -43,9 +47,9 @@ async def test_notify_delivers_through_workspace_watch():
     agen = ws.watch(PathSpec.from_str_path("/data"))
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
-    await watcher.notify(_change(ChangeKind.CREATE, "/data/new.txt"))
+    await watcher.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))
     got = await asyncio.wait_for(task, timeout=2)
-    assert got.kind is ChangeKind.CREATE
+    assert got.kind is FileChangeKind.CREATE
     assert got.path.virtual == "/data/new.txt"
     await agen.aclose()
     await ws.close()
@@ -62,7 +66,7 @@ async def test_watch_accepts_plain_string_path():
     agen = ws.watch("/data", recursive=True)
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
-    await watcher.notify(_change(ChangeKind.CREATE, "/data/new.txt"))
+    await watcher.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))
     got = await asyncio.wait_for(task, timeout=2)
     assert got.path.virtual == "/data/new.txt"
     await agen.aclose()
@@ -77,7 +81,7 @@ async def test_watch_accepts_string_list_and_glob():
     agen = ws.watch(["/data/a", "/data/*.txt"])
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
-    await watcher.notify(_change(ChangeKind.CREATE, "/data/hit.txt"))
+    await watcher.notify(_change(FileChangeKind.CREATE, "/data/hit.txt"))
     got = await asyncio.wait_for(task, timeout=2)
     assert got.path.virtual == "/data/hit.txt"
     await agen.aclose()
@@ -105,7 +109,7 @@ async def test_pull_loop_over_delta_hook_feeds_notify():
             await watcher.notify(change)
 
     got = await asyncio.wait_for(task, timeout=2)
-    assert got.kind is ChangeKind.UPDATE
+    assert got.kind is FileChangeKind.UPDATE
     assert got.path.virtual == "/data/doc.txt"
     await agen.aclose()
     await ws.close()

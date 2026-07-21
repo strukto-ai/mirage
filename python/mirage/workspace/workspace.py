@@ -52,8 +52,8 @@ from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
                                   runtime_bindings_for, whole_line_runtime)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
-from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, ResourceChange, StateKey, parse_mount_mode)
+from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
+                          MountMode, PathSpec, StateKey, parse_mount_mode)
 from mirage.utils.errors import format_fs_error
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.abort import MirageAbortError
@@ -127,10 +127,10 @@ class WatchDelegate(Protocol):
     def watch(self,
               path: PathSpec | Sequence[PathSpec],
               *,
-              recursive: bool = True) -> AsyncIterator[ResourceChange]:
+              recursive: bool = True) -> AsyncIterator[FileEvent]:
         ...
 
-    async def notify(self, change: ResourceChange) -> None:
+    async def notify(self, change: FileEvent) -> None:
         ...
 
     async def close(self) -> None:
@@ -679,7 +679,7 @@ class Workspace:
     def watch(self,
               path: str | PathSpec | Sequence[str | PathSpec],
               *,
-              recursive: bool = True) -> AsyncIterator[ResourceChange]:
+              recursive: bool = True) -> AsyncIterator[FileEvent]:
         """Stream externally observed changes under ``path``.
 
         The str tolerance lives only here, at the consumer boundary

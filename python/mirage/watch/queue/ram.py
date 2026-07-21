@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
+from datetime import datetime, timezone
 
-from mirage.types import ChangeKind, OverflowPolicy, PathSpec, ResourceChange
+from mirage.types import FileChangeKind, FileEvent, OverflowPolicy, PathSpec
 from mirage.watch.constants import DEFAULT_MAX_PENDING
 from mirage.watch.errors import QueueClosed, QueueOverflowError
 
@@ -52,47 +52,48 @@ class RAMWatchQueue:
         self._root = root
         self._max_pending = max_pending
         self._on_overflow = on_overflow
-        self._pending: dict[str, ResourceChange] = {}
+        self._pending: dict[str, FileEvent] = {}
         self._overflowed = False
         self._closed = False
         self._ready = asyncio.Event()
 
-    def _merge(self, old: ResourceChange | None,
-               new: ResourceChange) -> ResourceChange | None:
+    def _merge(self, old: FileEvent | None,
+               new: FileEvent) -> FileEvent | None:
         """Level-triggered merge of a pending change with a new one.
 
         Args:
-            old (ResourceChange | None): Currently pending change.
-            new (ResourceChange): Newly observed change.
+            old (FileEvent | None): Currently pending change.
+            new (FileEvent): Newly observed change.
 
         Returns:
-            ResourceChange | None: Replacement pending change, or None
+            FileEvent | None: Replacement pending change, or None
             when the pair cancels out (CREATE then DELETE).
         """
         if old is None:
             return new
-        if old.kind is ChangeKind.CREATE:
-            if new.kind is ChangeKind.DELETE:
+        if old.kind is FileChangeKind.CREATE:
+            if new.kind is FileChangeKind.DELETE:
                 return None
-            return ResourceChange(kind=ChangeKind.CREATE,
-                                  path=new.path,
-                                  observed_at_ms=new.observed_at_ms,
-                                  previous=new.previous,
-                                  fingerprint=new.fingerprint)
-        if old.kind is ChangeKind.DELETE and new.kind is ChangeKind.CREATE:
-            return ResourceChange(kind=ChangeKind.UPDATE,
-                                  path=new.path,
-                                  observed_at_ms=new.observed_at_ms,
-                                  previous=new.previous,
-                                  fingerprint=new.fingerprint)
+            return FileEvent(kind=FileChangeKind.CREATE,
+                             path=new.path,
+                             timestamp=new.timestamp,
+                             previous_path=new.previous_path,
+                             metadata=new.metadata)
+        if old.kind is FileChangeKind.DELETE \
+                and new.kind is FileChangeKind.CREATE:
+            return FileEvent(kind=FileChangeKind.UPDATE,
+                             path=new.path,
+                             timestamp=new.timestamp,
+                             previous_path=new.previous_path,
+                             metadata=new.metadata)
         return new
 
-    async def push(self, change: ResourceChange) -> None:
+    async def push(self, change: FileEvent) -> None:
         """Merge ``change`` into the pending map; apply the overflow
         policy when the cap is exceeded.
 
         Args:
-            change (ResourceChange): Change to deliver.
+            change (FileEvent): Change to deliver.
         """
         if self._closed:
             return
@@ -109,14 +110,14 @@ class RAMWatchQueue:
                 self._overflowed = True
             else:
                 self._pending.clear()
-                self._pending[self._root.virtual] = ResourceChange(
-                    kind=ChangeKind.UNKNOWN,
+                self._pending[self._root.virtual] = FileEvent(
+                    kind=FileChangeKind.UNKNOWN,
                     path=self._root,
-                    observed_at_ms=int(time.time() * 1000))
+                    timestamp=datetime.now(timezone.utc))
         if self._pending or self._overflowed:
             self._ready.set()
 
-    async def pop(self) -> ResourceChange:
+    async def pop(self) -> FileEvent:
         """Wait for and return the next pending change.
 
         Raises:

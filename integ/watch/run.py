@@ -148,7 +148,7 @@ class EventStream:
 
         Args:
             want_path (str): Virtual path the case expects.
-            want_kind (str): ChangeKind value the case expects.
+            want_kind (str): FileChangeKind value the case expects.
         """
         deadline = asyncio.get_running_loop().time() + EVENT_TIMEOUT
         while True:

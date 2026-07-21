@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from mirage.types import ChangeKind, PathSpec, WalkEntry
+from mirage.types import FileChangeKind, PathSpec, WalkEntry
 from mirage.watch.delta import ListingDeltaHook
 
 
@@ -41,7 +41,7 @@ async def test_create_detected():
     tree["/nc/b.txt"] = "e2"
     delta = await hook.pull(_root(), base.checkpoint)
     kinds = {(c.path.virtual, c.kind) for c in delta.changes}
-    assert ("/nc/b.txt", ChangeKind.CREATE) in kinds
+    assert ("/nc/b.txt", FileChangeKind.CREATE) in kinds
     assert len(delta.changes) == 1
 
 
@@ -53,8 +53,9 @@ async def test_update_detected_via_fingerprint_change():
     tree["/nc/a.txt"] = "e2"
     delta = await hook.pull(_root(), base.checkpoint)
     assert len(delta.changes) == 1
-    assert delta.changes[0].kind is ChangeKind.UPDATE
-    assert delta.changes[0].fingerprint == "e2"
+    assert delta.changes[0].kind is FileChangeKind.UPDATE
+    assert delta.changes[0].metadata is not None
+    assert delta.changes[0].metadata.fingerprint == "e2"
 
 
 @pytest.mark.asyncio
@@ -65,8 +66,30 @@ async def test_delete_detected():
     del tree["/nc/b.txt"]
     delta = await hook.pull(_root(), base.checkpoint)
     assert len(delta.changes) == 1
-    assert delta.changes[0].kind is ChangeKind.DELETE
+    assert delta.changes[0].kind is FileChangeKind.DELETE
     assert delta.changes[0].path.virtual == "/nc/b.txt"
+
+
+@pytest.mark.asyncio
+async def test_metadata_carries_size_and_modified():
+
+    async def _walk(root: PathSpec) -> AsyncIterator[WalkEntry]:
+        yield WalkEntry(virtual="/nc/a.txt",
+                        is_dir=False,
+                        fingerprint="e2",
+                        size=2,
+                        modified="2026-01-02T00:00:00")
+
+    hook = ListingDeltaHook(_walk)
+    base = await ListingDeltaHook(_walk_from({"/nc/a.txt":
+                                              "e1"})).pull(_root(), None)
+    delta = await hook.pull(_root(), base.checkpoint)
+    meta = delta.changes[0].metadata
+    assert delta.changes[0].kind is FileChangeKind.UPDATE
+    assert meta is not None
+    assert meta.fingerprint == "e2"
+    assert meta.size == 2
+    assert meta.modified == "2026-01-02T00:00:00"
 
 
 @pytest.mark.asyncio
@@ -86,4 +109,4 @@ async def test_directory_fingerprint_not_reported():
     tree["/nc/sub/x.txt"] = "e1"
     delta = await hook.pull(_root(), base.checkpoint)
     created = {c.path.virtual: c for c in delta.changes}
-    assert created["/nc/sub/x.txt"].fingerprint == "e1"
+    assert created["/nc/sub/x.txt"].metadata.fingerprint == "e1"

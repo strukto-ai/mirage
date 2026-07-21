@@ -1,12 +1,13 @@
 import asyncio
 import os
+from datetime import datetime, timezone
 
 from aiohttp import web
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
-from mirage.types import ChangeKind, PathSpec, ResourceChange
+from mirage.types import FileChangeKind, FileEvent, PathSpec
 from mirage.watch import Watcher, enable_watch
 
 load_dotenv(".env.development")
@@ -16,9 +17,9 @@ PORT = int(os.environ.get("WEBHOOK_PORT", "8990"))
 
 # Nextcloud webhook_listeners event class -> mirage change kind.
 KIND_BY_CLASS = {
-    "OCP\\Files\\Events\\Node\\NodeCreatedEvent": ChangeKind.CREATE,
-    "OCP\\Files\\Events\\Node\\NodeWrittenEvent": ChangeKind.UPDATE,
-    "OCP\\Files\\Events\\Node\\NodeDeletedEvent": ChangeKind.DELETE,
+    "OCP\\Files\\Events\\Node\\NodeCreatedEvent": FileChangeKind.CREATE,
+    "OCP\\Files\\Events\\Node\\NodeWrittenEvent": FileChangeKind.UPDATE,
+    "OCP\\Files\\Events\\Node\\NodeDeletedEvent": FileChangeKind.DELETE,
 }
 
 config = NextcloudConfig(
@@ -35,7 +36,7 @@ class WebhookReceiver:
     """The consumer-owned push endpoint: Nextcloud POSTs here.
 
     Mirage hosts no server; this receiver lives in your own service and
-    just imports mirage. Each payload is mapped to a ResourceChange and
+    just imports mirage. Each payload is mapped to a FileEvent and
     injected via watcher.notify — no polling anywhere.
     """
 
@@ -64,10 +65,11 @@ class WebhookReceiver:
         if kind is None:
             return web.json_response({"ok": True, "skipped": True})
         virtual = self.to_virtual(event.get("node", {}).get("path", ""))
-        change = ResourceChange(kind=kind,
-                                path=PathSpec.from_str_path(virtual),
-                                observed_at_ms=int(payload.get("time", 0)) *
-                                1000)
+        change = FileEvent(kind=kind,
+                           path=PathSpec.from_str_path(virtual),
+                           timestamp=datetime.fromtimestamp(int(
+                               payload.get("time", 0)),
+                                                            tz=timezone.utc))
         await self._watcher.notify(change)
         print(f"webhook: {kind.value} {virtual}")
         return web.json_response({"ok": True})
@@ -111,7 +113,7 @@ async def main() -> None:
     try:
         async for change in ws.watch(PathSpec.from_str_path(MOUNT)):
             print(f"event: {change.kind.value} {change.path.virtual}")
-            if change.kind is not ChangeKind.DELETE:
+            if change.kind is not FileChangeKind.DELETE:
                 result = await ws.execute(f"head -c 200 {change.path.virtual}")
                 fresh = (await result.stdout_str()).strip()
                 print(f"  fresh content: {fresh[:80]!r}")

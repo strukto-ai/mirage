@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterator, Sequence
 from typing import Protocol, runtime_checkable
 
-from mirage.types import Delta, PathSpec, ResourceChange
+from mirage.types import Delta, FileEvent, PathSpec
 from mirage.watch.queue.base import WatchQueue
 
 
@@ -62,16 +62,15 @@ class WatchRuntime(Protocol):
     this protocol so the dependency arrow stays watch -> workspace.
     """
 
-    def watch(
-            self,
-            path: PathSpec | Sequence[PathSpec],
-            *,
-            recursive: bool = True,
-            queue: WatchQueue | None = None) -> AsyncIterator[ResourceChange]:
+    def watch(self,
+              path: PathSpec | Sequence[PathSpec],
+              *,
+              recursive: bool = True,
+              queue: WatchQueue | None = None) -> AsyncIterator[FileEvent]:
         """Stream changes under ``path``; see ``Watcher.watch``."""
         ...
 
-    async def notify(self, change: ResourceChange) -> None:
+    async def notify(self, change: FileEvent) -> None:
         """Inject an externally observed change; see
         ``Watcher.notify``."""
         ...

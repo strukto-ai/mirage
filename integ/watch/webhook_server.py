@@ -12,17 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from datetime import datetime, timezone
+
 from aiohttp import web
 
-from mirage.types import ChangeKind, PathSpec, ResourceChange
+from mirage.types import FileChangeKind, FileEvent, PathSpec
 
 # Nextcloud webhook_listeners event class -> mirage change kind.
 _KIND_BY_CLASS = {
-    "OCP\\Files\\Events\\Node\\NodeCreatedEvent": ChangeKind.CREATE,
-    "OCP\\Files\\Events\\Node\\NodeWrittenEvent": ChangeKind.UPDATE,
-    "OCP\\Files\\Events\\Node\\NodeTouchedEvent": ChangeKind.UPDATE,
-    "OCP\\Files\\Events\\Node\\NodeDeletedEvent": ChangeKind.DELETE,
-    "OCP\\Files\\Events\\Node\\NodeRenamedEvent": ChangeKind.MOVE,
+    "OCP\\Files\\Events\\Node\\NodeCreatedEvent": FileChangeKind.CREATE,
+    "OCP\\Files\\Events\\Node\\NodeWrittenEvent": FileChangeKind.UPDATE,
+    "OCP\\Files\\Events\\Node\\NodeTouchedEvent": FileChangeKind.UPDATE,
+    "OCP\\Files\\Events\\Node\\NodeDeletedEvent": FileChangeKind.DELETE,
+    "OCP\\Files\\Events\\Node\\NodeRenamedEvent": FileChangeKind.MOVE,
 }
 
 
@@ -45,8 +47,8 @@ def _to_virtual(node_path: str, files_prefix: str, mount: str) -> str:
 
 
 def nextcloud_change(payload: dict, files_prefix: str,
-                     mount: str) -> ResourceChange | None:
-    """Map one Nextcloud webhook payload to a ResourceChange.
+                     mount: str) -> FileEvent | None:
+    """Map one Nextcloud webhook payload to a FileEvent.
 
     Returns None for event classes the watcher does not model.
 
@@ -59,21 +61,22 @@ def nextcloud_change(payload: dict, files_prefix: str,
     kind = _KIND_BY_CLASS.get(event.get("class", ""))
     if kind is None:
         return None
-    observed = int(payload.get("time", 0)) * 1000
-    if kind is ChangeKind.MOVE:
+    observed = datetime.fromtimestamp(int(payload.get("time", 0)),
+                                      tz=timezone.utc)
+    if kind is FileChangeKind.MOVE:
         source = event.get("source", {}).get("path", "")
         target = event.get("target", {}).get("path", "")
-        return ResourceChange(kind=kind,
-                              path=PathSpec.from_str_path(
-                                  _to_virtual(target, files_prefix, mount)),
-                              previous=PathSpec.from_str_path(
-                                  _to_virtual(source, files_prefix, mount)),
-                              observed_at_ms=observed)
+        return FileEvent(kind=kind,
+                         path=PathSpec.from_str_path(
+                             _to_virtual(target, files_prefix, mount)),
+                         previous_path=PathSpec.from_str_path(
+                             _to_virtual(source, files_prefix, mount)),
+                         timestamp=observed)
     node_path = event.get("node", {}).get("path", "")
-    return ResourceChange(kind=kind,
-                          path=PathSpec.from_str_path(
-                              _to_virtual(node_path, files_prefix, mount)),
-                          observed_at_ms=observed)
+    return FileEvent(kind=kind,
+                     path=PathSpec.from_str_path(
+                         _to_virtual(node_path, files_prefix, mount)),
+                     timestamp=observed)
 
 
 def make_app(watcher: object, files_prefix: str,

@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from typing import Protocol
 
-from mirage.types import ChangeKind, PathSpec, ResourceChange
+from mirage.types import FileChangeKind, FileEvent, PathSpec
 from mirage.utils.glob_walk import has_glob
 from mirage.utils.path import glob_prefix_match
 from mirage.watch.base import WatchRuntime
@@ -86,12 +86,12 @@ class Watcher:
             entry.prefix) else ""
         return PathSpec.from_str_path(norm, resource_path=resource_path)
 
-    def _matches(self, sub: Subscriber, change: ResourceChange) -> bool:
+    def _matches(self, sub: Subscriber, change: FileEvent) -> bool:
         """Whether a change falls inside any of a subscriber's scopes.
 
         Args:
             sub (Subscriber): Subscriber scopes.
-            change (ResourceChange): Candidate change.
+            change (FileEvent): Candidate change.
         """
         return any(
             self._in_scope(root, sub.recursive, change.path.virtual)
@@ -140,8 +140,7 @@ class Watcher:
                 return specs
             specs.append(self._frame(entry, current))
 
-    async def _invalidate(self, entry: MountEntry,
-                          change: ResourceChange) -> None:
+    async def _invalidate(self, entry: MountEntry, change: FileEvent) -> None:
         """Evict cache for one change before it is delivered.
 
         The whole ancestor chain is invalidated, not just the path: an
@@ -153,29 +152,29 @@ class Watcher:
 
         Args:
             entry (MountEntry): Mount owning the change path.
-            change (ResourceChange): Change whose path is now stale.
+            change (FileEvent): Change whose path is now stale.
         """
         manager = entry.cache_manager
         if manager is None:
             return
-        if change.kind is ChangeKind.DELETE:
+        if change.kind is FileChangeKind.DELETE:
             await manager.invalidate_after_unlink(change.path)
         else:
             await manager.invalidate_after_write(change.path)
         for ancestor in self._ancestors(entry, change.path.virtual):
             await manager.invalidate_after_write(ancestor)
 
-    async def notify(self, change: ResourceChange) -> None:
+    async def notify(self, change: FileEvent) -> None:
         """Inject one externally observed change.
 
         The single entry point for all detection: a consumer's webhook
         receiver, queue bridge, or poll loop maps its signal to a
-        ``ResourceChange`` and calls this. The change's cache entries
+        ``FileEvent`` and calls this. The change's cache entries
         are invalidated first, then it is delivered to every watch
         whose scope matches.
 
         Args:
-            change (ResourceChange): Observed change; its path is
+            change (FileEvent): Observed change; its path is
                 reframed to the owning mount before use.
         """
         if self._closed:
@@ -192,7 +191,7 @@ class Watcher:
             path: PathSpec | Sequence[PathSpec],
             *,
             recursive: bool = True,
-            queue: WatchQueue | None = None) -> AsyncIterator[ResourceChange]:
+            queue: WatchQueue | None = None) -> AsyncIterator[FileEvent]:
         """Stream changes under ``path`` until the caller stops
         iterating or the watcher closes.
 

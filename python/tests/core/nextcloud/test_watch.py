@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.core.nextcloud.watch import NextcloudWalk, build_delta_hook
-from mirage.types import ChangeKind, PathSpec
+from mirage.types import FileChangeKind, PathSpec
 
 
 def _root() -> PathSpec:
@@ -38,7 +38,7 @@ async def test_hook_baseline_then_create(make_acc):
     delta = await hook.pull(_root(), base.checkpoint)
     created = {c.path.virtual: c for c in delta.changes}
     assert "/data/b.txt" in created
-    assert created["/data/b.txt"].kind is ChangeKind.CREATE
+    assert created["/data/b.txt"].kind is FileChangeKind.CREATE
 
 
 @pytest.mark.asyncio
@@ -49,7 +49,7 @@ async def test_hook_detects_update(make_acc):
     await acc._fake.write("data/a.txt", b"changed-content")
     delta = await hook.pull(_root(), base.checkpoint)
     changed = {c.path.virtual: c for c in delta.changes}
-    assert changed["/data/a.txt"].kind is ChangeKind.UPDATE
+    assert changed["/data/a.txt"].kind is FileChangeKind.UPDATE
 
 
 @pytest.mark.asyncio
@@ -60,4 +60,4 @@ async def test_hook_detects_delete(make_acc):
     await acc._fake.delete("data/b.txt")
     delta = await hook.pull(_root(), base.checkpoint)
     deleted = {c.path.virtual: c for c in delta.changes}
-    assert deleted["/data/b.txt"].kind is ChangeKind.DELETE
+    assert deleted["/data/b.txt"].kind is FileChangeKind.DELETE

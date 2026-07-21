@@ -15,7 +15,7 @@
 from collections.abc import Callable
 from typing import Protocol
 
-from mirage.types import PathSpec, ResourceChange
+from mirage.types import FileEvent, PathSpec
 
 
 class WatchQueue(Protocol):
@@ -30,15 +30,15 @@ class WatchQueue(Protocol):
     of consumer speed.
     """
 
-    async def push(self, change: ResourceChange) -> None:
+    async def push(self, change: FileEvent) -> None:
         """Enqueue a change; never blocks on consumer progress.
 
         Args:
-            change (ResourceChange): Change to deliver.
+            change (FileEvent): Change to deliver.
         """
         ...
 
-    async def pop(self) -> ResourceChange:
+    async def pop(self) -> FileEvent:
         """Wait until a change is pending and return it.
 
         Raises:
