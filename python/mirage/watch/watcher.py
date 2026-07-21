@@ -100,9 +100,13 @@ class Watcher:
 
         A glob root (``/nc/data/*.txt``) is matched segment-wise at
         delivery time, so ``*`` does not cross ``/`` and files created
-        after the watch started still match; ``recursive`` is ignored
-        because the pattern itself defines the depth. A plain root uses
-        prefix containment.
+        after the watch started still match; a matched directory
+        covers its whole subtree (``/nc/data/*/abc`` scopes every
+        project's abc subtree; ``/nc/data/*`` therefore means the
+        whole subtree, not direct children — use a literal root with
+        ``recursive=False`` for shallow). ``recursive`` is ignored for
+        glob roots because the pattern itself defines the depth. A
+        plain root uses prefix containment.
 
         Args:
             root (str): One watch root, literal or glob.

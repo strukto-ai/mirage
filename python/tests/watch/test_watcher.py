@@ -247,6 +247,19 @@ def test_matches_glob_scope_covers_matched_dirs():
                                        "/nc/data/x.txt"))
 
 
+def test_matches_glob_middle_wildcard_fine_grained():
+    # /nc/data/*/abc: any project dir's abc subtree, nothing else.
+    w = _watcher()
+    sub = Subscriber(queue=None, roots=("/nc/data/*/abc", ), recursive=True)
+    assert w._matches(sub, _change(FileChangeKind.CREATE,
+                                   "/nc/data/proj1/abc"))
+    assert w._matches(
+        sub, _change(FileChangeKind.CREATE, "/nc/data/proj1/abc/report.txt"))
+    assert not w._matches(
+        sub, _change(FileChangeKind.CREATE, "/nc/data/proj1/other.txt"))
+    assert not w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/abc"))
+
+
 def test_matches_any_of_multiple_roots():
     w = _watcher()
     sub = Subscriber(queue=None,
