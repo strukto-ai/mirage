@@ -107,7 +107,6 @@ class WatchRuntime(Protocol):
     def watch(self,
               path: PathSpec | Sequence[PathSpec],
               *,
-              recursive: bool = True,
               queue: WatchQueue | None = None) -> AsyncIterator[FileEvent]:
         """Stream changes under ``path``; see ``Watcher.watch``."""
         ...

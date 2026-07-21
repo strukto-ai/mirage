@@ -92,32 +92,26 @@ class Watcher:
             change (FileEvent): Candidate change.
         """
         return any(
-            self._in_scope(root, sub.recursive, change.path.virtual)
-            for root in sub.roots)
+            self._in_scope(root, change.path.virtual) for root in sub.roots)
 
-    def _in_scope(self, root: str, recursive: bool, virtual: str) -> bool:
+    def _in_scope(self, root: str, virtual: str) -> bool:
         """Whether ``virtual`` falls inside one watch root.
 
-        Glob roots follow GNU shell glob depth semantics, matched
-        segment-wise at delivery time (``*`` does not cross ``/``, and
-        files created after the watch started still match):
+        The root's shape defines the depth, GNU shell glob style. A
+        literal directory root is the whole subtree; glob roots are
+        matched segment-wise at delivery time (``*`` does not cross
+        ``/``, and files created after the watch started still match):
 
         - no trailing slash (``/nc/data/*``, ``/nc/data/*.txt``):
           the matched entries themselves — exact depth, no descent
-          (the glob equivalent of a shallow watch);
+          (the glob spelling of a shallow watch);
         - trailing slash (``/nc/data/*/``, ``/nc/data/*/abc/``):
           directories, scoping everything strictly inside them
           (mirroring GNU ``*/`` matching only directories, which
           walkers then descend into).
 
-        ``recursive`` is ignored for glob roots because the pattern
-        itself defines the depth. A plain root uses prefix
-        containment.
-
         Args:
             root (str): One watch root, literal or glob.
-            recursive (bool): Whether descendants beyond direct
-                children match a literal root.
             virtual (str): Changed virtual path.
         """
         if has_glob(root):
@@ -130,13 +124,7 @@ class Watcher:
                 return path_depth > pat_depth
             return path_depth == pat_depth
         root = root.rstrip("/")
-        if virtual == root:
-            return True
-        if not virtual.startswith(root + "/"):
-            return False
-        if recursive:
-            return True
-        return "/" not in virtual[len(root) + 1:]
+        return virtual == root or virtual.startswith(root + "/")
 
     def _ancestors(self, entry: WatchMount, virtual: str) -> list[PathSpec]:
         """Framed ancestor directories of ``virtual`` below the mount
@@ -205,7 +193,6 @@ class Watcher:
             self,
             path: PathSpec | Sequence[PathSpec],
             *,
-            recursive: bool = True,
             queue: WatchQueue | None = None) -> AsyncIterator[FileEvent]:
         """Stream changes under ``path`` until the caller stops
         iterating or the watcher closes.
@@ -213,15 +200,16 @@ class Watcher:
         Works on any mount: delivery is notify-driven, so no resource
         capability is required to subscribe. Scope matching is done by
         mirage at delivery time, so glob roots need no backend support
-        and match files created after the watch started.
+        and match files created after the watch started. The root's
+        shape defines the depth: a literal directory is its whole
+        subtree, ``/dir/*`` is the entries at that level (shallow),
+        ``/dir/*/`` is everything inside child directories (see
+        ``_in_scope``).
 
         Args:
             path (PathSpec | Sequence[PathSpec]): Watch root or roots;
                 each may carry glob segments (``/nc/data/*.txt``) and
                 the mount is resolved per root.
-            recursive (bool): Deliver descendants beyond direct
-                children; ignored for glob roots (the pattern defines
-                the depth).
             queue (WatchQueue | None): Delivery queue override; the
                 watcher's factory builds one (for the first root) when
                 omitted.
@@ -242,8 +230,7 @@ class Watcher:
             ("/" if p.virtual.endswith("/") and p.virtual.strip("/") else "")
             for p in paths)
         sub = Subscriber(queue=queue or self._queue_factory(roots[0]),
-                         roots=scopes,
-                         recursive=recursive)
+                         roots=scopes)
         self._subscribers.append(sub)
         try:
             while True:

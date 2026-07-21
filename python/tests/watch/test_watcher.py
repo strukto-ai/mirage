@@ -214,24 +214,17 @@ async def test_notify_after_close_is_noop():
     assert w._subscribers == []
 
 
-def test_matches_recursive_scope():
+def test_matches_literal_root_is_whole_subtree():
     w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc", ), recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc", ))
+    assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/top.txt"))
     assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/sub/deep.txt"))
     assert not w._matches(sub, _change(FileChangeKind.CREATE, "/other/x.txt"))
 
 
-def test_matches_nonrecursive_scope():
-    w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc", ), recursive=False)
-    assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/top.txt"))
-    assert not w._matches(sub,
-                          _change(FileChangeKind.CREATE, "/nc/sub/deep.txt"))
-
-
 def test_matches_glob_scope_one_level():
     w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc/data/*.txt", ), recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc/data/*.txt", ))
     assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/a.txt"))
     assert not w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/a.md"))
     assert not w._matches(sub,
@@ -242,7 +235,7 @@ def test_matches_slashless_glob_is_shallow():
     # GNU depth semantics: /nc/data/* is the entries themselves —
     # the glob spelling of a shallow watch, no descent.
     w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc/data/*", ), recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc/data/*", ))
     assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/a.txt"))
     assert w._matches(sub, _change(FileChangeKind.CREATE, "/nc/data/sub"))
     assert not w._matches(
@@ -253,7 +246,7 @@ def test_matches_trailing_slash_glob_scopes_dir_subtrees():
     # GNU */ matches directories only; the watch scope is everything
     # strictly inside them.
     w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc/data/*/", ), recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc/data/*/", ))
     assert w._matches(sub,
                       _change(FileChangeKind.CREATE, "/nc/data/sub/deep.txt"))
     assert w._matches(
@@ -264,12 +257,12 @@ def test_matches_trailing_slash_glob_scopes_dir_subtrees():
 
 def test_matches_glob_scope_covers_matched_dirs():
     w = _watcher()
-    sub = Subscriber(queue=None, roots=("/nc/data/sub*/", ), recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc/data/sub*/", ))
     assert w._matches(
         sub, _change(FileChangeKind.CREATE, "/nc/data/subdir/deep.txt"))
     assert not w._matches(sub, _change(FileChangeKind.CREATE,
                                        "/nc/data/x.txt"))
-    shallow = Subscriber(queue=None, roots=("/nc/data/sub*", ), recursive=True)
+    shallow = Subscriber(queue=None, roots=("/nc/data/sub*", ))
     assert w._matches(shallow, _change(FileChangeKind.CREATE,
                                        "/nc/data/subdir"))
     assert not w._matches(
@@ -280,9 +273,7 @@ def test_matches_glob_middle_wildcard_fine_grained():
     # /nc/data/*/abc/: everything inside any project dir's abc;
     # /nc/data/*/abc (no slash): the abc entries themselves.
     w = _watcher()
-    inside = Subscriber(queue=None,
-                        roots=("/nc/data/*/abc/", ),
-                        recursive=True)
+    inside = Subscriber(queue=None, roots=("/nc/data/*/abc/", ))
     assert w._matches(
         inside, _change(FileChangeKind.CREATE,
                         "/nc/data/proj1/abc/report.txt"))
@@ -293,7 +284,7 @@ def test_matches_glob_middle_wildcard_fine_grained():
         inside, _change(FileChangeKind.CREATE, "/nc/data/proj1/other.txt"))
     assert not w._matches(inside, _change(FileChangeKind.CREATE,
                                           "/nc/data/abc"))
-    entry = Subscriber(queue=None, roots=("/nc/data/*/abc", ), recursive=True)
+    entry = Subscriber(queue=None, roots=("/nc/data/*/abc", ))
     assert w._matches(entry,
                       _change(FileChangeKind.CREATE, "/nc/data/proj1/abc"))
     assert not w._matches(
@@ -302,9 +293,7 @@ def test_matches_glob_middle_wildcard_fine_grained():
 
 def test_matches_any_of_multiple_roots():
     w = _watcher()
-    sub = Subscriber(queue=None,
-                     roots=("/nc/a", "/nc/b/keep.txt"),
-                     recursive=True)
+    sub = Subscriber(queue=None, roots=("/nc/a", "/nc/b/keep.txt"))
     assert w._matches(sub, _change(FileChangeKind.UPDATE, "/nc/a/x.txt"))
     assert w._matches(sub, _change(FileChangeKind.UPDATE, "/nc/b/keep.txt"))
     assert not w._matches(sub, _change(FileChangeKind.UPDATE,

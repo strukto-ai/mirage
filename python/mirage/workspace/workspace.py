@@ -126,9 +126,7 @@ class WatchDelegate(Protocol):
     """
 
     def watch(self,
-              path: PathSpec | Sequence[PathSpec],
-              *,
-              recursive: bool = True) -> AsyncIterator[FileEvent]:
+              path: PathSpec | Sequence[PathSpec]) -> AsyncIterator[FileEvent]:
         ...
 
     async def notify(self, change: FileEvent) -> None:
@@ -698,30 +696,31 @@ class Workspace:
             self._watch_runtime = Watcher(self._registry)
         return self._watch_runtime
 
-    def watch(self,
-              path: str | PathSpec | Sequence[str | PathSpec],
-              *,
-              recursive: bool = True) -> AsyncIterator[FileEvent]:
+    def watch(
+        self, path: str | PathSpec | Sequence[str | PathSpec]
+    ) -> AsyncIterator[FileEvent]:
         """Stream externally observed changes under ``path``.
 
-        The default watch runtime attaches lazily on first use; call
-        ``mirage.watch.enable_watch`` beforehand only to customize it.
-        The str tolerance lives only here, at the consumer boundary
-        (mirroring ``Ops``); the runtime below is PathSpec-only.
+        The root's shape defines the depth, GNU shell glob style: a
+        literal directory is its whole subtree, ``/dir/*`` is the
+        entries at that level (shallow), ``/dir/*/`` is everything
+        inside child directories. The default watch runtime attaches
+        lazily on first use; call ``mirage.watch.enable_watch``
+        beforehand only to customize it. The str tolerance lives only
+        here, at the consumer boundary (mirroring ``Ops``); the
+        runtime below is PathSpec-only.
 
         Args:
             path (str | PathSpec | Sequence[str | PathSpec]): Watch
                 root or roots; plain strings are coerced. Each root
                 may carry glob segments (``/nc/data/*.txt``).
-            recursive (bool): Deliver descendants beyond direct
-                children; ignored for glob roots.
         """
         raw = [path] if isinstance(path, (str, PathSpec)) else list(path)
         specs = [
             p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
             for p in raw
         ]
-        return self._watch_delegate().watch(specs, recursive=recursive)
+        return self._watch_delegate().watch(specs)
 
     async def notify(self, change: FileEvent) -> None:
         """Inject one externally observed change into the watch

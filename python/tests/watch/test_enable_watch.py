@@ -85,13 +85,13 @@ async def test_notify_delivers_through_workspace_watch():
 
 @pytest.mark.asyncio
 async def test_watch_accepts_plain_string_path():
-    # The issue-450 snippet shape: workspace.watch("/dir", recursive=True).
+    # The issue-450 snippet shape: workspace.watch("/dir").
     # Coercion happens at the workspace boundary; the runtime below
     # only ever sees PathSpec.
     ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     watcher = enable_watch(ws)
-    agen = ws.watch("/data", recursive=True)
+    agen = ws.watch("/data")
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
     await watcher.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))

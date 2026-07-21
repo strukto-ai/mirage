@@ -25,11 +25,7 @@ class Subscriber:
         queue (WatchQueue): Delivery queue owned by this subscriber.
         roots (tuple[str, ...]): Watch roots the subscriber asked for;
             each is a virtual path that may carry glob segments
-            (``/nc/data/*.txt``).
-        recursive (bool): Whether descendants beyond direct children
-            match; ignored for glob roots, whose pattern defines the
-            depth.
+            (``/nc/data/*.txt``); the root's shape defines the depth.
     """
     queue: WatchQueue
     roots: tuple[str, ...]
-    recursive: bool
