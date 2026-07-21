@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '../../utils/slash.ts'
+
 export interface DifyConfig {
   apiKey: string
   baseUrl: string
@@ -53,7 +55,7 @@ function normalizePositive(value: number | undefined, fallback: number, field: s
 export function resolveDifyConfig(config: DifyConfig): DifyConfigResolved {
   return {
     apiKey: config.apiKey,
-    baseUrl: config.baseUrl.replace(/\/+$/, ''),
+    baseUrl: rstripSlash(config.baseUrl),
     datasetId: normalizeNonEmpty(config.datasetId, 'datasetId'),
     slugMetadataName: normalizeNonEmpty(config.slugMetadataName ?? 'slug', 'slugMetadataName'),
     maxConcurrency: normalizePositive(config.maxConcurrency, 10, 'maxConcurrency'),
