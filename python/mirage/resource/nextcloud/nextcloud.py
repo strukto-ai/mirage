@@ -7,12 +7,14 @@ from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.commands.builtin.nextcloud import COMMANDS as NEXTCLOUD_COMMANDS
 from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.core.nextcloud.readdir import readdir
+from mirage.core.nextcloud.watch import build_delta_hook
 from mirage.ops.nextcloud import OPS as NEXTCLOUD_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.nextcloud.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+from mirage.watch.base import DeltaHook
 
 _resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 
@@ -46,6 +48,9 @@ class NextcloudResource(BaseResource):
             self.register(fn)
         for fn in NEXTCLOUD_OPS:
             self.register_op(fn)
+
+    def delta_hook(self) -> DeltaHook:
+        return build_delta_hook(self.accessor)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

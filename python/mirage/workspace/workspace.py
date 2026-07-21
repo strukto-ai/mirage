@@ -17,10 +17,10 @@ import builtins
 import logging
 import sys
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping
 from functools import partial
 from types import TracebackType
-from typing import Any, Literal, TypeAlias, cast, overload
+from typing import Any, Literal, Protocol, TypeAlias, cast, overload
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
@@ -53,7 +53,7 @@ from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, StateKey, parse_mount_mode)
+                          PathSpec, ResourceChange, StateKey, parse_mount_mode)
 from mirage.utils.errors import format_fs_error
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.abort import MirageAbortError
@@ -114,6 +114,27 @@ def _reject_config_script(kind: str, value: object) -> None:
             f"{kind} must be a callable taking the RouteContext; config "
             f"scripts reference a .py file (script:/route: in the "
             f"workspace yaml)")
+
+
+class WatchDelegate(Protocol):
+    """What ``Workspace.watch`` needs from an attached watch runtime.
+
+    ``mirage.watch.Watcher`` satisfies this structurally; the workspace
+    never imports the watch package, keeping the dependency one-way
+    (watch -> workspace), the same pattern as ``ReadReconciler``.
+    """
+
+    def watch(self,
+              path: PathSpec,
+              *,
+              recursive: bool = True) -> AsyncIterator[ResourceChange]:
+        ...
+
+    def nudge(self, path: PathSpec) -> None:
+        ...
+
+    async def close(self) -> None:
+        ...
 
 
 class Workspace:
@@ -210,6 +231,7 @@ class Workspace:
         self._dispatcher = Dispatcher(self._namespace, self._cache,
                                       consistency)
         self._registry.set_reconciler(self._dispatcher.reconciler)
+        self._watch_runtime: WatchDelegate | None = None
 
         fuse_targets: list[tuple[str, bool | str]] = []
         for prefix, value in resources.items():
@@ -638,10 +660,50 @@ class Workspace:
             task.cancel()
         self._cache._drain_tasks.clear()
 
+    @property
+    def registry(self) -> MountRegistry:
+        """Mount table; consumed by the watch runtime."""
+        return self._registry
+
+    def attach_watch_runtime(self, runtime: WatchDelegate) -> None:
+        """Install the watch runtime that ``watch`` delegates to.
+
+        Called by ``mirage.watch.enable_watch``; the workspace closes
+        the runtime on ``close``.
+
+        Args:
+            runtime (WatchDelegate): Runtime to attach.
+        """
+        self._watch_runtime = runtime
+
+    def watch(self,
+              path: PathSpec,
+              *,
+              recursive: bool = True) -> AsyncIterator[ResourceChange]:
+        """Stream externally observed changes under ``path``.
+
+        Args:
+            path (PathSpec): Watch root; its mount must have a change
+                capability.
+            recursive (bool): Deliver descendants beyond direct
+                children.
+
+        Raises:
+            RuntimeError: No watch runtime is attached.
+        """
+        if self._watch_runtime is None:
+            raise RuntimeError(
+                "watch requires an attached watch runtime: call "
+                "mirage.watch.enable_watch(workspace) first")
+        return self._watch_runtime.watch(path, recursive=recursive)
+
     async def close(self) -> None:
         async with self._close_lock:
             if self._async_closed:
                 return
+            if self._watch_runtime is not None:
+                await self._watch_runtime.close()
+                self._watch_runtime = None
             drain_tasks = list(self._cache._drain_tasks.values())
             for line_runtime in self._runtime_entries:
                 await line_runtime.close()

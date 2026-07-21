@@ -1,0 +1,109 @@
+import pytest
+
+from mirage.types import ChangeKind, OverflowPolicy, PathSpec, ResourceChange
+from mirage.watch.base import QueueOverflowError
+from mirage.watch.store import RAMWatchQueue
+
+
+def _change(kind: ChangeKind, virtual: str) -> ResourceChange:
+    return ResourceChange(kind=kind,
+                          path=PathSpec.from_str_path(virtual),
+                          observed_at_ms=0)
+
+
+def _root() -> PathSpec:
+    return PathSpec.from_str_path("/nc")
+
+
+@pytest.mark.asyncio
+async def test_push_pop_single():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(ChangeKind.CREATE, "/nc/a.txt"))
+    change = await q.pop()
+    assert change.kind is ChangeKind.CREATE
+    assert change.path.virtual == "/nc/a.txt"
+    assert await q.pending() == 0
+
+
+@pytest.mark.asyncio
+async def test_coalesce_create_then_update_stays_create():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(ChangeKind.CREATE, "/nc/a.txt"))
+    await q.push(_change(ChangeKind.UPDATE, "/nc/a.txt"))
+    assert await q.pending() == 1
+    change = await q.pop()
+    assert change.kind is ChangeKind.CREATE
+
+
+@pytest.mark.asyncio
+async def test_coalesce_create_then_delete_cancels():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(ChangeKind.CREATE, "/nc/a.txt"))
+    await q.push(_change(ChangeKind.DELETE, "/nc/a.txt"))
+    assert await q.pending() == 0
+
+
+@pytest.mark.asyncio
+async def test_coalesce_update_then_delete_is_delete():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(ChangeKind.UPDATE, "/nc/a.txt"))
+    await q.push(_change(ChangeKind.DELETE, "/nc/a.txt"))
+    change = await q.pop()
+    assert change.kind is ChangeKind.DELETE
+
+
+@pytest.mark.asyncio
+async def test_coalesce_delete_then_create_is_update():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(ChangeKind.DELETE, "/nc/a.txt"))
+    await q.push(_change(ChangeKind.CREATE, "/nc/a.txt"))
+    change = await q.pop()
+    assert change.kind is ChangeKind.UPDATE
+
+
+@pytest.mark.asyncio
+async def test_distinct_paths_do_not_coalesce():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(ChangeKind.CREATE, "/nc/a.txt"))
+    await q.push(_change(ChangeKind.CREATE, "/nc/b.txt"))
+    assert await q.pending() == 2
+
+
+@pytest.mark.asyncio
+async def test_overflow_collapse_to_unknown_root():
+    q = RAMWatchQueue(_root(),
+                      max_pending=2,
+                      on_overflow=OverflowPolicy.COLLAPSE)
+    for i in range(3):
+        await q.push(_change(ChangeKind.CREATE, f"/nc/f{i}.txt"))
+    assert await q.pending() == 1
+    change = await q.pop()
+    assert change.kind is ChangeKind.UNKNOWN
+    assert change.path.virtual == "/nc"
+
+
+@pytest.mark.asyncio
+async def test_overflow_drop_oldest_keeps_cap():
+    q = RAMWatchQueue(_root(),
+                      max_pending=2,
+                      on_overflow=OverflowPolicy.DROP_OLDEST)
+    for i in range(4):
+        await q.push(_change(ChangeKind.CREATE, f"/nc/f{i}.txt"))
+    assert await q.pending() == 2
+
+
+@pytest.mark.asyncio
+async def test_overflow_error_raises_on_pop():
+    q = RAMWatchQueue(_root(), max_pending=1, on_overflow=OverflowPolicy.ERROR)
+    await q.push(_change(ChangeKind.CREATE, "/nc/a.txt"))
+    await q.push(_change(ChangeKind.CREATE, "/nc/b.txt"))
+    with pytest.raises(QueueOverflowError):
+        await q.pop()
+
+
+@pytest.mark.asyncio
+async def test_clear_empties_pending():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(ChangeKind.CREATE, "/nc/a.txt"))
+    await q.clear()
+    assert await q.pending() == 0

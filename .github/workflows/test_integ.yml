@@ -813,6 +813,17 @@ jobs:
       - name: Run declarative battery on nextcloud
         run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud
 
+      - name: Run watch (Nextcloud) and check against truth
+        shell: bash
+        env:
+          NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
+          NEXTCLOUD_USERNAME: admin
+          NEXTCLOUD_PASSWORD: admin123
+        run: |
+          set -o pipefail
+          ./python/.venv/bin/python integ/watch.py 2>&1 \
+            | bash integ/check_lines.sh integ/truth_watch.txt
+
   integ-fuse:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}

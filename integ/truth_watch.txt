@@ -1,0 +1,19 @@
+# Watch integ: external mutation -> event -> fresh read.
+# Each case proves the event fires and the post-event read is not stale
+# (invalidate-before-deliver).
+
+=== create_file ===
+event=create /nc/data/new.txt
+verify=ok 'hello'
+
+=== update_file ===
+event=update /nc/data/new.txt
+verify=ok 'hello-v2'
+
+=== create_nested ===
+event=create /nc/data/sub/deep.txt
+verify=ok 'deep'
+
+=== delete_file ===
+event=delete /nc/data/new.txt
+verify=ok absent:new.txt

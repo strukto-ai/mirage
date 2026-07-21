@@ -415,6 +415,78 @@ class StateKey(StrEnum):
     NODES = "nodes"
 
 
+class ChangeKind(StrEnum):
+    """Kind of an externally observed resource change.
+
+    Values:
+        CREATE: path appeared since the previous checkpoint.
+        UPDATE: path content or metadata changed.
+        DELETE: path disappeared.
+        MOVE: path was renamed; reserved for sources that can express
+            it, poll-diff sources emit DELETE + CREATE instead.
+        UNKNOWN: precision was lost (queue overflow, checkpoint reset);
+            everything under the path must be re-inventoried.
+    """
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+    MOVE = "move"
+    UNKNOWN = "unknown"
+
+
+class OverflowPolicy(StrEnum):
+    """Behaviour of a watch queue when pending changes exceed its cap.
+
+    Values:
+        COLLAPSE: drop all pending entries and replace them with one
+            UNKNOWN change at the watch root (default; level-triggered
+            "rescan" semantics).
+        DROP_OLDEST: evict the oldest pending entry.
+        ERROR: surface QueueOverflowError to the consumer iterator.
+    """
+    COLLAPSE = "collapse"
+    DROP_OLDEST = "drop_oldest"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceChange:
+    """One externally observed change to a mounted resource path.
+
+    Level-triggered: an event tells the consumer *what is dirty*, not
+    every intermediate edit. Consumers read current content through the
+    workspace after receiving a change.
+
+    Args:
+        kind (ChangeKind): What happened to the path.
+        path (PathSpec): Virtual path of the changed entry.
+        observed_at_ms (int): Epoch milliseconds when the change was
+            observed by the poller.
+        previous (PathSpec | None): Prior path for MOVE changes.
+        version (str | None): Opaque change detector (ETag/rev) so
+            consumers can skip no-op reprocessing.
+    """
+    kind: ChangeKind
+    path: PathSpec
+    observed_at_ms: int
+    previous: PathSpec | None = None
+    version: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Delta:
+    """Result of one checkpointed delta pull.
+
+    Args:
+        changes (tuple[ResourceChange, ...]): Changes since the given
+            checkpoint; empty on a baseline pull.
+        checkpoint (str | None): Opaque serialized state to pass to the
+            next pull.
+    """
+    changes: tuple[ResourceChange, ...]
+    checkpoint: str | None
+
+
 class DriftPolicy(StrEnum):
     """Behaviour when a remote resource's live fingerprint differs from
     the value recorded at snapshot time.
