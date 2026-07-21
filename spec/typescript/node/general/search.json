@@ -5,6 +5,7 @@
     "has_provision": false,
     "has_write": false,
     "resources": [
+      "dify",
       "lancedb",
       "qdrant"
     ]
