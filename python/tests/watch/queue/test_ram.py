@@ -87,6 +87,24 @@ async def test_overflow_collapse_to_unknown_root():
 
 
 @pytest.mark.asyncio
+async def test_overflow_collapse_multi_root_unknown_per_root():
+    roots = (PathSpec.from_str_path("/nc/docs"),
+             PathSpec.from_str_path("/s3/exports"))
+    q = RAMWatchQueue(roots,
+                      max_pending=2,
+                      on_overflow=OverflowPolicy.COLLAPSE)
+    for i in range(3):
+        await q.push(_change(FileChangeKind.CREATE, f"/nc/docs/f{i}.txt"))
+    assert await q.pending() == 2
+    first = await q.pop()
+    second = await q.pop()
+    assert first.kind is FileChangeKind.UNKNOWN
+    assert second.kind is FileChangeKind.UNKNOWN
+    assert {first.path.virtual,
+            second.path.virtual} == {"/nc/docs", "/s3/exports"}
+
+
+@pytest.mark.asyncio
 async def test_overflow_drop_oldest_keeps_cap():
     q = RAMWatchQueue(_root(),
                       max_pending=2,

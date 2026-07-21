@@ -79,7 +79,7 @@ class FileEvent:
 signal honestly knows: a listing walk fills all three, a webhook payload none.
 
 `unknown` is the overflow signal: if a burst exceeds the queue cap, pending
-events collapse into one `unknown` event at the watch root, meaning
+events collapse into one `unknown` event per watch root, meaning
 "re-inventory this subtree". Precision degrades; dirtiness is never lost.
 
 Events are **level-triggered**: an event says *what is dirty*, not every
@@ -135,26 +135,49 @@ rather than the payload.
 
 ## Queues
 
-Each `watch()` owns a delivery queue. The default `RAMWatchQueue` coalesces
-per path with level-triggered semantics (create then update stays create;
-create then delete cancels; delete then create becomes update), so pending
-size is bounded by distinct dirty paths, not event volume. Overflow policy is
-`collapse` (default, the `unknown` rescan event), `drop_oldest`, or `error`.
+Each `watch()` owns its own delivery queue: `notify` fans one event out into
+every queue whose scope matches, so two watches on overlapping scopes each
+consume at their own pace and a slow consumer only overflows its own queue.
+
+The default `RAMWatchQueue` coalesces per path with level-triggered semantics
+(create then update stays create; create then delete cancels; delete then
+create becomes update), so pending size is bounded by distinct dirty paths,
+not event volume. Overflow policy is `collapse` (default, the `unknown`
+rescan event), `drop_oldest`, or `error`.
 
 To customize, attach the runtime explicitly before the first watch:
 
 ```python
-from mirage.watch import enable_watch
+from functools import partial
+from mirage.watch import RAMWatchQueue, Watcher
 
-watcher = enable_watch(ws, queue_factory=MyRedisWatchQueue)
+ws.attach_watch_runtime(
+    Watcher(ws.registry,
+            queue_factory=partial(RAMWatchQueue, max_pending=64)))
 ```
 
 Any object satisfying the async `WatchQueue` protocol (`push` / `pop` /
 `pending` / `clear` / `close`) drops in, so a Redis- or SQS-backed queue needs
-no interface changes.
+no interface changes. See
+[`examples/python/nextcloud/watch_custom_queue.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch_custom_queue.py)
+for a runnable custom-queue setup.
+
+To tear down without closing the workspace, `await
+ws.detach_watch_runtime()`: every subscriber queue closes (active `watch`
+loops end cleanly) and the workspace returns to its idle state; the next
+`watch` lazily attaches a fresh default runtime.
 
 ## Scope Notes
 
+- Watch roots are fixed at subscription time: there is no API to add or
+  remove roots on a live watch. To change scope, start a new `watch()` with
+  the updated list and stop iterating the old one (its pending events are
+  dropped when it closes). A mutable subscription handle is future work.
+- A watch may span mounts, including a mount nested inside another
+  mount's subtree: scope matching is on virtual paths, and each event is
+  invalidated on the mount that owns its path (longest prefix). Detection
+  stays per backend, so each mount needs its own signal feeding
+  `ws.notify`.
 - Python only for now; the TypeScript mirror is planned.
 - Nextcloud is the first backend with a `delta_hook`; push mode works with any
   backend today since `ws.notify` accepts events from any detection you run.

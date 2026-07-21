@@ -246,6 +246,45 @@
       ]
     }
   ],
+  "nested": {
+    "root": "data-nested",
+    "watch": "/nc/data-nested",
+    "inner_mount": "/nc/data-nested/inner",
+    "inner_root": "data-nested/inner",
+    "seed": {"data-nested/inner/doc.txt": "seed body\n"},
+    "cases": [
+      {
+        "id": "outer_mount_delivered",
+        "warm": ["ls /nc/data-nested"],
+        "mutate": {"op": "write", "path": "data-nested/report.txt", "body": "outer level\n"},
+        "expect": {"kind": "create", "path": "/nc/data-nested/report.txt"},
+        "checks": [
+          {"cmd": "cat /nc/data-nested/report.txt", "contains": "outer level"},
+          {"cmd": "ls /nc/data-nested", "contains": "report.txt"}
+        ]
+      },
+      {
+        "id": "inner_mount_update",
+        "warm": ["cat /nc/data-nested/inner/doc.txt"],
+        "mutate": {"op": "write", "path": "data-nested/inner/doc.txt", "body": "fresh inner\n"},
+        "expect": {"kind": "update", "path": "/nc/data-nested/inner/doc.txt"},
+        "checks": [
+          {"cmd": "cat /nc/data-nested/inner/doc.txt", "contains": "fresh inner"},
+          {"cmd": "cat /nc/data-nested/inner/doc.txt", "absent": "seed body"}
+        ]
+      },
+      {
+        "id": "inner_mount_create",
+        "warm": ["ls /nc/data-nested/inner"],
+        "mutate": {"op": "write", "path": "data-nested/inner/new.txt", "body": "inner new\n"},
+        "expect": {"kind": "create", "path": "/nc/data-nested/inner/new.txt"},
+        "checks": [
+          {"cmd": "cat /nc/data-nested/inner/new.txt", "contains": "inner new"},
+          {"cmd": "ls /nc/data-nested/inner", "contains": "new.txt"}
+        ]
+      }
+    ]
+  },
   "overflow": {
     "max_pending": 2,
     "paths": ["data/f1.txt", "data/f2.txt", "data/f3.txt", "data/f4.txt", "data/f5.txt"],

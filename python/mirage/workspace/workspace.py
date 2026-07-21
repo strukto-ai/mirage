@@ -667,24 +667,37 @@ class Workspace:
     def attach_watch_runtime(self, runtime: WatchDelegate) -> None:
         """Install the watch runtime that ``watch`` delegates to.
 
-        Called by ``mirage.watch.enable_watch`` to customize the
-        runtime (e.g. a non-default queue factory); the default runtime
-        attaches lazily on first ``watch``/``notify``, so calling this
-        is never required. The workspace closes the runtime on
-        ``close``.
+        Only needed to customize the runtime, e.g.
+        ``ws.attach_watch_runtime(Watcher(ws.registry,
+        queue_factory=...))``; the default runtime attaches lazily on
+        first ``watch``/``notify``, so calling this is never required.
+        The workspace closes the runtime on ``close``.
 
         Args:
             runtime (WatchDelegate): Runtime to attach.
 
         Raises:
-            RuntimeError: A runtime is already attached (customize
-                before the first ``watch``/``notify``).
+            RuntimeError: A runtime is already attached (call
+                ``detach_watch_runtime`` first to replace it).
         """
         if self._watch_runtime is not None:
             raise RuntimeError(
-                "watch runtime already attached: enable_watch must run "
-                "before the first watch()/notify()")
+                "watch runtime already attached: detach_watch_runtime "
+                "first, or attach before the first watch()/notify()")
         self._watch_runtime = runtime
+
+    async def detach_watch_runtime(self) -> None:
+        """Close and drop the attached watch runtime, if any.
+
+        Closing the runtime closes every subscriber queue, so active
+        ``watch`` iterators finish cleanly. Afterwards the workspace is
+        back to its idle state: the next ``watch``/``notify`` lazily
+        attaches a fresh default runtime, or ``attach_watch_runtime``
+        installs a custom one. A no-op when nothing is attached.
+        """
+        if self._watch_runtime is not None:
+            await self._watch_runtime.close()
+            self._watch_runtime = None
 
     def _watch_delegate(self) -> WatchDelegate:
         """The attached watch runtime, lazily creating the default one.
@@ -705,8 +718,8 @@ class Workspace:
         literal directory is its whole subtree, ``/dir/*`` is the
         entries at that level (shallow), ``/dir/*/`` is everything
         inside child directories. The default watch runtime attaches
-        lazily on first use; call ``mirage.watch.enable_watch``
-        beforehand only to customize it. The str tolerance lives only
+        lazily on first use; call ``attach_watch_runtime`` beforehand
+        only to customize it. The str tolerance lives only
         here, at the consumer boundary (mirroring ``Ops``); the
         runtime below is PathSpec-only.
 

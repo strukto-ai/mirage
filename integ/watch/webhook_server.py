@@ -88,7 +88,7 @@ def make_app(sink: object, files_prefix: str, mount: str) -> web.Application:
 
     Args:
         sink (object): Anything with ``notify`` — the workspace
-            itself, or a ``Watcher`` from ``enable_watch``.
+            itself, or a ``Watcher`` attached to one.
         files_prefix (str): The ``/<user>/files`` prefix to strip.
         mount (str): Mirage mount root.
     """

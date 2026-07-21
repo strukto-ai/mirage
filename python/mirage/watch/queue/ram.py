@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from mirage.types import FileChangeKind, FileEvent, OverflowPolicy, PathSpec
@@ -33,23 +34,27 @@ class RAMWatchQueue:
     - DELETE then CREATE becomes UPDATE (the path was replaced).
 
     On overflow the default policy collapses everything to one UNKNOWN
-    change at the watch root: precision degrades to "re-inventory this
-    subtree", dirtiness is never lost.
+    change per watch root: precision degrades to "re-inventory these
+    subtrees", dirtiness is never lost. Per-root matters for multi-root
+    watches, where the dirty paths may sit under any of the roots.
     """
 
     def __init__(
             self,
-            root: PathSpec,
+            roots: PathSpec | Sequence[PathSpec],
             max_pending: int = DEFAULT_MAX_PENDING,
             on_overflow: OverflowPolicy = OverflowPolicy.COLLAPSE) -> None:
         """Args:
-            root (PathSpec): Watch root, used as the path of the
-                collapse UNKNOWN change.
+            roots (PathSpec | Sequence[PathSpec]): Watch root or roots,
+                used as the paths of the collapse UNKNOWN changes (one
+                per root).
             max_pending (int): Cap on distinct pending paths.
             on_overflow (OverflowPolicy): Behaviour when the cap is
                 exceeded.
         """
-        self._root = root
+        self._roots = (roots, ) if isinstance(roots, PathSpec) \
+            else tuple(roots)
+        self._label = ", ".join(r.virtual for r in self._roots)
         self._max_pending = max_pending
         self._on_overflow = on_overflow
         self._pending: dict[str, FileEvent] = {}
@@ -110,10 +115,10 @@ class RAMWatchQueue:
                 self._overflowed = True
             else:
                 self._pending.clear()
-                self._pending[self._root.virtual] = FileEvent(
-                    kind=FileChangeKind.UNKNOWN,
-                    path=self._root,
-                    timestamp=datetime.now(timezone.utc))
+                now = datetime.now(timezone.utc)
+                for root in self._roots:
+                    self._pending[root.virtual] = FileEvent(
+                        kind=FileChangeKind.UNKNOWN, path=root, timestamp=now)
         if self._pending or self._overflowed:
             self._ready.set()
 
@@ -130,13 +135,13 @@ class RAMWatchQueue:
         # re-checks state exactly once.
         while True:
             if self._closed:
-                raise QueueClosed(self._root.virtual)
+                raise QueueClosed(self._label)
             if self._overflowed:
                 self._overflowed = False
                 if not self._pending:
                     self._ready.clear()
                 raise QueueOverflowError(
-                    f"watch queue for {self._root.virtual} exceeded "
+                    f"watch queue for {self._label} exceeded "
                     f"{self._max_pending} pending changes")
             if self._pending:
                 key = next(iter(self._pending))

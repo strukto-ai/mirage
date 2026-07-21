@@ -23,7 +23,8 @@ class WatchQueue(Protocol):
 
     Implementations own coalescing and overflow policy. The default
     ``RAMWatchQueue`` merges changes per path (level-triggered, latest
-    state wins) and collapses to one UNKNOWN change on overflow; a
+    state wins) and collapses to one UNKNOWN change per watch root on
+    overflow; a
     journal-style implementation that keeps every event is equally
     valid. ``push`` may perform I/O but must never wait on consumer
     progress: the poller's checkpoint has to keep advancing regardless
@@ -62,4 +63,4 @@ class WatchQueue(Protocol):
         ...
 
 
-QueueFactory = Callable[[PathSpec], WatchQueue]
+QueueFactory = Callable[[tuple[PathSpec, ...]], WatchQueue]

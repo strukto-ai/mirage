@@ -14,33 +14,15 @@
 
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
-from typing import Protocol
 
 from mirage.types import FileChangeKind, FileEvent, PathSpec
 from mirage.utils.glob_walk import has_glob
 from mirage.utils.path import glob_prefix_match
-from mirage.watch.base import WatchMount, WatchRegistry, WatchRuntime
+from mirage.watch.base import WatchMount, WatchRegistry
 from mirage.watch.errors import QueueClosed
 from mirage.watch.queue.base import QueueFactory, WatchQueue
 from mirage.watch.queue.ram import RAMWatchQueue
 from mirage.watch.source import Subscriber
-
-
-class WatchableWorkspace(Protocol):
-    """What ``enable_watch`` needs from a workspace.
-
-    ``mirage.workspace.workspace.Workspace`` satisfies this
-    structurally; depending on the protocol (not the concrete class)
-    keeps the watch package off the workspace facade, the same idiom as
-    ``ReadReconciler`` in the mount registry.
-    """
-
-    @property
-    def registry(self) -> WatchRegistry:
-        ...
-
-    def attach_watch_runtime(self, runtime: WatchRuntime) -> None:
-        ...
 
 
 class Watcher:
@@ -233,7 +215,7 @@ class Watcher:
                 each may carry glob segments (``/nc/data/*.txt``) and
                 the mount is resolved per root.
             queue (WatchQueue | None): Delivery queue override; the
-                watcher's factory builds one (for the first root) when
+                watcher's factory builds one over all roots when
                 omitted.
         """
         if self._closed:
@@ -251,7 +233,7 @@ class Watcher:
             "/" + p.virtual.strip("/") +
             ("/" if p.virtual.endswith("/") and p.virtual.strip("/") else "")
             for p in paths)
-        sub = Subscriber(queue=queue or self._queue_factory(roots[0]),
+        sub = Subscriber(queue=queue or self._queue_factory(roots),
                          roots=scopes)
         self._subscribers.append(sub)
         try:
@@ -271,22 +253,3 @@ class Watcher:
         self._closed = True
         for sub in list(self._subscribers):
             await sub.queue.close()
-
-
-def enable_watch(workspace: WatchableWorkspace,
-                 *,
-                 queue_factory: QueueFactory = RAMWatchQueue) -> Watcher:
-    """Attach a watch runtime to ``workspace`` and return it.
-
-    The runtime runs nothing in the background; the returned watcher's
-    ``notify`` is where the consumer's detection (webhook receiver or
-    poll loop over ``resource.delta_hook()``) injects changes.
-
-    Args:
-        workspace (WatchableWorkspace): Workspace to attach to.
-        queue_factory (QueueFactory): Builds delivery queues for
-            watches that do not supply their own.
-    """
-    watcher = Watcher(workspace.registry, queue_factory=queue_factory)
-    workspace.attach_watch_runtime(watcher)
-    return watcher

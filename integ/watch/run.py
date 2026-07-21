@@ -27,7 +27,7 @@ from mirage import MountMode, Workspace
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.types import PathSpec
-from mirage.watch import RAMWatchQueue, enable_watch
+from mirage.watch import RAMWatchQueue, Watcher
 
 CASE_DIR = Path(__file__).resolve().parent
 EVENT_TIMEOUT = 20.0
@@ -38,6 +38,19 @@ CLASS_BY_KIND = {
     "delete": "OCP\\Files\\Events\\Node\\NodeDeletedEvent",
     "move": "OCP\\Files\\Events\\Node\\NodeRenamedEvent",
 }
+
+
+def _nextcloud_config(url: str) -> NextcloudConfig:
+    """Build a NextcloudConfig for ``url`` from the deployment env.
+
+    Args:
+        url (str): WebDAV endpoint the mount is rooted at.
+    """
+    return NextcloudConfig(
+        url=url,
+        username=os.environ.get("NEXTCLOUD_USERNAME", "admin"),
+        password=os.environ.get("NEXTCLOUD_PASSWORD", "admin123"),
+    )
 
 
 def _build_nextcloud(spec: dict) -> tuple[Workspace, object] | None:
@@ -52,14 +65,35 @@ def _build_nextcloud(spec: dict) -> tuple[Workspace, object] | None:
     url = os.environ.get("NEXTCLOUD_URL")
     if not url:
         return None
-    config = NextcloudConfig(
-        url=url,
-        username=os.environ.get("NEXTCLOUD_USERNAME", "admin"),
-        password=os.environ.get("NEXTCLOUD_PASSWORD", "admin123"),
-    )
+    config = _nextcloud_config(url)
     ws = Workspace({spec["mount"]: NextcloudResource(config)},
                    mode=MountMode.WRITE)
     external = NextcloudAccessor(config).operator()
+    return ws, external
+
+
+def _build_nextcloud_nested(spec: dict) -> tuple[Workspace, object] | None:
+    """Build the nested-mount battery's workspace: the outer mount at
+    the account root plus a second mount, rooted at a subfolder of the
+    same account, nested inside the outer mount's subtree.
+
+    Args:
+        spec (dict): Parsed case file (needs a ``nested`` block).
+    """
+    url = os.environ.get("NEXTCLOUD_URL")
+    if not url:
+        return None
+    block = spec["nested"]
+    inner_url = url.rstrip("/") + "/" + block["inner_root"].strip("/") + "/"
+    outer = _nextcloud_config(url)
+    ws = Workspace(
+        {
+            spec["mount"]: NextcloudResource(outer),
+            block["inner_mount"]: NextcloudResource(
+                _nextcloud_config(inner_url)),
+        },
+        mode=MountMode.WRITE)
+    external = NextcloudAccessor(outer).operator()
     return ws, external
 
 
@@ -420,16 +454,17 @@ def _overflow_workspace(spec: dict) -> tuple[Workspace, object]:
     """Build the overflow battery's own workspace with a tiny queue.
 
     A dedicated workspace is required because the custom queue factory
-    must attach via ``enable_watch`` before the first watch.
+    must attach via ``attach_watch_runtime`` before the first watch.
 
     Args:
         spec (dict): Parsed case file.
     """
     ws, op = BUILDERS[spec["resource"]](spec)
-    enable_watch(ws,
-                 queue_factory=partial(
-                     RAMWatchQueue,
-                     max_pending=spec["overflow"]["max_pending"]))
+    ws.attach_watch_runtime(
+        Watcher(ws.registry,
+                queue_factory=partial(
+                    RAMWatchQueue,
+                    max_pending=spec["overflow"]["max_pending"])))
     return ws, op
 
 
@@ -484,6 +519,115 @@ async def _run_overflow_push(spec: dict, results: list) -> None:
         await ws.close()
 
 
+async def _seed_nested(op: object, block: dict) -> None:
+    """Reset the nested battery's subtree and lay down its seeds.
+
+    Seeding goes through the external writer only: the battery's
+    workspaces are fresh, so there is no cache to reset, and ``rm -rf``
+    from inside would have to cross the nested mount boundary.
+
+    Args:
+        op (object): External writer operator (outer account root).
+        block (dict): The ``nested`` block of the case file.
+    """
+    root = block["root"].strip("/") + "/"
+    await op.create_dir(root)
+    await op.remove_all(root)
+    await op.create_dir(block["inner_root"].strip("/") + "/")
+    for rel, body in block["seed"].items():
+        await op.write(rel, body.encode())
+
+
+async def _nested_core(spec: dict, ws: Workspace, op: object, trigger,
+                       mode: str, results: list) -> None:
+    """Shared body of the nested-mount battery: one watch on the shared
+    ancestor spans both mounts, and each event must invalidate the
+    mount that owns its path (longest prefix), so post-event reads
+    through the inner mount are fresh.
+
+    Args:
+        spec (dict): Parsed case file (needs a ``nested`` block).
+        ws (Workspace): Nested-mount workspace.
+        op (object): External writer operator.
+        trigger (Callable): Case trigger (pull pump or push POST).
+        mode (str): "pull" or "push".
+        results (list): Result rows to append to.
+    """
+    block = spec["nested"]
+    agen = ws.watch(block["watch"])
+    stream = EventStream(agen)
+    await stream.start()
+    try:
+        for case in block["cases"]:
+            ok, detail = await _run_case(ws, op, trigger, stream, case)
+            results.append((f"{mode}:nested:{case['id']}", ok, detail))
+    finally:
+        await stream.close()
+
+
+async def _run_nested_pull(spec: dict, results: list) -> None:
+    """Nested-mount battery, pull mode. The poller pulls the OUTER
+    resource's delta hook over the whole subtree; changes under the
+    inner mount surface there and are reframed to the inner mount by
+    ``notify``.
+
+    Args:
+        spec (dict): Parsed case file.
+        results (list): Result rows to append to.
+    """
+    if "nested" not in spec:
+        return
+    built = _build_nextcloud_nested(spec)
+    if built is None:
+        return
+    ws, op = built
+    block = spec["nested"]
+    try:
+        await _seed_nested(op, block)
+        resource = ws.registry.mount_for(spec["mount"]).resource
+        root = PathSpec.from_str_path(block["watch"],
+                                      resource_path=block["root"])
+        poller = ConsumerPoller(resource.delta_hook(), ws, root)
+        await poller.pump()
+        await _nested_core(spec, ws, op, PullTrigger(poller), "pull", results)
+    finally:
+        await ws.close()
+
+
+async def _run_nested_push(spec: dict, results: list) -> None:
+    """Nested-mount battery, push mode (its own receiver bound to the
+    nested workspace; payload paths are mapped against the outer mount
+    and reframed to the inner mount by ``notify``).
+
+    Args:
+        spec (dict): Parsed case file.
+        results (list): Result rows to append to.
+    """
+    if "nested" not in spec:
+        return
+    built = _build_nextcloud_nested(spec)
+    if built is None:
+        return
+    ws, op = built
+    try:
+        await _seed_nested(op, spec["nested"])
+        runner = web.AppRunner(make_app(ws, _files_prefix(), spec["mount"]))
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        url = f"http://127.0.0.1:{port}/nextcloud/webhook"
+        async with aiohttp.ClientSession() as session:
+            try:
+                await _nested_core(spec, ws, op,
+                                   PushTrigger(session, url, spec["mount"]),
+                                   "push", results)
+            finally:
+                await runner.cleanup()
+    finally:
+        await ws.close()
+
+
 async def _run_pull(spec: dict, ws: Workspace,
                     op: object) -> list[tuple[str, bool, str]]:
     """Run all batteries in pull mode (consumer-owned poll loop).
@@ -517,6 +661,7 @@ async def _run_pull(spec: dict, ws: Workspace,
                                           scope["cases"],
                                           f"pull:{scope['id']}", "pull"))
     await _run_overflow_pull(spec, results)
+    await _run_nested_pull(spec, results)
     return results
 
 
@@ -560,6 +705,7 @@ async def _run_push(spec: dict, ws: Workspace,
         finally:
             await runner.cleanup()
     await _run_overflow_push(spec, results)
+    await _run_nested_push(spec, results)
     return results
 
 

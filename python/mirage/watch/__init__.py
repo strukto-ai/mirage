@@ -19,7 +19,7 @@ from mirage.watch.base import DeltaHook, SupportsChanges, WatchRuntime
 from mirage.watch.delta import ListingDeltaHook
 from mirage.watch.queue import (OverflowPolicy, QueueClosed, QueueFactory,
                                 QueueOverflowError, RAMWatchQueue, WatchQueue)
-from mirage.watch.watcher import Watcher, enable_watch
+from mirage.watch.watcher import Watcher
 
 __all__ = [
     "Delta",
@@ -39,6 +39,5 @@ __all__ = [
     "WatchQueue",
     "WatchRuntime",
     "Watcher",
-    "enable_watch",
     "stat_fingerprint",
 ]
