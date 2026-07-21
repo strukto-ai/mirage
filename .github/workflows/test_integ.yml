@@ -520,13 +520,13 @@ jobs:
 
       - name: Start fake Databricks API for the typescript host
         run: |
-          nohup ./python/.venv/bin/python integ/server/databricks_server.py --port 5095 > /tmp/databrickssrv.log 2>&1 &
+          nohup ./python/.venv/bin/python integ/server/databricks_server.py --port 5092 > /tmp/databrickssrv.log 2>&1 &
           for i in $(seq 1 30); do
             grep -q "DATABRICKS_ENDPOINT=" /tmp/databrickssrv.log && break
             sleep 1
           done
           cat /tmp/databrickssrv.log
-          echo "DATABRICKS_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
+          echo "DATABRICKS_ENDPOINT=http://127.0.0.1:5092" >> "$GITHUB_ENV"
 
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py
