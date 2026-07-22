@@ -75,6 +75,44 @@
         "d",
         "f"
       ]
+    },
+    {
+      "id": "cut_d_multichar_rejected",
+      "seq": 610190,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\n' | cut -d ,, -f1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: the delimiter must be a single character\n"
+      },
+      "flags": [
+        "d",
+        "f"
+      ]
     }
   ]
 }
