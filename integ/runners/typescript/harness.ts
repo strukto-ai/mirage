@@ -17,6 +17,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const CASE_DIRS = ['unix', 'bash', 'crossmount', 'runtime', 'resources', 'cli']
+const HOST_ONLY_CASE_PREFIXES = ['bash/', 'unix/sleep/', 'unix/timeout/']
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
@@ -139,6 +140,16 @@ export function loadCases(root: string): Case[] {
   }
   cases.sort((a, b) => (a.seq ?? 1 << 30) - (b.seq ?? 1 << 30))
   return cases
+}
+
+export function caseRunsOnTarget(c: Case, target: string): boolean {
+  if (!c.targets.includes(target)) return false
+  const source = c._source?.split(sep).join('/')
+  if (source === undefined) return true
+  for (const prefix of HOST_ONLY_CASE_PREFIXES) {
+    if (source.startsWith(prefix)) return target === 'ram'
+  }
+  return true
 }
 
 export function walkFiles(base: string): string[] {

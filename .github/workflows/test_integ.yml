@@ -334,6 +334,10 @@ jobs:
   integ-shared:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [python, typescript]
     runs-on: ubuntu-latest
     services:
       redis:
@@ -402,14 +406,17 @@ jobs:
         run: pnpm install --frozen-lockfile=false
 
       - name: Build mirage-core
+        if: matrix.host == 'typescript'
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-core build
 
       - name: Build mirage-node
+        if: matrix.host == 'typescript'
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node build
 
       - name: Build mirage-browser
+        if: matrix.host == 'typescript'
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-browser build
 
@@ -529,9 +536,11 @@ jobs:
           echo "DATABRICKS_ENDPOINT=http://127.0.0.1:5092" >> "$GITHUB_ENV"
 
       - name: Run declarative battery (python hosts)
+        if: matrix.host == 'python'
         run: ./python/.venv/bin/python integ/runners/python/main.py
 
       - name: Run declarative battery (typescript hosts)
+        if: matrix.host == 'typescript'
         working-directory: integ
         run: pnpm exec tsx runners/typescript/main.ts
 

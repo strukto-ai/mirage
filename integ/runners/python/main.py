@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,6 +26,10 @@ import adapters  # noqa: E402
 import harness  # noqa: E402
 
 HOST = "python"
+SERIAL_SERVICE_GROUPS = {
+    "onedrive": "msgraph",
+    "sharepoint": "msgraph",
+}
 
 
 async def run_target(target: dict, cases: list[dict], root: Path,
@@ -36,7 +41,7 @@ async def run_target(target: dict, cases: list[dict], root: Path,
             await harness.seed_fixture(ws, mount.get("fixture"), mount["path"],
                                        root)
         for case in cases:
-            if target["id"] not in case["targets"]:
+            if not harness.case_runs_on_target(case, target["id"]):
                 continue
             exit_code, out, err, elapsed = await harness.run_case(ws, case)
             if emit is not None:
@@ -55,6 +60,13 @@ async def run_target(target: dict, cases: list[dict], root: Path,
         await cleanup()
 
 
+async def run_target_group(targets: list[dict], cases: list[dict], root: Path,
+                           report: harness.Report | None,
+                           emit: list[dict] | None) -> None:
+    for target in targets:
+        await run_target(target, cases, root, report, emit)
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", action="append", dest="targets")
@@ -68,6 +80,7 @@ async def main() -> None:
     selected = args.targets or list(manifest)
     report = None if args.emit else harness.Report()
     emit: list[dict] | None = [] if args.emit else None
+    groups: dict[str, list[dict]] = defaultdict(list)
     for target_id in selected:
         target = manifest[target_id]
         if HOST not in target["hosts"]:
@@ -92,7 +105,12 @@ async def main() -> None:
                 and not os.environ.get("SLACK_URL")):
             print(f"skip [{target_id}]: SLACK_URL not set", file=sys.stderr)
             continue
-        await run_target(target, cases, root, report, emit)
+        service = target.get("service")
+        group = SERIAL_SERVICE_GROUPS.get(service, service or target_id)
+        groups[group].append(target)
+
+    await asyncio.gather(*(run_target_group(targets, cases, root, report, emit)
+                           for targets in groups.values()))
 
     if args.emit:
         Path(args.emit).write_text(json.dumps(emit))

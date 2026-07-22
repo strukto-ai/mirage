@@ -20,6 +20,7 @@ from pathlib import Path
 from mirage.types import FileStat, PathSpec
 
 CASE_DIRS = ("unix", "bash", "crossmount", "runtime", "resources", "cli")
+HOST_ONLY_CASE_PREFIXES = ("bash/", "unix/sleep/", "unix/timeout/")
 
 
 def integ_root() -> Path:
@@ -47,6 +48,15 @@ def load_cases(root: Path) -> list[dict]:
             cases.append(case)
     cases.sort(key=lambda c: c.get("seq", 1 << 30))
     return cases
+
+
+def case_runs_on_target(case: dict, target: str) -> bool:
+    if target not in case["targets"]:
+        return False
+    source = Path(case["_source"]).as_posix()
+    if source.startswith(HOST_ONLY_CASE_PREFIXES):
+        return target == "ram"
+    return True
 
 
 async def seed_fixture(ws, fixture: str | None, mount_path: str,

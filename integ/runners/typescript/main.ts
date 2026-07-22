@@ -17,6 +17,7 @@ import { ADAPTERS } from './adapters.ts'
 import type { Case, Target } from './harness.ts'
 import {
   Report,
+  caseRunsOnTarget,
   compare,
   integRoot,
   loadCases,
@@ -57,7 +58,7 @@ async function runTarget(
   try {
     for (const mount of target.mounts) await seedFixture(ws, mount.fixture, mount.path, root)
     for (const c of cases) {
-      if (!c.targets.includes(target.id)) continue
+      if (!caseRunsOnTarget(c, target.id)) continue
       const { exitCode, out, err, elapsed } = await runCase(ws, c)
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: err })
@@ -70,6 +71,16 @@ async function runTarget(
   }
 }
 
+async function runTargetGroup(
+  targets: Target[],
+  cases: Case[],
+  root: string,
+  report: Report | null,
+  emit: EmitRow[] | null,
+): Promise<void> {
+  for (const target of targets) await runTarget(target, cases, root, report, emit)
+}
+
 async function main(): Promise<void> {
   const root = integRoot()
   const manifest = loadTargets(root)
@@ -79,6 +90,7 @@ async function main(): Promise<void> {
   const ids = targets.length ? targets : [...manifest.keys()]
   const report = emitPath ? null : new Report()
   const emit: EmitRow[] | null = emitPath ? [] : null
+  const groups = new Map<string, Target[]>()
   for (const id of ids) {
     const target = manifest.get(id)
     if (!target) throw new Error(`unknown target: ${id}`)
@@ -134,8 +146,16 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: LINEAR_ENDPOINT not set\n`)
       continue
     }
-    await runTarget(target, cases, root, report, emit)
+    const group = target.service ?? target.id
+    const members = groups.get(group) ?? []
+    members.push(target)
+    groups.set(group, members)
   }
+  const runs: Promise<void>[] = []
+  for (const members of groups.values()) {
+    runs.push(runTargetGroup(members, cases, root, report, emit))
+  }
+  await Promise.all(runs)
 
   if (emitPath) {
     writeFileSync(emitPath, JSON.stringify(emit))

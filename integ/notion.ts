@@ -482,7 +482,9 @@ async function main(): Promise<void> {
     await restWs.close();
     await mcpWs.close();
     server.close();
+    server.closeAllConnections();
     mcpServer.close();
+    mcpServer.closeAllConnections();
   }
 }
 
