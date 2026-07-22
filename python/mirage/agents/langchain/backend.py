@@ -19,9 +19,9 @@ from pathlib import PurePosixPath
 from deepagents.backends.protocol import (EditResult, ExecuteResponse,
                                           FileData, FileDownloadResponse,
                                           FileInfo, FileUploadResponse,
-                                          GlobResult, GrepResult, LsResult,
-                                          ReadResult, SandboxBackendProtocol,
-                                          WriteResult)
+                                          GlobResult, GrepMatch, GrepResult,
+                                          LsResult, ReadResult,
+                                          SandboxBackendProtocol, WriteResult)
 
 from mirage.agents.langchain._convert import (io_to_execute_response,
                                               io_to_file_infos,
@@ -296,6 +296,64 @@ class LangchainWorkspace(SandboxBackendProtocol):
         if error:
             return GlobResult(error=error)
         return GlobResult(matches=io_to_file_infos(io))
+
+    # ── info projections ─────────────────────────────────────
+
+    def ls_info(self, path: str) -> list[FileInfo]:
+        return self._run(self.als_info(path))
+
+    async def als_info(self, path: str) -> list[FileInfo]:
+        """Entries of a directory, unwrapped.
+
+        The error channel of :meth:`als` collapses to an empty list, which
+        is what the protocol's bare-list return leaves room for.
+
+        Args:
+            path (str): directory to list.
+        """
+        result = await self.als(path)
+        return result.entries or []
+
+    def glob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
+        return self._run(self.aglob_info(pattern, path))
+
+    async def aglob_info(self,
+                         pattern: str,
+                         path: str = "/") -> list[FileInfo]:
+        """Glob matches, unwrapped.
+
+        Args:
+            pattern (str): glob pattern.
+            path (str): directory to search under.
+        """
+        result = await self.aglob(pattern, path)
+        return result.matches or []
+
+    def grep_raw(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+    ) -> list[GrepMatch] | str:
+        return self._run(self.agrep_raw(pattern, path, glob))
+
+    async def agrep_raw(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+    ) -> list[GrepMatch] | str:
+        """Grep matches, or the error text when the search failed.
+
+        Args:
+            pattern (str): search pattern.
+            path (str | None): directory to search under.
+            glob (str | None): restrict to files matching this glob.
+        """
+        result = await self.agrep(pattern, path, glob)
+        if result.error is not None:
+            return result.error
+        return result.matches or []
 
     # ── upload / download ────────────────────────────────────
 

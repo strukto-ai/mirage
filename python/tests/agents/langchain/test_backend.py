@@ -192,3 +192,53 @@ async def test_upload_and_download(backend):
     down_results = await backend.adownload_files(["/up1.txt", "/up2.txt"])
     assert down_results[0].content == b"content1"
     assert down_results[1].content == b"content2"
+
+
+@pytest.mark.asyncio
+async def test_als_info_returns_bare_entries(backend):
+    await backend.awrite("/d/a.txt", "x")
+    infos = await backend.als_info("/d")
+    assert [i["path"] for i in infos] == ["/d/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_als_info_empty_on_error(backend):
+    assert await backend.als_info("/missing") == []
+
+
+@pytest.mark.asyncio
+async def test_aglob_info_returns_bare_matches(backend):
+    await backend.awrite("/g/one.txt", "x")
+    infos = await backend.aglob_info("*.txt", path="/g")
+    assert any(i["path"].endswith("one.txt") for i in infos)
+
+
+@pytest.mark.asyncio
+async def test_aglob_info_empty_on_error(backend):
+    assert await backend.aglob_info("*.txt", path="/missing") == []
+
+
+@pytest.mark.asyncio
+async def test_agrep_raw_returns_matches(backend):
+    await backend.awrite("/r/f.txt", "alpha\nbeta\n")
+    result = await backend.agrep_raw("beta", path="/r")
+    assert isinstance(result, list)
+    assert result[0]["line"] == 2
+    assert result[0]["text"] == "beta"
+
+
+@pytest.mark.asyncio
+async def test_agrep_raw_projects_error_to_string(backend):
+    from deepagents.backends.protocol import GrepResult
+
+    async def failing(*args, **kwargs):
+        return GrepResult(error="boom")
+
+    backend.agrep = failing
+    assert await backend.agrep_raw("x") == "boom"
+
+
+def test_sync_info_projections(backend):
+    backend.write("/s/a.txt", "x")
+    assert [i["path"] for i in backend.ls_info("/s")] == ["/s/a.txt"]
+    assert isinstance(backend.grep_raw("nope", path="/s"), list)

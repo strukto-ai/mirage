@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
@@ -124,3 +126,60 @@ async def test_exists(backend):
     assert not await backend.aexists("/missing.txt")
     await backend.awrite("/exists.txt", "content")
     assert await backend.aexists("/exists.txt")
+
+
+async def _settle_background(backend, shell_id, tries=50):
+    for _ in range(tries):
+        output = backend.read_background(shell_id)
+        if not output.running:
+            return output
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"background job {shell_id} never finished")
+
+
+@pytest.mark.asyncio
+async def test_execute_background_returns_a_handle(backend):
+    handle = await backend.aexecute_background("echo bg")
+
+    assert handle.command == "echo bg"
+    assert handle.shell_id
+    assert handle.pid
+
+
+@pytest.mark.asyncio
+async def test_read_background_drains_output(backend):
+    handle = await backend.aexecute_background("echo streamed")
+
+    output = await _settle_background(backend, handle.shell_id)
+
+    assert output.stdout == "streamed\n"
+    assert output.exit_code == 0
+    assert backend.read_background(handle.shell_id).stdout == ""
+
+
+@pytest.mark.asyncio
+async def test_list_background_reports_started_jobs(backend):
+    handle = await backend.aexecute_background("sleep 30")
+
+    listed = backend.list_background()
+
+    assert [p.shell_id for p in listed] == [handle.shell_id]
+    assert listed[0].running
+
+
+@pytest.mark.asyncio
+async def test_kill_background_stops_a_job(backend):
+    handle = await backend.aexecute_background("sleep 30")
+
+    assert backend.kill_background(handle.shell_id)
+    assert not backend.kill_background(handle.shell_id)
+
+
+@pytest.mark.asyncio
+async def test_kill_all_background_clears_running_jobs(backend):
+    await backend.aexecute_background("sleep 30")
+    await backend.aexecute_background("sleep 30")
+
+    backend.kill_all_background()
+
+    assert not any(p.running for p in backend.list_background())

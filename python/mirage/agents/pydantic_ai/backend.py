@@ -14,10 +14,13 @@
 
 import shlex
 
-from pydantic_ai_backends.protocol import SandboxProtocol
-from pydantic_ai_backends.types import (EditResult, ExecuteResponse, FileInfo,
-                                        GrepMatch, WriteResult)
+from pydantic_ai_backends.protocol import BackgroundSandboxProtocol
+from pydantic_ai_backends.types import (BackgroundHandle, BackgroundOutput,
+                                        BackgroundProcessInfo, EditResult,
+                                        ExecuteResponse, FileInfo, GrepMatch,
+                                        WriteResult)
 
+from mirage.agents.background import BackgroundJobs
 from mirage.agents.pydantic_ai._convert import (io_to_execute_response,
                                                 io_to_file_infos,
                                                 io_to_grep_matches)
@@ -26,12 +29,13 @@ from mirage.io.types import IOResult
 from mirage.workspace.workspace import Workspace
 
 
-class PydanticAIWorkspace(SandboxProtocol):
+class PydanticAIWorkspace(BackgroundSandboxProtocol):
     """Pydantic AI backend backed by a Mirage Workspace.
 
     File operations (read, write, edit, ls) go through the Ops layer directly.
     Shell operations (execute, grep, glob) go through Workspace.execute()
-    for pipe and flag support.
+    for pipe and flag support. Background processes are the workspace's own
+    job table, the one behind the shell's ``&`` operator.
     """
 
     def __init__(
@@ -43,6 +47,7 @@ class PydanticAIWorkspace(SandboxProtocol):
         self._ws = workspace
         self._id = sandbox_id
         self._session_id = session_id
+        self._bg = BackgroundJobs(workspace, session_id=session_id)
 
     def _run(self, coro):
         return run_async_from_sync(coro)
@@ -239,3 +244,38 @@ class PydanticAIWorkspace(SandboxProtocol):
         io = await self._exec(
             f"find {shlex.quote(path)} -name {shlex.quote(name)}")
         return io_to_file_infos(io)
+
+    # -- background ----------------------------------------------------
+
+    def execute_background(self, command: str) -> BackgroundHandle:
+        return self._run(self.aexecute_background(command))
+
+    async def aexecute_background(self, command: str) -> BackgroundHandle:
+        job = await self._bg.start(command)
+        return BackgroundHandle(shell_id=job.shell_id,
+                                pid=job.pid,
+                                command=job.command)
+
+    def read_background(self, shell_id: str) -> BackgroundOutput:
+        chunk = self._bg.output(shell_id)
+        return BackgroundOutput(shell_id=chunk.shell_id,
+                                stdout=chunk.stdout,
+                                stderr=chunk.stderr,
+                                running=chunk.running,
+                                exit_code=chunk.exit_code)
+
+    def kill_background(self, shell_id: str) -> bool:
+        return self._bg.kill(shell_id)
+
+    def list_background(self) -> list[BackgroundProcessInfo]:
+        return [
+            BackgroundProcessInfo(shell_id=job.shell_id,
+                                  command=job.command,
+                                  pid=job.pid,
+                                  running=job.running,
+                                  exit_code=job.exit_code)
+            for job in self._bg.info()
+        ]
+
+    def kill_all_background(self) -> None:
+        self._bg.kill_all()

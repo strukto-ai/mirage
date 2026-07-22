@@ -14,47 +14,39 @@
 
 from deepagents.backends.protocol import ExecuteResponse, FileInfo, GrepMatch
 
-from mirage.agents.io_text import decode
+from mirage.agents import ops
 from mirage.io.types import IOResult
 
 
 def io_to_execute_response(io: IOResult) -> ExecuteResponse:
-    stdout = decode(io.stdout if isinstance(io.stdout, bytes) else None)
-    stderr = decode(io.stderr if isinstance(io.stderr, bytes) else None)
-    output = stdout
-    if stderr:
-        output = f"{stdout}\n{stderr}" if stdout else stderr
-    return ExecuteResponse(output=output, exit_code=io.exit_code)
+    """Map a command outcome onto the deepagents response type.
+
+    Args:
+        io (IOResult): the executed command's result.
+    """
+    result = ops.io_to_exec_result(io)
+    return ExecuteResponse(output=result.output, exit_code=result.exit_code)
 
 
 def io_to_grep_matches(io: IOResult) -> list[GrepMatch]:
-    stdout = decode(
-        io.stdout if isinstance(io.stdout, bytes) else None).strip()
-    if not stdout:
-        return []
-    matches: list[GrepMatch] = []
-    for line in stdout.split("\n"):
-        parts = line.split(":", 2)
-        if len(parts) >= 3:
-            try:
-                line_num = int(parts[1])
-            except ValueError:
-                continue
-            matches.append(
-                GrepMatch(path=parts[0], line=line_num, text=parts[2]))
-    return matches
+    """Map grep matches onto the deepagents match type.
+
+    Args:
+        io (IOResult): result of a ``grep -n`` run.
+    """
+    return [
+        GrepMatch(path=m.path, line=m.line, text=m.text)
+        for m in ops.io_to_grep_matches(io)
+    ]
 
 
 def io_to_file_infos(io: IOResult) -> list[FileInfo]:
-    stdout = decode(
-        io.stdout if isinstance(io.stdout, bytes) else None).strip()
-    if not stdout:
-        return []
-    infos: list[FileInfo] = []
-    for entry in stdout.split("\n"):
-        entry = entry.strip()
-        if not entry:
-            continue
-        is_dir = entry.endswith("/")
-        infos.append(FileInfo(path=entry.rstrip("/"), is_dir=is_dir))
-    return infos
+    """Map directory entries onto the deepagents file-info type.
+
+    Args:
+        io (IOResult): result of an ``ls`` run.
+    """
+    return [
+        FileInfo(path=i.path, is_dir=i.is_dir)
+        for i in ops.io_to_file_infos(io)
+    ]
