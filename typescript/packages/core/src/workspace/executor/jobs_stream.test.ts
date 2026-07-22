@@ -111,6 +111,26 @@ describe('capture sites: a sink must never leak into a captured value', () => {
   })
 })
 
+describe('bare wait adopts job output', () => {
+  // A real shell has nothing to adopt because its jobs share the
+  // terminal. Mirage jobs print to their console, so bare `wait` has to
+  // surface it or the output is stranded.
+  it('surfaces every job in id order', async () => {
+    const ws = buildWs()
+    await ws.execute('echo a &')
+    await ws.execute('echo b &')
+    const res = await ws.execute('wait')
+    expect(res.stdoutText).toBe('a\nb\n')
+  })
+
+  it('returns nothing and exit 0 when there are no jobs', async () => {
+    const ws = buildWs()
+    const res = await ws.execute('wait')
+    expect(res.stdoutText).toBe('')
+    expect(res.exitCode).toBe(0)
+  })
+})
+
 describe('kill reaches a real running command', () => {
   it('stops a job that is already mid-flight, not one still queued', async () => {
     const ws = buildWs()

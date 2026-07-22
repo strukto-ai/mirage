@@ -238,10 +238,19 @@ describe('workspace: job table cleanup', () => {
 
   it('completed jobs cleared after listing', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo hi & wait; jobs')
+    // `wait %1` waits without reaping, so the job is still listable.
+    // Bare `wait` reaps, matching GNU, and is covered separately below.
+    const io = await ws.execute('echo hi & wait %1; jobs')
     expect(stdoutStr(io)).toContain('completed')
     const io2 = await ws.execute('jobs')
     expect(stdoutStr(io2)).toBe('')
+    await ws.close()
+  })
+
+  it('bare wait reaps, so jobs is empty after it', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('echo hi & wait; jobs')
+    expect(stdoutStr(io)).toBe('hi\n')
     await ws.close()
   })
 })

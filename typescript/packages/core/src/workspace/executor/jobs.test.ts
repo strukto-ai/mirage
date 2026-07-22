@@ -43,7 +43,7 @@ function decode(b: Uint8Array): string {
 describe('handleWait', () => {
   it('waits for all jobs when no id given', async () => {
     const jt = new JobTable()
-    const j1 = jt.submit({
+    jt.submit({
       command: 'a',
       run: quiet,
       abort: new AbortController(),
@@ -52,7 +52,8 @@ describe('handleWait', () => {
     const [, io, exec] = await handleWait(jt, ['wait'])
     expect(io.exitCode).toBe(0)
     expect(exec.command).toBe('wait')
-    await jt.wait(j1.id)
+    // Bare `wait` reaps, so nothing is left to wait on afterwards.
+    expect(jt.listJobs()).toHaveLength(0)
   })
 
   it('rejects non-numeric job id', async () => {

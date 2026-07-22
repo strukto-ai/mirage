@@ -155,8 +155,33 @@ export async function handleBackground(
 export async function handleWait(jobTable: JobTable, parts: string[]): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   if (parts.length <= 1) {
+    // Bare `wait` adopts every job's output, the way `wait <id>` already
+    // does for one. A real shell has nothing to adopt: its jobs share the
+    // terminal and have printed already. Mirage jobs print to their
+    // console, so the shell has to surface it or the output is stranded.
+    //
+    // Every unreaped job, not just the ones still running: a job that
+    // finished before this line was reached has output nobody has read,
+    // and whether it finished in time is a scheduling accident. Ordered
+    // by job id, because jobs finish concurrently and completion order
+    // is not reproducible. Reaped afterwards so a second `wait` does not
+    // print the same output twice.
     await jobTable.waitAll()
-    return [null, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
+    const finished = jobTable.listJobs().sort((a, b) => a.id - b.id)
+    const outs: Uint8Array[] = []
+    const errs: Uint8Array[] = []
+    for (const job of finished) {
+      outs.push(await job.console.snapshot(Channel.STDOUT))
+      errs.push(await job.console.snapshot(Channel.STDERR))
+    }
+    jobTable.popCompleted()
+    const out = concat(outs)
+    const err = concat(errs)
+    return [
+      out.byteLength > 0 ? out : null,
+      new IOResult(err.byteLength > 0 ? { stderr: err } : {}),
+      new ExecutionNode({ command: cmdStr, exitCode: 0 }),
+    ]
   }
   const raw = (parts[1] ?? '').replace(/^%+/, '')
   const jobId = Number(raw)

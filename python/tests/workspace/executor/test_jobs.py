@@ -121,6 +121,39 @@ def test_redirected_output_goes_to_the_file_not_the_console():
     assert written == "hi\n"
 
 
+# ── bare `wait` adopts job output ───────────────────────────────────
+
+
+def test_bare_wait_adopts_output_from_every_job_in_id_order():
+    """`wait` with no operand surfaces what the jobs printed.
+
+    A real shell has nothing to adopt because its jobs share the
+    terminal. Mirage jobs print to their console, so bare `wait` has to
+    surface it or the output is stranded.
+    """
+
+    async def _do():
+        ws = _workspace()
+        await ws.execute("echo a &")
+        await ws.execute("echo b &")
+        result = await ws.execute("wait")
+        return await result.stdout_str()
+
+    assert asyncio.run(_do()) == "a\nb\n"
+
+
+def test_bare_wait_with_no_jobs_returns_nothing():
+
+    async def _do():
+        ws = _workspace()
+        result = await ws.execute("wait")
+        return await result.stdout_str(), result.exit_code
+
+    out, code = asyncio.run(_do())
+    assert out == ""
+    assert code == 0
+
+
 def test_stderr_is_routed_to_its_own_channel():
     out, err = asyncio.run(_run_bg("echo err >&2 &"))
     assert out == b""

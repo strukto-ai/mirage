@@ -2445,8 +2445,9 @@ def test_bg_sleep_kill_and_jobs_cleanup():
 def test_completed_jobs_cleaned_after_jobs_command():
     """Completed jobs appear in first `jobs`, removed by second `jobs`."""
     ws = _ws()
-    # Run a fast bg job, wait for it, then list
-    io = _exec(ws, "echo hi & wait; jobs")
+    # `wait %1` waits without reaping, so the job is still listable.
+    # Bare `wait` reaps, matching GNU, and is covered separately below.
+    io = _exec(ws, "echo hi & wait %1; jobs")
     out = _stdout(io)
     assert b"completed" in out
 
@@ -2454,6 +2455,13 @@ def test_completed_jobs_cleaned_after_jobs_command():
     io = _exec(ws, "jobs")
     out = _stdout(io)
     assert out == b""
+
+
+def test_bare_wait_reaps_so_jobs_is_empty_after_it():
+    """GNU prints nothing from `jobs` once `wait` has reaped."""
+    ws = _ws()
+    io = _exec(ws, "echo hi & wait; jobs")
+    assert _stdout(io) == b"hi\n"
 
 
 # ── while loop limit warning ───────────────────────────────────────────

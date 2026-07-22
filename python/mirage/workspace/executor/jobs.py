@@ -137,8 +137,27 @@ async def handle_wait(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     cmd_str = " ".join(parts)
     if len(parts) <= 1:
+        # Bare `wait` adopts every job's output, the way `wait <id>`
+        # already does for one. A real shell has nothing to adopt: its
+        # jobs share the terminal and have printed already. Mirage jobs
+        # print to their console, so the shell has to surface it or the
+        # output is stranded.
+        #
+        # Every unreaped job, not just the ones still running: a job
+        # that finished before this line was reached has output nobody
+        # has read, and whether it finished in time is a scheduling
+        # accident. Ordered by job id, because jobs finish concurrently
+        # and completion order is not reproducible. Reaped afterwards so
+        # a second `wait` does not print the same output twice.
         await job_table.wait_all()
-        return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+        out = b""
+        err = b""
+        for finished in sorted(job_table.list_jobs(), key=lambda j: j.id):
+            out += await finished.console.snapshot(Channel.STDOUT)
+            err += await finished.console.snapshot(Channel.STDERR)
+        job_table.pop_completed()
+        return out or None, IOResult(stderr=err or None), ExecutionNode(
+            command=cmd_str, exit_code=0)
     raw = parts[1].lstrip("%")
     try:
         job_id = int(raw)
