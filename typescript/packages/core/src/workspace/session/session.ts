@@ -100,7 +100,7 @@ export class Session {
    * forget one when adding new fields.
    */
   fork(overrides: Partial<SessionInit> = {}): Session {
-    return new Session({
+    const forked = new Session({
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
       env: overrides.env ?? { ...this.env },
@@ -118,6 +118,9 @@ export class Session {
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    forked.getoptsPos = this.getoptsPos
+    forked.getoptsOptind = this.getoptsOptind
+    return forked
   }
 
   /**

@@ -83,6 +83,7 @@ export function handleUnset(names: string[], session: Session): Result {
     }
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete session.env[name]
+    if (name === 'OPTIND') session.getoptsOptind = null
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'unset', exitCode: 0 })]
 }
@@ -226,6 +227,12 @@ export function handleSet(
   return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
 }
 
+const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+function isValidName(name: string): boolean {
+  return IDENTIFIER_RE.test(name)
+}
+
 function getoptsFinish(
   session: Session,
   name: string,
@@ -236,7 +243,18 @@ function getoptsFinish(
   exitCode: number,
   stderr: Uint8Array | null = null,
 ): Result {
-  session.env[name] = optValue
+  // The name is assigned last, exactly as bash does: OPTIND/OPTARG and
+  // the hidden cursor still advance, but a bad destination fails the
+  // write and turns the call into a status-1 error.
+  if (!isValidName(name)) {
+    stderr = new TextEncoder().encode(`bash: getopts: \`${name}': not a valid identifier\n`)
+    exitCode = 1
+  } else if (session.readonlyVars.has(name)) {
+    stderr = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+    exitCode = 1
+  } else {
+    session.env[name] = optValue
+  }
   if (optarg === null) delete session.env.OPTARG
   else session.env.OPTARG = optarg
   session.env.OPTIND = String(newOptind)
@@ -251,7 +269,11 @@ function getoptsFinish(
 }
 
 /** Parse one option per call, with bash's getopts semantics. */
-export function handleGetopts(args: readonly string[], session: Session): Result {
+export function handleGetopts(
+  args: readonly string[],
+  session: Session,
+  callStack: CallStack | null = null,
+): Result {
   if (args.length < 2) {
     const err = new TextEncoder().encode('getopts: usage: getopts optstring name [arg]\n')
     return [
@@ -262,17 +284,28 @@ export function handleGetopts(args: readonly string[], session: Session): Result
   }
   const optstring = args[0] ?? ''
   const name = args[1] ?? ''
-  const params = args.length > 2 ? args.slice(2) : session.positionalArgs
+  let params: readonly string[]
+  if (args.length > 2) params = args.slice(2)
+  else if (callStack !== null && callStack.getAllPositional().length > 0)
+    params = callStack.getAllPositional()
+  else params = session.positionalArgs
   const silent = optstring.startsWith(':')
+  const verbose = !silent && (session.env.OPTERR ?? '1') !== '0'
   const parsed = Number.parseInt(session.env.OPTIND ?? '1', 10)
-  const optind = Number.isNaN(parsed) ? 1 : parsed
-  if (session.getoptsOptind !== optind) session.getoptsPos = 0
+  let optind = Number.isNaN(parsed) ? 1 : parsed
+  // Bash treats a nonpositive OPTIND as a restart at argument 1.
+  const restart = optind < 1
+  if (restart) optind = 1
+  if (restart || session.getoptsOptind !== optind) session.getoptsPos = 0
   let pos = session.getoptsPos
 
-  if (optind < 1 || optind > params.length) {
+  if (optind > params.length) {
     return getoptsFinish(session, name, '?', null, optind, 0, 1)
   }
   const word = params[optind - 1] ?? ''
+  // A stale cursor left past the end of the current word (a shorter or
+  // reused argument) restarts the scan rather than reading undefined.
+  if (pos >= word.length) pos = 0
   if (pos === 0) {
     if (!word.startsWith('-') || word === '-') {
       return getoptsFinish(session, name, '?', null, optind, 0, 1)
@@ -291,7 +324,7 @@ export function handleGetopts(args: readonly string[], session: Session): Result
   if (!isValid) {
     const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
     if (silent) return getoptsFinish(session, name, '?', letter, afterOptind, afterPos, 0)
-    const err = enc.encode(`bash: illegal option -- ${letter}\n`)
+    const err = verbose ? enc.encode(`bash: illegal option -- ${letter}\n`) : null
     return getoptsFinish(session, name, '?', null, afterOptind, afterPos, 0, err)
   }
 
@@ -305,7 +338,7 @@ export function handleGetopts(args: readonly string[], session: Session): Result
     return getoptsFinish(session, name, letter, params[optind] ?? '', optind + 2, 0, 0)
   }
   if (silent) return getoptsFinish(session, name, ':', letter, optind + 1, 0, 0)
-  const err = enc.encode(`bash: option requires an argument -- ${letter}\n`)
+  const err = verbose ? enc.encode(`bash: option requires an argument -- ${letter}\n`) : null
   return getoptsFinish(session, name, '?', null, optind + 1, 0, 0, err)
 }
 

@@ -369,3 +369,89 @@ async def test_getopts_end_to_end_loop_with_case():
                           '  esac\n'
                           'done')
     assert (io.stdout or b"") == b"a=val\nb-set\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_stale_offset_shorter_word_no_crash():
+    session = make_session()
+    await handle_getopts(["ab", "o", "-ab"], session)
+    _, io, _ = await handle_getopts(["ab", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_nonpositive_optind_restarts_at_one():
+    session = make_session()
+    session.positional_args = ["-a", "-b"]
+    session.env["OPTIND"] = "0"
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_invalid_identifier_destination():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a", "bad-name", "-a"], session)
+    assert io.exit_code == 1
+    assert b"not a valid identifier" in (await materialize(io.stderr))
+    assert "bad-name" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_getopts_readonly_destination_is_not_overwritten():
+    session = make_session()
+    session.env["o"] = "orig"
+    session.readonly_vars.add("o")
+    _, io, _ = await handle_getopts(["a", "o", "-a"], session)
+    assert io.exit_code == 1
+    assert session.env["o"] == "orig"
+    assert b"readonly variable" in (await materialize(io.stderr))
+
+
+@pytest.mark.asyncio
+async def test_getopts_opterr_zero_suppresses_stderr():
+    session = make_session()
+    session.env["OPTERR"] = "0"
+    _, io, _ = await handle_getopts(["ab", "o", "-x"], session)
+    assert session.env["o"] == "?"
+    assert (await materialize(io.stderr)) == b""
+
+
+@pytest.mark.asyncio
+async def test_getopts_scans_function_frame_positional():
+    session = make_session()
+    cs = CallStack()
+    cs.push(["-a", "-b"], function_name="f")
+    await handle_getopts(["ab", "o"], session, cs)
+    assert session.env["o"] == "a"
+    await handle_getopts(["ab", "o"], session, cs)
+    assert session.env["o"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_getopts_fork_preserves_cursor():
+    session = make_session()
+    await handle_getopts(["ab", "o", "-ab"], session)
+    forked = session.fork()
+    assert forked._getopts_pos == session._getopts_pos
+    assert forked._getopts_optind == session._getopts_optind
+
+
+@pytest.mark.asyncio
+async def test_getopts_reassign_optind_same_value_reparses():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('set -- -ab; getopts ab o; echo "1:$o"; '
+                          'OPTIND=1; getopts ab o; echo "2:$o"')
+    assert (io.stdout or b"") == b"1:a\n2:a\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_subshell_does_not_corrupt_parent_cursor():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('set -- -ab; OPTIND=1; getopts ab o; '
+                          '(getopts ab o); getopts ab o; echo "$o"')
+    assert (io.stdout or b"") == b"b\n"

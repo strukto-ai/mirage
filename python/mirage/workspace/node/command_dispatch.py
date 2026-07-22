@@ -392,7 +392,7 @@ async def _run_argv(
         return await handle_shift(args, call_stack, session=session)
 
     if name == SB.GETOPTS:
-        return await handle_getopts(args, session)
+        return await handle_getopts(args, session, call_stack)
 
     if name == SB.TRAP:
         return await handle_trap(session)

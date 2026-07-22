@@ -121,6 +121,11 @@ class Session:
             self.pipeline_timeout_seconds,
             "last_bg_job_id":
             self.last_bg_job_id,
+            "positional_args":
+            list(self.positional_args),
         }
         defaults.update(overrides)
-        return Session(**defaults)
+        forked = Session(**defaults)
+        forked._getopts_pos = self._getopts_pos
+        forked._getopts_optind = self._getopts_optind
+        return forked

@@ -296,4 +296,22 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
     expect(new TextDecoder().decode(res.stdout)).toBe('a=val\nb-set\n')
     await ws.close()
   })
+
+  it('reparses when OPTIND is reassigned to its current value', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute(
+      'set -- -ab; getopts ab o; echo "1:$o"; OPTIND=1; getopts ab o; echo "2:$o"',
+    )
+    expect(new TextDecoder().decode(res.stdout)).toBe('1:a\n2:a\n')
+    await ws.close()
+  })
+
+  it('does not let a subshell corrupt the parent getopts cursor', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute(
+      'set -- -ab; OPTIND=1; getopts ab o; (getopts ab o); getopts ab o; echo "$o"',
+    )
+    expect(new TextDecoder().decode(res.stdout)).toBe('b\n')
+    await ws.close()
+  })
 })

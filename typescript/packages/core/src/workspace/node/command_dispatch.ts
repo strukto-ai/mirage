@@ -529,7 +529,7 @@ async function runArgv(
   if (name === SB.SHIFT) {
     return handleShift(args, callStack, session)
   }
-  if (name === SB.GETOPTS) return handleGetopts(args, session)
+  if (name === SB.GETOPTS) return handleGetopts(args, session, callStack)
   if (name === SB.TRAP) return handleTrap(session)
   if (name === SB.TEST || name === SB.BRACKET || name === SB.DOUBLE_BRACKET) {
     let testArgs = [...operands]

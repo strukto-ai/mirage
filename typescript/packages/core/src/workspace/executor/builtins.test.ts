@@ -624,6 +624,65 @@ describe('handleGetopts', () => {
     expect(io.exitCode).toBe(0)
     expect(s.env.o).toBe('b')
   })
+
+  it('does not read past the end of a shorter reused word', () => {
+    const s = new Session({ sessionId: 't' })
+    handleGetopts(['ab', 'o', '-ab'], s)
+    const [, io] = handleGetopts(['ab', 'o', '-a'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('treats a nonpositive OPTIND as a restart at argument 1', () => {
+    const s = new Session({ sessionId: 't', positionalArgs: ['-a', '-b'] })
+    s.env.OPTIND = '0'
+    const [, io] = handleGetopts(['ab', 'o'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('rejects an invalid destination identifier', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['a', 'bad-name', '-a'], s)
+    expect(io.exitCode).toBe(1)
+    expect(decode(io.stderr as Uint8Array)).toContain('not a valid identifier')
+    expect(s.env['bad-name']).toBeUndefined()
+  })
+
+  it('does not overwrite a readonly destination', () => {
+    const s = new Session({ sessionId: 't', env: { o: 'orig' }, readonlyVars: new Set(['o']) })
+    const [, io] = handleGetopts(['a', 'o', '-a'], s)
+    expect(io.exitCode).toBe(1)
+    expect(s.env.o).toBe('orig')
+    expect(decode(io.stderr as Uint8Array)).toContain('readonly variable')
+  })
+
+  it('suppresses diagnostics when OPTERR=0', () => {
+    const s = new Session({ sessionId: 't', env: { OPTERR: '0' } })
+    const [, io] = handleGetopts(['ab', 'o', '-x'], s)
+    expect(s.env.o).toBe('?')
+    expect(io.stderr ?? null).toBeNull()
+  })
+
+  it('scans the function frame positional parameters', () => {
+    const s = new Session({ sessionId: 't' })
+    const cs = new CallStack()
+    cs.push(['-a', '-b'], 'f')
+    handleGetopts(['ab', 'o'], s, cs)
+    expect(s.env.o).toBe('a')
+    handleGetopts(['ab', 'o'], s, cs)
+    expect(s.env.o).toBe('b')
+  })
+
+  it('propagates the cursor across fork()', () => {
+    const s = new Session({ sessionId: 't' })
+    handleGetopts(['ab', 'o', '-ab'], s)
+    const forked = s.fork()
+    expect(forked.getoptsPos).toBe(s.getoptsPos)
+    expect(forked.getoptsOptind).toBe(s.getoptsOptind)
+  })
 })
 
 describe('handleSet', () => {
