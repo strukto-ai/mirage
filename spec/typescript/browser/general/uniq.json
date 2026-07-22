@@ -37,7 +37,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--count",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
@@ -46,7 +46,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--repeated",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
@@ -58,13 +58,40 @@
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
+      "short": "-D",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--all-repeated",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--group",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--unique",
+      "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-u",
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--skip-fields",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
@@ -73,7 +100,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--skip-chars",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
@@ -82,7 +109,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--ignore-case",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-i",
@@ -91,11 +118,20 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--check-chars",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
       "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--zero-terminated",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
+      "value_kind": "none",
       "value_optional": false
     }
   ],

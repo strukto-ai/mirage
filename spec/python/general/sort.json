@@ -46,7 +46,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--reverse",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
@@ -55,7 +55,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--numeric-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
@@ -64,7 +64,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--unique",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-u",
@@ -73,7 +73,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--ignore-case",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
@@ -82,7 +82,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--key",
       "numeric_shorthand": false,
       "repeatable": true,
       "short": "-k",
@@ -91,7 +91,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--field-separator",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-t",
@@ -100,7 +100,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--human-numeric-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-h",
@@ -109,7 +109,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--version-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-V",
@@ -118,7 +118,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--stable",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
@@ -127,7 +127,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--month-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-M",
@@ -136,10 +136,82 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--ignore-leading-blanks",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-b",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-c",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--check",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--dictionary-order",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-d",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--general-numeric-sort",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-g",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--ignore-nonprinting",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-i",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--merge",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-m",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--output",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-o",
+      "value_kind": "path",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--zero-terminated",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
       "value_kind": "none",
       "value_optional": false
     }

@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "id": "pipe_sort_uniq_nul_records",
+      "seq": 610183,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'b\\0a\\0a\\0' | sort -z | uniq -z | head -z -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\u0000b\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "z",
+        "z",
+        "z",
+        "n"
+      ]
+    },
+    {
+      "id": "pipe_sort_uniq_fields_numeric",
+      "seq": 610184,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x 20\\ny 3\\ny 3\\n' | cut -F2 | sort -g | uniq -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "      2 3\n      1 20\n",
+        "stderr": ""
+      },
+      "flags": [
+        "F",
+        "g",
+        "c"
+      ]
+    }
+  ]
+}

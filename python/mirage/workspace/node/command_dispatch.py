@@ -40,8 +40,8 @@ from mirage.shell.helpers import (  # isort: skip
 from mirage.workspace.executor.builtins import (  # isort: skip
     follow_paths, handle_bash, handle_cd, handle_chmod, handle_chown,
     handle_command_builtin, handle_echo, handle_eval, handle_exit,
-    handle_export, handle_history, handle_ln, handle_local, handle_man,
-    handle_printenv, handle_printf, handle_read, handle_readlink,
+    handle_export, handle_getopts, handle_history, handle_ln, handle_local,
+    handle_man, handle_printenv, handle_printf, handle_read, handle_readlink,
     handle_return, handle_set, handle_shift, handle_sleep, handle_source,
     handle_test, handle_timeout, handle_touch, handle_trap, handle_type,
     handle_unset, handle_whoami, handle_xargs, link_flags, prepare_mv,
@@ -390,6 +390,9 @@ async def _run_argv(
 
     if name == SB.SHIFT:
         return await handle_shift(args, call_stack, session=session)
+
+    if name == SB.GETOPTS:
+        return await handle_getopts(args, session, call_stack)
 
     if name == SB.TRAP:
         return await handle_trap(session)

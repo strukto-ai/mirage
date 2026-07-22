@@ -15,7 +15,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { cutStream, parseCutRanges } from '../cut_helper.ts'
+import { cutStream, parseCutRanges, type CutOptions } from '../cut_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
@@ -24,46 +24,89 @@ const ENC = new TextEncoder()
 async function* chainStreams(
   streams: readonly AsyncIterable<Uint8Array>[],
 ): AsyncIterable<Uint8Array> {
-  for (const s of streams) {
-    for await (const chunk of s) yield chunk
+  for (const stream of streams) {
+    for await (const chunk of stream) yield chunk
+  }
+}
+
+function stringFlag(
+  flags: Record<string, string | boolean | string[]>,
+  ...names: string[]
+): string | null {
+  for (const name of names) {
+    const value = flags[name]
+    if (typeof value === 'string') return value
+  }
+  return null
+}
+
+function parseFlags(flags: Record<string, string | boolean | string[]>): CutOptions | string {
+  const bytesRange = stringFlag(flags, 'b', 'bytes')
+  const charsRange = stringFlag(flags, 'c', 'characters')
+  const fieldsRange = stringFlag(flags, 'F', 'f', 'fields')
+  const selected = [bytesRange, charsRange, fieldsRange].filter((value) => value !== null)
+  if (selected.length === 0) {
+    return 'cut: you must specify a list of bytes, characters, or fields\n'
+  }
+  if (selected.length > 1) return 'cut: only one type of list may be specified\n'
+  const mode: CutOptions['mode'] =
+    bytesRange !== null ? 'bytes' : charsRange !== null ? 'characters' : 'fields'
+  const range = bytesRange ?? charsRange ?? fieldsRange ?? ''
+  const rawWhitespace = flags.whitespace_delimited
+  let whitespace: CutOptions['whitespace'] = null
+  if (flags.w === true || typeof flags.F === 'string' || rawWhitespace === true) {
+    whitespace = 'default'
+  } else if (typeof rawWhitespace === 'string') {
+    if (rawWhitespace !== 'trimmed') {
+      return `cut: invalid argument '${rawWhitespace}' for '--whitespace-delimited'\n`
+    }
+    whitespace = 'trimmed'
+  }
+  if (whitespace !== null && mode !== 'fields') {
+    return "cut: '-w' is only meaningful with fields\n"
+  }
+  let outputDelimiter = stringFlag(flags, 'args_O', 'output_delimiter')
+  if (typeof flags.F === 'string' && outputDelimiter === null) outputDelimiter = ' '
+  const explicitDelimiter = stringFlag(flags, 'd', 'delimiter')
+  if (explicitDelimiter !== null && Array.from(explicitDelimiter).length !== 1) {
+    return 'cut: the delimiter must be a single character\n'
+  }
+  return {
+    ranges: parseCutRanges(range),
+    mode,
+    delimiter: explicitDelimiter ?? '\t',
+    complement: flags.complement === true,
+    onlyDelimited: flags.s === true || flags.only_delimited === true,
+    whitespace,
+    noPartial: flags.n === true || flags.no_partial === true,
+    outputDelimiter,
+    zeroTerminated: flags.z === true || flags.zero_terminated === true,
   }
 }
 
 export async function cutGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const f = typeof opts.flags.f === 'string' ? opts.flags.f : null
-  const d = typeof opts.flags.d === 'string' ? opts.flags.d : null
-  const c = typeof opts.flags.c === 'string' ? opts.flags.c : null
-  const complement = opts.flags.complement === true
-  const z = opts.flags.z === true
-  const fields = f !== null ? parseCutRanges(f) : null
-  const chars = c !== null ? parseCutRanges(c) : null
-  const delim = d ?? '\t'
-
+  const parsed = parseFlags(opts.flags)
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   if (paths.length > 0) {
-    // Each operand is read eagerly (a missing one is reported and skipped,
-    // GNU-style), cut independently, and the outputs concatenate in operand
-    // order (a file without a trailing newline never merges its last line
-    // into the next operand's first).
     const [ok, err] = await readOperands(paths, stream, 'cut')
-    const io = operandsIo(err, { cache: ok.map((o) => o.path.virtual) })
+    const io = operandsIo(err, { cache: ok.map((operand) => operand.path.virtual) })
     if (ok.length === 0 && err !== '') return [null, io]
-    const outputs = ok.map((o) =>
-      cutStream(singleChunk(o.data), delim, fields, chars, complement, z),
-    )
+    const outputs = ok.map((operand) => cutStream(singleChunk(operand.data), parsed))
     const out: ByteSource = chainStreams(outputs)
     return [out, io]
   }
   let source: AsyncIterable<Uint8Array>
   try {
     source = resolveSource(opts.stdin, 'cut: missing operand')
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${message}\n`) })]
   }
-  const out: ByteSource = cutStream(source, delim, fields, chars, complement, z)
-  return [out, new IOResult()]
+  return [cutStream(source, parsed), new IOResult()]
 }

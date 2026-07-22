@@ -34,6 +34,7 @@ import {
   handleMan,
   handlePrintenv,
   handlePrintf,
+  handleGetopts,
   handleRead,
   handleReturn,
   handleSet,
@@ -229,6 +230,8 @@ describe('handlePrintf', () => {
     [['%.0f\n', '2.5'], '2\n', 0],
     [['%010.2f\n', '3.14'], '0000003.14\n', 0],
     [['%#.0f\n', '3'], '3.\n', 0],
+    [['%g|%g|%g|%g\n', '1.', '.5', '1e2', '+1.25e-2'], '1|0.5|100|0.0125\n', 0],
+    [['%g', `${'0'.repeat(20_000)}x`], '0', 1],
     [['%e\n', '0'], '0.000000e+00\n', 0],
     [['%.2e\n', '12345.678'], '1.23e+04\n', 0],
     [['%g\n', '100000'], '100000\n', 0],
@@ -488,6 +491,199 @@ describe('handleShift', () => {
     const s = new Session({ sessionId: 'test', positionalArgs: ['x', 'y', 'z'] })
     handleShift(['1'], cs, s)
     expect(s.positionalArgs).toEqual(['y', 'z'])
+  })
+})
+
+describe('handleGetopts', () => {
+  it('single flag sets var and advances OPTIND', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['ab', 'o', '-a'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('iterates two flags then stops', () => {
+    const s = new Session({ sessionId: 't' })
+    const args = ['ab', 'o', '-a', '-b']
+    handleGetopts(args, s)
+    expect([s.env.o, s.env.OPTIND]).toEqual(['a', '2'])
+    handleGetopts(args, s)
+    expect([s.env.o, s.env.OPTIND]).toEqual(['b', '3'])
+    const [, io3] = handleGetopts(args, s)
+    expect(io3.exitCode).toBe(1)
+    expect(s.env.o).toBe('?')
+  })
+
+  it('separate optarg', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['a:b', 'o', '-a', 'foo', '-b'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+    expect(s.env.OPTARG).toBe('foo')
+    expect(s.env.OPTIND).toBe('3')
+  })
+
+  it('attached optarg', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['a:', 'o', '-afoo'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+    expect(s.env.OPTARG).toBe('foo')
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('combined flags share OPTIND until the word is done', () => {
+    const s = new Session({ sessionId: 't' })
+    const args = ['abc', 'o', '-abc']
+    handleGetopts(args, s)
+    expect([s.env.o, s.env.OPTIND]).toEqual(['a', '1'])
+    handleGetopts(args, s)
+    expect([s.env.o, s.env.OPTIND]).toEqual(['b', '1'])
+    handleGetopts(args, s)
+    expect([s.env.o, s.env.OPTIND]).toEqual(['c', '2'])
+  })
+
+  it('invalid option, non-silent', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['ab', 'o', '-x'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('?')
+    expect(decode(io.stderr as Uint8Array)).toBe('bash: illegal option -- x\n')
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('invalid option, silent → OPTARG set, no stderr', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts([':ab', 'o', '-x'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('?')
+    expect(s.env.OPTARG).toBe('x')
+    expect(io.stderr).toBeNull()
+  })
+
+  it('missing arg, non-silent', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['a:', 'o', '-a'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('?')
+    expect(decode(io.stderr as Uint8Array)).toBe('bash: option requires an argument -- a\n')
+  })
+
+  it('missing arg, silent → name ":" and OPTARG', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts([':a:', 'o', '-a'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe(':')
+    expect(s.env.OPTARG).toBe('a')
+    expect(io.stderr).toBeNull()
+  })
+
+  it('non-option word stops without advancing', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['ab', 'o', 'foo', '-a'], s)
+    expect(io.exitCode).toBe(1)
+    expect(s.env.OPTIND).toBe('1')
+  })
+
+  it('double dash is consumed then stops', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['ab', 'o', '--', '-a'], s)
+    expect(io.exitCode).toBe(1)
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('no args stops', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['ab', 'o'], s)
+    expect(io.exitCode).toBe(1)
+    expect(s.env.OPTIND).toBe('1')
+  })
+
+  it('reads positional args when no explicit args', () => {
+    const s = new Session({ sessionId: 't', positionalArgs: ['-a', '-b'] })
+    const [, io] = handleGetopts(['ab', 'o'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+  })
+
+  it('usage error on too few operands', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['ab'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toBe('getopts: usage: getopts optstring name [arg]\n')
+  })
+
+  it('OPTIND reset reparses', () => {
+    const s = new Session({ sessionId: 't', positionalArgs: ['-a', '-b'] })
+    handleGetopts(['ab', 'o'], s)
+    handleGetopts(['ab', 'o'], s)
+    const [, stop] = handleGetopts(['ab', 'o'], s)
+    expect(stop.exitCode).toBe(1)
+    s.env.OPTIND = '1'
+    s.positionalArgs = ['-b', '-a']
+    const [, io] = handleGetopts(['ab', 'o'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('b')
+  })
+
+  it('does not read past the end of a shorter reused word', () => {
+    const s = new Session({ sessionId: 't' })
+    handleGetopts(['ab', 'o', '-ab'], s)
+    const [, io] = handleGetopts(['ab', 'o', '-a'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('treats a nonpositive OPTIND as a restart at argument 1', () => {
+    const s = new Session({ sessionId: 't', positionalArgs: ['-a', '-b'] })
+    s.env.OPTIND = '0'
+    const [, io] = handleGetopts(['ab', 'o'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.o).toBe('a')
+    expect(s.env.OPTIND).toBe('2')
+  })
+
+  it('rejects an invalid destination identifier', () => {
+    const s = new Session({ sessionId: 't' })
+    const [, io] = handleGetopts(['a', 'bad-name', '-a'], s)
+    expect(io.exitCode).toBe(1)
+    expect(decode(io.stderr as Uint8Array)).toContain('not a valid identifier')
+    expect(s.env['bad-name']).toBeUndefined()
+  })
+
+  it('does not overwrite a readonly destination', () => {
+    const s = new Session({ sessionId: 't', env: { o: 'orig' }, readonlyVars: new Set(['o']) })
+    const [, io] = handleGetopts(['a', 'o', '-a'], s)
+    expect(io.exitCode).toBe(1)
+    expect(s.env.o).toBe('orig')
+    expect(decode(io.stderr as Uint8Array)).toContain('readonly variable')
+  })
+
+  it('suppresses diagnostics when OPTERR=0', () => {
+    const s = new Session({ sessionId: 't', env: { OPTERR: '0' } })
+    const [, io] = handleGetopts(['ab', 'o', '-x'], s)
+    expect(s.env.o).toBe('?')
+    expect(io.stderr ?? null).toBeNull()
+  })
+
+  it('scans the function frame positional parameters', () => {
+    const s = new Session({ sessionId: 't' })
+    const cs = new CallStack()
+    cs.push(['-a', '-b'], 'f')
+    handleGetopts(['ab', 'o'], s, cs)
+    expect(s.env.o).toBe('a')
+    handleGetopts(['ab', 'o'], s, cs)
+    expect(s.env.o).toBe('b')
+  })
+
+  it('propagates the cursor across fork()', () => {
+    const s = new Session({ sessionId: 't' })
+    handleGetopts(['ab', 'o', '-ab'], s)
+    const forked = s.fork()
+    expect(forked.getoptsPos).toBe(s.getoptsPos)
+    expect(forked.getoptsOptind).toBe(s.getoptsOptind)
   })
 })
 

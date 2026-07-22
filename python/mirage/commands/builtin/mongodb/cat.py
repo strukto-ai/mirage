@@ -15,6 +15,7 @@
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat as generic_cat
+from mirage.commands.builtin.generic.cat import needs_display
 from mirage.commands.builtin.mongodb._provision import file_read_provision
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -39,9 +40,8 @@ async def cat(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
@@ -77,7 +77,10 @@ async def cat(
                 parts.append(data)
             io = IOResult(reads=reads, cache=list(reads))
             source = async_chain(*parts)
-        return (generic_cat(source, number_lines=True) if n else source), io
+        if needs_display(flags):
+            return generic_cat(source, flags=flags), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
-    return (generic_cat(source, number_lines=True)
-            if n else source), IOResult()
+    if needs_display(flags):
+        return generic_cat(source, flags=flags), IOResult()
+    return source, IOResult()

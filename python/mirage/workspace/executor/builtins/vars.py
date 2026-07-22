@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -74,6 +76,8 @@ async def handle_unset(
                                                              exit_code=1,
                                                              stderr=err)
         session.env.pop(name, None)
+        if name == "OPTIND":
+            session._getopts_optind = None
     return None, IOResult(), ExecutionNode(command="unset", exit_code=0)
 
 
@@ -282,6 +286,146 @@ async def handle_set(
         session.positional_args = args[i:]
         break
     return None, IOResult(), ExecutionNode(command="set", exit_code=0)
+
+
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _is_valid_name(name: str) -> bool:
+    return _IDENTIFIER_RE.fullmatch(name) is not None
+
+
+def _getopts_finish(
+    session: Session,
+    name: str,
+    opt_value: str,
+    optarg: str | None,
+    new_optind: int,
+    new_pos: int,
+    exit_code: int,
+    stderr: bytes = b"",
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    # The name is assigned last, exactly as bash does: OPTIND/OPTARG and
+    # the hidden cursor still advance, but a bad destination fails the
+    # write and turns the call into a status-1 error.
+    if not _is_valid_name(name):
+        stderr = f"bash: getopts: `{name}': not a valid identifier\n".encode()
+        exit_code = 1
+    elif name in session.readonly_vars:
+        stderr = f"bash: {name}: readonly variable\n".encode()
+        exit_code = 1
+    else:
+        session.env[name] = opt_value
+    if optarg is None:
+        session.env.pop("OPTARG", None)
+    else:
+        session.env["OPTARG"] = optarg
+    session.env["OPTIND"] = str(new_optind)
+    session._getopts_pos = new_pos
+    session._getopts_optind = new_optind
+    io = IOResult(exit_code=exit_code, stderr=stderr)
+    return None, io, ExecutionNode(command="getopts",
+                                   exit_code=exit_code,
+                                   stderr=stderr)
+
+
+async def handle_getopts(
+    args: list[str],
+    session: Session,
+    call_stack: CallStack | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Parse one option per call, with bash's getopts semantics.
+
+    Args:
+        args (list[str]): words after `getopts`: the optstring, the name
+            variable, then optional explicit arguments (the positional
+            parameters are scanned when no explicit ones are given).
+        session (Session): shell session; OPTIND/OPTARG live in its env
+            and the hidden per-word scan offset in its getopts state.
+        call_stack (CallStack | None): function-call positional frames;
+            inside a shell function getopts scans the function's own
+            positional parameters, matching bash.
+    """
+    if len(args) < 2:
+        err = b"getopts: usage: getopts optstring name [arg]\n"
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="getopts",
+                                                         exit_code=2,
+                                                         stderr=err)
+    optstring = args[0]
+    name = args[1]
+    if len(args) > 2:
+        params = args[2:]
+    elif call_stack is not None and call_stack.get_all_positional():
+        params = call_stack.get_all_positional()
+    else:
+        params = session.positional_args
+    silent = optstring.startswith(":")
+    verbose = not silent and session.env.get("OPTERR", "1") != "0"
+    try:
+        optind = int(session.env.get("OPTIND", "1"))
+    except ValueError:
+        optind = 1
+    # Bash treats a nonpositive OPTIND as a restart at argument 1.
+    restart = optind < 1
+    if restart:
+        optind = 1
+    if restart or session._getopts_optind != optind:
+        session._getopts_pos = 0
+    pos = session._getopts_pos
+
+    if optind > len(params):
+        return _getopts_finish(session, name, "?", None, optind, 0, 1)
+    word = params[optind - 1]
+    # A stale cursor left past the end of the current word (a shorter or
+    # reused argument) restarts the scan rather than indexing out of range.
+    if pos >= len(word):
+        pos = 0
+    if pos == 0:
+        if not word.startswith("-") or word == "-":
+            return _getopts_finish(session, name, "?", None, optind, 0, 1)
+        if word == "--":
+            return _getopts_finish(session, name, "?", None, optind + 1, 0, 1)
+        pos = 1
+
+    letter = word[pos]
+    rest = word[pos + 1:]
+    idx = optstring.find(letter)
+    is_valid = letter != ":" and idx != -1
+    takes_arg = (is_valid and idx + 1 < len(optstring)
+                 and optstring[idx + 1] == ":")
+
+    if not is_valid:
+        if rest:
+            after_optind, after_pos = optind, pos + 1
+        else:
+            after_optind, after_pos = optind + 1, 0
+        if silent:
+            return _getopts_finish(session, name, "?", letter, after_optind,
+                                   after_pos, 0)
+        err = (f"bash: illegal option -- {letter}\n".encode()
+               if verbose else b"")
+        return _getopts_finish(session, name, "?", None, after_optind,
+                               after_pos, 0, err)
+
+    if not takes_arg:
+        if rest:
+            after_optind, after_pos = optind, pos + 1
+        else:
+            after_optind, after_pos = optind + 1, 0
+        return _getopts_finish(session, name, letter, None, after_optind,
+                               after_pos, 0)
+
+    if rest:
+        return _getopts_finish(session, name, letter, rest, optind + 1, 0, 0)
+    if optind < len(params):
+        return _getopts_finish(session, name, letter, params[optind],
+                               optind + 2, 0, 0)
+    if silent:
+        return _getopts_finish(session, name, ":", letter, optind + 1, 0, 0)
+    err = (f"bash: option requires an argument -- {letter}\n".encode()
+           if verbose else b"")
+    return _getopts_finish(session, name, "?", None, optind + 1, 0, 0, err)
 
 
 async def handle_trap(

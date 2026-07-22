@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "redirect_sort_uniq_output",
+      "seq": 610185,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/sort-uniq && printf 'b\\na\\na\\n' > /data/sort-uniq/in && sort -o /data/sort-uniq/sorted /data/sort-uniq/in && uniq /data/sort-uniq/sorted /data/sort-uniq/out && cat /data/sort-uniq/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    }
+  ]
+}

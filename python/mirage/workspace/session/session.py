@@ -47,6 +47,12 @@ class Session:
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
     _stdin_source: object = field(default=None, repr=False)
     _local_vars: dict[str, str | None] | None = field(default=None, repr=False)
+    # Hidden `getopts` state: the 1-based char offset within the current
+    # word being scanned, plus the OPTIND value that offset belongs to.
+    # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,
+    # which restarts the scan, matching bash's internal char pointer.
+    _getopts_pos: int = field(default=1, repr=False)
+    _getopts_optind: int | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         data = {
@@ -115,6 +121,11 @@ class Session:
             self.pipeline_timeout_seconds,
             "last_bg_job_id":
             self.last_bg_job_id,
+            "positional_args":
+            list(self.positional_args),
         }
         defaults.update(overrides)
-        return Session(**defaults)
+        forked = Session(**defaults)
+        forked._getopts_pos = self._getopts_pos
+        forked._getopts_optind = self._getopts_optind
+        return forked

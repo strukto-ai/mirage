@@ -17,9 +17,9 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import wc_aggregate
-from mirage.commands.builtin.generic.wc import format_multi, format_wc
+from mirage.commands.builtin.generic.wc import (format_multi, format_stdin,
+                                                parse_flags)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
-from mirage.commands.builtin.generic.wc import wc_lines as generic_wc_lines
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     dir_refusing_read
@@ -34,33 +34,29 @@ async def wc(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    args_l: bool = False,
-    w: bool = False,
-    c: bool = False,
-    m: bool = False,
-    L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
         body, err = await format_multi(paths,
                                        read=dir_refusing_read(
                                            ops, accessor, index),
-                                       args_l=args_l,
-                                       w=w,
-                                       c=c,
-                                       m=m,
-                                       L=L)
+                                       args_l=parsed.lines,
+                                       w=parsed.words,
+                                       c=parsed.bytes_,
+                                       m=parsed.chars,
+                                       L=parsed.max_line_length,
+                                       total=parsed.total)
         return body, IOResult(exit_code=1 if err else 0, stderr=err or None)
     source: AsyncIterator[bytes] = _resolve_source(stdin,
                                                    "wc: missing operand")
-    if args_l and not (L or w or c or m):
-        line_count = await generic_wc_lines(source)
-        return str(line_count).encode() + b"\n", IOResult()
     counts = await generic_wc(source)
-    return (format_wc(counts, args_l=args_l, w=w, c=c, m=m, L=L).encode() +
-            b"\n", IOResult())
+    return format_stdin(counts, parsed), IOResult()
 
 
 BUILDER = Builder('wc', wc, None, False, wc_aggregate, read=True)

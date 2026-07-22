@@ -40,8 +40,11 @@ describe('removalLines', () => {
     ).toEqual(["removed '/data/t/b.txt'", "removed '/data/t/a.txt'", "removed directory '/data/t'"])
   })
 
-  it('renders a single file and an empty list', () => {
+  it('renders a single file, strips trailing slashes, and handles an empty list', () => {
     expect(removalLines([{ path: '/data/f.txt', isDir: false }])).toEqual(["removed '/data/f.txt'"])
+    expect(removalLines([{ path: '/data/dir///', isDir: true }])).toEqual([
+      "removed directory '/data/dir'",
+    ])
     expect(removalLines([])).toEqual([])
   })
 })

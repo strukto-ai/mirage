@@ -245,6 +245,8 @@ async def handle_subshell(
     saved_functions = dict(session.functions)
     saved_positional = list(getattr(session, "positional_args", None) or [])
     saved_last_bg_job = session.last_bg_job_id
+    saved_getopts_pos = session._getopts_pos
+    saved_getopts_optind = session._getopts_optind
     try:
         all_stdout: list[Any] = []
         merged_io = IOResult()
@@ -303,3 +305,5 @@ async def handle_subshell(
         session.functions = saved_functions
         session.positional_args = saved_positional
         session.last_bg_job_id = saved_last_bg_job
+        session._getopts_pos = saved_getopts_pos
+        session._getopts_optind = saved_getopts_optind

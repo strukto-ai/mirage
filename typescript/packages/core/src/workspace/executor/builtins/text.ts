@@ -120,6 +120,34 @@ function numericValue(value: string): [bigint, boolean] {
   return parsePrintfInt(value)
 }
 
+function isDecimalDigit(code: number): boolean {
+  return code >= 48 && code <= 57
+}
+
+function isDecimalFloat(value: string): boolean {
+  let index = 0
+  if (value[index] === '+' || value[index] === '-') index += 1
+  const integerStart = index
+  while (isDecimalDigit(value.charCodeAt(index))) index += 1
+  const integerDigits = index - integerStart
+  let fractionalDigits = 0
+  if (value[index] === '.') {
+    index += 1
+    const fractionalStart = index
+    while (isDecimalDigit(value.charCodeAt(index))) index += 1
+    fractionalDigits = index - fractionalStart
+  }
+  if (integerDigits === 0 && fractionalDigits === 0) return false
+  if (value[index] === 'e' || value[index] === 'E') {
+    index += 1
+    if (value[index] === '+' || value[index] === '-') index += 1
+    const exponentStart = index
+    while (isDecimalDigit(value.charCodeAt(index))) index += 1
+    if (index === exponentStart) return false
+  }
+  return index === value.length
+}
+
 /** Resolve a floating-point argument (decimal, hex float, inf/nan, or the leading-quote code-point form). Returns [value, ok]. */
 function parseFloatArg(value: string): [number, boolean] {
   const s = value.trim()
@@ -133,7 +161,7 @@ function parseFloatArg(value: string): [number, boolean] {
     const v = parseHexFloat(s)
     return v === null ? [0, false] : [v, true]
   }
-  if (/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return [Number(s), true]
+  if (isDecimalFloat(s)) return [Number(s), true]
   const l = s.toLowerCase().replace(/^[+-]/, '')
   if (l === 'inf' || l === 'infinity') return [s.startsWith('-') ? -Infinity : Infinity, true]
   if (l === 'nan') return [NaN, true]

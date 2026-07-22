@@ -117,6 +117,23 @@ describe('OPFS commands — readers', () => {
 })
 
 describe('OPFS commands — writers', () => {
+  it('sort -o writes sorted output', async () => {
+    const r = await run('sort -o /data/sorted.csv /data/q1.csv')
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toBe('')
+    const output = DEC.decode(await ws.fs.readFile('/data/sorted.csv'))
+    expect(output).toBe('expense,80\nprofit,20\nrevenue,100\n')
+  })
+
+  it('uniq writes output to a second path', async () => {
+    await ws.fs.writeFile('/data/repeated.txt', 'alpha\nalpha\nbeta\nbeta\n')
+    const r = await run('uniq /data/repeated.txt /data/unique.txt')
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toBe('')
+    const output = DEC.decode(await ws.fs.readFile('/data/unique.txt'))
+    expect(output).toBe('alpha\nbeta\n')
+  })
+
   it('tee -a appends to a file', async () => {
     const r = await run("echo 'appended' | tee -a /data/hello.txt")
     expect(r.exitCode).toBe(0)

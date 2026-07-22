@@ -44,7 +44,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--lines",
       "numeric_shorthand": true,
       "repeatable": false,
       "short": "-n",
@@ -53,7 +53,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--bytes",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
@@ -62,7 +62,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--quiet",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-q",
@@ -71,10 +71,28 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--silent",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--verbose",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--zero-terminated",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
       "value_kind": "none",
       "value_optional": false
     }

@@ -187,6 +187,7 @@ class ShellBuiltin(StrEnum):
     EVAL = "eval"
     READ = "read"
     SHIFT = "shift"
+    GETOPTS = "getopts"
     TRAP = "trap"
     TEST = "test"
     BRACKET = "["

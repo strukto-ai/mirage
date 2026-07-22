@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '../../../utils/slash.ts'
+
 // Render GNU `rm -v` lines for a removed tree, deepest entry first. GNU prints
 // one line per removed entry in a depth-first, children-first walk: `removed
 // 'file'` for files and `removed directory 'dir'` for directories. Backends
@@ -25,7 +27,7 @@ export function removalLines(entries: { path: string; isDir: boolean }[]): strin
   return ordered.map((e) => {
     // Object stores hand back directory paths with a trailing slash; GNU never
     // prints one, so normalize (root "/" excepted).
-    const p = e.path.replace(/\/+$/, '') || '/'
+    const p = rstripSlash(e.path) || '/'
     return e.isDir ? `removed directory '${p}'` : `removed '${p}'`
   })
 }

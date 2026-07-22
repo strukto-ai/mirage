@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '../../utils/slash.ts'
+
 export const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
 export const DROPBOX_API_BASE = 'https://api.dropboxapi.com/2'
 export const DROPBOX_CONTENT_BASE = 'https://content.dropboxapi.com/2'
@@ -52,7 +54,7 @@ function summaryOf(text: string): string {
 
 function tokenUrlOf(config: DropboxConfig): string {
   if (config.endpoint === undefined || config.endpoint === '') return DROPBOX_TOKEN_URL
-  return `${config.endpoint.replace(/\/+$/, '')}/oauth2/token`
+  return `${rstripSlash(config.endpoint)}/oauth2/token`
 }
 
 export async function refreshAccessToken(config: DropboxConfig): Promise<[string, number]> {
@@ -88,7 +90,7 @@ export class DropboxTokenManager {
   constructor(config: DropboxConfig) {
     this.config = config
     if (config.endpoint !== undefined && config.endpoint !== '') {
-      const base = `${config.endpoint.replace(/\/+$/, '')}/2`
+      const base = `${rstripSlash(config.endpoint)}/2`
       this.apiBase = base
       this.contentBase = base
     } else {

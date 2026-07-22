@@ -181,4 +181,18 @@ describe('sort', () => {
     expect(r.exitCode).toBe(2)
     expect(r.lines).toEqual([])
   })
+
+  it('-g parses infinity as numeric and hex as non-numeric', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/f.txt', ENC.encode('inf\n5\n-3\nnan\nabc'))
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { g: true })
+    expect(r.lines).toEqual(['abc', 'nan', '-3', '5', 'inf'])
+  })
+
+  it('-g treats hex strings as non-numeric', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/f.txt', ENC.encode('0x10\n5'))
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { g: true })
+    expect(r.lines).toEqual(['0x10', '5'])
+  })
 })

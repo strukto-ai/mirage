@@ -69,10 +69,28 @@ async function* chainStreams(
 
 interface CatDisplay {
   numberLines: boolean
+  numberNonblank: boolean
   showEnds: boolean
   showTabs: boolean
   showNonprinting: boolean
   squeezeBlank: boolean
+}
+
+function parseFlags(flags: Record<string, string | boolean | string[]>): CatDisplay {
+  const showAll = flags.A === true || flags.show_all === true
+  return {
+    numberLines: flags.n === true || flags.number === true,
+    numberNonblank: flags.b === true || flags.number_nonblank === true,
+    showEnds: flags.E === true || flags.show_ends === true || flags.e === true || showAll,
+    showTabs: flags.T === true || flags.show_tabs === true || flags.t === true || showAll,
+    showNonprinting:
+      flags.v === true ||
+      flags.show_nonprinting === true ||
+      flags.e === true ||
+      flags.t === true ||
+      showAll,
+    squeezeBlank: flags.s === true || flags.squeeze_blank === true,
+  }
 }
 
 // Render a line GNU cat -T / -v style: tabs become ^I under -T; under -v
@@ -132,16 +150,20 @@ async function* displayLines(
         continue
       }
       prevBlank = line.byteLength === 0
-      lineNo += 1
-      if (display.numberLines) yield ENC.encode(`${formatLineNo(lineNo)}\t`)
+      const shouldNumber =
+        (!display.numberNonblank && display.numberLines) ||
+        (display.numberNonblank && line.byteLength > 0)
+      if (shouldNumber) lineNo += 1
+      if (shouldNumber) yield ENC.encode(`${formatLineNo(lineNo)}\t`)
       if (transform) line = visible(line, display.showTabs, display.showNonprinting)
       yield line
       yield ENC.encode(display.showEnds ? '$\n' : '\n')
     }
   }
   if (buf.byteLength > 0) {
-    lineNo += 1
-    if (display.numberLines) yield ENC.encode(`${formatLineNo(lineNo)}\t`)
+    const shouldNumber = display.numberLines || display.numberNonblank
+    if (shouldNumber) lineNo += 1
+    if (shouldNumber) yield ENC.encode(`${formatLineNo(lineNo)}\t`)
     yield transform ? visible(buf, display.showTabs, display.showNonprinting) : buf
   }
 }
@@ -153,15 +175,8 @@ export async function catGeneric(
   stat: Stat,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  // GNU combinations: -e is -vE, -t is -vT, -A is -vET.
-  const f = opts.flags
-  const display: CatDisplay = {
-    numberLines: f.n === true,
-    showEnds: f.E === true || f.e === true || f.A === true,
-    showTabs: f.T === true || f.t === true || f.A === true,
-    showNonprinting: f.v === true || f.e === true || f.t === true || f.A === true,
-    squeezeBlank: f.s === true,
-  }
+  const display = parseFlags(opts.flags)
+  if (display.numberNonblank) display.numberLines = false
   const wantsDisplay = Object.values(display).some(Boolean)
   if (paths.length > 0) {
     const [readable, err] = await splitReadable(paths, stat, 'cat')
@@ -178,7 +193,8 @@ export async function catGeneric(
       cacheKeys.push(p.mountPath)
       outputs.push(cachable)
     }
-    const merged = chainStreams(outputs)
+    const merged = outputs.length === 1 ? outputs[0] : chainStreams(outputs)
+    if (merged === undefined) throw new Error('cat: missing readable stream')
     const out: ByteSource = wantsDisplay ? displayLines(merged, display) : merged
     return [
       out,

@@ -1,0 +1,300 @@
+{
+  "cases": [
+    {
+      "id": "uniq_count",
+      "seq": 610175,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --count /data/dup.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "      2 a\n      2 b\n      1 c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "count"
+      ]
+    },
+    {
+      "id": "uniq_repeated",
+      "seq": 610176,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --repeated /data/dup.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "repeated"
+      ]
+    },
+    {
+      "id": "uniq_unique",
+      "seq": 610177,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --unique /data/dup.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "unique"
+      ]
+    },
+    {
+      "id": "uniq_ignore_case",
+      "seq": 610178,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --ignore-case /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello World\n",
+        "stderr": ""
+      },
+      "flags": [
+        "ignore-case"
+      ]
+    },
+    {
+      "id": "uniq_check_chars",
+      "seq": 610179,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'apple1\\napple2\\nberry\\n' | uniq --check-chars=5",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple1\nberry\n",
+        "stderr": ""
+      },
+      "flags": [
+        "check-chars"
+      ]
+    },
+    {
+      "id": "uniq_skip_chars",
+      "seq": 610180,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --skip-chars=2 /data/prefix_dup.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 apple\n3 banana\n",
+        "stderr": ""
+      },
+      "flags": [
+        "skip-chars"
+      ]
+    },
+    {
+      "id": "uniq_skip_fields",
+      "seq": 610181,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --skip-fields=1 /data/prefix_dup.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 apple\n3 banana\n",
+        "stderr": ""
+      },
+      "flags": [
+        "skip-fields"
+      ]
+    },
+    {
+      "id": "uniq_zero_terminated",
+      "seq": 610182,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\0a\\0b\\0' | uniq --zero-terminated",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\u0000b\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "zero-terminated"
+      ]
+    }
+  ]
+}

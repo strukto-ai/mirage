@@ -2,7 +2,9 @@ import type { Metadata } from 'opendal'
 import {
   keep,
   optionsTree,
+  rstripSlash,
   startBasename,
+  stripSlash,
   treeHasEmpty,
   type FindEntry,
   type FindOptions,
@@ -43,7 +45,7 @@ interface FindCriteria {
 }
 
 function findScope(path: PathSpec): FindScope {
-  const relative = rawPathOf(path).replace(/^\/+|\/+$/g, '')
+  const relative = stripSlash(rawPathOf(path))
   return {
     baseKey: relative !== '' ? `/${relative}` : '/',
     scanKey: relative !== '' ? `${relative}/` : '/',
@@ -84,7 +86,7 @@ function parentKeys(scope: FindScope, key: string): string[] {
 }
 
 function basename(key: string): string {
-  return key.replace(/\/+$/, '').split('/').pop() ?? ''
+  return rstripSlash(key).split('/').pop() ?? ''
 }
 
 function modifiedTimestamp(metadata: Metadata): number | null {
@@ -118,7 +120,7 @@ async function statCandidate(
     return { key, name, kind: 'd', size: 0, modified: null, isEmpty: null }
   }
   const op = await accessor.operator()
-  const relative = key.replace(/^\/+|\/+$/g, '')
+  const relative = stripSlash(key)
   let metadata: Metadata
   try {
     metadata = await op.stat(relative)
@@ -206,7 +208,7 @@ async function findWithSearch(
 }
 
 function scanKey(rawKey: string): string {
-  return `/${rawKey.replace(/^\/+|\/+$/g, '')}`
+  return `/${stripSlash(rawKey)}`
 }
 
 function directoryCandidate(key: string): Candidate {

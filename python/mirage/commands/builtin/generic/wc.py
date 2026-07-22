@@ -1,14 +1,43 @@
 import codecs
 import inspect
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.stream import ensure_stream
+
+_TOTAL_MODES = frozenset({"auto", "always", "only", "never"})
+
+
+@dataclass(frozen=True, slots=True)
+class WCFlags:
+    lines: bool = False
+    words: bool = False
+    bytes_: bool = False
+    chars: bool = False
+    max_line_length: bool = False
+    total: str = "auto"
+
+
+def parse_flags(flags: Mapping[str, object]) -> WCFlags:
+    fl = FlagView(flags, spec=SPECS["wc"])
+    total = fl.as_str("total") or "auto"
+    if total not in _TOTAL_MODES:
+        raise ValueError(f"wc: invalid argument '{total}' for '--total'")
+    return WCFlags(
+        lines=fl.as_bool("args_l") or fl.as_bool("lines"),
+        words=fl.as_bool("w") or fl.as_bool("words"),
+        bytes_=fl.as_bool("c") or fl.as_bool("bytes"),
+        chars=fl.as_bool("m") or fl.as_bool("chars"),
+        max_line_length=(fl.as_bool("L") or fl.as_bool("max_line_length")),
+        total=total,
+    )
 
 
 @dataclass
@@ -107,17 +136,21 @@ def _selected_values(
     m: bool = False,
     L: bool = False,
 ) -> list[int]:
-    if L:
-        return [counts.max_line_length]
+    selected = args_l or w or c or m or L
+    if not selected:
+        return [counts.lines, counts.words, counts.bytes_]
+    values: list[int] = []
     if args_l:
-        return [counts.lines]
+        values.append(counts.lines)
     if w:
-        return [counts.words]
-    if c:
-        return [counts.bytes_]
+        values.append(counts.words)
     if m:
-        return [counts.chars]
-    return [counts.lines, counts.words, counts.bytes_]
+        values.append(counts.chars)
+    if c:
+        values.append(counts.bytes_)
+    if L:
+        values.append(counts.max_line_length)
+    return values
 
 
 def format_wc_lines(
@@ -183,6 +216,34 @@ def format_wc(
                            L=L)[0]
 
 
+def format_count_rows(
+    rows: list[tuple[WCCounts, str | None]],
+    totals: WCCounts,
+    operand_count: int,
+    flags: WCFlags,
+) -> bytes:
+    if flags.total == "only":
+        values = _selected_values(totals,
+                                  args_l=flags.lines,
+                                  w=flags.words,
+                                  c=flags.bytes_,
+                                  m=flags.chars,
+                                  L=flags.max_line_length)
+        return (" ".join(str(value) for value in values) + "\n").encode()
+    output_rows = list(rows)
+    include_total = (flags.total == "always"
+                     or (flags.total == "auto" and operand_count > 1))
+    if include_total:
+        output_rows.append((totals, "total"))
+    return format_records(
+        format_wc_lines(output_rows,
+                        args_l=flags.lines,
+                        w=flags.words,
+                        c=flags.bytes_,
+                        m=flags.chars,
+                        L=flags.max_line_length))
+
+
 async def format_multi(
     paths: list[PathSpec],
     *,
@@ -192,6 +253,7 @@ async def format_multi(
     c: bool = False,
     m: bool = False,
     L: bool = False,
+    total: str = "auto",
 ) -> tuple[bytes, bytes]:
     """Format wc output for multiple already-resolved paths.
 
@@ -227,9 +289,31 @@ async def format_multi(
             continue
         rows.append((counts, path.raw_path))
         totals.merge(counts)
-    if len(paths) > 1:
-        rows.append((totals, "total"))
-    if not rows:
-        return b"", err
+    flags = WCFlags(lines=args_l,
+                    words=w,
+                    bytes_=c,
+                    chars=m,
+                    max_line_length=L,
+                    total=total)
+    return format_count_rows(rows, totals, len(paths), flags), err
+
+
+def format_stdin(counts: WCCounts, flags: WCFlags) -> bytes:
+    if flags.total == "only":
+        values = _selected_values(counts,
+                                  args_l=flags.lines,
+                                  w=flags.words,
+                                  c=flags.bytes_,
+                                  m=flags.chars,
+                                  L=flags.max_line_length)
+        return (" ".join(str(value) for value in values) + "\n").encode()
+    rows: list[tuple[WCCounts, str | None]] = [(counts, None)]
+    if flags.total == "always":
+        rows.append((counts, "total"))
     return format_records(
-        format_wc_lines(rows, args_l=args_l, w=w, c=c, m=m, L=L)), err
+        format_wc_lines(rows,
+                        args_l=flags.lines,
+                        w=flags.words,
+                        c=flags.bytes_,
+                        m=flags.chars,
+                        L=flags.max_line_length))

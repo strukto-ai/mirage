@@ -19,6 +19,24 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 
 export const CUT_OPEN_END = Number.MAX_SAFE_INTEGER
 
+export interface CutOptions {
+  ranges: [number, number][]
+  mode: 'bytes' | 'characters' | 'fields'
+  delimiter: string
+  complement: boolean
+  onlyDelimited: boolean
+  whitespace: 'default' | 'trimmed' | null
+  noPartial: boolean
+  outputDelimiter: string | null
+  zeroTerminated: boolean
+}
+
+interface WhitespaceFields {
+  fields: string[]
+  hasDelimiter: boolean
+  sourceEmpty: boolean
+}
+
 export function parseCutRanges(spec: string): [number, number][] {
   const ranges: [number, number][] = []
   for (const part of spec.split(',')) {
@@ -44,94 +62,168 @@ function selectPositions(
   for (const [lo, hi] of ranges) {
     const start = Math.max(1, lo)
     const end = Math.min(hi, n)
-    for (let p = start; p <= end; p++) inSet.add(p)
+    for (let position = start; position <= end; position++) inSet.add(position)
   }
   const out: number[] = []
-  for (let p = 1; p <= n; p++) {
-    if (complement ? !inSet.has(p) : inSet.has(p)) out.push(p)
+  for (let position = 1; position <= n; position++) {
+    if (complement ? !inSet.has(position) : inSet.has(position)) out.push(position)
   }
   return out
 }
 
-function withSep(rec: Uint8Array, sep: number): Uint8Array {
-  const out = new Uint8Array(rec.byteLength + 1)
-  out.set(rec, 0)
-  out[rec.byteLength] = sep
+function concat(parts: readonly Uint8Array[], delimiter: Uint8Array): Uint8Array {
+  const size = parts.reduce((total, part) => total + part.byteLength, 0)
+  const out = new Uint8Array(size + Math.max(0, parts.length - 1) * delimiter.byteLength)
+  let offset = 0
+  parts.forEach((part, index) => {
+    if (index > 0) {
+      out.set(delimiter, offset)
+      offset += delimiter.byteLength
+    }
+    out.set(part, offset)
+    offset += part.byteLength
+  })
   return out
 }
 
-function splitRecords(raw: Uint8Array, sep: number): Uint8Array[] {
+function joinPositionGroups(
+  units: readonly Uint8Array[],
+  positions: readonly number[],
+  outputDelimiter: Uint8Array | null,
+): Uint8Array {
+  if (positions.length === 0) return new Uint8Array()
+  const groups: Uint8Array[][] = [[]]
+  let previous = positions[0] ?? 0
+  for (const [index, position] of positions.entries()) {
+    if (index > 0 && position !== previous + 1) groups.push([])
+    const unit = units[position - 1]
+    if (unit !== undefined) groups[groups.length - 1]?.push(unit)
+    previous = position
+  }
+  const joined = groups.map((group) => concat(group, new Uint8Array()))
+  return concat(joined, outputDelimiter ?? new Uint8Array())
+}
+
+function splitRecords(raw: Uint8Array, separator: number): Uint8Array[] {
   const records: Uint8Array[] = []
   let start = 0
-  for (let i = 0; i < raw.byteLength; i++) {
-    if (raw[i] === sep) {
-      records.push(raw.subarray(start, i))
-      start = i + 1
+  for (let index = 0; index < raw.byteLength; index++) {
+    if (raw[index] === separator) {
+      records.push(raw.subarray(start, index))
+      start = index + 1
     }
   }
   if (start < raw.byteLength) records.push(raw.subarray(start))
   return records
 }
 
-function cutRecord(
-  rec: Uint8Array,
-  delimiter: string,
-  fieldRanges: readonly [number, number][] | null,
-  charRanges: readonly [number, number][] | null,
-  complement: boolean,
-  sep: number,
-): Uint8Array {
-  const line = DEC.decode(rec)
-  if (charRanges !== null) {
-    const positions = selectPositions(charRanges, line.length, complement)
-    let s = ''
-    for (const p of positions) s += line.charAt(p - 1)
-    return withSep(ENC.encode(s), sep)
+function isCutWhitespace(text: string, index: number): boolean {
+  const code = text.charCodeAt(index)
+  return code === 32 || code === 9
+}
+
+function splitWhitespaceFields(text: string, trimmed: boolean): WhitespaceFields {
+  const fields: string[] = []
+  let index = 0
+  let fieldStart = 0
+  let hasDelimiter = false
+  let sourceEmpty = true
+  if (trimmed) {
+    while (index < text.length && isCutWhitespace(text, index)) {
+      hasDelimiter = true
+      index += 1
+    }
+    fieldStart = index
   }
-  if (fieldRanges !== null) {
-    const parts = line.split(delimiter)
-    if (parts.length === 1) return withSep(rec, sep)
-    const positions = selectPositions(fieldRanges, parts.length, complement)
-    const selected = positions.map((p) => parts[p - 1] ?? '')
-    return withSep(ENC.encode(selected.join(delimiter)), sep)
+  while (index < text.length) {
+    if (!isCutWhitespace(text, index)) {
+      sourceEmpty = false
+      index += 1
+      continue
+    }
+    hasDelimiter = true
+    fields.push(text.slice(fieldStart, index))
+    while (index < text.length && isCutWhitespace(text, index)) index += 1
+    fieldStart = index
   }
-  return withSep(rec, sep)
+  if (!trimmed || fieldStart < text.length) fields.push(text.slice(fieldStart))
+  if (fields.length === 0) fields.push('')
+  return { fields, hasDelimiter, sourceEmpty }
+}
+
+export function cutBytes(rec: Uint8Array, options: CutOptions): Uint8Array {
+  const positions = selectPositions(options.ranges, rec.byteLength, options.complement)
+  const outputDelimiter =
+    options.outputDelimiter === null ? null : ENC.encode(options.outputDelimiter)
+  if (!options.noPartial) {
+    const units = Array.from(rec, (byte) => Uint8Array.of(byte))
+    return joinPositionGroups(units, positions, outputDelimiter)
+  }
+  const selected = new Set(positions)
+  const groups: Uint8Array[][] = [[]]
+  let offset = 0
+  let previousEnd = 0
+  for (const char of Array.from(DEC.decode(rec))) {
+    const bytes = ENC.encode(char)
+    const end = offset + bytes.byteLength
+    if (selected.has(end)) {
+      if (offset !== previousEnd && groups[groups.length - 1]?.length !== 0) groups.push([])
+      groups[groups.length - 1]?.push(rec.subarray(offset, end))
+      previousEnd = end
+    }
+    offset = end
+  }
+  return concat(
+    groups.filter((group) => group.length > 0).map((group) => concat(group, new Uint8Array())),
+    outputDelimiter ?? new Uint8Array(),
+  )
+}
+
+function cutRecord(rec: Uint8Array, options: CutOptions): Uint8Array | null {
+  if (options.mode === 'bytes') return cutBytes(rec, options)
+  const text = DEC.decode(rec)
+  if (options.mode === 'characters') {
+    const chars = Array.from(text)
+    const positions = selectPositions(options.ranges, chars.length, options.complement)
+    return joinPositionGroups(
+      chars.map((char) => ENC.encode(char)),
+      positions,
+      options.outputDelimiter === null ? null : ENC.encode(options.outputDelimiter),
+    )
+  }
+  let fields: string[]
+  let hasDelimiter: boolean
+  let defaultOutput: string
+  if (options.whitespace !== null) {
+    const whitespaceFields = splitWhitespaceFields(text, options.whitespace === 'trimmed')
+    hasDelimiter = whitespaceFields.hasDelimiter
+    fields = whitespaceFields.fields
+    defaultOutput = '\t'
+    if (options.whitespace === 'trimmed' && whitespaceFields.sourceEmpty && options.onlyDelimited)
+      return null
+  } else {
+    hasDelimiter = text.includes(options.delimiter)
+    fields = text.split(options.delimiter)
+    defaultOutput = options.delimiter
+  }
+  if (!hasDelimiter) return options.onlyDelimited ? null : rec
+  const positions = selectPositions(options.ranges, fields.length, options.complement)
+  const delimiter = options.outputDelimiter ?? defaultOutput
+  return ENC.encode(positions.map((position) => fields[position - 1] ?? '').join(delimiter))
 }
 
 export async function* cutStream(
   source: AsyncIterable<Uint8Array>,
-  delimiter: string,
-  fieldRanges: readonly [number, number][] | null,
-  charRanges: readonly [number, number][] | null,
-  complement: boolean,
-  zeroTerminated: boolean,
+  options: CutOptions,
 ): AsyncIterable<Uint8Array> {
   const raw = await materialize(source)
-  const sep = zeroTerminated ? 0 : 0x0a
-  for (const rec of splitRecords(raw, sep)) {
-    yield cutRecord(rec, delimiter, fieldRanges, charRanges, complement, sep)
+  const separator = options.zeroTerminated ? 0 : 0x0a
+  for (const rec of splitRecords(raw, separator)) {
+    const selected = cutRecord(rec, options)
+    if (selected === null) continue
+    const out = new Uint8Array(selected.byteLength + 1)
+    out.set(selected)
+    out[selected.byteLength] = separator
+    yield out
   }
-}
-
-export function cutBytes(
-  raw: Uint8Array,
-  delimiter: string,
-  fieldRanges: readonly [number, number][] | null,
-  charRanges: readonly [number, number][] | null,
-  complement: boolean,
-  zeroTerminated: boolean,
-): Uint8Array {
-  const sep = zeroTerminated ? 0 : 0x0a
-  const parts = splitRecords(raw, sep).map((rec) =>
-    cutRecord(rec, delimiter, fieldRanges, charRanges, complement, sep),
-  )
-  let total = 0
-  for (const p of parts) total += p.byteLength
-  const out = new Uint8Array(total)
-  let off = 0
-  for (const p of parts) {
-    out.set(p, off)
-    off += p.byteLength
-  }
-  return out
 }

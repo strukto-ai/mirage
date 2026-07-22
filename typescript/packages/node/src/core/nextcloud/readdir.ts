@@ -5,6 +5,7 @@ import {
   mountPrefixOf,
   ResourceType,
   rstripSlash,
+  stripSlash,
   type IndexCacheStore,
   type PathSpec,
 } from '@struktoai/mirage-core'
@@ -28,7 +29,7 @@ export async function readdir(
     const listing = await index.listDir(virtualKey)
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
   }
-  const stripped = target.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(target)
   const listPath = stripped !== '' ? `${stripped}/` : '/'
   const op = await accessor.operator()
   let entries
@@ -54,7 +55,7 @@ export async function readdir(
       modified: info.lastModified ?? '',
     })
   }
-  const targetKey = `/${target.replace(/^\/+|\/+$/g, '')}`
+  const targetKey = `/${stripSlash(target)}`
   if (names.length === 1 && names[0] === targetKey && !directories.has(targetKey)) {
     throw enotdir(path)
   }

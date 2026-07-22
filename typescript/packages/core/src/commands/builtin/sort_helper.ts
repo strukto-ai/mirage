@@ -46,11 +46,14 @@ export class SortKeyError extends Error {}
 
 export interface KeyMods {
   numeric: boolean
+  generalNumeric?: boolean
   human: boolean
   version: boolean
   month: boolean
   fold: boolean
   reverse: boolean
+  dictionary?: boolean
+  ignoreNonprinting?: boolean
 }
 
 export interface Key {
@@ -102,15 +105,18 @@ function modsFromLetters(letterRuns: string): [KeyMods, boolean] {
   for (const letter of letterRuns) {
     if (ORDER_LETTERS.includes(letter)) hasOwn = true
   }
-  const numeric = letterRuns.includes('n') || letterRuns.includes('g')
+  const numeric = letterRuns.includes('n')
   return [
     {
       numeric,
+      generalNumeric: letterRuns.includes('g'),
       human: letterRuns.includes('h'),
       version: letterRuns.includes('V'),
       month: letterRuns.includes('M'),
       fold: letterRuns.includes('f'),
       reverse: letterRuns.includes('r'),
+      dictionary: letterRuns.includes('d'),
+      ignoreNonprinting: letterRuns.includes('i'),
     },
     hasOwn,
   ]
@@ -154,11 +160,14 @@ export function parseKeydef(spec: string, globalMods: KeyMods, globalSkip: boole
 export function buildConfig(flags: Record<string, string | boolean | string[]>): SortConfig {
   const globalMods: KeyMods = {
     numeric: flags.n === true,
+    generalNumeric: flags.g === true,
     human: flags.h === true,
     version: flags.V === true,
     month: flags.M === true,
     fold: flags.f === true,
     reverse: flags.r === true,
+    dictionary: flags.d === true,
+    ignoreNonprinting: flags.i === true,
   }
   const ignoreBlanks = flags.b === true
   const rawK = flags.k
@@ -279,11 +288,43 @@ function leadingNumber(field: string): number {
   return Number.isNaN(num) ? 0 : num
 }
 
+function isPrintingCharacter(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0
+  return code > 31 && code !== 127
+}
+
+function parseGeneralFloat(field: string): number | null {
+  const trimmed = field.trim()
+  if (trimmed === '') return null
+  const collapsed = trimmed.replace(/(\d)_(?=\d)/g, '$1')
+  if (collapsed.includes('_')) return null
+  const lowered = collapsed.toLowerCase()
+  if (/^[+-]?(inf(inity)?|nan)$/.test(lowered)) {
+    if (lowered.endsWith('nan')) return Number.NaN
+    return lowered.startsWith('-') ? -Infinity : Infinity
+  }
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/.test(collapsed)) return null
+  return Number(collapsed)
+}
+
 function transform(field: string, mods: KeyMods): SortVal {
+  if (mods.dictionary)
+    field = Array.from(field)
+      .filter((char) => /[\p{L}\p{N} \t]/u.test(char))
+      .join('')
+  else if (mods.ignoreNonprinting) {
+    field = Array.from(field).filter(isPrintingCharacter).join('')
+  }
   if (mods.month) return MONTHS[field.trim().slice(0, 3).toLowerCase()] ?? 0
   if (mods.human) return parseHuman(field)
   if (mods.version) return versionKey(field)
   if (mods.numeric) return leadingNumber(field)
+  if (mods.generalNumeric) {
+    const value = parseGeneralFloat(field)
+    if (value === null) return [0, 0]
+    if (Number.isNaN(value)) return [1, 0]
+    return [2, value]
+  }
   if (mods.fold) return field.toLowerCase()
   return field
 }
@@ -303,7 +344,7 @@ function cmpVals(a: SortVal, b: SortVal): number {
   return sa < sb ? -1 : sa > sb ? 1 : 0
 }
 
-function compareLines(a: string, b: string, cfg: SortConfig): number {
+export function compareLines(a: string, b: string, cfg: SortConfig): number {
   const fa = computeFields(a, cfg.fieldSep)
   const fb = computeFields(b, cfg.fieldSep)
   for (const key of cfg.keys) {

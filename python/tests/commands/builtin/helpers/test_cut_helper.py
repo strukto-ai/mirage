@@ -53,39 +53,43 @@ class TestSelectPositions:
 class TestCutRecordChars:
 
     def test_char_range(self):
-        assert cut_record(b"abcdefgh", "\t", None, [(2, 5)], False) == b"bcde"
+        assert cut_record(b"abcdefgh", [(2, 5)], "characters", "\t", False,
+                          False, None, False, None) == b"bcde"
 
     def test_char_overlap_dedup(self):
-        assert cut_record(b"abcdef", "\t", None, [(1, 3), (2, 4)],
-                          False) == b"abcd"
+        assert cut_record(b"abcdef", [(1, 3), (2, 4)], "characters", "\t",
+                          False, False, None, False, None) == b"abcd"
 
     def test_char_open(self):
-        assert cut_record(b"abcdef", "\t", None, [(3, OPEN_END)],
-                          False) == b"cdef"
+        assert cut_record(b"abcdef", [(3, OPEN_END)], "characters", "\t",
+                          False, False, None, False, None) == b"cdef"
 
 
 class TestCutRecordFields:
 
     def test_single_field(self):
-        assert cut_record(b"a\tb\tc", "\t", [(2, 2)], None, False) == b"b"
+        assert cut_record(b"a\tb\tc", [(2, 2)], "fields", "\t", False, False,
+                          None, False, None) == b"b"
 
     def test_field_order_is_file_order(self):
-        assert cut_record(b"a\tb\tc", "\t", [(3, 3), (1, 1)], None,
-                          False) == b"a\tc"
+        assert cut_record(b"a\tb\tc", [(3, 3), (1, 1)], "fields", "\t", False,
+                          False, None, False, None) == b"a\tc"
 
     def test_open_field_range(self):
-        assert cut_record(b"a\tb\tc\td", "\t", [(2, OPEN_END)], None,
-                          False) == b"b\tc\td"
+        assert cut_record(b"a\tb\tc\td", [(2, OPEN_END)], "fields", "\t",
+                          False, False, None, False, None) == b"b\tc\td"
 
     def test_no_delimiter_passthrough(self):
-        assert cut_record(b"nodelim", "\t", [(2, 2)], None,
-                          False) == b"nodelim"
+        assert cut_record(b"nodelim", [(2, 2)], "fields", "\t", False, False,
+                          None, False, None) == b"nodelim"
 
     def test_custom_delimiter(self):
-        assert cut_record(b"root:x:0", ":", [(1, 1)], None, False) == b"root"
+        assert cut_record(b"root:x:0", [(1, 1)], "fields", ":", False, False,
+                          None, False, None) == b"root"
 
     def test_complement(self):
-        assert cut_record(b"a\tb\tc", "\t", [(2, 2)], None, True) == b"a\tc"
+        assert cut_record(b"a\tb\tc", [(2, 2)], "fields", "\t", True, False,
+                          None, False, None) == b"a\tc"
 
 
 class TestSplitRecords:

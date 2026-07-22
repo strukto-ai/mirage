@@ -1,4 +1,4 @@
-import { mountPrefixOf, type PathSpec } from '@struktoai/mirage-core'
+import { lstripSlash, mountPrefixOf, type PathSpec } from '@struktoai/mirage-core'
 
 export function rawPathOf(path: PathSpec): string {
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
@@ -8,7 +8,7 @@ export function rawPathOf(path: PathSpec): string {
 }
 
 export function nextcloudKey(path: PathSpec): string {
-  return rawPathOf(path).replace(/^\/+/, '')
+  return lstripSlash(rawPathOf(path))
 }
 
 export function isNotFound(error: unknown): boolean {

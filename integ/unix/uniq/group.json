@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "uniq_group",
+      "seq": 610171,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\na\\nb\\nb\\nc\\n' | uniq --group",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\na\n\nb\nb\n\nc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "group"
+      ]
+    },
+    {
+      "id": "uniq_group_both",
+      "seq": 610172,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\na\\nb\\n' | uniq --group=both",
+      "expect": {
+        "exit": 0,
+        "stdout": "\na\na\n\nb\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "group"
+      ]
+    }
+  ]
+}

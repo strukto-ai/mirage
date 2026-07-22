@@ -14,12 +14,11 @@
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.wc import (WCCounts, format_wc,
-                                                format_wc_lines)
+from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
+                                                format_stdin, parse_flags)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.postgres._provision import file_read_provision
 from mirage.commands.builtin.postgres.io import resolve_glob
-from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -39,20 +38,21 @@ async def wc(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    args_l: bool = False,
-    w: bool = False,
-    c: bool = False,
-    m: bool = False,
-    L: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     if paths:
         paths = await resolve_glob(accessor, paths, index)
         # Line counts on tables/views come from a server-side COUNT(*)
         # instead of reading every row. -l only (default prints words and
         # bytes too, which needs the content).
-        count_only = args_l and not (w or c or m or L)
+        count_only = parsed.lines and not (parsed.words or parsed.bytes_
+                                           or parsed.chars
+                                           or parsed.max_line_length)
         scopes = [detect_scope(p) for p in paths]
         row_scopes = [
             scope for scope in scopes
@@ -68,24 +68,17 @@ async def wc(
                                                      scope.entity)
                     rows.append((WCCounts(lines=count), p.virtual))
                     total += count
-            if len(paths) > 1:
-                rows.append((WCCounts(lines=total), "total"))
-            return format_records(format_wc_lines(rows,
-                                                  args_l=True)), IOResult()
+            return format_count_rows(rows, WCCounts(lines=total), len(paths),
+                                     parsed), IOResult()
         totals = WCCounts()
         for p in paths:
             data = await postgres_read(accessor, p, index)
             counts = await generic_wc(data)
             rows.append((counts, p.virtual))
             totals.merge(counts)
-        if len(paths) > 1:
-            rows.append((totals, "total"))
-        return format_records(
-            format_wc_lines(rows, args_l=args_l, w=w, c=c, m=m,
-                            L=L)), IOResult()
+        return format_count_rows(rows, totals, len(paths), parsed), IOResult()
     stdin_data = await _read_stdin_async(stdin)
     if stdin_data is None:
         raise ValueError("wc: missing operand")
     counts = await generic_wc(stdin_data)
-    return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
-                     L=L).encode() + b"\n", IOResult()
+    return format_stdin(counts, parsed), IOResult()

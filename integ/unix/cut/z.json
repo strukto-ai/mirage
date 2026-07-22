@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "cut_z",
+      "seq": 610133,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\0c,d\\0' | cut -z -d, -f2",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\u0000d\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "z",
+        "d",
+        "f"
+      ]
+    }
+  ]
+}
