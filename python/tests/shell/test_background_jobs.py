@@ -22,21 +22,27 @@ from mirage.workspace import Workspace
 from mirage.workspace.types import ExecutionNode
 
 
-async def _make_failing_task():
+async def _failing_run(job):
     raise RuntimeError("resource API error")
 
 
-async def _make_successful_task():
-    return b"hello", IOResult(exit_code=0), ExecutionNode(command="echo hello",
-                                                          exit_code=0)
+async def _never_ending_run(job):
+    job.stdout += b"partial"
+    await asyncio.sleep(30)
+    return IOResult(exit_code=0), ExecutionNode(command="noisy", exit_code=0)
+
+
+async def _successful_run(job):
+    job.stdout += b"hello"
+    return IOResult(exit_code=0), ExecutionNode(command="echo hello",
+                                                exit_code=0)
 
 
 def test_wait_handles_task_exception():
 
     async def _run():
         table = JobTable()
-        task = asyncio.create_task(_make_failing_task())
-        table.submit(command="bad_cmd", task=task, cwd="/")
+        table.submit(command="bad_cmd", run=_failing_run, cwd="/")
         job = await table.wait(1)
         assert job.status == JobStatus.COMPLETED
         assert job.exit_code == 1
@@ -49,10 +55,8 @@ def test_wait_all_survives_failing_task():
 
     async def _run():
         table = JobTable()
-        task1 = asyncio.create_task(_make_failing_task())
-        task2 = asyncio.create_task(_make_successful_task())
-        table.submit(command="bad", task=task1, cwd="/")
-        table.submit(command="good", task=task2, cwd="/")
+        table.submit(command="bad", run=_failing_run, cwd="/")
+        table.submit(command="good", run=_successful_run, cwd="/")
         jobs = await table.wait_all()
         assert len(jobs) == 2
         bad = table.get(1)
@@ -68,12 +72,29 @@ def test_wait_successful_task():
 
     async def _run():
         table = JobTable()
-        task = asyncio.create_task(_make_successful_task())
-        table.submit(command="echo hello", task=task, cwd="/")
+        table.submit(command="echo hello", run=_successful_run, cwd="/")
         job = await table.wait(1)
         assert job.status == JobStatus.COMPLETED
         assert job.exit_code == 0
         assert job.stdout == b"hello"
+
+    asyncio.run(_run())
+
+
+def test_kill_keeps_output_produced_before_the_kill():
+
+    async def _run():
+        table = JobTable()
+        table.submit(command="noisy", run=_never_ending_run, cwd="/")
+        job = table.get(1)
+        while not job.stdout:
+            await asyncio.sleep(0.01)
+
+        table.kill(1)
+
+        assert job.status == JobStatus.KILLED
+        assert job.stdout == b"partial"
+        assert job.stderr == b"Killed"
 
     asyncio.run(_run())
 

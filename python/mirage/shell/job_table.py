@@ -14,6 +14,7 @@
 
 import asyncio
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -30,6 +31,13 @@ class JobStatus(str, Enum):
 
 @dataclass
 class Job:
+    """One background command and the output it has produced so far.
+
+    ``stdout`` and ``stderr`` grow while the job runs: the runner appends
+    to them as chunks arrive, so a reader can watch a long job instead of
+    waiting for it to finish.
+    """
+
     id: int
     command: str
     task: asyncio.Task[Any] | None
@@ -45,6 +53,21 @@ class Job:
     session_id: str = ""
 
 
+JobRunner = Callable[[Job], Coroutine[Any, Any, tuple[IOResult,
+                                                      ExecutionNode]]]
+
+
+def _note_killed(job: Job) -> None:
+    """Record that a job was killed, keeping what it already printed.
+
+    Args:
+        job (Job): the job being stopped.
+    """
+    if job.stderr and not job.stderr.endswith(b"\n"):
+        job.stderr += b"\n"
+    job.stderr += b"Killed"
+
+
 class JobTable:
 
     def __init__(self) -> None:
@@ -54,19 +77,33 @@ class JobTable:
     def submit(
         self,
         command: str,
-        task: asyncio.Task[Any],
+        run: JobRunner,
         cwd: str,
         agent: str = "unknown",
         session_id: str = "",
     ) -> Job:
+        """Register a job and start it.
+
+        The table creates the task itself so the runner is handed the job
+        it writes into. Building the task first would leave a window in
+        which output could arrive with nowhere to go.
+
+        Args:
+            command (str): the command line being run.
+            run (JobRunner): coroutine factory taking the job to fill.
+            cwd (str): working directory the job was started from.
+            agent (str): agent that started the job.
+            session_id (str): session the job belongs to.
+        """
         job = Job(id=self._next_id,
                   command=command,
-                  task=task,
+                  task=None,
                   cwd=cwd,
                   agent=agent,
                   session_id=session_id)
         self._jobs[job.id] = job
         self._next_id += 1
+        job.task = asyncio.create_task(run(job))
         return job
 
     def get(self, job_id: int) -> Job | None:
@@ -92,11 +129,10 @@ class JobTable:
         """Sync status from the underlying asyncio task without awaiting.
 
         When the bg task has finished (normally, raised, or was cancelled)
-        but no one has called ``wait``, this updates the job's status,
-        exit_code, and captured streams from the task result. Lets
-        ``list_jobs`` / ``running_jobs`` / ``get`` report fresh state.
-        Requires ``_run_bg`` to have already materialized stdout/stderr,
-        so reading the result is purely synchronous.
+        but no one has called ``wait``, this settles the job's status and
+        exit_code. Lets ``list_jobs`` / ``running_jobs`` / ``get`` report
+        fresh state. Output is not read from the task result: the runner
+        has been appending it to the job all along.
         """
         if job.status != JobStatus.RUNNING:
             return
@@ -106,24 +142,19 @@ class JobTable:
         if job.task.cancelled():
             job.status = JobStatus.KILLED
             job.exit_code = 137
-            job.stderr = b"Killed"
+            _note_killed(job)
             return
         exc = job.task.exception()
         if exc is not None:
             job.status = JobStatus.COMPLETED
             job.exit_code = 1
-            job.stderr = str(exc).encode()
+            job.stderr += str(exc).encode()
             return
-        stdout, io_result, exec_node = job.task.result()
-        job.stdout = stdout if isinstance(stdout, bytes) else b""
+        io_result, exec_node = job.task.result()
         job.io_result = io_result
         job.execution_node = exec_node
         io_result.sync_exit_code()
         job.exit_code = io_result.exit_code
-        if isinstance(io_result.stderr, bytes):
-            job.stderr = io_result.stderr
-        elif io_result.stderr is None:
-            job.stderr = b""
         job.status = JobStatus.COMPLETED
 
     def kill(self, job_id: int) -> bool:
@@ -132,9 +163,10 @@ class JobTable:
             return False
         if job.task is not None:
             job.task.cancel()
+        if job.status != JobStatus.KILLED:
+            _note_killed(job)
         job.status = JobStatus.KILLED
         job.exit_code = 137
-        job.stderr = b"Killed"
         return True
 
     async def wait(self, job_id: int) -> Job:
@@ -143,22 +175,20 @@ class JobTable:
             return job
         assert job.task is not None
         try:
-            stdout, io_result, exec_node = await job.task
-            job.stdout = stdout if isinstance(stdout, bytes) else b""
+            io_result, exec_node = await job.task
             job.io_result = io_result
             job.execution_node = exec_node
             io_result.sync_exit_code()
             job.exit_code = io_result.exit_code
-            job.stderr = await io_result.materialize_stderr()
             job.status = JobStatus.COMPLETED
         except asyncio.CancelledError:
             job.status = JobStatus.KILLED
             job.exit_code = 137
-            job.stderr = b"Killed"
+            _note_killed(job)
         except Exception as exc:
             job.status = JobStatus.COMPLETED
             job.exit_code = 1
-            job.stderr = str(exc).encode()
+            job.stderr += str(exc).encode()
         return job
 
     async def wait_all(self) -> list[Job]:
