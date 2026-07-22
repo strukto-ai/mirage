@@ -284,6 +284,109 @@ async def handle_set(
     return None, IOResult(), ExecutionNode(command="set", exit_code=0)
 
 
+def _getopts_finish(
+    session: Session,
+    name: str,
+    opt_value: str,
+    optarg: str | None,
+    new_optind: int,
+    new_pos: int,
+    exit_code: int,
+    stderr: bytes = b"",
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    session.env[name] = opt_value
+    if optarg is None:
+        session.env.pop("OPTARG", None)
+    else:
+        session.env["OPTARG"] = optarg
+    session.env["OPTIND"] = str(new_optind)
+    session._getopts_pos = new_pos
+    session._getopts_optind = new_optind
+    io = IOResult(exit_code=exit_code, stderr=stderr)
+    return None, io, ExecutionNode(command="getopts",
+                                   exit_code=exit_code,
+                                   stderr=stderr)
+
+
+async def handle_getopts(
+    args: list[str],
+    session: Session,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Parse one option per call, with bash's getopts semantics.
+
+    Args:
+        args (list[str]): words after `getopts`: the optstring, the name
+            variable, then optional explicit arguments (the positional
+            parameters are scanned when no explicit ones are given).
+        session (Session): shell session; OPTIND/OPTARG live in its env
+            and the hidden per-word scan offset in its getopts state.
+    """
+    if len(args) < 2:
+        err = b"getopts: usage: getopts optstring name [arg]\n"
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="getopts",
+                                                         exit_code=2,
+                                                         stderr=err)
+    optstring = args[0]
+    name = args[1]
+    params = args[2:] if len(args) > 2 else session.positional_args
+    silent = optstring.startswith(":")
+    try:
+        optind = int(session.env.get("OPTIND", "1"))
+    except ValueError:
+        optind = 1
+    if session._getopts_optind != optind:
+        session._getopts_pos = 0
+    pos = session._getopts_pos
+
+    if optind < 1 or optind > len(params):
+        return _getopts_finish(session, name, "?", None, optind, 0, 1)
+    word = params[optind - 1]
+    if pos == 0:
+        if not word.startswith("-") or word == "-":
+            return _getopts_finish(session, name, "?", None, optind, 0, 1)
+        if word == "--":
+            return _getopts_finish(session, name, "?", None, optind + 1, 0, 1)
+        pos = 1
+
+    letter = word[pos]
+    rest = word[pos + 1:]
+    idx = optstring.find(letter)
+    is_valid = letter != ":" and idx != -1
+    takes_arg = (is_valid and idx + 1 < len(optstring)
+                 and optstring[idx + 1] == ":")
+
+    if not is_valid:
+        if rest:
+            after_optind, after_pos = optind, pos + 1
+        else:
+            after_optind, after_pos = optind + 1, 0
+        if silent:
+            return _getopts_finish(session, name, "?", letter, after_optind,
+                                   after_pos, 0)
+        err = f"bash: illegal option -- {letter}\n".encode()
+        return _getopts_finish(session, name, "?", None, after_optind,
+                               after_pos, 0, err)
+
+    if not takes_arg:
+        if rest:
+            after_optind, after_pos = optind, pos + 1
+        else:
+            after_optind, after_pos = optind + 1, 0
+        return _getopts_finish(session, name, letter, None, after_optind,
+                               after_pos, 0)
+
+    if rest:
+        return _getopts_finish(session, name, letter, rest, optind + 1, 0, 0)
+    if optind < len(params):
+        return _getopts_finish(session, name, letter, params[optind],
+                               optind + 2, 0, 0)
+    if silent:
+        return _getopts_finish(session, name, ":", letter, optind + 1, 0, 0)
+    err = f"bash: option requires an argument -- {letter}\n".encode()
+    return _getopts_finish(session, name, "?", None, optind + 1, 0, 0, err)
+
+
 async def handle_trap(
         session: Session,  # noqa: E125
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:

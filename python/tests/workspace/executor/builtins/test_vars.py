@@ -6,10 +6,9 @@ from mirage import MountMode, RAMResource, Workspace
 from mirage.io.stream import materialize
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
-from mirage.workspace.executor.builtins.vars import (handle_exit, handle_read,
-                                                     handle_return,
-                                                     handle_shift,
-                                                     handle_whoami)
+from mirage.workspace.executor.builtins.vars import (  # yapf: disable
+    handle_exit, handle_getopts, handle_read, handle_return, handle_shift,
+    handle_whoami)
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session.session import Session
@@ -203,3 +202,170 @@ async def test_read_scalar_replaces_array():
     await ws.execute("a=(x y z)")
     io = await ws.execute('read -r a b <<< "one two"\necho "a=$a b=$b"')
     assert (io.stdout or b"") == b"a=one b=two\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_single_flag_sets_var_and_advances_optind():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_iterates_two_flags_then_stops():
+    session = make_session()
+    args = ["ab", "o", "-a", "-b"]
+    _, io1, _ = await handle_getopts(args, session)
+    assert (io1.exit_code, session.env["o"], session.env["OPTIND"]) == (0, "a",
+                                                                        "2")
+    _, io2, _ = await handle_getopts(args, session)
+    assert (io2.exit_code, session.env["o"], session.env["OPTIND"]) == (0, "b",
+                                                                        "3")
+    _, io3, _ = await handle_getopts(args, session)
+    assert io3.exit_code == 1
+    assert session.env["o"] == "?"
+
+
+@pytest.mark.asyncio
+async def test_getopts_separate_optarg():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a:b", "o", "-a", "foo", "-b"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTARG"] == "foo"
+    assert session.env["OPTIND"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_getopts_attached_optarg():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a:", "o", "-afoo"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTARG"] == "foo"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_combined_flags_share_optind_until_word_done():
+    session = make_session()
+    args = ["abc", "o", "-abc"]
+    _, _, _ = await handle_getopts(args, session)
+    assert (session.env["o"], session.env["OPTIND"]) == ("a", "1")
+    _, _, _ = await handle_getopts(args, session)
+    assert (session.env["o"], session.env["OPTIND"]) == ("b", "1")
+    _, _, _ = await handle_getopts(args, session)
+    assert (session.env["o"], session.env["OPTIND"]) == ("c", "2")
+
+
+@pytest.mark.asyncio
+async def test_getopts_invalid_option_non_silent():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "-x"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "?"
+    assert await materialize(io.stderr) == b"bash: illegal option -- x\n"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_invalid_option_silent_sets_optarg_no_stderr():
+    session = make_session()
+    _, io, _ = await handle_getopts([":ab", "o", "-x"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "?"
+    assert session.env["OPTARG"] == "x"
+    assert await materialize(io.stderr) == b""
+
+
+@pytest.mark.asyncio
+async def test_getopts_missing_arg_non_silent():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a:", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "?"
+    assert (await materialize(io.stderr
+                              )) == b"bash: option requires an argument -- a\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_missing_arg_silent_sets_colon_and_optarg():
+    session = make_session()
+    _, io, _ = await handle_getopts([":a:", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == ":"
+    assert session.env["OPTARG"] == "a"
+    assert await materialize(io.stderr) == b""
+
+
+@pytest.mark.asyncio
+async def test_getopts_nonoption_stops_without_advancing():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "foo", "-a"], session)
+    assert io.exit_code == 1
+    assert session.env["OPTIND"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_getopts_double_dash_consumed_then_stops():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "--", "-a"], session)
+    assert io.exit_code == 1
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_no_args_stops():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 1
+    assert session.env["OPTIND"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_getopts_reads_positional_args_when_no_explicit():
+    session = make_session()
+    session.positional_args = ["-a", "-b"]
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_getopts_usage_error_too_few_operands():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab"], session)
+    assert io.exit_code == 2
+    assert (await
+            materialize(io.stderr
+                        )) == b"getopts: usage: getopts optstring name [arg]\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_optind_reset_reparses():
+    session = make_session()
+    session.positional_args = ["-a", "-b"]
+    await handle_getopts(["ab", "o"], session)
+    await handle_getopts(["ab", "o"], session)
+    _, stop, _ = await handle_getopts(["ab", "o"], session)
+    assert stop.exit_code == 1
+    session.env["OPTIND"] = "1"
+    session.positional_args = ["-b", "-a"]
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_getopts_end_to_end_loop_with_case():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('set -- -a val -b\n'
+                          'while getopts "a:b" opt; do\n'
+                          '  case $opt in\n'
+                          '    a) echo "a=$OPTARG" ;;\n'
+                          '    b) echo "b-set" ;;\n'
+                          '  esac\n'
+                          'done')
+    assert (io.stdout or b"") == b"a=val\nb-set\n"

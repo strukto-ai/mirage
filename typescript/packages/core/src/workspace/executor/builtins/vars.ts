@@ -226,6 +226,89 @@ export function handleSet(
   return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
 }
 
+function getoptsFinish(
+  session: Session,
+  name: string,
+  optValue: string,
+  optarg: string | null,
+  newOptind: number,
+  newPos: number,
+  exitCode: number,
+  stderr: Uint8Array | null = null,
+): Result {
+  session.env[name] = optValue
+  if (optarg === null) delete session.env.OPTARG
+  else session.env.OPTARG = optarg
+  session.env.OPTIND = String(newOptind)
+  session.getoptsPos = newPos
+  session.getoptsOptind = newOptind
+  const io = new IOResult(stderr === null ? { exitCode } : { exitCode, stderr })
+  const node =
+    stderr === null
+      ? new ExecutionNode({ command: 'getopts', exitCode })
+      : new ExecutionNode({ command: 'getopts', exitCode, stderr })
+  return [null, io, node]
+}
+
+/** Parse one option per call, with bash's getopts semantics. */
+export function handleGetopts(args: readonly string[], session: Session): Result {
+  if (args.length < 2) {
+    const err = new TextEncoder().encode('getopts: usage: getopts optstring name [arg]\n')
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'getopts', exitCode: 2, stderr: err }),
+    ]
+  }
+  const optstring = args[0] ?? ''
+  const name = args[1] ?? ''
+  const params = args.length > 2 ? args.slice(2) : session.positionalArgs
+  const silent = optstring.startsWith(':')
+  const parsed = Number.parseInt(session.env.OPTIND ?? '1', 10)
+  const optind = Number.isNaN(parsed) ? 1 : parsed
+  if (session.getoptsOptind !== optind) session.getoptsPos = 0
+  let pos = session.getoptsPos
+
+  if (optind < 1 || optind > params.length) {
+    return getoptsFinish(session, name, '?', null, optind, 0, 1)
+  }
+  const word = params[optind - 1] ?? ''
+  if (pos === 0) {
+    if (!word.startsWith('-') || word === '-') {
+      return getoptsFinish(session, name, '?', null, optind, 0, 1)
+    }
+    if (word === '--') return getoptsFinish(session, name, '?', null, optind + 1, 0, 1)
+    pos = 1
+  }
+
+  const letter = word[pos] ?? ''
+  const rest = word.slice(pos + 1)
+  const idx = optstring.indexOf(letter)
+  const isValid = letter !== ':' && idx !== -1
+  const takesArg = isValid && idx + 1 < optstring.length && optstring[idx + 1] === ':'
+  const enc = new TextEncoder()
+
+  if (!isValid) {
+    const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
+    if (silent) return getoptsFinish(session, name, '?', letter, afterOptind, afterPos, 0)
+    const err = enc.encode(`bash: illegal option -- ${letter}\n`)
+    return getoptsFinish(session, name, '?', null, afterOptind, afterPos, 0, err)
+  }
+
+  if (!takesArg) {
+    const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
+    return getoptsFinish(session, name, letter, null, afterOptind, afterPos, 0)
+  }
+
+  if (rest) return getoptsFinish(session, name, letter, rest, optind + 1, 0, 0)
+  if (optind < params.length) {
+    return getoptsFinish(session, name, letter, params[optind] ?? '', optind + 2, 0, 0)
+  }
+  if (silent) return getoptsFinish(session, name, ':', letter, optind + 1, 0, 0)
+  const err = enc.encode(`bash: option requires an argument -- ${letter}\n`)
+  return getoptsFinish(session, name, '?', null, optind + 1, 0, 0, err)
+}
+
 export function handleTrap(_session: Session): Result {
   return [null, new IOResult(), new ExecutionNode({ command: 'trap', exitCode: 0 })]
 }

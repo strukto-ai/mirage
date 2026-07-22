@@ -281,4 +281,19 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
     expect(new TextDecoder().decode(res.stderr)).toBe('nosuchcmd: command not found\n')
     await ws.close()
   })
+
+  it('runs a getopts option-parsing loop', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute(
+      'set -- -a val -b\n' +
+        'while getopts "a:b" opt; do\n' +
+        '  case $opt in\n' +
+        '    a) echo "a=$OPTARG" ;;\n' +
+        '    b) echo "b-set" ;;\n' +
+        '  esac\n' +
+        'done',
+    )
+    expect(new TextDecoder().decode(res.stdout)).toBe('a=val\nb-set\n')
+    await ws.close()
+  })
 })

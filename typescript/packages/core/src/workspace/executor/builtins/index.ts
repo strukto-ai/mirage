@@ -27,6 +27,7 @@ export { handleChmod, handleChown, handleTouch } from './metadata.ts'
 export {
   handleExit,
   handleExport,
+  handleGetopts,
   handleLocal,
   handlePrintenv,
   handleRead,

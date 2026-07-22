@@ -188,6 +188,7 @@ export const ShellBuiltin = Object.freeze({
   EVAL: 'eval',
   READ: 'read',
   SHIFT: 'shift',
+  GETOPTS: 'getopts',
   TRAP: 'trap',
   TEST: 'test',
   BRACKET: '[',

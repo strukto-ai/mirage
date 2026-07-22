@@ -59,6 +59,7 @@ _BUILTIN_NAMES = frozenset({
     SB.READ,
     SB.SET,
     SB.SHIFT,
+    SB.GETOPTS,
     SB.TRAP,
     SB.TEST,
     SB.BRACKET,

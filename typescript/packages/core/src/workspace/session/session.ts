@@ -62,6 +62,12 @@ export class Session {
   stdinBuffer: AsyncLineIterator | null = null
   stdinSource: unknown = null
   localVars: Map<string, string | null> | null = null
+  // Hidden `getopts` state: the char offset within the word being
+  // scanned (0 = positioned at the word's leading dash), plus the OPTIND
+  // that offset belongs to. A caller resetting OPTIND makes the seen
+  // value stale, restarting the scan, matching bash's char pointer.
+  getoptsPos = 0
+  getoptsOptind: number | null = null
   mountModes: ReadonlyMap<string, MountMode> | null
   generation: number
   pipelineTimeoutSeconds: number | null
