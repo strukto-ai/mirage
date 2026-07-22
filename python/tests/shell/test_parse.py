@@ -260,3 +260,34 @@ def test_process_substitution():
 def test_negated_command():
     node = parse("! echo hello").named_children[0]
     assert node.type == NT.NEGATED_COMMAND
+
+
+# ── `((` reparse: subshell that immediately opens a subshell ────────
+
+
+def test_double_open_paren_parses_as_nested_subshells():
+    """``((`` lexes as the arithmetic opener; bash reparses, so do we."""
+    node = parse("((echo a); echo b)").named_children[0]
+    assert node.type == NT.SUBSHELL
+
+
+def test_double_open_paren_backgrounded():
+    assert not parse("((echo s1; echo s2) & wait)").has_error
+
+
+def test_genuine_arithmetic_command_is_untouched():
+    assert not parse("i=1; ((i++)); echo $i").has_error
+
+
+def test_line_mixing_arithmetic_and_nested_subshell_is_left_alone():
+    """A wrong parse is worse than a rejected one.
+
+    tree-sitter's error region swallows the valid ``((i++))`` next to the
+    bad opener, so splitting would silently turn arithmetic into a
+    subshell running ``i++``. Such lines keep their error instead.
+    """
+    assert parse("i=1; ((i++)); ((echo x); echo $i)").has_error
+
+
+def test_unrelated_syntax_error_still_reports():
+    assert parse("if then").has_error

@@ -153,3 +153,31 @@ describe('findSyntaxError', () => {
     expect(findSyntaxError(root)).toBeNull()
   })
 })
+
+describe('(( reparse: subshell that immediately opens a subshell', () => {
+  it('parses as nested subshells rather than an arithmetic command', () => {
+    const root = parser.parse('((echo a); echo b)')
+    expect(root.hasError).toBe(false)
+    expect(root.namedChildren[0]?.type).toBe('subshell')
+  })
+
+  it('handles the backgrounded form', () => {
+    expect(parser.parse('((echo s1; echo s2) & wait)').hasError).toBe(false)
+  })
+
+  it('leaves a genuine arithmetic command untouched', () => {
+    expect(parser.parse('i=1; ((i++)); echo $i').hasError).toBe(false)
+  })
+
+  // A wrong parse is worse than a rejected one: tree-sitter's error
+  // region swallows the valid `((i++))` next to the bad opener, so
+  // splitting would silently turn arithmetic into a subshell running
+  // `i++`. Such lines keep their error instead.
+  it('leaves a line mixing arithmetic and a nested subshell alone', () => {
+    expect(parser.parse('i=1; ((i++)); ((echo x); echo $i)').hasError).toBe(true)
+  })
+
+  it('still reports an unrelated syntax error', () => {
+    expect(parser.parse('if then').hasError).toBe(true)
+  })
+})

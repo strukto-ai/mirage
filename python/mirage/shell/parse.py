@@ -18,14 +18,72 @@ import tree_sitter_bash
 BASH_LANGUAGE = tree_sitter.Language(tree_sitter_bash.language())
 TS_PARSER = tree_sitter.Parser(BASH_LANGUAGE)
 
+ARITH_OPEN_TOKEN = "(("
+ARITH_CLOSE_TOKEN = "))"
+
+
+def _failed_arith_openers(root: tree_sitter.Node) -> list[int]:
+    """Byte offsets of ``((`` tokens the parser could not make sense of.
+
+    Only openers inside an ERROR subtree are reported. A genuine
+    ``((i++))`` parses as an arithmetic command and never lands in one,
+    so it cannot be picked up here.
+
+    Args:
+        root (tree_sitter.Node): root of a tree that has an error.
+    """
+    offsets: list[int] = []
+    stack: list[tuple[tree_sitter.Node, bool]] = [(root, False)]
+    while stack:
+        node, in_error = stack.pop()
+        errored = in_error or node.type == "ERROR"
+        if errored and node.type == ARITH_OPEN_TOKEN:
+            offsets.append(node.start_byte)
+        for child in node.children:
+            stack.append((child, errored))
+    return offsets
+
 
 def parse(command: str) -> tree_sitter.Node:
     """Parse a shell command string into a tree-sitter AST.
 
-    Returns the root tree-sitter node.
+    A leading ``((`` is lexed as the arithmetic opener and the lexer
+    cannot back out, so a subshell that immediately opens another
+    subshell (``((echo a); echo b)``) fails to parse. Bash resolves the
+    same ambiguity by trying the arithmetic command and reparsing as
+    nested subshells when that fails; this does the same, splitting only
+    the openers that already sit inside an error and keeping the retry
+    only if it parses cleanly. Commands that parse today are untouched,
+    so no working command's byte offsets move.
+
+    Args:
+        command (str): shell source to parse.
+
+    Returns:
+        tree_sitter.Node: root node, or the original errored root when no
+        reparse helps.
     """
-    tree = TS_PARSER.parse(command.encode())
-    return tree.root_node
+    root = TS_PARSER.parse(command.encode()).root_node
+    if not root.has_error:
+        return root
+    # An arithmetic construct has to close with `))`, so a line without
+    # one anywhere cannot contain a real arithmetic opener and splitting
+    # is safe. Checking the whole line rather than each opener is what
+    # keeps this sound: tree-sitter's error region swallows neighbouring
+    # tokens, so a valid `((i++))` next to a bad opener also reports as
+    # errored, and splitting it would silently turn arithmetic into a
+    # subshell running `i++`. A wrong parse is worse than a rejected
+    # one, so lines mixing both are left alone.
+    if ARITH_CLOSE_TOKEN in command:
+        return root
+    offsets = _failed_arith_openers(root)
+    if not offsets:
+        return root
+    data = command.encode()
+    for offset in sorted(set(offsets), reverse=True):
+        data = data[:offset + 1] + b" " + data[offset + 1:]
+    retried = TS_PARSER.parse(data).root_node
+    return root if retried.has_error else retried
 
 
 _BASH_KEYWORDS = frozenset({

@@ -25,18 +25,73 @@ export interface ShellParser {
 
 export type { Node as ShellNode } from 'web-tree-sitter'
 
+const ARITH_OPEN_TOKEN = '(('
+const ARITH_CLOSE_TOKEN = '))'
+
+/**
+ * Offsets of `((` tokens the parser could not make sense of.
+ *
+ * Only openers inside an ERROR subtree are reported.
+ */
+function failedArithOpeners(root: Node): number[] {
+  const offsets: number[] = []
+  const stack: [Node, boolean][] = [[root, false]]
+  for (;;) {
+    const entry = stack.pop()
+    if (entry === undefined) break
+    const [node, inError] = entry
+    const errored = inError || node.type === 'ERROR'
+    if (errored && node.type === ARITH_OPEN_TOKEN) offsets.push(node.startIndex)
+    for (const child of node.children) {
+      stack.push([child, errored])
+    }
+  }
+  return offsets
+}
+
 export async function createShellParser(config: ShellParserConfig): Promise<ShellParser> {
   await Parser.init({ wasmBinary: toArrayBuffer(config.engineWasm) })
   const language = await Language.load(toUint8(config.grammarWasm))
   const parser = new Parser()
   parser.setLanguage(language)
   return {
+    /**
+     * Parse a shell command into a tree-sitter AST.
+     *
+     * A leading `((` is lexed as the arithmetic opener and the lexer
+     * cannot back out, so a subshell that immediately opens another
+     * subshell (`((echo a); echo b)`) fails to parse. Bash resolves the
+     * same ambiguity by trying the arithmetic command and reparsing as
+     * nested subshells when that fails; this does the same, splitting
+     * only openers that already sit inside an error and keeping the
+     * retry only if it parses cleanly. Commands that parse today are
+     * untouched, so no working command's offsets move.
+     */
     parse(command: string): Node {
       const tree = parser.parse(command)
       if (tree === null) {
         throw new Error('shell parse returned null')
       }
-      return tree.rootNode
+      const root = tree.rootNode
+      if (!root.hasError) return root
+      // An arithmetic construct has to close with `))`, so a line
+      // without one anywhere cannot contain a real arithmetic opener and
+      // splitting is safe. Checking the whole line rather than each
+      // opener is what keeps this sound: tree-sitter's error region
+      // swallows neighbouring tokens, so a valid `((i++))` next to a bad
+      // opener also reports as errored, and splitting it would silently
+      // turn arithmetic into a subshell running `i++`. A wrong parse is
+      // worse than a rejected one, so lines mixing both are left alone.
+      if (command.includes(ARITH_CLOSE_TOKEN)) return root
+      const offsets = failedArithOpeners(root)
+      if (offsets.length === 0) return root
+      let text = command
+      for (const offset of [...new Set(offsets)].sort((a, b) => b - a)) {
+        text = `${text.slice(0, offset + 1)} ${text.slice(offset + 1)}`
+      }
+      const retried = parser.parse(text)
+      if (retried === null) return root
+      return retried.rootNode.hasError ? root : retried.rootNode
     },
   }
 }
