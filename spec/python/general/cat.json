@@ -55,7 +55,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--number",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
@@ -64,7 +64,16 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--number-nonblank",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-b",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--show-ends",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-E",
@@ -73,7 +82,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--show-tabs",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-T",
@@ -82,7 +91,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--show-nonprinting",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
@@ -109,7 +118,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--show-all",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-A",
@@ -118,10 +127,19 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--squeeze-blank",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-u",
       "value_kind": "none",
       "value_optional": false
     }

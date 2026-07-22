@@ -55,7 +55,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--lines",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-l",
@@ -64,7 +64,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--words",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
@@ -73,7 +73,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--bytes",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
@@ -82,7 +82,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--chars",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-m",
@@ -91,11 +91,20 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--max-line-length",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-L",
       "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--total",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "text",
       "value_optional": false
     }
   ],
