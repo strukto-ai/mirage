@@ -1,5 +1,6 @@
 import type { Operator } from 'opendal'
 import { vi } from 'vitest'
+import { rstripSlash } from '@struktoai/mirage-core'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 
 interface FakeMetadata {
@@ -54,7 +55,7 @@ export class FakeNextcloudOperator {
   }
 
   stat(key: string): Promise<FakeMetadata> {
-    const normalized = key.replace(/\/+$/, '')
+    const normalized = rstripSlash(key)
     const data = this.files.get(normalized)
     if (data !== undefined) return Promise.resolve(fileMetadata(data))
     if (this.hasDirectory(normalized)) return Promise.resolve(DIRECTORY_METADATA)
@@ -75,7 +76,7 @@ export class FakeNextcloudOperator {
         entries.set(key, { path: () => key, metadata: () => fileMetadata(data) })
         const separator = key.lastIndexOf('/')
         let parent = separator >= 0 ? key.slice(0, separator) : ''
-        while (parent !== '' && parent.startsWith(prefix.replace(/\/+$/, ''))) {
+        while (parent !== '' && parent.startsWith(rstripSlash(prefix))) {
           const directory = `${parent}/`
           entries.set(directory, { path: () => directory, metadata: () => DIRECTORY_METADATA })
           parent = parent.slice(0, parent.lastIndexOf('/'))

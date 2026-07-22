@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser'
 import { SyntaxValidator } from 'fast-xml-validator'
+import { rstripSlash } from '@struktoai/mirage-core'
 import { CONTENT_LENGTH, DISPLAY_NAME, LAST_MODIFIED, RESOURCE_TYPE, SIZE } from './constants.ts'
 import { relativePath } from './target.ts'
 import type { Property, SearchEntry, SearchTarget, XmlRecord } from './types.ts'
@@ -77,7 +78,7 @@ function parseResponse(response: XmlRecord, target: SearchTarget): SearchEntry {
   const key = relativePath(href, target)
   return {
     key,
-    name: findText(properties, DISPLAY_NAME) ?? key.replace(/\/+$/, '').split('/').pop() ?? '',
+    name: findText(properties, DISPLAY_NAME) ?? rstripSlash(key).split('/').pop() ?? '',
     kind: hasCollection(properties) ? 'd' : 'f',
     size: entrySize(properties),
     modified: modifiedTimestamp(findText(properties, LAST_MODIFIED)),

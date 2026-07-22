@@ -626,7 +626,7 @@ export async function executeNode(
         )
       }
       while (arr.length <= idx) arr.push('')
-      arr[idx] = append ? (arr[idx] ?? '') + val : val
+      arr.splice(idx, 1, append ? (arr[idx] ?? '') + val : val)
       session.arrays[key] = arr
       return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
     }

@@ -1,4 +1,4 @@
-import type { PathSpec } from '@struktoai/mirage-core'
+import { rstripSlash, stripSlash, type PathSpec } from '@struktoai/mirage-core'
 import { rawPathOf } from '../util.ts'
 import { SEARCH_ENDPOINT_PATH } from './constants.ts'
 import type { SearchTarget } from './types.ts'
@@ -16,7 +16,7 @@ export function searchTarget(url: string): SearchTarget | null {
   const marker = parsed.pathname.indexOf(SEARCH_ENDPOINT_PATH)
   if (marker < 0) return null
   const davEnd = marker + SEARCH_ENDPOINT_PATH.length
-  const relative = parsed.pathname.slice(davEnd).replace(/^\/+|\/+$/g, '')
+  const relative = stripSlash(parsed.pathname.slice(davEnd))
   const parts = relative === '' ? [] : relative.split('/')
   if (parts.length < 2 || parts[0] !== 'files') return null
   const endpoint = new URL(parsed.toString())
@@ -30,24 +30,22 @@ export function searchTarget(url: string): SearchTarget | null {
 }
 
 export function scopePath(target: SearchTarget, path: PathSpec): string {
-  const relative = rawPathOf(path).replace(/^\/+|\/+$/g, '')
-  return relative === ''
-    ? target.resourceScope
-    : `${target.resourceScope.replace(/\/+$/, '')}/${relative}`
+  const relative = stripSlash(rawPathOf(path))
+  return relative === '' ? target.resourceScope : `${rstripSlash(target.resourceScope)}/${relative}`
 }
 
 function stripScope(path: string, scope: string): string | null {
   if (path === scope) return ''
-  const prefix = `${scope.replace(/\/+$/, '')}/`
+  const prefix = `${rstripSlash(scope)}/`
   return path.startsWith(prefix) ? path.slice(prefix.length) : null
 }
 
 export function relativePath(href: string, target: SearchTarget): string {
-  const hrefPath = decodePath(new URL(href, target.endpoint).pathname).replace(/\/+$/, '')
-  const resourceScope = target.resourceScope.replace(/\/+$/, '')
+  const hrefPath = rstripSlash(decodePath(new URL(href, target.endpoint).pathname))
+  const resourceScope = rstripSlash(target.resourceScope)
   let relative = stripScope(hrefPath, resourceScope)
   if (relative === null) {
-    const davRoot = decodePath(new URL(target.endpoint).pathname).replace(/\/+$/, '')
+    const davRoot = rstripSlash(decodePath(new URL(target.endpoint).pathname))
     relative = stripScope(hrefPath, `${davRoot}${resourceScope}`)
   }
   if (relative === null) {
