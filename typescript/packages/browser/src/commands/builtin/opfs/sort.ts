@@ -15,11 +15,17 @@
 import { ResourceName, command, specOf, sortGeneric } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
+import { writeBytes as opfsWrite } from '../../../core/opfs/write.ts'
 
 export const OPFS_SORT = command({
   name: 'sort',
   resource: ResourceName.OPFS,
   spec: specOf('sort'),
   fn: (accessor: OPFSAccessor, paths, _texts, opts) =>
-    sortGeneric(paths, opts, (p) => opfsStream(accessor, p)),
+    sortGeneric(
+      paths,
+      opts,
+      (p) => opfsStream(accessor, p),
+      (p, data) => opfsWrite(accessor, p, data),
+    ),
 })
