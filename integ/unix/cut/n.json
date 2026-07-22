@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "cut_n",
+      "seq": 610128,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'éx\\n' | cut -b 1 -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "n"
+      ]
+    }
+  ]
+}

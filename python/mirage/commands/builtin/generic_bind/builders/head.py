@@ -16,11 +16,10 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.head import head as generic_head
-from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic.head import head_multi, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import split_readable
-from mirage.commands.builtin.tail_helper import number_flag_error
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -32,32 +31,31 @@ async def head(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: str | None = None,
-    c: str | None = None,
-    q: bool = False,
-    v: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    num_err = number_flag_error("head", n, c)
-    if num_err is not None:
-        return None, IOResult(exit_code=1, stderr=num_err.encode())
-    n_int = int(n) if n is not None else None
-    c_int = int(c) if c is not None else None
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=str(exc).encode())
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
-        show_headers = (v or len(paths) > 1) and not q
+        show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
         paths, err = await split_readable(ops, accessor, paths, index, "head")
         io = IOResult(exit_code=1 if err else 0, stderr=err or None)
         if not paths:
             return None, io
         return head_multi(paths,
                           read=bound_op(ops.read_stream, accessor, index),
-                          n=n_int,
-                          c=c_int,
-                          show_headers=show_headers), io
+                          n=parsed.lines,
+                          c=parsed.bytes_,
+                          show_headers=show_headers,
+                          zero_terminated=parsed.zero_terminated), io
     source = _resolve_source(stdin, "head: missing operand")
-    return generic_head(source, n=n_int, c=c_int), IOResult()
+    return generic_head(source,
+                        n=parsed.lines,
+                        c=parsed.bytes_,
+                        zero_terminated=parsed.zero_terminated), IOResult()
 
 
 BUILDER = Builder('head', head, None, False, header_aggregate, read=True)

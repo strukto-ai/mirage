@@ -219,16 +219,15 @@ def test_format_wc_w_c_m():
     assert format_wc(counts, m=True) == "18"
 
 
-def test_format_wc_L_wins_when_both_set():
-    """L has highest precedence (matching wrapper behavior)."""
+def test_format_wc_combines_lines_and_max_line_length():
     counts = WCCounts(lines=2, max_line_length=11)
-    assert format_wc(counts, args_l=True, L=True) == "11"
+    assert format_wc(counts, args_l=True, L=True) == "      2      11"
 
 
-def test_format_wc_precedence_l_over_w_c_m():
-    """args_l > w > c > m precedence."""
+def test_format_wc_combines_selected_counts_in_canonical_order():
     counts = WCCounts(lines=2, words=4, bytes_=20, chars=18)
-    assert format_wc(counts, args_l=True, w=True) == "2"
+    assert format_wc(counts, args_l=True, w=True, c=True,
+                     m=True) == "      2       4      18      20"
 
 
 def test_wc_counts_merge():

@@ -1,0 +1,304 @@
+{
+  "cases": [
+    {
+      "id": "head_bytes",
+      "seq": 610112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abcd' | head --bytes=2",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      },
+      "flags": [
+        "bytes"
+      ]
+    },
+    {
+      "id": "head_lines",
+      "seq": 610113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | head --lines=1",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "lines"
+      ]
+    },
+    {
+      "id": "head_quiet",
+      "seq": 610114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head --quiet -n 1 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "quiet",
+        "n"
+      ]
+    },
+    {
+      "id": "head_silent",
+      "seq": 610115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head --silent -n 1 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "silent",
+        "n"
+      ]
+    },
+    {
+      "id": "head_verbose",
+      "seq": 610116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head --verbose -n 1 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/a.txt <==\nhello\n",
+        "stderr": ""
+      },
+      "flags": [
+        "verbose",
+        "n"
+      ]
+    },
+    {
+      "id": "head_zero_terminated",
+      "seq": 610117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\0b\\0c\\0' | head --zero-terminated --lines=2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\u0000b\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "zero-terminated",
+        "lines"
+      ]
+    },
+    {
+      "id": "head_bytes_negative",
+      "seq": 610186,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abcd' | head --bytes=-1",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc",
+        "stderr": ""
+      },
+      "flags": [
+        "bytes"
+      ]
+    },
+    {
+      "id": "head_lines_negative_unterminated",
+      "seq": 610187,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb' | head --lines=-1",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "lines"
+      ]
+    }
+  ]
+}

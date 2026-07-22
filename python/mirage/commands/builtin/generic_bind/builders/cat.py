@@ -16,6 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
+from mirage.commands.builtin.generic.cat import needs_display
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import split_readable
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -31,26 +32,10 @@ async def cat(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: bool = False,
-    E: bool = False,
-    T: bool = False,
-    v: bool = False,
-    e: bool = False,
-    t: bool = False,
-    A: bool = False,
-    s: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    # GNU combinations: -e is -vE, -t is -vT, -A is -vET.
-    display = dict(
-        number_lines=n,
-        show_ends=E or e or A,
-        show_tabs=T or t or A,
-        show_nonprinting=v or e or t or A,
-        squeeze_blank=s,
-    )
-    wants_display = any(display.values())
+    wants_display = needs_display(flags)
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
         paths, err = await split_readable(ops, accessor, paths, index, "cat")
@@ -87,11 +72,11 @@ async def cat(
             io.stderr = err
             io.exit_code = 1
         if wants_display:
-            return generic_cat(source, **display), io
+            return generic_cat(source, flags=flags), io
         return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if wants_display:
-        return generic_cat(source, **display), IOResult()
+        return generic_cat(source, flags=flags), IOResult()
     return source, IOResult()
 
 

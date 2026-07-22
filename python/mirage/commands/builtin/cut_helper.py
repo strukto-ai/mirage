@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import AsyncIterator
 
 OPEN_END = 2**31 - 1
+_BLANKS = re.compile(r"[ \t]+")
 
 
 def parse_ranges(spec: str) -> list[tuple[int, int]]:
@@ -37,53 +39,132 @@ def select_positions(ranges: list[tuple[int, int]], n: int,
     for lo, hi in ranges:
         start = max(1, lo)
         end = min(hi, n)
-        for p in range(start, end + 1):
-            in_set.add(p)
+        for position in range(start, end + 1):
+            in_set.add(position)
     if complement:
-        return [p for p in range(1, n + 1) if p not in in_set]
-    return [p for p in range(1, n + 1) if p in in_set]
+        return [
+            position for position in range(1, n + 1) if position not in in_set
+        ]
+    return [position for position in range(1, n + 1) if position in in_set]
 
 
 def split_records(raw: bytes, zero_terminated: bool) -> list[bytes]:
-    sep = b"\x00" if zero_terminated else b"\n"
-    records = raw.split(sep)
+    separator = b"\x00" if zero_terminated else b"\n"
+    records = raw.split(separator)
     if records and records[-1] == b"":
         records = records[:-1]
     return records
 
 
-def cut_record(rec: bytes, delimiter: str,
-               field_ranges: list[tuple[int, int]] | None,
-               char_ranges: list[tuple[int, int]] | None,
-               complement: bool) -> bytes:
-    line = rec.decode(errors="replace")
-    if char_ranges is not None:
-        positions = select_positions(char_ranges, len(line), complement)
-        return "".join(line[p - 1] for p in positions).encode()
-    if field_ranges is not None:
-        parts = line.split(delimiter)
-        if len(parts) == 1:
-            return rec
-        positions = select_positions(field_ranges, len(parts), complement)
-        return delimiter.join(parts[p - 1] for p in positions).encode()
-    return rec
+def _join_position_groups(parts: list[bytes], positions: list[int],
+                          output_delimiter: bytes | None) -> bytes:
+    if not positions:
+        return b""
+    groups: list[bytes] = []
+    group = bytearray(parts[positions[0] - 1])
+    previous = positions[0]
+    for position in positions[1:]:
+        if position != previous + 1:
+            groups.append(bytes(group))
+            group = bytearray()
+        group.extend(parts[position - 1])
+        previous = position
+    groups.append(bytes(group))
+    return (output_delimiter or b"").join(groups)
+
+
+def _cut_bytes(rec: bytes, ranges: list[tuple[int, int]], complement: bool,
+               no_partial: bool, output_delimiter: bytes | None) -> bytes:
+    positions = select_positions(ranges, len(rec), complement)
+    if not no_partial:
+        return _join_position_groups([bytes((byte, )) for byte in rec],
+                                     positions, output_delimiter)
+    selected = set(positions)
+    parts: list[bytes] = []
+    part_positions: list[int] = []
+    offset = 0
+    for char in rec.decode(errors="replace"):
+        encoded = char.encode()
+        end = offset + len(encoded)
+        if end in selected:
+            parts.append(rec[offset:end])
+            part_positions.append(offset + 1)
+        offset = end
+    if output_delimiter is None:
+        return b"".join(parts)
+    groups: list[bytes] = []
+    for index, part in enumerate(parts):
+        if index == 0 or part_positions[index] != (part_positions[index - 1] +
+                                                   len(parts[index - 1])):
+            groups.append(part)
+        else:
+            groups[-1] += part
+    return output_delimiter.join(groups)
+
+
+def cut_record(
+    rec: bytes,
+    ranges: list[tuple[int, int]],
+    mode: str,
+    delimiter: str,
+    complement: bool,
+    only_delimited: bool,
+    whitespace: str | None,
+    no_partial: bool,
+    output_delimiter: str | None,
+) -> bytes | None:
+    output_bytes = (output_delimiter.encode()
+                    if output_delimiter is not None else None)
+    if mode == "bytes":
+        return _cut_bytes(rec, ranges, complement, no_partial, output_bytes)
+    text = rec.decode(errors="replace")
+    if mode == "characters":
+        positions = select_positions(ranges, len(text), complement)
+        parts = [char.encode() for char in text]
+        return _join_position_groups(parts, positions, output_bytes)
+    if whitespace is not None:
+        has_delimiter = _BLANKS.search(text) is not None
+        source = text.strip(" \t") if whitespace == "trimmed" else text
+        fields = _BLANKS.split(source)
+        default_output = "\t"
+    else:
+        has_delimiter = delimiter in text
+        fields = text.split(delimiter)
+        default_output = delimiter
+    if not has_delimiter:
+        return None if only_delimited else rec
+    if whitespace == "trimmed" and source == "" and only_delimited:
+        return None
+    positions = select_positions(ranges, len(fields), complement)
+    separator = (output_delimiter
+                 if output_delimiter is not None else default_output)
+    return separator.join(fields[position - 1]
+                          for position in positions).encode()
 
 
 async def cut_stream(
     source: AsyncIterator[bytes],
+    *,
+    ranges: list[tuple[int, int]],
+    mode: str,
     delimiter: str,
-    field_ranges: list[tuple[int, int]] | None,
-    char_ranges: list[tuple[int, int]] | None,
     complement: bool,
+    only_delimited: bool,
+    whitespace: str | None,
+    no_partial: bool,
+    output_delimiter: str | None,
     zero_terminated: bool,
 ) -> AsyncIterator[bytes]:
-    sep = b"\x00" if zero_terminated else b"\n"
+    separator = b"\x00" if zero_terminated else b"\n"
     raw = b""
     async for chunk in source:
         raw += chunk
     for rec in split_records(raw, zero_terminated):
-        yield cut_record(rec, delimiter, field_ranges, char_ranges,
-                         complement) + sep
+        output = cut_record(rec, ranges, mode, delimiter, complement,
+                            only_delimited, whitespace, no_partial,
+                            output_delimiter)
+        if output is not None:
+            yield output + separator
 
 
 __all__ = [

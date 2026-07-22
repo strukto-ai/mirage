@@ -25,14 +25,6 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
-async function* wcLinesStream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
-  let count = 0
-  for await (const chunk of source) {
-    for (let i = 0; i < chunk.byteLength; i++) if (chunk[i] === 0x0a) count += 1
-  }
-  yield ENC.encode(`${String(count)}\n`)
-}
-
 function countChar(text: string, ch: string): number {
   let n = 0
   for (const c of text) if (c === ch) n += 1
@@ -42,6 +34,71 @@ function countChar(text: string, ch: string): number {
 export interface WcRow {
   values: number[]
   label: string | null
+}
+
+interface WcCounts {
+  lines: number
+  words: number
+  bytes: number
+  chars: number
+  maxLineLength: number
+}
+
+interface WcFlags {
+  lines: boolean
+  words: boolean
+  bytes: boolean
+  chars: boolean
+  maxLineLength: boolean
+  total: 'auto' | 'always' | 'only' | 'never'
+}
+
+function parseFlags(flags: Record<string, string | boolean | string[]>): WcFlags | string {
+  const rawTotal = typeof flags.total === 'string' ? flags.total : 'auto'
+  if (!['auto', 'always', 'only', 'never'].includes(rawTotal)) {
+    return `wc: invalid argument '${rawTotal}' for '--total'\n`
+  }
+  return {
+    lines: flags.args_l === true || flags.lines === true,
+    words: flags.w === true || flags.words === true,
+    bytes: flags.c === true || flags.bytes === true,
+    chars: flags.m === true || flags.chars === true,
+    maxLineLength: flags.L === true || flags.max_line_length === true,
+    total: rawTotal as WcFlags['total'],
+  }
+}
+
+function countsOf(data: Uint8Array): WcCounts {
+  const text = DEC.decode(data)
+  return {
+    lines: countChar(text, '\n'),
+    words: text.split(/\s+/u).filter((s) => s !== '').length,
+    bytes: data.byteLength,
+    chars: Array.from(text).length,
+    maxLineLength: text
+      .split(/\r?\n/u)
+      .reduce((m, line) => Math.max(m, Array.from(line).length), 0),
+  }
+}
+
+function selectedValues(counts: WcCounts, flags: WcFlags): number[] {
+  const selected = flags.lines || flags.words || flags.bytes || flags.chars || flags.maxLineLength
+  if (!selected) return [counts.lines, counts.words, counts.bytes]
+  const values: number[] = []
+  if (flags.lines) values.push(counts.lines)
+  if (flags.words) values.push(counts.words)
+  if (flags.chars) values.push(counts.chars)
+  if (flags.bytes) values.push(counts.bytes)
+  if (flags.maxLineLength) values.push(counts.maxLineLength)
+  return values
+}
+
+function addCounts(total: WcCounts, counts: WcCounts): void {
+  total.lines += counts.lines
+  total.words += counts.words
+  total.bytes += counts.bytes
+  total.chars += counts.chars
+  total.maxLineLength = Math.max(total.maxLineLength, counts.maxLineLength)
 }
 
 // GNU wc layout: counts right-aligned to a shared width and space-separated;
@@ -77,18 +134,13 @@ export async function wcGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stream = cacheAwareStreamEager(stream)
-  const f = opts.flags
-  const lFlag = f.args_l === true
-  const wFlag = f.w === true
-  const cFlag = f.c === true
-  const mFlag = f.m === true
-  const LFlag = f.L === true
+  const parsed = parseFlags(opts.flags)
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   if (paths.length > 0) {
     const rows: WcRow[] = []
-    let totalLines = 0
-    let totalWords = 0
-    let totalBytes = 0
-    let totalMax = 0
+    const total: WcCounts = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
     let err = ''
     for (const p of paths) {
       let data: Uint8Array
@@ -99,47 +151,22 @@ export async function wcGeneric(
         err += fsErrorLine('wc', p, e)
         continue
       }
-      const text = DEC.decode(data)
-      const lineCount = countChar(text, '\n')
-      const wordCount = text.split(/\s+/).filter((s) => s !== '').length
-      const byteCount = data.byteLength
-      if (LFlag) {
-        const maxLen = text.split(/\r?\n/).reduce((m, l) => Math.max(m, l.length), 0)
-        rows.push({ values: [maxLen], label: p.rawPath })
-        totalMax = Math.max(totalMax, maxLen)
-      } else if (lFlag) {
-        rows.push({ values: [lineCount], label: p.rawPath })
-        totalLines += lineCount
-      } else if (wFlag) {
-        rows.push({ values: [wordCount], label: p.rawPath })
-        totalWords += wordCount
-      } else if (cFlag) {
-        rows.push({ values: [byteCount], label: p.rawPath })
-        totalBytes += byteCount
-      } else if (mFlag) {
-        const charCount = text.length
-        rows.push({ values: [charCount], label: p.rawPath })
-        totalBytes += charCount
-      } else {
-        rows.push({ values: [lineCount, wordCount, byteCount], label: p.rawPath })
-        totalLines += lineCount
-        totalWords += wordCount
-        totalBytes += byteCount
-      }
+      const counts = countsOf(data)
+      rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
+      addCounts(total, counts)
     }
-    if (paths.length > 1) {
-      // GNU wc totals the operands that resolved and still prints the row
-      // when some (or all) operands failed: `0 total` when none resolved.
-      if (LFlag) rows.push({ values: [totalMax], label: 'total' })
-      else if (lFlag) rows.push({ values: [totalLines], label: 'total' })
-      else if (wFlag) rows.push({ values: [totalWords], label: 'total' })
-      else if (cFlag || mFlag) rows.push({ values: [totalBytes], label: 'total' })
-      else rows.push({ values: [totalLines, totalWords, totalBytes], label: 'total' })
+    const includeTotal = parsed.total === 'always' || (parsed.total === 'auto' && paths.length > 1)
+    if (includeTotal || parsed.total === 'only') {
+      rows.push({ values: selectedValues(total, parsed), label: 'total' })
     }
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
       stderr: err === '' ? null : ENC.encode(err),
     })
+    if (parsed.total === 'only') {
+      const out = ENC.encode(`${selectedValues(total, parsed).join(' ')}\n`)
+      return [out, io]
+    }
     if (rows.length === 0) return [null, io]
     const out: ByteSource = formatRecords(formatWcLines(rows))
     return [out, io]
@@ -151,20 +178,13 @@ export async function wcGeneric(
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
   }
-  if (lFlag) return [wcLinesStream(source), new IOResult()]
   const raw = await materialize(source)
-  const text = DEC.decode(raw)
-  const lc = countChar(text, '\n')
-  const wcVal = text.split(/\s+/).filter((s) => s !== '').length
-  const bc = raw.byteLength
-  const cc = text.length
-  if (LFlag) {
-    const maxLen = text.split(/\r?\n/).reduce((m, l) => Math.max(m, l.length), 0)
-    return [ENC.encode(`${String(maxLen)}\n`), new IOResult()]
+  const counts = countsOf(raw)
+  const values = selectedValues(counts, parsed)
+  if (parsed.total === 'only') {
+    return [ENC.encode(`${values.join(' ')}\n`), new IOResult()]
   }
-  if (wFlag) return [ENC.encode(`${String(wcVal)}\n`), new IOResult()]
-  if (mFlag) return [ENC.encode(`${String(cc)}\n`), new IOResult()]
-  if (cFlag) return [ENC.encode(`${String(bc)}\n`), new IOResult()]
-  const line = formatWcLines([{ values: [lc, wcVal, bc], label: null }])[0] ?? ''
-  return [ENC.encode(`${line}\n`), new IOResult()]
+  const rows: WcRow[] = [{ values, label: null }]
+  if (parsed.total === 'always') rows.push({ values, label: 'total' })
+  return [formatRecords(formatWcLines(rows)), new IOResult()]
 }

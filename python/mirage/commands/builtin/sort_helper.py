@@ -46,11 +46,14 @@ class SortKeyError(ValueError):
 @dataclass(frozen=True, slots=True)
 class KeyMods:
     numeric: bool = False
+    general_numeric: bool = False
     human: bool = False
     version: bool = False
     month: bool = False
     fold: bool = False
     reverse: bool = False
+    dictionary: bool = False
+    ignore_nonprinting: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,14 +101,17 @@ def _parse_pos(spec: str, is_end: bool) -> tuple[int, int | None, str]:
 def _mods_from_letters(*letter_runs: str) -> tuple[KeyMods, bool]:
     letters = "".join(letter_runs)
     has_own = any(letter in _ORDER_LETTERS for letter in letters)
-    numeric = "n" in letters or "g" in letters
+    numeric = "n" in letters
     return KeyMods(
         numeric=numeric,
+        general_numeric="g" in letters,
         human="h" in letters,
         version="V" in letters,
         month="M" in letters,
         fold="f" in letters,
         reverse="r" in letters,
+        dictionary="d" in letters,
+        ignore_nonprinting="i" in letters,
     ), has_own
 
 
@@ -148,14 +154,20 @@ def build_config(
     month_sort: bool,
     ignore_blanks: bool,
     stable: bool,
+    general_numeric: bool = False,
+    dictionary: bool = False,
+    ignore_nonprinting: bool = False,
 ) -> SortConfig:
     global_mods = KeyMods(
         numeric=numeric,
+        general_numeric=general_numeric,
         human=human_numeric,
         version=version_sort,
         month=month_sort,
         fold=fold_case,
         reverse=reverse,
+        dictionary=dictionary,
+        ignore_nonprinting=ignore_nonprinting,
     )
     if key_defs:
         keys = tuple(
@@ -265,6 +277,11 @@ def _leading_number(field: str) -> float:
 
 
 def _transform(field: str, mods: KeyMods) -> object:
+    if mods.dictionary:
+        field = "".join(char for char in field
+                        if char.isalnum() or char in " \t")
+    elif mods.ignore_nonprinting:
+        field = "".join(char for char in field if char.isprintable())
     if mods.month:
         return _MONTHS.get(field.strip()[:3].lower(), 0)
     if mods.human:
@@ -273,6 +290,15 @@ def _transform(field: str, mods: KeyMods) -> object:
         return _version_key(field)
     if mods.numeric:
         return _leading_number(field)
+    if mods.general_numeric:
+        stripped = field.lstrip()
+        try:
+            value = float(stripped)
+        except ValueError:
+            return (0, 0.0)
+        if value != value:
+            return (1, 0.0)
+        return (2, value)
     if mods.fold:
         return field.lower()
     return field
@@ -288,7 +314,7 @@ def _cmp(a: object, b: object) -> int:
     return (a > b) - (a < b)  # type: ignore[operator]
 
 
-def _compare_lines(a: str, b: str, cfg: SortConfig) -> int:
+def compare_lines(a: str, b: str, cfg: SortConfig) -> int:
     fa = _compute_fields(a, cfg.field_sep)
     fb = _compute_fields(b, cfg.field_sep)
     for key in cfg.keys:
@@ -317,7 +343,7 @@ def _dedup_key(line: str, cfg: SortConfig) -> tuple[object, ...]:
 
 
 def sort_lines(lines: list[str], cfg: SortConfig) -> list[str]:
-    compare = partial(_compare_lines, cfg=cfg)
+    compare = partial(compare_lines, cfg=cfg)
     ordered = sorted(lines, key=cmp_to_key(compare))
     if not cfg.unique:
         return ordered

@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.head import head as generic_head
-from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic.head import head_multi, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.postgres._provision import head_tail_provision
 from mirage.commands.builtin.postgres.io import resolve_glob
@@ -38,32 +38,34 @@ async def head(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: str | None = None,
-    c: str | None = None,
-    q: bool = False,
-    v: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    n_int = int(n) if n is not None else None
-    c_int = int(c) if c is not None else None
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=str(exc).encode())
     if paths:
         paths = await resolve_glob(accessor, paths, index)
         # Row reads push LIMIT into the query instead of fetching the whole
         # relation; non-row scopes ignore the limit kwarg.
-        n_eff = n_int if n_int is not None else 10
+        n_eff = parsed.lines if parsed.lines is not None else 10
         read_fn = postgres_read
-        if c_int is None and n_eff > 0:
+        if parsed.bytes_ is None and n_eff > 0 and not parsed.zero_terminated:
             read_fn = partial(postgres_read,
                               limit=min(n_eff,
                                         accessor.config.default_row_limit))
         return head_multi(paths,
                           read=bound_op(read_fn, accessor, index),
-                          n=n_int,
-                          c=c_int,
-                          show_headers=(v or len(paths) > 1)
-                          and not q), IOResult()
+                          n=parsed.lines,
+                          c=parsed.bytes_,
+                          show_headers=(parsed.verbose or len(paths) > 1)
+                          and not parsed.quiet,
+                          zero_terminated=parsed.zero_terminated), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("head: missing operand")
-    return generic_head(raw, n=n_int, c=c_int), IOResult()
+    return generic_head(raw,
+                        n=parsed.lines,
+                        c=parsed.bytes_,
+                        zero_terminated=parsed.zero_terminated), IOResult()

@@ -15,6 +15,7 @@
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat as generic_cat
+from mirage.commands.builtin.generic.cat import needs_display
 from mirage.commands.builtin.generic_bind.provision import \
     make_file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -35,9 +36,8 @@ async def cat(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         contents: dict[str, bytes] = {
@@ -47,10 +47,10 @@ async def cat(
         merged = b"".join(contents.values())
         reads: dict[str, ByteSource] = {k: v for k, v in contents.items()}
         io = IOResult(reads=reads)
-        if n:
-            return generic_cat(merged, number_lines=True), io
+        if needs_display(flags):
+            return generic_cat(merged, flags=flags), io
         return merged, io
     source = _resolve_source(stdin, "cat: missing operand")
-    if n:
-        return generic_cat(source, number_lines=True), IOResult()
+    if needs_display(flags):
+        return generic_cat(source, flags=flags), IOResult()
     return source, IOResult()

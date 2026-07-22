@@ -1,6 +1,7 @@
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.dify.io import resolve_glob
 from mirage.commands.builtin.generic.cat import cat as generic_cat
+from mirage.commands.builtin.generic.cat import needs_display
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.generic_bind.provision import \
     make_file_read_provision
@@ -29,9 +30,8 @@ def make_cat(ops: CommandIO):
         accessor,
         paths: list[PathSpec],
         *texts: str,
-        n: bool = False,
         index: IndexCacheStore,
-        **_extra: object,
+        **flags: object,
     ) -> tuple[ByteSource | None, IOResult]:
         paths = await resolve_glob(accessor, paths, index)
         # dify is a remote (cacheable) backend. Single file: stream via a
@@ -56,8 +56,8 @@ def make_cat(ops: CommandIO):
                 parts.append(data)
             io = IOResult(reads=reads, cache=list(reads))
             source = async_chain(*parts)
-        if n:
-            return generic_cat(source, number_lines=True), io
+        if needs_display(flags):
+            return generic_cat(source, flags=flags), io
         return source, io
 
     return cat

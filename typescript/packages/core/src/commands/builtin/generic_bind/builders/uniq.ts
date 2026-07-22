@@ -20,7 +20,13 @@ export const UNIQ_BUILDER: Builder = {
   read: true,
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
+    const write = ops.write
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return uniqGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return uniqGeneric(
+      resolved,
+      opts,
+      (p) => ops.readStream(accessor, p, idx),
+      write === undefined ? undefined : (p, data) => write(accessor, p, data),
+    )
   },
 }
