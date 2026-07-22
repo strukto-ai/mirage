@@ -82,9 +82,9 @@ def parse_flags(flags: Mapping[str, object]) -> UniqFlags:
 def _skip_fields(text: str, count: int) -> str:
     index = 0
     for _ in range(count):
-        while index < len(text) and text[index].isspace():
+        while index < len(text) and text[index] in " \t":
             index += 1
-        while index < len(text) and not text[index].isspace():
+        while index < len(text) and text[index] not in " \t":
             index += 1
     return text[index:]
 
@@ -96,7 +96,7 @@ def _comparison_key(line: bytes, flags: UniqFlags) -> str:
     if flags.check_chars is not None:
         text = text[:flags.check_chars]
     if flags.ignore_case:
-        text = text.casefold()
+        text = text.lower()
     return text
 
 

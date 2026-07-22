@@ -103,11 +103,15 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): UniqFla
   }
 }
 
+function isBlank(char: string | undefined): boolean {
+  return char === ' ' || char === '\t'
+}
+
 function skipFields(text: string, count: number): string {
   let index = 0
   for (let field = 0; field < count; field += 1) {
-    while (index < text.length && /\s/u.test(text[index] ?? '')) index += 1
-    while (index < text.length && !/\s/u.test(text[index] ?? '')) index += 1
+    while (index < text.length && isBlank(text[index])) index += 1
+    while (index < text.length && !isBlank(text[index])) index += 1
   }
   return text.slice(index)
 }
@@ -117,7 +121,7 @@ function comparisonKey(line: Uint8Array, flags: UniqFlags): string {
   if (flags.skipChars > 0) characters = characters.slice(flags.skipChars)
   if (flags.checkChars !== null) characters = characters.slice(0, flags.checkChars)
   const text = characters.join('')
-  return flags.ignoreCase ? text.toLocaleLowerCase() : text
+  return flags.ignoreCase ? text.toLowerCase() : text
 }
 
 function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {

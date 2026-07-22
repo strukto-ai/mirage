@@ -51,10 +51,13 @@ def parse_flags(flags: Mapping[str, object]) -> CutFlags:
     output_delimiter = (fl.as_str("args_O") or fl.as_str("output_delimiter"))
     if fl.as_str("F") is not None and output_delimiter is None:
         output_delimiter = " "
+    explicit_delimiter = fl.as_str("d") or fl.as_str("delimiter")
+    if explicit_delimiter is not None and len(explicit_delimiter) != 1:
+        raise ValueError("cut: the delimiter must be a single character")
     return CutFlags(
         ranges=ranges,
         mode=mode,
-        delimiter=(fl.as_str("d") or fl.as_str("delimiter") or "\t"),
+        delimiter=explicit_delimiter or "\t",
         complement=fl.as_bool("complement"),
         only_delimited=fl.as_bool("s") or fl.as_bool("only_delimited"),
         whitespace=whitespace,

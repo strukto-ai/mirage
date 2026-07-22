@@ -99,6 +99,19 @@ class TestSortFieldSep:
         assert result == ["b:2", "a:10", "c:30"]
 
 
+class TestSortGeneralNumeric:
+
+    @pytest.mark.asyncio
+    async def test_infinity_and_hex_parse_like_float(self):
+        result = await sort_lines(b"inf\n5\n-3\nnan\nabc", flags={"g": True})
+        assert result == ["abc", "nan", "-3", "5", "inf"]
+
+    @pytest.mark.asyncio
+    async def test_hex_is_not_numeric(self):
+        result = await sort_lines(b"0x10\n5", flags={"g": True})
+        assert result == ["0x10", "5"]
+
+
 class TestSortMixed:
 
     @pytest.mark.asyncio

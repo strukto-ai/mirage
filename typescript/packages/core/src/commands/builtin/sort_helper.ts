@@ -293,6 +293,20 @@ function isPrintingCharacter(char: string): boolean {
   return code > 31 && code !== 127
 }
 
+function parseGeneralFloat(field: string): number | null {
+  const trimmed = field.trim()
+  if (trimmed === '') return null
+  const collapsed = trimmed.replace(/(\d)_(?=\d)/g, '$1')
+  if (collapsed.includes('_')) return null
+  const lowered = collapsed.toLowerCase()
+  if (/^[+-]?(inf(inity)?|nan)$/.test(lowered)) {
+    if (lowered.endsWith('nan')) return Number.NaN
+    return lowered.startsWith('-') ? -Infinity : Infinity
+  }
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/.test(collapsed)) return null
+  return Number(collapsed)
+}
+
 function transform(field: string, mods: KeyMods): SortVal {
   if (mods.dictionary)
     field = Array.from(field)
@@ -306,9 +320,8 @@ function transform(field: string, mods: KeyMods): SortVal {
   if (mods.version) return versionKey(field)
   if (mods.numeric) return leadingNumber(field)
   if (mods.generalNumeric) {
-    const trimmed = field.trimStart()
-    if (trimmed === '') return [0, 0]
-    const value = Number(trimmed)
+    const value = parseGeneralFloat(field)
+    if (value === null) return [0, 0]
     if (Number.isNaN(value)) return [1, 0]
     return [2, value]
   }

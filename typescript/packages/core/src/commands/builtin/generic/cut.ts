@@ -67,10 +67,14 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): CutOpti
   }
   let outputDelimiter = stringFlag(flags, 'args_O', 'output_delimiter')
   if (typeof flags.F === 'string' && outputDelimiter === null) outputDelimiter = ' '
+  const explicitDelimiter = stringFlag(flags, 'd', 'delimiter')
+  if (explicitDelimiter !== null && Array.from(explicitDelimiter).length !== 1) {
+    return 'cut: the delimiter must be a single character\n'
+  }
   return {
     ranges: parseCutRanges(range),
     mode,
-    delimiter: stringFlag(flags, 'd', 'delimiter') ?? '\t',
+    delimiter: explicitDelimiter ?? '\t',
     complement: flags.complement === true,
     onlyDelimited: flags.s === true || flags.only_delimited === true,
     whitespace,
