@@ -19,7 +19,71 @@ BASH_LANGUAGE = tree_sitter.Language(tree_sitter_bash.language())
 TS_PARSER = tree_sitter.Parser(BASH_LANGUAGE)
 
 ARITH_OPEN_TOKEN = "(("
-ARITH_CLOSE_TOKEN = "))"
+_QUOTES = ("'", '"')
+
+
+def _balanced_end(text: str, start: int) -> int | None:
+    """Index just past the ``)`` closing the ``(`` at ``start``.
+
+    Parens inside quotes and backslash escapes do not count, so a
+    command substitution or a literal ``")"`` cannot throw off the
+    depth.
+
+    Args:
+        text (str): shell source.
+        start (int): index of the opening paren.
+
+    Returns:
+        int | None: end index, or None when the parens never balance.
+    """
+    depth = 0
+    index = start
+    quote: str | None = None
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == "\\" and quote == '"':
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in _QUOTES:
+            quote = char
+        elif char == "\\":
+            index += 2
+            continue
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return None
+
+
+def _is_arithmetic(text: str, start: int) -> bool:
+    """Whether the construct at ``start`` is a real arithmetic command.
+
+    Decided by parsing the balanced span on its own: ``((i++))`` stands
+    alone cleanly, while ``((echo x); echo $i)`` does not. Judging each
+    opener separately is what keeps a valid ``((i++))`` safe when it
+    shares a line with a broken one, since tree-sitter's error region
+    covers both.
+
+    Args:
+        text (str): shell source.
+        start (int): index of the opener's first paren.
+    """
+    end = _balanced_end(text, start)
+    if end is None:
+        # Unbalanced: no span to judge, so assume arithmetic and leave
+        # the construct alone rather than risk rewriting it.
+        return True
+    span = text[start:end]
+    return not TS_PARSER.parse(span.encode()).root_node.has_error
 
 
 def _failed_arith_openers(root: tree_sitter.Node) -> list[int]:
@@ -66,21 +130,20 @@ def parse(command: str) -> tree_sitter.Node:
     root = TS_PARSER.parse(command.encode()).root_node
     if not root.has_error:
         return root
-    # An arithmetic construct has to close with `))`, so a line without
-    # one anywhere cannot contain a real arithmetic opener and splitting
-    # is safe. Checking the whole line rather than each opener is what
-    # keeps this sound: tree-sitter's error region swallows neighbouring
-    # tokens, so a valid `((i++))` next to a bad opener also reports as
-    # errored, and splitting it would silently turn arithmetic into a
-    # subshell running `i++`. A wrong parse is worse than a rejected
-    # one, so lines mixing both are left alone.
-    if ARITH_CLOSE_TOKEN in command:
-        return root
-    offsets = _failed_arith_openers(root)
+    # Sitting inside an ERROR is not evidence that an opener is broken:
+    # tree-sitter's error region swallows neighbouring tokens, so a valid
+    # `((i++))` next to a bad opener reports as errored too. Splitting it
+    # would silently turn arithmetic into a subshell running `i++`, which
+    # is a wrong parse rather than a rejected one. Each opener is judged
+    # on its own span instead.
+    offsets = [
+        offset for offset in set(_failed_arith_openers(root))
+        if not _is_arithmetic(command, offset)
+    ]
     if not offsets:
         return root
     data = command.encode()
-    for offset in sorted(set(offsets), reverse=True):
+    for offset in sorted(offsets, reverse=True):
         data = data[:offset + 1] + b" " + data[offset + 1:]
     retried = TS_PARSER.parse(data).root_node
     return root if retried.has_error else retried

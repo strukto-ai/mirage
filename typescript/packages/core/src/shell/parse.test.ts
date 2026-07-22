@@ -169,12 +169,20 @@ describe('(( reparse: subshell that immediately opens a subshell', () => {
     expect(parser.parse('i=1; ((i++)); echo $i').hasError).toBe(false)
   })
 
-  // A wrong parse is worse than a rejected one: tree-sitter's error
-  // region swallows the valid `((i++))` next to the bad opener, so
-  // splitting would silently turn arithmetic into a subshell running
-  // `i++`. Such lines keep their error instead.
-  it('leaves a line mixing arithmetic and a nested subshell alone', () => {
-    expect(parser.parse('i=1; ((i++)); ((echo x); echo $i)').hasError).toBe(true)
+  // Each opener is judged on its own span, not on the error region:
+  // tree-sitter's ERROR swallows the valid `((i++))` next to the bad
+  // opener, so scope alone would split both and silently turn the
+  // arithmetic into a subshell running `i++`.
+  it('handles a line mixing arithmetic and a nested subshell', () => {
+    expect(parser.parse('i=1; ((i++)); ((echo x); echo $i)').hasError).toBe(false)
+  })
+
+  it('is not confused by a paren inside quotes', () => {
+    expect(parser.parse('((echo ")"); echo b)').hasError).toBe(false)
+  })
+
+  it('handles two nested subshells on one line', () => {
+    expect(parser.parse('((echo a); echo b); ((echo c); echo d)').hasError).toBe(false)
   })
 
   it('still reports an unrelated syntax error', () => {

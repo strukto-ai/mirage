@@ -26,7 +26,45 @@ export interface ShellParser {
 export type { Node as ShellNode } from 'web-tree-sitter'
 
 const ARITH_OPEN_TOKEN = '(('
-const ARITH_CLOSE_TOKEN = '))'
+const QUOTES = new Set(["'", '"'])
+
+/**
+ * Index just past the `)` closing the `(` at `start`.
+ *
+ * Parens inside quotes and backslash escapes do not count, so a command
+ * substitution or a literal `")"` cannot throw off the depth. Returns
+ * null when the parens never balance.
+ */
+function balancedEnd(text: string, start: number): number | null {
+  let depth = 0
+  let index = start
+  let quote: string | null = null
+  while (index < text.length) {
+    const char = text[index] ?? ''
+    if (quote !== null) {
+      if (char === '\\' && quote === '"') {
+        index += 2
+        continue
+      }
+      if (char === quote) quote = null
+      index += 1
+      continue
+    }
+    if (QUOTES.has(char)) {
+      quote = char
+    } else if (char === '\\') {
+      index += 2
+      continue
+    } else if (char === '(') {
+      depth += 1
+    } else if (char === ')') {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+    index += 1
+  }
+  return null
+}
 
 /**
  * Offsets of `((` tokens the parser could not make sense of.
@@ -74,19 +112,24 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
       }
       const root = tree.rootNode
       if (!root.hasError) return root
-      // An arithmetic construct has to close with `))`, so a line
-      // without one anywhere cannot contain a real arithmetic opener and
-      // splitting is safe. Checking the whole line rather than each
-      // opener is what keeps this sound: tree-sitter's error region
-      // swallows neighbouring tokens, so a valid `((i++))` next to a bad
-      // opener also reports as errored, and splitting it would silently
-      // turn arithmetic into a subshell running `i++`. A wrong parse is
-      // worse than a rejected one, so lines mixing both are left alone.
-      if (command.includes(ARITH_CLOSE_TOKEN)) return root
-      const offsets = failedArithOpeners(root)
+      // Sitting inside an ERROR is not evidence that an opener is
+      // broken: tree-sitter's error region swallows neighbouring tokens,
+      // so a valid `((i++))` next to a bad opener reports as errored
+      // too. Splitting it would silently turn arithmetic into a subshell
+      // running `i++`, which is a wrong parse rather than a rejected
+      // one. Each opener is judged on its own span instead: `((i++))`
+      // stands alone cleanly, `((echo x); echo $i)` does not. An
+      // unbalanced span is assumed arithmetic and left alone.
+      const isArithmetic = (start: number): boolean => {
+        const end = balancedEnd(command, start)
+        if (end === null) return true
+        const span = parser.parse(command.slice(start, end))
+        return !span?.rootNode.hasError
+      }
+      const offsets = [...new Set(failedArithOpeners(root))].filter((o) => !isArithmetic(o))
       if (offsets.length === 0) return root
       let text = command
-      for (const offset of [...new Set(offsets)].sort((a, b) => b - a)) {
+      for (const offset of offsets.sort((a, b) => b - a)) {
         text = `${text.slice(0, offset + 1)} ${text.slice(offset + 1)}`
       }
       const retried = parser.parse(text)
