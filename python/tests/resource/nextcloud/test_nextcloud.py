@@ -36,7 +36,8 @@ def test_nextcloud_write_commands_tagged():
     from mirage.commands.builtin.nextcloud import COMMANDS
     write_names = {
         "cp", "csplit", "gunzip", "gzip", "iconv", "ln", "mkdir", "mktemp",
-        "mv", "patch", "rm", "split", "tar", "tee", "touch", "unzip", "zip"
+        "mv", "patch", "rm", "rmdir", "split", "tar", "tee", "touch", "unlink",
+        "unzip", "zip"
     }
     for fn in COMMANDS:
         for rc in fn._registered_commands:

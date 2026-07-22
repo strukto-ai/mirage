@@ -34,6 +34,8 @@ def test_s3_write_commands_tagged():
     from mirage.commands.builtin.s3 import COMMANDS
     write_names = {
         "rm",
+        "rmdir",
+        "unlink",
         "mkdir",
         "touch",
         "cp",
