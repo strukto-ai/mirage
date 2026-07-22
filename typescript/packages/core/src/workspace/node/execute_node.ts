@@ -72,6 +72,22 @@ import { expandDoubleBracket, expandTestExpr } from './test_expr.ts'
 import { executeProgram } from './program.ts'
 import { executeCommand } from './command_dispatch.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
+import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import { type ExecuteNodeOpts, pump } from '../executor/jobs.ts'
+
+const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
+  NodeKind.PROGRAM,
+  NodeKind.COMPOUND,
+  NodeKind.LIST,
+  NodeKind.SUBSHELL,
+  NodeKind.IF,
+  NodeKind.FOR,
+  NodeKind.SELECT,
+  NodeKind.WHILE,
+  NodeKind.UNTIL,
+  NodeKind.CASE,
+  NodeKind.NEGATED,
+])
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 type Recurse = (
@@ -79,7 +95,22 @@ type Recurse = (
   session: Session,
   stdin: ByteSource | null,
   callStack: CallStack | null,
+  opts?: ExecuteNodeOpts,
 ) => Promise<Result>
+
+/**
+ * Layer per-call overrides onto the walker's deps.
+ *
+ * Written field by field rather than spread so an explicitly undefined
+ * override cannot erase a dep under exactOptionalPropertyTypes.
+ */
+function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDeps {
+  if (opts === undefined) return base
+  const next: ExecuteNodeDeps = { ...base }
+  if (opts.sink !== undefined) next.sink = opts.sink
+  if (opts.signal !== undefined) next.signal = opts.signal
+  return next
+}
 
 // Array-literal elements behave like any other shell word list: command
 // substitutions word-split and globs resolve to matches
@@ -186,7 +217,7 @@ export interface ExecuteNodeDeps {
   dispatch: DispatchFn
   registry: MountRegistry
   namespace: Namespace
-  jobTable: JobTable | null
+  jobTable: JobTable
   executeFn: ExecuteFn
   agentId: string
   workspaceId: string
@@ -196,6 +227,13 @@ export interface ExecuteNodeDeps {
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RoutingDecision
   signal?: AbortSignal
+  /**
+   * Console this node writes its output to as it is produced.
+   * When set, the node emits and returns no stdout; when unset
+   * it returns stdout as a value, which is what capture sites
+   * (command substitution, pipe stages, redirects) rely on.
+   */
+  sink?: JobConsole
 }
 
 export async function executeNode(
@@ -205,12 +243,24 @@ export async function executeNode(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
+  const { sink, ...captureDeps } = deps
   const recurse = (
     n: TSNodeLike,
     s: Session,
     i: ByteSource | null,
     cs: CallStack | null,
-  ): Promise<Result> => executeNode(deps, n, s, i, cs)
+    opts?: ExecuteNodeOpts,
+  ): Promise<Result> => executeNode(withOpts(captureDeps, opts), n, s, i, cs)
+  const stream =
+    sink === undefined
+      ? recurse
+      : (
+          n: TSNodeLike,
+          s: Session,
+          i: ByteSource | null,
+          cs: CallStack | null,
+          opts?: ExecuteNodeOpts,
+        ): Promise<Result> => executeNode(withOpts(deps, opts), n, s, i, cs)
 
   const { dispatch, registry, jobTable, executeFn, agentId } = deps
   const kind = nodeKind(node)
@@ -220,12 +270,29 @@ export async function executeNode(
   }
   session.errexitImmune = false
 
+  // A sink turns this walk from "return your output" into "write your
+  // output". Sequencing constructs pass it to their children so each
+  // statement lands as it finishes; everything else runs unchanged and
+  // has its result drained here. Only STREAMING_KINDS inherit a sink,
+  // so capture sites keep receiving their output as a value.
+  if (sink !== undefined && !STREAMING_KINDS.has(kind)) {
+    const [stdout, io, execNode] = await recurse(node, session, stdin, callStack)
+    await pump(sink, Channel.STDOUT, stdout)
+    const stderr = await io.materializeStderr()
+    if (stderr.byteLength > 0) {
+      await sink.emit(Channel.STDERR, stderr)
+      // Cleared so the job's tail does not emit it a second time.
+      io.stderr = null
+    }
+    return [null, io, execNode]
+  }
+
   if (kind === NodeKind.COMMENT) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
 
   if (kind === NodeKind.PROGRAM) {
-    return executeProgram(recurse, node, session, stdin, callStack, jobTable, agentId)
+    return executeProgram(stream, node, session, stdin, callStack, jobTable, agentId)
   }
 
   if (kind === NodeKind.COMMAND) {
@@ -286,7 +353,7 @@ export async function executeNode(
 
   if (kind === NodeKind.LIST) {
     const [left, op, right] = getListParts(node)
-    return handleConnection(recurse, left, op, right, session, stdin, callStack)
+    return handleConnection(stream, left, op, right, session, stdin, callStack)
   }
 
   if (kind === NodeKind.REDIRECT) {
@@ -406,7 +473,7 @@ export async function executeNode(
     let lastExec = new ExecutionNode({ command: '{}', exitCode: 0 })
     for (const child of node.namedChildren) {
       if (child.type === NT.COMMENT) continue
-      const [stdout, io, execNode] = await recurse(child, session, stdin, callStack)
+      const [stdout, io, execNode] = await stream(child, session, stdin, callStack)
       lastExec = execNode
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -430,7 +497,7 @@ export async function executeNode(
 
   if (kind === NodeKind.IF) {
     const [branches, elseBody] = getIfBranches(node)
-    return handleIf(recurse, branches, elseBody, session, stdin, callStack)
+    return handleIf(stream, branches, elseBody, session, stdin, callStack)
   }
 
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
@@ -447,24 +514,24 @@ export async function executeNode(
     // globs resolve to matches before iteration starts.
     const resolved = await resolveGlobs(classified, registry, session.shellOptions.noglob === true)
     if (kind === NodeKind.SELECT) {
-      return handleSelect(recurse, variable, resolved, body, session, stdin, callStack)
+      return handleSelect(stream, variable, resolved, body, session, stdin, callStack)
     }
-    return handleFor(recurse, variable, resolved, body, session, stdin, callStack)
+    return handleFor(stream, variable, resolved, body, session, stdin, callStack)
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
     const [condition, body] = getWhileParts(node)
     if (kind === NodeKind.UNTIL) {
-      return handleUntil(recurse, condition, body, session, stdin, callStack)
+      return handleUntil(stream, condition, body, session, stdin, callStack)
     }
-    return handleWhile(recurse, condition, body, session, stdin, callStack)
+    return handleWhile(stream, condition, body, session, stdin, callStack)
   }
 
   if (kind === NodeKind.CASE) {
     const wordNode = getCaseWord(node)
     const word = await expandNode(wordNode, session, executeFn, callStack)
     const items = getCaseItems(node)
-    return handleCase(recurse, word, items, session, stdin, callStack)
+    return handleCase(stream, word, items, session, stdin, callStack)
   }
 
   if (kind === NodeKind.FUNCTION_DEF) {
@@ -539,7 +606,7 @@ export async function executeNode(
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
-    const [stdout, io, execNode] = await recurse(inner, session, stdin, callStack)
+    const [stdout, io, execNode] = await stream(inner, session, stdin, callStack)
     const flipped = new IOResult({
       exitCode: io.exitCode !== 0 ? 0 : 1,
       stderr: io.stderr,

@@ -23,6 +23,8 @@ import pytest
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.shell.console import (Channel, ConsoleChunk, JobConsole,
+                                  RAMConsoleStore)
 from mirage.shell.job_table import Job, JobStatus
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -176,6 +178,14 @@ def test_history_round_trip(tmp_path):
 # ── finished jobs survive, pending dropped ────────────────────────
 
 
+def _finished_console(stdout: bytes) -> JobConsole:
+    chunks = [
+        ConsoleChunk(seq=0, ts=0.0, channel=Channel.STDOUT, data=stdout),
+        ConsoleChunk(seq=1, ts=0.0, channel=Channel.CONTROL, data=b"exit:0"),
+    ]
+    return JobConsole(RAMConsoleStore(chunks=chunks), finished=True)
+
+
 def test_finished_jobs_survive(tmp_path):
     src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                     mode=MountMode.WRITE)
@@ -184,9 +194,8 @@ def test_finished_jobs_survive(tmp_path):
                    task=None,
                    cwd="/",
                    status=JobStatus.COMPLETED,
-                   stdout=b"done\n",
-                   stderr=b"",
                    exit_code=0,
+                   console=_finished_console(b"done\n"),
                    created_at=time.time(),
                    agent="test",
                    session_id="default")
@@ -198,6 +207,9 @@ def test_finished_jobs_survive(tmp_path):
 
     job_ids = {j.id for j in dst.job_table.list_jobs()}
     assert 1 in job_ids
+    restored = dst.job_table.get(1)
+    assert asyncio.run(restored.console.snapshot(Channel.STDOUT)) == b"done\n"
+    assert restored.console.finished
     # Next job id continues from max(finished)+1 (= 2)
     assert dst.job_table._next_id == 2
 

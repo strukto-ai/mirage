@@ -50,7 +50,7 @@ from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
 from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
                                   build_runtime, catch_all,
                                   runtime_bindings_for, whole_line_runtime)
-from mirage.shell.job_table import JobTable
+from mirage.shell.job_table import JobTable, cancel_job
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           MountMode, PathSpec, StateKey, parse_mount_mode)
@@ -654,7 +654,11 @@ class Workspace:
         self._fuse_managers.clear()
         self._fuse_mountpoints.clear()
         for job in self.job_table.running_jobs():
-            self.job_table.kill(job.id)
+            # Teardown is sync and cannot join, so it only requests the
+            # cancel. Jobs die with their process, like processes at
+            # reboot; the async close() path is where a caller can wait.
+            if job.task is not None:
+                cancel_job(job)
         for task in self._cache._drain_tasks.values():
             task.cancel()
         self._cache._drain_tasks.clear()

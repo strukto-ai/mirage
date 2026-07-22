@@ -22,6 +22,7 @@ from mirage import MountMode, Workspace
 from mirage.commands import safeguard as sg
 from mirage.resource.ram import RAMResource
 from mirage.runtime.python import LocalRuntime
+from mirage.shell.console import Channel
 from mirage.types import CommandSafeguard, OnExceed
 
 
@@ -253,7 +254,8 @@ async def test_job_table_reports_completed_bg_without_wait(restore_defaults):
     assert len(jobs) == 1
     assert jobs[0].status.value == "completed"
     assert jobs[0].exit_code == 124
-    assert b"sleep: timed out" in jobs[0].stderr
+    stderr = await jobs[0].console.snapshot(Channel.STDERR)
+    assert b"sleep: timed out" in stderr
 
 
 @pytest.mark.asyncio

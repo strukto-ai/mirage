@@ -16,31 +16,39 @@ import asyncio
 
 from mirage.io.types import IOResult
 from mirage.resource.ram import RAMResource
+from mirage.shell.console import Channel
 from mirage.shell.job_table import JobStatus, JobTable
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.types import ExecutionNode
 
 
-async def _make_failing_task():
+async def _failing_run(job):
     raise RuntimeError("resource API error")
 
 
-async def _make_successful_task():
-    return b"hello", IOResult(exit_code=0), ExecutionNode(command="echo hello",
-                                                          exit_code=0)
+async def _successful_run(job):
+    await job.console.emit(Channel.STDOUT, b"hello")
+    return IOResult(exit_code=0), ExecutionNode(command="echo hello",
+                                                exit_code=0)
+
+
+async def _never_ending_run(job):
+    await job.console.emit(Channel.STDOUT, b"partial")
+    await asyncio.sleep(30)
+    return IOResult(exit_code=0), ExecutionNode(command="noisy", exit_code=0)
 
 
 def test_wait_handles_task_exception():
 
     async def _run():
         table = JobTable()
-        task = asyncio.create_task(_make_failing_task())
-        table.submit(command="bad_cmd", task=task, cwd="/")
+        table.submit(command="bad_cmd", run=_failing_run, cwd="/")
         job = await table.wait(1)
         assert job.status == JobStatus.COMPLETED
         assert job.exit_code == 1
-        assert b"resource API error" in job.stderr
+        stderr = await job.console.snapshot(Channel.STDERR)
+        assert b"resource API error" in stderr
 
     asyncio.run(_run())
 
@@ -49,17 +57,15 @@ def test_wait_all_survives_failing_task():
 
     async def _run():
         table = JobTable()
-        task1 = asyncio.create_task(_make_failing_task())
-        task2 = asyncio.create_task(_make_successful_task())
-        table.submit(command="bad", task=task1, cwd="/")
-        table.submit(command="good", task=task2, cwd="/")
+        table.submit(command="bad", run=_failing_run, cwd="/")
+        table.submit(command="good", run=_successful_run, cwd="/")
         jobs = await table.wait_all()
         assert len(jobs) == 2
         bad = table.get(1)
         good = table.get(2)
         assert bad.exit_code == 1
         assert good.exit_code == 0
-        assert good.stdout == b"hello"
+        assert await good.console.snapshot(Channel.STDOUT) == b"hello"
 
     asyncio.run(_run())
 
@@ -68,12 +74,72 @@ def test_wait_successful_task():
 
     async def _run():
         table = JobTable()
-        task = asyncio.create_task(_make_successful_task())
-        table.submit(command="echo hello", task=task, cwd="/")
+        table.submit(command="echo hello", run=_successful_run, cwd="/")
         job = await table.wait(1)
         assert job.status == JobStatus.COMPLETED
         assert job.exit_code == 0
-        assert job.stdout == b"hello"
+        assert await job.console.snapshot(Channel.STDOUT) == b"hello"
+
+    asyncio.run(_run())
+
+
+def test_kill_keeps_output_produced_before_the_kill():
+
+    async def _run():
+        table = JobTable()
+        job = table.submit(command="noisy", run=_never_ending_run, cwd="/")
+        while not await job.console.snapshot(Channel.STDOUT):
+            await asyncio.sleep(0)
+
+        assert await table.kill(1)
+
+        assert job.status == JobStatus.KILLED
+        assert job.exit_code == 137
+        assert await job.console.snapshot(Channel.STDOUT) == b"partial"
+        assert await job.console.snapshot(Channel.STDERR) == b"Killed"
+
+    asyncio.run(_run())
+
+
+def test_kill_returns_a_settled_job():
+    """kill joins, so a caller never sees a half-dead job."""
+
+    async def _run():
+        table = JobTable()
+        job = table.submit(command="noisy", run=_never_ending_run, cwd="/")
+
+        assert await table.kill(1)
+
+        assert job.console.finished
+        assert job.status == JobStatus.KILLED
+
+    asyncio.run(_run())
+
+
+def test_kill_is_false_for_unknown_and_finished_jobs():
+
+    async def _run():
+        table = JobTable()
+        table.submit(command="echo hello", run=_successful_run, cwd="/")
+        await table.wait(1)
+
+        assert not await table.kill(1)
+        assert not await table.kill(404)
+
+    asyncio.run(_run())
+
+
+def test_kill_all_stops_every_running_job():
+
+    async def _run():
+        table = JobTable()
+        table.submit(command="a", run=_never_ending_run, cwd="/")
+        table.submit(command="b", run=_never_ending_run, cwd="/")
+
+        killed = await table.kill_all()
+
+        assert len(killed) == 2
+        assert table.running_jobs() == []
 
     asyncio.run(_run())
 

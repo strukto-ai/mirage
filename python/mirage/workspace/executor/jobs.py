@@ -12,18 +12,42 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-
 import tree_sitter
 
 from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
-from mirage.shell.job_table import JobTable
+from mirage.shell.job_table import Job, JobTable
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
+
+
+async def pump(console: JobConsole, channel: Channel,
+               stream: ByteSource | None) -> None:
+    """Send a command's output to a console as chunks arrive.
+
+    Consuming the stream piece by piece rather than materializing it
+    whole is what lets a reader watch a running job. A command that
+    computes its output eagerly still lands in one chunk, because there
+    was nothing to observe before it finished.
+
+    Args:
+        console (JobConsole): where the output goes.
+        channel (Channel): which stream the bytes belong to.
+        stream (ByteSource | None): the output to drain.
+    """
+    if stream is None:
+        return
+    if isinstance(stream, bytes):
+        if stream:
+            await console.emit(channel, stream)
+        return
+    async for chunk in stream:
+        if chunk:
+            await console.emit(channel, chunk)
 
 
 async def handle_background(
@@ -31,7 +55,7 @@ async def handle_background(
     left: tree_sitter.Node,
     right: tree_sitter.Node | None,
     session: Session,
-    job_table: JobTable | None,
+    job_table: JobTable,
     agent_id: str | None,
     stdin: ByteSource | None = None,
     call_stack=None,
@@ -39,49 +63,54 @@ async def handle_background(
     """Run left side in background."""
     bg_session = session.fork()
 
-    async def _run_bg():
+    async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
         # race conditions when stdin is an async iterator.
+        console = job.console
         cmd_str_inner = get_text(left) if hasattr(left, "text") else str(left)
         try:
-            stdout, io, exec_node = await execute_node(left, bg_session, None,
-                                                       call_stack)
+            # Handing the console down as a sink is what makes compound
+            # bodies stream: each statement writes as it finishes rather
+            # than the whole construct landing at the end. Statements
+            # that emit return no stdout, so the pump below is a no-op
+            # for them and still covers constructs that do not stream.
+            stdout, io, exec_node = await execute_node(left,
+                                                       bg_session,
+                                                       None,
+                                                       call_stack,
+                                                       sink=console)
         except CommandTimeoutError as exc:
             msg = (str(exc) + "\n").encode()
+            stdout = b""
             io = IOResult(exit_code=124, stderr=msg)
             exec_node = ExecutionNode(command=cmd_str_inner,
                                       stderr=msg,
                                       exit_code=124)
-            return b"", io, exec_node
         except ExitSignal as sig:
             # A background job is its own shell: exit ends the job only.
+            stdout = sig.stdout or b""
             io = IOResult(exit_code=sig.contained_code,
                           stderr=sig.stderr or None)
             exec_node = ExecutionNode(command=cmd_str_inner,
                                       stderr=sig.stderr,
                                       exit_code=sig.contained_code)
-            return sig.stdout or b"", io, exec_node
-        stdout = await materialize(stdout)
-        # Eagerly materialize stderr too so JobTable._refresh can read
-        # the task result synchronously without an async hop.
-        await io.materialize_stderr()
+        await pump(console, Channel.STDOUT, stdout)
+        stderr = await io.materialize_stderr()
+        if stderr:
+            await console.emit(Channel.STDERR, stderr)
         io.sync_exit_code()
-        return stdout, io, exec_node
+        return io, exec_node
 
-    task = asyncio.create_task(_run_bg())
     cmd_str = get_text(left) if hasattr(left, 'text') else str(left)
 
-    if job_table is not None:
-        job = job_table.submit(command=cmd_str,
-                               task=task,
-                               cwd=bg_session.cwd,
-                               agent=agent_id or "",
-                               session_id=session.session_id)
-        session.last_bg_job_id = job.id
-        job_line = f"[{job.id}]\n".encode()
-    else:
-        job_line = b"[bg]\n"
+    job = job_table.submit(command=cmd_str,
+                           run=_run_bg,
+                           cwd=bg_session.cwd,
+                           agent=agent_id or "",
+                           session_id=session.session_id)
+    session.last_bg_job_id = job.id
+    job_line = f"[{job.id}]\n".encode()
 
     if right is None:
         return None, IOResult(stderr=job_line), ExecutionNode(
@@ -127,9 +156,10 @@ async def handle_wait(
                                                          exit_code=1,
                                                          stderr=err)
     job = await job_table.wait(job_id)
-    return job.stdout, IOResult(
+    stderr = await job.console.snapshot(Channel.STDERR)
+    return await job.console.snapshot(Channel.STDOUT), IOResult(
         exit_code=job.exit_code,
-        stderr=job.stderr or None,
+        stderr=stderr or None,
     ), ExecutionNode(command=cmd_str, exit_code=job.exit_code)
 
 
@@ -173,10 +203,11 @@ async def handle_fg(
                                                              stderr=err)
     job = await job_table.wait(job_id)
     header = (job.command + "\n").encode()
-    stdout = header + (job.stdout or b"")
+    stdout = header + await job.console.snapshot(Channel.STDOUT)
+    stderr = await job.console.snapshot(Channel.STDERR)
     return stdout, IOResult(
         exit_code=job.exit_code,
-        stderr=job.stderr or None,
+        stderr=stderr or None,
     ), ExecutionNode(command=cmd_str, exit_code=job.exit_code)
 
 
@@ -200,7 +231,7 @@ async def handle_kill(
                               stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=1,
                                                          stderr=err)
-    killed = job_table.kill(job_id)
+    killed = await job_table.kill(job_id)
     if not killed:
         err = f"kill: no such job: {job_id}\n".encode()
         return None, IOResult(exit_code=1,

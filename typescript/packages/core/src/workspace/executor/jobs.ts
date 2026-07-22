@@ -17,26 +17,57 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { CommandTimeoutError } from '../../commands/builtin/utils/safeguard.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
-import type { JobTable } from '../../shell/job_table.ts'
+import type { Job, JobTable } from '../../shell/job_table.ts'
+import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { ExecutionNode } from '../types.ts'
+
+/** Per-call overrides a caller can layer onto the walker's deps. */
+export interface ExecuteNodeOpts {
+  sink?: JobConsole
+  signal?: AbortSignal
+}
 
 export type ExecuteNodeFn = (
   node: TSNodeLike,
   session: Session,
   stdin: ByteSource | null,
   callStack: CallStack | null,
+  opts?: ExecuteNodeOpts,
 ) => Promise<[ByteSource | null, IOResult, ExecutionNode]>
 
 type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
+
+/**
+ * Send a command's output to a console as chunks arrive.
+ *
+ * Consuming the stream piece by piece rather than materializing it whole
+ * is what lets a reader watch a running job. A command that computes its
+ * output eagerly still lands in one chunk, because there was nothing to
+ * observe before it finished.
+ */
+export async function pump(
+  console_: JobConsole,
+  channel: Channel,
+  stream: ByteSource | null,
+): Promise<void> {
+  if (stream === null) return
+  if (stream instanceof Uint8Array) {
+    if (stream.byteLength > 0) await console_.emit(channel, stream)
+    return
+  }
+  for await (const chunk of stream) {
+    if (chunk.byteLength > 0) await console_.emit(channel, chunk)
+  }
+}
 
 export async function handleBackground(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
   right: TSNodeLike | null,
   session: Session,
-  jobTable: JobTable | null,
+  jobTable: JobTable,
   agentId: string | null,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
@@ -45,59 +76,59 @@ export async function handleBackground(
 
   const abort = new AbortController()
   const cmdStrInner = left.text
-  const task: Promise<[ByteSource | null, IOResult, ExecutionNode]> = (async () => {
+  const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
+    const console_ = job.console
     let stdout: ByteSource | null
     let io: IOResult
     let execNode: ExecutionNode
     try {
-      ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack)
+      // The sink is what makes compound bodies stream: each statement
+      // writes as it finishes rather than the whole construct landing
+      // at the end. The signal is what makes `kill` able to stop the
+      // job at all, since a promise cannot be cancelled.
+      ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack, {
+        sink: console_,
+        signal: abort.signal,
+      })
     } catch (err) {
       if (err instanceof CommandTimeoutError) {
         const msg = new TextEncoder().encode(`${err.message}\n`)
-        return [
-          new Uint8Array(),
-          new IOResult({ exitCode: 124, stderr: msg }),
-          new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 }),
-        ]
-      }
-      if (err instanceof ExitSignal) {
+        stdout = new Uint8Array()
+        io = new IOResult({ exitCode: 124, stderr: msg })
+        execNode = new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 })
+      } else if (err instanceof ExitSignal) {
         // A background job is its own shell: exit ends the job only.
-        return [
-          err.stdout ?? new Uint8Array(),
-          new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
-          new ExecutionNode({
-            command: cmdStrInner,
-            stderr: err.stderr,
-            exitCode: err.containedCode,
-          }),
-        ]
+        stdout = err.stdout ?? new Uint8Array()
+        io = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
+        execNode = new ExecutionNode({
+          command: cmdStrInner,
+          stderr: err.stderr,
+          exitCode: err.containedCode,
+        })
+      } else {
+        throw err
       }
-      throw err
     }
-    const materialized = await materialize(stdout)
+    await pump(console_, Channel.STDOUT, stdout)
+    const stderr = await io.materializeStderr()
+    if (stderr.byteLength > 0) {
+      await console_.emit(Channel.STDERR, stderr)
+    }
     io.syncExitCode()
-    return [materialized, io, execNode]
-  })()
-  task.catch(() => {
-    // unhandled rejections silenced here; callers use jobTable.wait()
-  })
+    return [io, execNode]
+  }
 
   const cmdStr = left.text
-  let jobLine: Uint8Array
-  if (jobTable !== null) {
-    const job = jobTable.submit({
-      command: cmdStr,
-      task,
-      abort,
-      cwd: bgSession.cwd,
-      agent: agentId ?? '',
-      sessionId: session.sessionId,
-    })
-    session.lastBgJobId = job.id
-    jobLine = new TextEncoder().encode(`[${job.id.toString()}]\n`)
-  } else {
-    jobLine = new TextEncoder().encode('[bg]\n')
-  }
+  const job = jobTable.submit({
+    command: cmdStr,
+    run: runBg,
+    abort,
+    cwd: bgSession.cwd,
+    agent: agentId ?? '',
+    sessionId: session.sessionId,
+  })
+  session.lastBgJobId = job.id
+  const jobLine = new TextEncoder().encode(`[${job.id.toString()}]\n`)
 
   if (right === null) {
     const io = new IOResult({ stderr: jobLine })
@@ -147,11 +178,13 @@ export async function handleWait(jobTable: JobTable, parts: string[]): Promise<J
     ]
   }
   const job = await jobTable.wait(jobId)
+  const stdout = await job.console.snapshot(Channel.STDOUT)
+  const stderr = await job.console.snapshot(Channel.STDERR)
   const io = new IOResult({
     exitCode: job.exitCode,
-    stderr: job.stderr.byteLength > 0 ? job.stderr : null,
+    stderr: stderr.byteLength > 0 ? stderr : null,
   })
-  return [job.stdout, io, new ExecutionNode({ command: cmdStr, exitCode: job.exitCode })]
+  return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: job.exitCode })]
 }
 
 /**
@@ -187,17 +220,19 @@ export async function handleFg(jobTable: JobTable, parts: string[]): Promise<Job
   }
   const job = await jobTable.wait(jobId)
   const header = new TextEncoder().encode(job.command + '\n')
-  const stdout = new Uint8Array(header.byteLength + job.stdout.byteLength)
+  const body = await job.console.snapshot(Channel.STDOUT)
+  const stderr = await job.console.snapshot(Channel.STDERR)
+  const stdout = new Uint8Array(header.byteLength + body.byteLength)
   stdout.set(header, 0)
-  stdout.set(job.stdout, header.byteLength)
+  stdout.set(body, header.byteLength)
   const io = new IOResult({
     exitCode: job.exitCode,
-    stderr: job.stderr.byteLength > 0 ? job.stderr : null,
+    stderr: stderr.byteLength > 0 ? stderr : null,
   })
   return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: job.exitCode })]
 }
 
-export function handleKill(jobTable: JobTable, parts: string[]): JobHandlerResult {
+export async function handleKill(jobTable: JobTable, parts: string[]): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   if (parts.length < 2) {
     const err = new TextEncoder().encode('kill: usage: kill <job_id>\n')
@@ -217,7 +252,7 @@ export function handleKill(jobTable: JobTable, parts: string[]): JobHandlerResul
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr: err }),
     ]
   }
-  const killed = jobTable.kill(jobId)
+  const killed = await jobTable.kill(jobId)
   if (!killed) {
     const err = new TextEncoder().encode(`kill: no such job: ${jobId.toString()}\n`)
     return [

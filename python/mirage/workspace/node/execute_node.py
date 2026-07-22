@@ -21,6 +21,7 @@ from mirage.io.stream import async_chain
 from mirage.runtime.route import RoutingDecision
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
@@ -33,6 +34,7 @@ from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.control import (handle_case, handle_for,
                                                handle_if, handle_select,
                                                handle_until, handle_while)
+from mirage.workspace.executor.jobs import pump
 from mirage.workspace.executor.pipes import (handle_connection, handle_pipe,
                                              handle_subshell)
 from mirage.workspace.executor.redirect import handle_redirect
@@ -57,6 +59,20 @@ from mirage.shell.helpers import (  # isort: skip
     get_unset_names, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_local, handle_readonly, handle_test, handle_unset)
+
+STREAMING_KINDS = frozenset({
+    NodeKind.PROGRAM,
+    NodeKind.COMPOUND,
+    NodeKind.LIST,
+    NodeKind.SUBSHELL,
+    NodeKind.IF,
+    NodeKind.FOR,
+    NodeKind.SELECT,
+    NodeKind.WHILE,
+    NodeKind.UNTIL,
+    NodeKind.CASE,
+    NodeKind.NEGATED,
+})
 
 
 async def _expand_array_items(
@@ -178,6 +194,7 @@ async def execute_node(
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
     routing_decision: RoutingDecision | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
@@ -193,6 +210,11 @@ async def execute_node(
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.
+        sink (JobConsole | None): console to write this node's output to
+            as it is produced. When set, the node emits and returns no
+            stdout; when None it returns stdout as a value, which is
+            what capture sites (command substitution, pipe stages,
+            redirects) rely on.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
@@ -211,12 +233,29 @@ async def execute_node(
 
     kind = node_kind(node)
 
+    # A sink turns this walk from "return your output" into "write your
+    # output". Sequencing constructs pass it to their children so each
+    # statement lands as it finishes; everything else runs unchanged and
+    # has its result drained here. Only the kinds below inherit a sink,
+    # so capture sites keep receiving their output as a value.
+    if sink is not None and kind not in STREAMING_KINDS:
+        stdout, io, exec_node = await recurse(node, session, stdin, cs)
+        await pump(sink, Channel.STDOUT, stdout)
+        stderr = await io.materialize_stderr()
+        if stderr:
+            await sink.emit(Channel.STDERR, stderr)
+            # Cleared so the job's tail does not emit it a second time.
+            io.stderr = None
+        return None, io, exec_node
+
+    stream = partial(recurse, sink=sink) if sink is not None else recurse
+
     if kind == NodeKind.COMMENT:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
 
     # ── program (root / semicolons) ─────────────
     if kind == NodeKind.PROGRAM:
-        return await execute_program(recurse, node, session, stdin, cs,
+        return await execute_program(stream, node, session, stdin, cs,
                                      job_table, agent_id)
 
     # ── command ─────────────────────────────────
@@ -268,8 +307,8 @@ async def execute_node(
     # ── list (&&, ||) ───────────────────────────
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
-        return await handle_connection(recurse, left, op, right, session,
-                                       stdin, cs)
+        return await handle_connection(stream, left, op, right, session, stdin,
+                                       cs)
 
     # ── redirected statement ────────────────────
     if kind == NodeKind.REDIRECT:
@@ -322,7 +361,8 @@ async def execute_node(
                               execute_fn,
                               agent_id,
                               cancel=cancel,
-                              routing_decision=routing_decision)
+                              routing_decision=routing_decision,
+                              sink=sink)
         return await handle_subshell(sub_recurse, list(node.children), session,
                                      stdin, cs, sub_table, agent_id)
 
@@ -359,7 +399,7 @@ async def execute_node(
         for child in node.named_children:
             if child.type == NT.COMMENT:
                 continue
-            stdout, io, last_exec = await recurse(child, session, stdin, cs)
+            stdout, io, last_exec = await stream(child, session, stdin, cs)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
@@ -376,8 +416,7 @@ async def execute_node(
     # ── if ──────────────────────────────────────
     if kind == NodeKind.IF:
         branches, else_body = get_if_branches(node)
-        return await handle_if(recurse, branches, else_body, session, stdin,
-                               cs)
+        return await handle_if(stream, branches, else_body, session, stdin, cs)
 
     # ── for / select ────────────────────────────
     if kind in (NodeKind.FOR, NodeKind.SELECT):
@@ -391,25 +430,25 @@ async def execute_node(
             registry,
             noglob=bool(session.shell_options.get("noglob")))
         if kind == NodeKind.SELECT:
-            return await handle_select(recurse, var, classified, body, session,
+            return await handle_select(stream, var, classified, body, session,
                                        stdin, cs)
-        return await handle_for(recurse, var, classified, body, session, stdin,
+        return await handle_for(stream, var, classified, body, session, stdin,
                                 cs)
 
     # ── while / until ───────────────────────────
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         condition, body = get_while_parts(node)
         if kind == NodeKind.UNTIL:
-            return await handle_until(recurse, condition, body, session, stdin,
+            return await handle_until(stream, condition, body, session, stdin,
                                       cs)
-        return await handle_while(recurse, condition, body, session, stdin, cs)
+        return await handle_while(stream, condition, body, session, stdin, cs)
 
     # ── case ────────────────────────────────────
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, session, execute_fn, cs)
         case_items = get_case_items(node)
-        return await handle_case(recurse, word, case_items, session, stdin, cs)
+        return await handle_case(stream, word, case_items, session, stdin, cs)
 
     # ── function definition ─────────────────────
     if kind == NodeKind.FUNCTION_DEF:
@@ -480,7 +519,7 @@ async def execute_node(
     # ── negated command ─────────────────────────
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
-        stdout, io, exec_node = await recurse(inner, session, stdin, cs)
+        stdout, io, exec_node = await stream(inner, session, stdin, cs)
         io = IOResult(
             exit_code=0 if io.exit_code != 0 else 1,
             stderr=io.stderr,

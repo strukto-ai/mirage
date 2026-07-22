@@ -1398,8 +1398,11 @@ export class Workspace {
         // keep tearing down; swallow subsystem-cleanup failures
       }
     }
+    // Teardown only requests the cancel; jobs die with their process,
+    // like processes at reboot. Awaiting each console here would block
+    // shutdown on a job that is mid-write.
     for (const job of this.jobTable.runningJobs()) {
-      this.jobTable.kill(job.id)
+      job.abort?.abort()
     }
     const toClose = new Set<Resource>(this.openOrder)
     for (const mount of this.registry.allMounts()) {

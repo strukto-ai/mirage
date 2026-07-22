@@ -20,6 +20,8 @@ from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
 from mirage.resource.registry import REGISTRY, resolve_class
 from mirage.resource.secrets import has_redacted_secret
+from mirage.shell.console import (KILLED_OUTCOME, Channel, ConsoleChunk,
+                                  JobConsole, RAMConsoleStore, exit_outcome)
 from mirage.shell.job_table import Job, JobStatus
 from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
                           MountMode, ResourceName, ResourceStateKey,
@@ -65,7 +67,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
     ]
 
     finished_jobs = [
-        _job_to_dict(j) for j in ws.job_table.list_jobs()
+        await _job_to_dict(j) for j in ws.job_table.list_jobs()
         if j.status != JobStatus.RUNNING
     ]
 
@@ -252,14 +254,25 @@ def _restore_jobs(ws, state: dict[str, Any]) -> None:
     ws.job_table._next_id = max_id + 1
 
 
-def _job_to_dict(job) -> dict[str, Any]:
+async def _job_to_dict(job) -> dict[str, Any]:
+    """Serialize one finished job.
+
+    Output is stored per channel rather than chunk by chunk: the manifest
+    externalizes byte fields into tar entries, so keeping chunks would
+    write one tar entry per write a job ever made. The cost is that a
+    restored job's stdout and stderr no longer interleave, which only
+    affects jobs that have already ended.
+
+    Args:
+        job (Job): the finished job to serialize.
+    """
     return {
         JobKey.ID: job.id,
         JobKey.COMMAND: job.command,
         JobKey.CWD: job.cwd,
         JobKey.STATUS: job.status.value,
-        JobKey.STDOUT: job.stdout,
-        JobKey.STDERR: job.stderr,
+        JobKey.STDOUT: await job.console.snapshot(Channel.STDOUT),
+        JobKey.STDERR: await job.console.snapshot(Channel.STDERR),
         JobKey.EXIT_CODE: job.exit_code,
         JobKey.CREATED_AT: job.created_at,
         JobKey.AGENT: job.agent,
@@ -267,16 +280,47 @@ def _job_to_dict(job) -> dict[str, Any]:
     }
 
 
+def _restored_console(d: dict[str, Any], exit_code: int,
+                      status: JobStatus) -> JobConsole:
+    """Rebuild a finished job's console from its serialized output.
+
+    Args:
+        d (dict[str, Any]): the serialized job.
+        exit_code (int): the job's exit status.
+        status (JobStatus): how the job ended.
+    """
+    ts = d.get(JobKey.CREATED_AT, 0.0)
+    chunks: list[ConsoleChunk] = []
+    for channel, key in ((Channel.STDOUT, JobKey.STDOUT), (Channel.STDERR,
+                                                           JobKey.STDERR)):
+        data = d.get(key, b"") or b""
+        if data:
+            chunks.append(
+                ConsoleChunk(seq=len(chunks),
+                             ts=ts,
+                             channel=channel,
+                             data=data))
+    outcome = (KILLED_OUTCOME
+               if status == JobStatus.KILLED else exit_outcome(exit_code))
+    chunks.append(
+        ConsoleChunk(seq=len(chunks),
+                     ts=ts,
+                     channel=Channel.CONTROL,
+                     data=outcome.encode()))
+    return JobConsole(RAMConsoleStore(chunks=chunks), finished=True)
+
+
 def _job_from_dict(d: dict[str, Any]):
+    status = JobStatus(d.get(JobKey.STATUS, JobStatus.COMPLETED.value))
+    exit_code = d.get(JobKey.EXIT_CODE, 0)
     return Job(
         id=d[JobKey.ID],
         command=d[JobKey.COMMAND],
         task=None,
         cwd=d.get(JobKey.CWD, "/"),
-        status=JobStatus(d.get(JobKey.STATUS, JobStatus.COMPLETED.value)),
-        stdout=d.get(JobKey.STDOUT, b"") or b"",
-        stderr=d.get(JobKey.STDERR, b"") or b"",
-        exit_code=d.get(JobKey.EXIT_CODE, 0),
+        status=status,
+        exit_code=exit_code,
+        console=_restored_console(d, exit_code, status),
         created_at=d.get(JobKey.CREATED_AT, 0.0),
         agent=d.get(JobKey.AGENT, "unknown"),
         session_id=d.get(JobKey.SESSION_ID, "default"),

@@ -18,7 +18,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
-import type { JobTable } from '../../shell/job_table.ts'
+import { JobTable } from '../../shell/job_table.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse.ts'
 import { MountMode } from '../../types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
@@ -42,7 +42,7 @@ beforeAll(async () => {
 function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
   const dispatch: DispatchFn = () => Promise.resolve([null, new IOResult()])
   const executeFn = (): Promise<IOResult> => Promise.resolve(new IOResult())
-  const jobTable: JobTable | null = null
+  const jobTable = new JobTable()
   return {
     dispatch,
     registry,

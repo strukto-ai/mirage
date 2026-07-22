@@ -308,7 +308,7 @@ export async function handleCommand(
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
     if (cmdName === 'wait') return handleWait(jobTable, textParts)
     if (cmdName === 'fg') return handleFg(jobTable, textParts)
-    if (cmdName === 'kill') return handleKill(jobTable, textParts)
+    if (cmdName === 'kill') return await handleKill(jobTable, textParts)
     if (cmdName === 'jobs') return handleJobs(jobTable, textParts)
     if (cmdName === 'ps') return handlePs(jobTable, textParts)
   }

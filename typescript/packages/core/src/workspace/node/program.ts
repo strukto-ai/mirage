@@ -39,7 +39,7 @@ export async function executeProgram(
   session: Session,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null,
+  jobTable: JobTable,
   agentId: string,
 ): Promise<Result> {
   const children = node.children

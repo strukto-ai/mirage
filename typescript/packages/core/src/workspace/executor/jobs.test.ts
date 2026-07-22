@@ -14,28 +14,26 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
-import { JobStatus, JobTable, type JobTaskResult } from '../../shell/job_table.ts'
+import { Channel } from '../../shell/console/index.ts'
+import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table.ts'
 import { ExecutionNode } from '../types.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 
-function settled(result: JobTaskResult): Promise<JobTaskResult> {
-  return Promise.resolve(result)
-}
+/** A runner that finishes immediately with no output. */
+const quiet: JobRunner = () => Promise.resolve([new IOResult(), new ExecutionNode()] as JobResult)
 
-function pending(): { task: Promise<JobTaskResult>; abort: AbortController } {
-  const abort = new AbortController()
-  const task = new Promise<JobTaskResult>((resolve, reject) => {
-    abort.signal.addEventListener('abort', () => {
-      const err = new Error('aborted')
-      err.name = 'AbortError'
-      reject(err)
+/** A runner that never finishes on its own; only an abort ends it. */
+function pendingRun(abort: AbortController): JobRunner {
+  return async () => {
+    await new Promise<never>((_resolve, reject) => {
+      abort.signal.addEventListener('abort', () => {
+        const err = new Error('aborted')
+        err.name = 'AbortError'
+        reject(err)
+      })
     })
-    void resolve
-  })
-  task.catch(() => {
-    // silence unhandled
-  })
-  return { task, abort }
+    throw new Error('unreachable')
+  }
 }
 
 function decode(b: Uint8Array): string {
@@ -47,7 +45,7 @@ describe('handleWait', () => {
     const jt = new JobTable()
     const j1 = jt.submit({
       command: 'a',
-      task: settled([null, new IOResult(), new ExecutionNode()]),
+      run: quiet,
       abort: new AbortController(),
       cwd: '/',
     })
@@ -71,26 +69,25 @@ describe('handleWait', () => {
     expect(decode(io.stderr as Uint8Array)).toMatch(/no such job/)
   })
 
-  it('awaits a specific job and returns its exit code', async () => {
+  it('awaits a specific job and returns its output and exit code', async () => {
     const jt = new JobTable()
-    const io = new IOResult({ stderr: new TextEncoder().encode('done'), exitCode: 3 })
-    const stdout = new TextEncoder().encode('out')
-    const j = jt.submit({
-      command: 'foo',
-      task: settled([stdout, io, new ExecutionNode()]),
-      abort: new AbortController(),
-      cwd: '/',
-    })
+    const run: JobRunner = async (job) => {
+      await job.console.emit(Channel.STDOUT, new TextEncoder().encode('out'))
+      await job.console.emit(Channel.STDERR, new TextEncoder().encode('done'))
+      return [new IOResult({ exitCode: 3 }), new ExecutionNode({ command: 'foo', exitCode: 3 })]
+    }
+    const j = jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
     const [resStdout, resIo] = await handleWait(jt, ['wait', j.id.toString()])
-    expect(resStdout).toEqual(stdout)
+    expect(resStdout).toEqual(new TextEncoder().encode('out'))
     expect(resIo.exitCode).toBe(3)
+    expect(decode(resIo.stderr as Uint8Array)).toBe('done')
   })
 
   it('accepts %N job id syntax', async () => {
     const jt = new JobTable()
     const j = jt.submit({
       command: 'foo',
-      task: settled([null, new IOResult(), new ExecutionNode()]),
+      run: quiet,
       abort: new AbortController(),
       cwd: '/',
     })
@@ -100,32 +97,33 @@ describe('handleWait', () => {
 })
 
 describe('handleKill', () => {
-  it('rejects missing job id arg', () => {
+  it('rejects missing job id arg', async () => {
     const jt = new JobTable()
-    const [, io] = handleKill(jt, ['kill'])
+    const [, io] = await handleKill(jt, ['kill'])
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toMatch(/usage/)
   })
 
-  it('rejects non-numeric job id', () => {
+  it('rejects non-numeric job id', async () => {
     const jt = new JobTable()
-    const [, io] = handleKill(jt, ['kill', 'abc'])
+    const [, io] = await handleKill(jt, ['kill', 'abc'])
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toMatch(/invalid job id/)
   })
 
-  it('rejects unknown job id', () => {
+  it('rejects unknown job id', async () => {
     const jt = new JobTable()
-    const [, io] = handleKill(jt, ['kill', '999'])
+    const [, io] = await handleKill(jt, ['kill', '999'])
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toMatch(/no such job/)
   })
 
-  it('kills a known job and returns 0', () => {
+  it('kills a known job and returns 0', async () => {
     const jt = new JobTable()
-    const { task, abort } = pending()
-    const j = jt.submit({ command: 'sleep', task, abort, cwd: '/' })
-    const [, io] = handleKill(jt, ['kill', j.id.toString()])
+    const abort = new AbortController()
+    const task = pendingRun(abort)
+    const j = jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
+    const [, io] = await handleKill(jt, ['kill', j.id.toString()])
     expect(io.exitCode).toBe(0)
     expect(jt.get(j.id)?.status).toBe(JobStatus.KILLED)
   })
@@ -143,12 +141,13 @@ describe('handleJobs', () => {
     const jt = new JobTable()
     const j = jt.submit({
       command: 'foo',
-      task: settled([null, new IOResult(), new ExecutionNode()]),
+      run: quiet,
       abort: new AbortController(),
       cwd: '/',
     })
-    const { task, abort } = pending()
-    jt.submit({ command: 'bar', task, abort, cwd: '/' })
+    const abort = new AbortController()
+    const task = pendingRun(abort)
+    jt.submit({ command: 'bar', run: task, abort, cwd: '/' })
     await jt.wait(j.id)
     const [out] = handleJobs(jt, ['jobs'])
     const text = decode(out as Uint8Array)
@@ -160,7 +159,7 @@ describe('handleJobs', () => {
     const jt = new JobTable()
     const j = jt.submit({
       command: 'foo',
-      task: settled([null, new IOResult(), new ExecutionNode()]),
+      run: quiet,
       abort: new AbortController(),
       cwd: '/',
     })
@@ -173,8 +172,9 @@ describe('handleJobs', () => {
 describe('handlePs', () => {
   it('lists only running jobs', () => {
     const jt = new JobTable()
-    const { task, abort } = pending()
-    jt.submit({ command: 'sleep', task, abort, cwd: '/' })
+    const abort = new AbortController()
+    const task = pendingRun(abort)
+    jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
     const [out] = handlePs(jt, ['ps'])
     expect(decode(out as Uint8Array)).toMatch(/1\tsleep/)
   })
