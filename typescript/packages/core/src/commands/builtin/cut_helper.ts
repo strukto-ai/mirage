@@ -31,6 +31,12 @@ export interface CutOptions {
   zeroTerminated: boolean
 }
 
+interface WhitespaceFields {
+  fields: string[]
+  hasDelimiter: boolean
+  sourceEmpty: boolean
+}
+
 export function parseCutRanges(spec: string): [number, number][] {
   const ranges: [number, number][] = []
   for (const part of spec.split(',')) {
@@ -111,6 +117,40 @@ function splitRecords(raw: Uint8Array, separator: number): Uint8Array[] {
   return records
 }
 
+function isCutWhitespace(text: string, index: number): boolean {
+  const code = text.charCodeAt(index)
+  return code === 32 || code === 9
+}
+
+function splitWhitespaceFields(text: string, trimmed: boolean): WhitespaceFields {
+  const fields: string[] = []
+  let index = 0
+  let fieldStart = 0
+  let hasDelimiter = false
+  let sourceEmpty = true
+  if (trimmed) {
+    while (index < text.length && isCutWhitespace(text, index)) {
+      hasDelimiter = true
+      index += 1
+    }
+    fieldStart = index
+  }
+  while (index < text.length) {
+    if (!isCutWhitespace(text, index)) {
+      sourceEmpty = false
+      index += 1
+      continue
+    }
+    hasDelimiter = true
+    fields.push(text.slice(fieldStart, index))
+    while (index < text.length && isCutWhitespace(text, index)) index += 1
+    fieldStart = index
+  }
+  if (!trimmed || fieldStart < text.length) fields.push(text.slice(fieldStart))
+  if (fields.length === 0) fields.push('')
+  return { fields, hasDelimiter, sourceEmpty }
+}
+
 export function cutBytes(rec: Uint8Array, options: CutOptions): Uint8Array {
   const positions = selectPositions(options.ranges, rec.byteLength, options.complement)
   const outputDelimiter =
@@ -155,11 +195,12 @@ function cutRecord(rec: Uint8Array, options: CutOptions): Uint8Array | null {
   let hasDelimiter: boolean
   let defaultOutput: string
   if (options.whitespace !== null) {
-    hasDelimiter = /[ \t]+/u.test(text)
-    const source = options.whitespace === 'trimmed' ? text.replace(/^[ \t]+|[ \t]+$/gu, '') : text
-    fields = source.split(/[ \t]+/u)
+    const whitespaceFields = splitWhitespaceFields(text, options.whitespace === 'trimmed')
+    hasDelimiter = whitespaceFields.hasDelimiter
+    fields = whitespaceFields.fields
     defaultOutput = '\t'
-    if (options.whitespace === 'trimmed' && source === '' && options.onlyDelimited) return null
+    if (options.whitespace === 'trimmed' && whitespaceFields.sourceEmpty && options.onlyDelimited)
+      return null
   } else {
     hasDelimiter = text.includes(options.delimiter)
     fields = text.split(options.delimiter)
