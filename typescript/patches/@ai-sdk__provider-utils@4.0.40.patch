@@ -1,0 +1,84 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 5e09de0fb5b8b295a6d4bc4cfe34b4eeda12e98b..e93f2f02a05520ef5f6251a0677d8c280c997d41 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -1460,6 +1460,7 @@ declare function safeValidateTypes<OBJECT>({ value, schema, context, }: {
+ }>;
+ 
+ declare const VERSION: string;
++declare const validatorSymbol: unique symbol;
+ 
+ /**
+  * Appends suffix parts to the `user-agent` header.
+@@ -1551,4 +1552,4 @@ interface ToolResult<NAME extends string, INPUT, OUTPUT> {
+  */
+ type ToolCallOptions = ToolExecutionOptions;
+ 
+-export { type AssistantContent, type AssistantModelMessage, DEFAULT_MAX_DOWNLOAD_SIZE, type DataContent, DelayedPromise, DownloadError, type FetchFunction, type FilePart, type FlexibleSchema, type IdGenerator, type ImagePart, type InferSchema, type InferToolInput, type InferToolOutput, type LazySchema, type MaybePromiseLike, type ModelMessage, type ParseResult, type ProviderOptions, type ProviderToolFactory, type ProviderToolFactoryWithOutputSchema, type ReasoningPart, type Resolvable, type ResponseHandler, type RetryDelayProvider, type RetryErrorFactory, type RetryErrorReason, type RetryFunction, type Schema, type ShouldRetryFunction, type SystemModelMessage, type TextPart, type Tool, type ToolApprovalRequest, type ToolApprovalResponse, type ToolCall, type ToolCallOptions, type ToolCallPart, type ToolContent, type ToolExecuteFunction, type ToolExecutionOptions, type ToolModelMessage, type ToolNameMapping, type ToolNeedsApprovalFunction, type ToolResult, type ToolResultOutput, type ToolResultPart, type UserContent, type UserModelMessage, VERSION, type ValidationResult, asSchema, cancelResponseBody, combineHeaders, convertAsyncIteratorToReadableStream, convertBase64ToUint8Array, convertImageModelFileToDataUri, convertToBase64, convertToFormData, convertUint8ArrayToBase64, createBinaryResponseHandler, createEventSourceResponseHandler, createIdGenerator, createJsonErrorResponseHandler, createJsonResponseHandler, createProviderToolFactory, createProviderToolFactoryWithOutputSchema, createStatusCodeErrorResponseHandler, createToolNameMapping, delay, downloadBlob, dynamicTool, executeTool, extractResponseHeaders, fetchWithValidatedRedirects, generateId, getErrorMessage, getFromApi, getRuntimeEnvironmentUserAgent, injectJsonInstructionIntoMessages, isAbortError, isBrowserRuntime, isNonNullable, isParsableJson, isSameOrigin, isUrlSupported, jsonSchema, lazySchema, loadApiKey, loadOptionalSetting, loadSetting, mediaTypeToExtension, normalizeHeaders, parseJSON, parseJsonEventStream, parseProviderOptions, postFormDataToApi, postJsonToApi, postToApi, readResponseWithSizeLimit, removeUndefinedEntries, resolve, retryWithExponentialBackoff, safeParseJSON, safeValidateTypes, secureJsonParse, stripFileExtension, tool, validateDownloadUrl, validateTypes, withUserAgentSuffix, withoutTrailingSlash, zodSchema };
++export { type AssistantContent, type AssistantModelMessage, DEFAULT_MAX_DOWNLOAD_SIZE, type DataContent, DelayedPromise, DownloadError, type FetchFunction, type FilePart, type FlexibleSchema, type IdGenerator, type ImagePart, type InferSchema, type InferToolInput, type InferToolOutput, type LazySchema, type MaybePromiseLike, type ModelMessage, type ParseResult, type ProviderOptions, type ProviderToolFactory, type ProviderToolFactoryWithOutputSchema, type ReasoningPart, type Resolvable, type ResponseHandler, type RetryDelayProvider, type RetryErrorFactory, type RetryErrorReason, type RetryFunction, type Schema, type ShouldRetryFunction, type SystemModelMessage, type TextPart, type Tool, type ToolApprovalRequest, type ToolApprovalResponse, type ToolCall, type ToolCallOptions, type ToolCallPart, type ToolContent, type ToolExecuteFunction, type ToolExecutionOptions, type ToolModelMessage, type ToolNameMapping, type ToolNeedsApprovalFunction, type ToolResult, type ToolResultOutput, type ToolResultPart, type UserContent, type UserModelMessage, VERSION, type ValidationResult, asSchema, cancelResponseBody, combineHeaders, convertAsyncIteratorToReadableStream, convertBase64ToUint8Array, convertImageModelFileToDataUri, convertToBase64, convertToFormData, convertUint8ArrayToBase64, createBinaryResponseHandler, createEventSourceResponseHandler, createIdGenerator, createJsonErrorResponseHandler, createJsonResponseHandler, createProviderToolFactory, createProviderToolFactoryWithOutputSchema, createStatusCodeErrorResponseHandler, createToolNameMapping, delay, downloadBlob, dynamicTool, executeTool, extractResponseHeaders, fetchWithValidatedRedirects, generateId, getErrorMessage, getFromApi, getRuntimeEnvironmentUserAgent, injectJsonInstructionIntoMessages, isAbortError, isBrowserRuntime, isNonNullable, isParsableJson, isSameOrigin, isUrlSupported, jsonSchema, lazySchema, loadApiKey, loadOptionalSetting, loadSetting, mediaTypeToExtension, normalizeHeaders, parseJSON, parseJsonEventStream, parseProviderOptions, postFormDataToApi, postJsonToApi, postToApi, readResponseWithSizeLimit, removeUndefinedEntries, resolve, retryWithExponentialBackoff, safeParseJSON, safeValidateTypes, secureJsonParse, stripFileExtension, tool, validateDownloadUrl, validateTypes, validatorSymbol, withUserAgentSuffix, withoutTrailingSlash, zodSchema };
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 5e09de0fb5b8b295a6d4bc4cfe34b4eeda12e98b..e93f2f02a05520ef5f6251a0677d8c280c997d41 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1460,6 +1460,7 @@ declare function safeValidateTypes<OBJECT>({ value, schema, context, }: {
+ }>;
+ 
+ declare const VERSION: string;
++declare const validatorSymbol: unique symbol;
+ 
+ /**
+  * Appends suffix parts to the `user-agent` header.
+@@ -1551,4 +1552,4 @@ interface ToolResult<NAME extends string, INPUT, OUTPUT> {
+  */
+ type ToolCallOptions = ToolExecutionOptions;
+ 
+-export { type AssistantContent, type AssistantModelMessage, DEFAULT_MAX_DOWNLOAD_SIZE, type DataContent, DelayedPromise, DownloadError, type FetchFunction, type FilePart, type FlexibleSchema, type IdGenerator, type ImagePart, type InferSchema, type InferToolInput, type InferToolOutput, type LazySchema, type MaybePromiseLike, type ModelMessage, type ParseResult, type ProviderOptions, type ProviderToolFactory, type ProviderToolFactoryWithOutputSchema, type ReasoningPart, type Resolvable, type ResponseHandler, type RetryDelayProvider, type RetryErrorFactory, type RetryErrorReason, type RetryFunction, type Schema, type ShouldRetryFunction, type SystemModelMessage, type TextPart, type Tool, type ToolApprovalRequest, type ToolApprovalResponse, type ToolCall, type ToolCallOptions, type ToolCallPart, type ToolContent, type ToolExecuteFunction, type ToolExecutionOptions, type ToolModelMessage, type ToolNameMapping, type ToolNeedsApprovalFunction, type ToolResult, type ToolResultOutput, type ToolResultPart, type UserContent, type UserModelMessage, VERSION, type ValidationResult, asSchema, cancelResponseBody, combineHeaders, convertAsyncIteratorToReadableStream, convertBase64ToUint8Array, convertImageModelFileToDataUri, convertToBase64, convertToFormData, convertUint8ArrayToBase64, createBinaryResponseHandler, createEventSourceResponseHandler, createIdGenerator, createJsonErrorResponseHandler, createJsonResponseHandler, createProviderToolFactory, createProviderToolFactoryWithOutputSchema, createStatusCodeErrorResponseHandler, createToolNameMapping, delay, downloadBlob, dynamicTool, executeTool, extractResponseHeaders, fetchWithValidatedRedirects, generateId, getErrorMessage, getFromApi, getRuntimeEnvironmentUserAgent, injectJsonInstructionIntoMessages, isAbortError, isBrowserRuntime, isNonNullable, isParsableJson, isSameOrigin, isUrlSupported, jsonSchema, lazySchema, loadApiKey, loadOptionalSetting, loadSetting, mediaTypeToExtension, normalizeHeaders, parseJSON, parseJsonEventStream, parseProviderOptions, postFormDataToApi, postJsonToApi, postToApi, readResponseWithSizeLimit, removeUndefinedEntries, resolve, retryWithExponentialBackoff, safeParseJSON, safeValidateTypes, secureJsonParse, stripFileExtension, tool, validateDownloadUrl, validateTypes, withUserAgentSuffix, withoutTrailingSlash, zodSchema };
++export { type AssistantContent, type AssistantModelMessage, DEFAULT_MAX_DOWNLOAD_SIZE, type DataContent, DelayedPromise, DownloadError, type FetchFunction, type FilePart, type FlexibleSchema, type IdGenerator, type ImagePart, type InferSchema, type InferToolInput, type InferToolOutput, type LazySchema, type MaybePromiseLike, type ModelMessage, type ParseResult, type ProviderOptions, type ProviderToolFactory, type ProviderToolFactoryWithOutputSchema, type ReasoningPart, type Resolvable, type ResponseHandler, type RetryDelayProvider, type RetryErrorFactory, type RetryErrorReason, type RetryFunction, type Schema, type ShouldRetryFunction, type SystemModelMessage, type TextPart, type Tool, type ToolApprovalRequest, type ToolApprovalResponse, type ToolCall, type ToolCallOptions, type ToolCallPart, type ToolContent, type ToolExecuteFunction, type ToolExecutionOptions, type ToolModelMessage, type ToolNameMapping, type ToolNeedsApprovalFunction, type ToolResult, type ToolResultOutput, type ToolResultPart, type UserContent, type UserModelMessage, VERSION, type ValidationResult, asSchema, cancelResponseBody, combineHeaders, convertAsyncIteratorToReadableStream, convertBase64ToUint8Array, convertImageModelFileToDataUri, convertToBase64, convertToFormData, convertUint8ArrayToBase64, createBinaryResponseHandler, createEventSourceResponseHandler, createIdGenerator, createJsonErrorResponseHandler, createJsonResponseHandler, createProviderToolFactory, createProviderToolFactoryWithOutputSchema, createStatusCodeErrorResponseHandler, createToolNameMapping, delay, downloadBlob, dynamicTool, executeTool, extractResponseHeaders, fetchWithValidatedRedirects, generateId, getErrorMessage, getFromApi, getRuntimeEnvironmentUserAgent, injectJsonInstructionIntoMessages, isAbortError, isBrowserRuntime, isNonNullable, isParsableJson, isSameOrigin, isUrlSupported, jsonSchema, lazySchema, loadApiKey, loadOptionalSetting, loadSetting, mediaTypeToExtension, normalizeHeaders, parseJSON, parseJsonEventStream, parseProviderOptions, postFormDataToApi, postJsonToApi, postToApi, readResponseWithSizeLimit, removeUndefinedEntries, resolve, retryWithExponentialBackoff, safeParseJSON, safeValidateTypes, secureJsonParse, stripFileExtension, tool, validateDownloadUrl, validateTypes, validatorSymbol, withUserAgentSuffix, withoutTrailingSlash, zodSchema };
+diff --git a/dist/index.js b/dist/index.js
+index a9c661d73acef5096cc11b14bd6d0dbe538a055b..790a252ecaf4181cd2ea690ccfd2aa9705ccbace 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -94,6 +94,7 @@ __export(index_exports, {
+   tool: () => tool,
+   validateDownloadUrl: () => validateDownloadUrl,
+   validateTypes: () => validateTypes,
++  validatorSymbol: () => validatorSymbol,
+   withUserAgentSuffix: () => withUserAgentSuffix,
+   withoutTrailingSlash: () => withoutTrailingSlash,
+   zodSchema: () => zodSchema
+@@ -779,6 +780,7 @@ function withUserAgentSuffix(headers, ...userAgentSuffixParts) {
+ }
+ 
+ // src/version.ts
++var validatorSymbol = Symbol.for("vercel.ai.validator");
+ var VERSION = true ? "4.0.40" : "0.0.0-test";
+ 
+ // src/get-from-api.ts
+@@ -3064,6 +3066,7 @@ var import_stream2 = require("eventsource-parser/stream");
+   tool,
+   validateDownloadUrl,
+   validateTypes,
++  validatorSymbol,
+   withUserAgentSuffix,
+   withoutTrailingSlash,
+   zodSchema
+diff --git a/dist/index.mjs b/dist/index.mjs
+index edb8688069a6eadbda69b39d2aee64a1fef43141..b2c44d515a1e82e8787269ac0af494298b23be7a 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -677,6 +677,7 @@ function withUserAgentSuffix(headers, ...userAgentSuffixParts) {
+ }
+ 
+ // src/version.ts
++var validatorSymbol = Symbol.for("vercel.ai.validator");
+ var VERSION = true ? "4.0.40" : "0.0.0-test";
+ 
+ // src/get-from-api.ts
+@@ -2972,6 +2973,7 @@ export {
+   tool,
+   validateDownloadUrl,
+   validateTypes,
++  validatorSymbol,
+   withUserAgentSuffix,
+   withoutTrailingSlash,
+   zodSchema

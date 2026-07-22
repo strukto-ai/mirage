@@ -37,10 +37,15 @@
       "fast-uri@>=3.0.0 <3.1.4": ">=3.1.4 <4",
       "linkify-it@>=5.0.0 <5.0.2": ">=5.0.2 <6",
       "hono@>=4.0.0 <4.12.27": ">=4.12.27 <5",
+      "@hono/node-server@<2.0.5": ">=2.0.5 <3",
+      "@ai-sdk/provider-utils@<=3.0.97": ">=4.0.40 <5",
       "body-parser@>=2.0.0 <2.3.0": ">=2.3.0 <3",
       "axios@>=1.0.0 <1.18.0": ">=1.18.0 <2",
       "brace-expansion@>=1.0.0 <1.1.16": ">=1.1.16 <2",
       "brace-expansion@>=5.0.0 <5.0.7": ">=5.0.7 <6"
+    },
+    "patchedDependencies": {
+      "@ai-sdk/provider-utils@4.0.40": "patches/@ai-sdk__provider-utils@4.0.40.patch"
     }
   },
   "devDependencies": {
