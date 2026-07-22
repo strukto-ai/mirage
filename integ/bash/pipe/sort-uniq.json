@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "pipe_tier1_nul_records",
+      "id": "pipe_sort_uniq_nul_records",
       "seq": 610183,
       "targets": [
         "ram",
@@ -41,7 +41,7 @@
       ]
     },
     {
-      "id": "pipe_tier1_fields_numeric",
+      "id": "pipe_sort_uniq_fields_numeric",
       "seq": 610184,
       "targets": [
         "ram",
