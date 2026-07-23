@@ -19,6 +19,21 @@ def _should_number(line: str, numbering: str,
     return bool(line.strip())
 
 
+def _section_delimiters(delimiter: str) -> dict[str, str]:
+    """Map each logical-page delimiter line to the section it opens.
+
+    GNU pads a one-character ``-d`` with ``:`` as its second character, and
+    an empty ``-d`` disables delimiter matching entirely.
+
+    Args:
+        delimiter (str): The ``-d``/``--section-delimiter`` argument.
+    """
+    if not delimiter:
+        return {}
+    pair = delimiter if len(delimiter) > 1 else delimiter + ":"
+    return {pair * 3: "header", pair * 2: "body", pair: "footer"}
+
+
 @dataclass(frozen=True, slots=True)
 class NlConfig:
     numbering: dict[str, str]
@@ -28,7 +43,7 @@ class NlConfig:
     width: int
     separator: str
     number_format: str
-    delimiter: str
+    delimiters: dict[str, str]
     join_blank_lines: int
     no_renumber: bool
 
@@ -48,18 +63,15 @@ def _format_number(number: int, width: int, number_format: str) -> str:
     return str(number).rjust(width)
 
 
-def _render_line(line: str, config: NlConfig, state: NlState) -> bytes | None:
-    delimiters = {
-        config.delimiter * 3: "header",
-        config.delimiter * 2: "body",
-        config.delimiter: "footer",
-    }
-    if line in delimiters:
-        state.section = delimiters[line]
+def _render_line(line: str, config: NlConfig, state: NlState) -> bytes:
+    section = config.delimiters.get(line)
+    if section is not None:
+        state.section = section
         state.blank_run = 0
         if not config.no_renumber:
             state.number = config.start
-        return None
+        # GNU writes an empty line in place of the delimiter itself.
+        return b"\n"
     numbering = config.numbering[state.section]
     pattern = config.patterns[state.section]
     should_number = _should_number(line, numbering, pattern)
@@ -85,9 +97,7 @@ async def _nl_stream(
 ) -> AsyncIterator[bytes]:
     async for raw_line in AsyncLineIterator(source):
         line = raw_line.decode(errors="replace")
-        rendered = _render_line(line, config, state)
-        if rendered is not None:
-            yield rendered
+        yield _render_line(line, config, state)
 
 
 async def _nl_multi(
@@ -148,7 +158,7 @@ async def nl(
         width=width,
         separator=separator if separator is not None else "\t",
         number_format=number_format,
-        delimiter=delimiter,
+        delimiters=_section_delimiters(delimiter),
         join_blank_lines=int(join_blank_lines_raw or "1"),
         no_renumber=no_renumber,
     )

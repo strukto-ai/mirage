@@ -31,6 +31,14 @@
       "command": "mkdir -p /data/t2checksum3 && printf 'bad\n' > /data/t2checksum3/sums && sha1sum --check --warn /data/t2checksum3/sums 2>&1; echo warn=$?; sha1sum --check --strict /data/t2checksum3/sums > /dev/null 2>&1; echo strict=$?",
       "expect": { "exit": 0, "stdout": "WARNING: 1 line is improperly formatted\nwarn=0\nstrict=1\n", "stderr": "" },
       "flags": ["check", "warn", "strict"]
+    },
+    {
+      "id": "checksum_tier2_tag_check_roundtrip",
+      "seq": 910041,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2checksum4 && sha256sum --tag /data/one_byte.txt > /data/t2checksum4/sums && sha256sum --check --strict /data/t2checksum4/sums; echo rc=$?",
+      "expect": { "exit": 0, "stdout": "/data/one_byte.txt: OK\nrc=0\n", "stderr": "" },
+      "flags": ["tag", "check", "strict"]
     }
   ]
 }

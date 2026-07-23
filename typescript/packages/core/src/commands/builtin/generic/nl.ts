@@ -36,6 +36,14 @@ function formatNumber(value: number, width: number, format: string): string {
   return raw.padStart(width, ' ')
 }
 
+// GNU pads a one-character -d with ':' as its second character, and an empty
+// -d disables delimiter matching entirely.
+function sectionDelimiters(delimiter: string): Record<string, string> {
+  if (delimiter === '') return {}
+  const pair = delimiter.length > 1 ? delimiter : `${delimiter}:`
+  return { [pair.repeat(3)]: 'header', [pair.repeat(2)]: 'body', [pair]: 'footer' }
+}
+
 interface NlConfig {
   numbering: Record<string, string>
   patterns: Record<string, RegExp | null>
@@ -44,7 +52,7 @@ interface NlConfig {
   width: number
   separator: string
   numberFormat: string
-  delimiter: string
+  delimiters: Record<string, string>
   joinBlankLines: number
   noRenumber: boolean
 }
@@ -55,20 +63,14 @@ interface NlState {
   blankRun: number
 }
 
-function renderLine(line: string, config: NlConfig, state: NlState): Uint8Array | null {
-  const delimiterCount =
-    line === config.delimiter.repeat(3)
-      ? 3
-      : line === config.delimiter.repeat(2)
-        ? 2
-        : line === config.delimiter
-          ? 1
-          : 0
-  if (delimiterCount > 0) {
-    state.section = delimiterCount === 3 ? 'header' : delimiterCount === 2 ? 'body' : 'footer'
+function renderLine(line: string, config: NlConfig, state: NlState): Uint8Array {
+  const section = config.delimiters[line]
+  if (section !== undefined) {
+    state.section = section
     state.blankRun = 0
     if (!config.noRenumber) state.number = config.start
-    return null
+    // GNU writes an empty line in place of the delimiter itself.
+    return ENC.encode('\n')
   }
   const numbering = config.numbering[state.section] ?? 'n'
   const pattern = config.patterns[state.section] ?? null
@@ -96,8 +98,7 @@ async function* nlStream(
   const iter = new AsyncLineIterator(source)
   for await (const raw of iter) {
     const line = DEC.decode(raw)
-    const rendered = renderLine(line, config, state)
-    if (rendered !== null) yield rendered
+    yield renderLine(line, config, state)
   }
 }
 
@@ -144,7 +145,7 @@ function parseOptions(flags: Record<string, string | boolean | string[]>): NlCon
     width: typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 6,
     separator: typeof separatorValue === 'string' ? separatorValue : '\t',
     numberFormat: typeof formatValue === 'string' ? formatValue : 'rn',
-    delimiter: typeof delimiterValue === 'string' ? delimiterValue : '\\:',
+    delimiters: sectionDelimiters(typeof delimiterValue === 'string' ? delimiterValue : '\\:'),
     joinBlankLines: typeof blankValue === 'string' ? Number.parseInt(blankValue, 10) : 1,
     noRenumber: flags.p === true || flags.no_renumber === true,
   }

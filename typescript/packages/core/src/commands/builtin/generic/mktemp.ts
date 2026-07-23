@@ -83,11 +83,19 @@ export async function mktempGeneric(
   const path = `${rstripSlash(parent)}/${name}`
   if (!dryRun) {
     const mountPrefix = opts.mountPrefix ?? ''
-    await mkdir(makePathSpec(parent, mountPrefix), true)
-    if (directory) {
-      await mkdir(makePathSpec(path, mountPrefix))
-    } else {
-      await write(makePathSpec(path, mountPrefix), new Uint8Array(0))
+    const quiet = opts.flags.q === true || opts.flags.quiet === true
+    try {
+      await mkdir(makePathSpec(parent, mountPrefix), true)
+      if (directory) {
+        await mkdir(makePathSpec(path, mountPrefix))
+      } else {
+        await write(makePathSpec(path, mountPrefix), new Uint8Array(0))
+      }
+    } catch (error) {
+      // -q suppresses diagnostics about file/directory creation only
+      // (GNU); usage errors and internal failures still propagate.
+      if (!quiet) throw error
+      return [null, new IOResult({ exitCode: 1 })]
     }
   }
   const result: ByteSource = ENC.encode(path + '\n')

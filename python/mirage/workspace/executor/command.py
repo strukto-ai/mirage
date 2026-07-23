@@ -76,6 +76,23 @@ def _path_flag_scopes(cmd_name: str, argv: list[str],
     ]
 
 
+def _merge_scopes(positional: list[PathSpec],
+                  flag_scopes: list[PathSpec]) -> list[PathSpec]:
+    """Combine positional and path-flag scopes, keeping operand order.
+
+    Args:
+        positional (list[PathSpec]): Path operands parsed from the argv tail.
+        flag_scopes (list[PathSpec]): Paths carried by path-valued flags.
+    """
+    merged = list(positional)
+    seen = {p.virtual for p in merged}
+    for scope in flag_scopes:
+        if scope.virtual not in seen:
+            seen.add(scope.virtual)
+            merged.append(scope)
+    return merged
+
+
 async def _exec_node(cmd_str: str, io: IOResult,
                      paths: list[PathSpec]) -> ExecutionNode:
     """Build the recorded execution node, materializing any streamed stderr.
@@ -613,8 +630,11 @@ async def handle_command(
                                                          exit_code=127,
                                                          stderr=err)
 
-    routing_scopes = (path_scopes
-                      or _path_flag_scopes(cmd_name, raw_argv, session.cwd))
+    # Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
+    # positional operands, so they join routing and mount validation instead
+    # of being dropped whenever a positional path is also present.
+    routing_scopes = _merge_scopes(
+        path_scopes, _path_flag_scopes(cmd_name, raw_argv, session.cwd))
 
     find_expr_tokens: list[str] | None = None
     if cmd_name == "find":
@@ -690,10 +710,11 @@ async def handle_command(
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
         return stdout, io, await _exec_node(cmd_str, io, path_scopes)
 
-    # Reject unsupported cross-mount commands
-    if len(path_scopes) >= 2:
+    # Reject unsupported cross-mount commands. Path-flag targets count: a
+    # command bound to one mount cannot write its output through another.
+    if len(routing_scopes) >= 2:
         mount_prefixes = set()
-        for s in path_scopes:
+        for s in routing_scopes:
             try:
                 mount_prefixes.add(registry.mount_for(s.virtual).prefix)
             except ValueError:

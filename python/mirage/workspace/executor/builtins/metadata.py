@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_mode
 from mirage.utils.path import CycleError, resolve_path
 from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
                                                        fail, finish,
@@ -27,57 +28,8 @@ from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 
-_MODE_CLASS_BITS = {"u": 0o700, "g": 0o070, "o": 0o007, "a": 0o777}
-_MODE_PERM_BITS = {"r": 0o444, "w": 0o222, "x": 0o111}
-_MODE_CLAUSE_RE = re.compile(r"([ugoa]*)([+\-=])([rwx]*)")
 _TOUCH_STAMP_RE = re.compile(r"(\d{8}|\d{10}|\d{12})(\.\d{2})?")
 _TOUCH_STAMP_FMT = {10: "%y%m%d%H%M", 12: "%Y%m%d%H%M"}
-
-
-def parse_mode(text: str, current: int) -> int | None:
-    """Parse a chmod MODE argument (octal or symbolic).
-
-    Symbolic supports the common grammar: ``[ugoa...][+-=][rwx...]``
-    clauses joined by commas (``u+x``, ``go-w``, ``a=r``, ``+x``).
-    Special bits (s, t, X) are not supported.
-
-    Args:
-        text (str): the MODE operand as typed.
-        current (int): current permission bits the clauses apply to.
-
-    Returns:
-        int | None: the new mode, or None when the text does not parse.
-
-    Example::
-
-        parse_mode("644", 0)          -> 0o644
-        parse_mode("u+x", 0o644)      -> 0o744
-        parse_mode("a=r", 0o777)      -> 0o444
-    """
-    if text and all(c in "01234567" for c in text):
-        value = int(text, 8)
-        return value if value <= 0o7777 else None
-
-    mode = current
-    for clause in text.split(","):
-        match = _MODE_CLAUSE_RE.fullmatch(clause)
-        if match is None:
-            return None
-        classes, action, perms = match.groups()
-        class_mask = 0
-        for c in classes or "a":
-            class_mask |= _MODE_CLASS_BITS[c]
-        perm_mask = 0
-        for c in perms:
-            perm_mask |= _MODE_PERM_BITS[c]
-        bits = class_mask & perm_mask
-        if action == "+":
-            mode |= bits
-        elif action == "-":
-            mode &= ~bits
-        else:
-            mode = (mode & ~class_mask) | bits
-    return mode
 
 
 def parse_owner(text: str) -> tuple[int | str | None, int | str | None]:
@@ -380,7 +332,8 @@ async def handle_chmod(
         if stat.mode is not None:
             current = stat.mode
         else:
-            current = 0o755 if stat.type == FileType.DIRECTORY else 0o644
+            current = (DEFAULT_DIR_MODE if stat.type == FileType.DIRECTORY else
+                       DEFAULT_FILE_MODE)
         new_mode = parse_mode(mode_text, current)
         if new_mode is None:
             return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
@@ -578,7 +531,6 @@ __all__ = [
     "handle_chown",
     "handle_touch",
     "parse_group",
-    "parse_mode",
     "parse_owner",
     "parse_touch_stamp",
 ]

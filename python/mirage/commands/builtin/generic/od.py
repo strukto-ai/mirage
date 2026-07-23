@@ -82,8 +82,15 @@ async def od(
     limit: int | None = None,
     formats: list[str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    source = read_stream(paths[0]) if paths else _resolve_source(stdin)
-    raw = b"".join([chunk async for chunk in source])
+    # od defines multiple FILE operands as one concatenated input, so skip
+    # and limit offsets apply across the whole run, not per file.
+    chunks: list[bytes] = []
+    if paths:
+        for p in paths:
+            chunks.extend([chunk async for chunk in read_stream(p)])
+    else:
+        chunks.extend([chunk async for chunk in _resolve_source(stdin)])
+    raw = b"".join(chunks)
     data = raw[skip:skip + limit if limit is not None else None]
     type_specs = formats or ["o2"]
     lines: list[str] = []

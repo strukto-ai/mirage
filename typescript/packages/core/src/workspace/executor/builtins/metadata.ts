@@ -16,6 +16,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { isMissingOp } from '../../../utils/errors.ts'
+import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
@@ -24,9 +25,6 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
-
-const MODE_CLASS_BITS: Record<string, number> = { u: 0o700, g: 0o070, o: 0o007, a: 0o777 }
-const MODE_PERM_BITS: Record<string, number> = { r: 0o444, w: 0o222, x: 0o111 }
 
 function errorResult(cmd: string, message: string, exitCode = 1): Result {
   const err = new TextEncoder().encode(message)
@@ -39,42 +37,6 @@ function errorResult(cmd: string, message: string, exitCode = 1): Result {
 
 function okResult(cmd: string): Result {
   return [null, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
-}
-
-// Parse a chmod MODE argument (octal or symbolic). Symbolic supports the
-// common grammar: `[ugoa...][+-=][rwx...]` clauses joined by commas
-// (`u+x`, `go-w`, `a=r`, `+x`). Special bits (s, t, X) are not supported.
-// Returns the new mode, or null when the text does not parse.
-export function parseMode(text: string, current: number): number | null {
-  if (/^[0-7]+$/.test(text)) {
-    const value = parseInt(text, 8)
-    return value <= 0o7777 ? value : null
-  }
-  let mode = current
-  for (const clause of text.split(',')) {
-    let i = 0
-    let classes = ''
-    while (i < clause.length && 'ugoa'.includes(clause.charAt(i))) {
-      classes += clause.charAt(i)
-      i += 1
-    }
-    const action = clause[i]
-    if (action === undefined || !'+-='.includes(action)) return null
-    i += 1
-    const perms = clause.slice(i)
-    if (!/^[rwx]*$/.test(perms)) return null
-    let classMask = 0
-    for (const c of classes.length > 0 ? classes : 'a') {
-      classMask |= MODE_CLASS_BITS[c] ?? 0
-    }
-    let permMask = 0
-    for (const c of perms) permMask |= MODE_PERM_BITS[c] ?? 0
-    const bits = classMask & permMask
-    if (action === '+') mode |= bits
-    else if (action === '-') mode &= ~bits
-    else mode = (mode & ~classMask) | bits
-  }
-  return mode
 }
 
 // Parse a chown OWNER[:GROUP] argument. Numeric ids become numbers; names
@@ -376,7 +338,8 @@ export async function handleChmod(
     }
     // Backends without a mode default to what ls renders: 755 for
     // directories, 644 for files (symbolic clauses build on this).
-    const current = stat.mode ?? (stat.type === FileType.DIRECTORY ? 0o755 : 0o644)
+    const current =
+      stat.mode ?? (stat.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE)
     const newMode = parseMode(modeText, current)
     if (newMode === null) {
       return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)

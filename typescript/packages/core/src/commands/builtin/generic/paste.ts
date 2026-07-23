@@ -31,9 +31,26 @@ function splitRecords(text: string, zeroTerminated: boolean): string[] {
   return stripped === '' ? [] : stripped.split('\0')
 }
 
+const ESCAPES: Record<string, string> = { n: '\n', t: '\t', '\\': '\\', '0': '' }
+
+// GNU paste recognizes exactly \n, \t, \\ and \0, where \0 means the empty
+// delimiter (fields are concatenated) rather than a NUL byte. A single
+// left-to-right scan keeps \\0 reading as a backslash followed by 0.
 function decodeDelimiters(value: string): string[] {
-  const decoded = value.replace(/\\t/g, '\t').replace(/\\n/g, '\n').replace(/\\0/g, '')
-  return Array.from(decoded)
+  const chars: string[] = []
+  let index = 0
+  while (index < value.length) {
+    const char = value[index] ?? ''
+    const next = value[index + 1]
+    if (char === '\\' && next !== undefined && Object.hasOwn(ESCAPES, next)) {
+      chars.push(ESCAPES[next] ?? '')
+      index += 2
+      continue
+    }
+    chars.push(char)
+    index += 1
+  }
+  return chars.length > 0 ? chars : ['']
 }
 
 function joinFields(fields: readonly string[], delimiters: readonly string[]): string {

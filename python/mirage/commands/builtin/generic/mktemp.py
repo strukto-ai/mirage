@@ -52,16 +52,24 @@ async def mktemp(
     t: bool = False,
     dry_run: bool = False,
     suffix: str = "",
+    quiet: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(texts) > 1:
         raise extra_operand_error(CommandName.MKTEMP, texts[1])
     path, parent = _build_path(p, t, texts, suffix)
     if not dry_run:
-        await mkdir_fn(parent, parents=True)
-        if d:
-            await mkdir_fn(path)
-        else:
-            await write_bytes_fn(path, b"")
+        # -q suppresses diagnostics about file/directory creation only
+        # (GNU); usage errors and internal failures still propagate.
+        try:
+            await mkdir_fn(parent, parents=True)
+            if d:
+                await mkdir_fn(path)
+            else:
+                await write_bytes_fn(path, b"")
+        except OSError:
+            if not quiet:
+                raise
+            return None, IOResult(exit_code=1)
     return (path.virtual + "\n").encode(), IOResult()
 
 

@@ -57,7 +57,8 @@ async def join(
                               ignore_case=i or fl.as_bool("ignore_case"),
                               zero_terminated=z
                               or fl.as_bool("zero_terminated"),
-                              check_order=fl.as_bool("check_order"),
+                              check_order=fl.as_bool("check_order")
+                              and not fl.as_bool("nocheck_order"),
                               header=fl.as_bool("header"))
 
 

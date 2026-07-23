@@ -7,6 +7,23 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
+def _split_fields(line: str, delimiter: str | None) -> list[str]:
+    return line.split(delimiter) if delimiter else line.split()
+
+
+def _field_at(fields: list[str], index: int) -> str:
+    """Return a field by index, or the empty string when the line is short.
+
+    Blank and short lines are legal input for GNU ``join``: the missing
+    field simply reads as an empty key rather than aborting the run.
+
+    Args:
+        fields (list[str]): Fields of one input line.
+        index (int): Zero-based field index to read.
+    """
+    return fields[index] if 0 <= index < len(fields) else ""
+
+
 def _build_join_map(
     lines: list[str],
     field_idx: int,
@@ -15,7 +32,7 @@ def _build_join_map(
 ) -> dict[str, list[list[str]]]:
     result: dict[str, list[list[str]]] = {}
     for line in lines:
-        parts = line.split(delimiter) if delimiter else line.split()
+        parts = _split_fields(line, delimiter)
         if field_idx < len(parts):
             key = parts[field_idx].casefold(
             ) if ignore_case else parts[field_idx]
@@ -79,7 +96,7 @@ def _join_lines(
     matched_keys2: set[str] = set()
 
     for line in lines1:
-        parts = line.split(sep) if sep else line.split()
+        parts = _split_fields(line, sep)
         if field1 >= len(parts):
             continue
         key = parts[field1]
@@ -98,7 +115,7 @@ def _join_lines(
 
     if also_unpairable == "2" or only_unpairable == "2":
         for line in lines2:
-            parts = line.split(sep) if sep else line.split()
+            parts = _split_fields(line, sep)
             if field2 >= len(parts):
                 continue
             key = parts[field2]
@@ -140,24 +157,20 @@ async def join_cmd(
         "\0") if zero_terminated else split_lines(data2)
     header_lines: list[str] = []
     if header and lines1 and lines2:
-        first1 = lines1.pop(0).split(separator) if separator else lines1.pop(
-            0).split()
-        first2 = lines2.pop(0).split(separator) if separator else lines2.pop(
-            0).split()
+        first1 = _split_fields(lines1.pop(0), separator)
+        first2 = _split_fields(lines2.pop(0), separator)
         header_lines.append(
-            _format_row(first1[field1], first1, field1, first2, field2,
-                        output_format, separator or " ", empty_value))
+            _format_row(_field_at(first1, field1), first1, field1, first2,
+                        field2, output_format, separator or " ", empty_value))
     key_fn = str.casefold if ignore_case else str
     stderr = ""
     if check_order:
         keys1 = [
-            key_fn(
-                (line.split(separator) if separator else line.split())[field1])
+            key_fn(_field_at(_split_fields(line, separator), field1))
             for line in lines1
         ]
         keys2 = [
-            key_fn(
-                (line.split(separator) if separator else line.split())[field2])
+            key_fn(_field_at(_split_fields(line, separator), field2))
             for line in lines2
         ]
         if keys1 != sorted(keys1):

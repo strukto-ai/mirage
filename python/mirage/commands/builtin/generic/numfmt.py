@@ -1,10 +1,12 @@
 import re
 from decimal import Decimal, InvalidOperation
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 
 _SI_SUFFIXES = ("", "K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q")
+_FIRST_FIELD_RE = re.compile(r"(\s*)(\S+)([\s\S]*)")
 
 
 def _parse_number(value: str, from_mode: str) -> Decimal:
@@ -41,6 +43,34 @@ def _format_number(number: Decimal, to_mode: str, grouping: bool) -> str:
     return text + suffix
 
 
+def _convert_field(value: str, to_mode: str, from_mode: str, suffix: str,
+                   grouping: bool) -> str:
+    number = _parse_number(value.removesuffix(suffix), from_mode)
+    return _format_number(number, to_mode, grouping) + suffix
+
+
+def _convert_line(line: str, to_mode: str, from_mode: str, suffix: str,
+                  grouping: bool) -> str:
+    """Reformat the first field of a record, preserving the rest verbatim.
+
+    GNU ``numfmt`` converts only ``--field`` (1 by default) and copies the
+    remaining fields and their separating whitespace through untouched.
+
+    Args:
+        line (str): One input record, without its terminator.
+        to_mode (str): Output scaling mode.
+        from_mode (str): Input scaling mode.
+        suffix (str): Suffix stripped before parsing and re-appended.
+        grouping (bool): Whether to group thousands in the output.
+    """
+    match = _FIRST_FIELD_RE.fullmatch(line)
+    if match is None:
+        return line
+    lead, field, rest = match.groups()
+    return lead + _convert_field(field, to_mode, from_mode, suffix,
+                                 grouping) + rest
+
+
 async def numfmt(
     *texts: str,
     stdin: ByteSource | None = None,
@@ -49,15 +79,20 @@ async def numfmt(
     suffix: str = "",
     grouping: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    values = list(texts)
-    if not values:
+    if texts:
+        output = [
+            _convert_field(value, to_mode, from_mode, suffix, grouping)
+            for value in texts
+        ]
+    else:
         raw = await _read_stdin_async(stdin)
-        values = raw.decode(
-            errors="replace").split() if raw is not None else []
-    output = [
-        _format_number(_parse_number(value.removesuffix(suffix), from_mode),
-                       to_mode, grouping) + suffix for value in values
-    ]
+        data = raw.decode(errors="replace") if raw is not None else ""
+        output = [
+            _convert_line(line, to_mode, from_mode, suffix, grouping)
+            for line in split_lines(data)
+        ]
+    if not output:
+        return b"", IOResult()
     return ("\n".join(output) + "\n").encode(), IOResult()
 
 

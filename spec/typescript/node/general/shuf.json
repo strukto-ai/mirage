@@ -3,41 +3,22 @@
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
-    "has_write": false,
+    "has_write": true,
     "resources": [
       "box",
-      "chroma",
       "databricks_volume",
-      "dify",
-      "discord",
       "disk",
       "dropbox",
-      "email",
-      "gdocs",
       "gdrive",
-      "github",
-      "github_ci",
-      "gmail",
-      "gsheets",
-      "gslides",
       "hf_buckets",
       "hf_datasets",
       "hf_models",
       "hf_spaces",
-      "lancedb",
-      "langfuse",
-      "linear",
-      "mongodb",
       "nextcloud",
-      "notion",
-      "postgres",
-      "qdrant",
       "ram",
       "redis",
       "s3",
-      "slack",
-      "ssh",
-      "trello"
+      "ssh"
     ]
   },
   "description": null,
@@ -45,7 +26,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--head-count",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
@@ -54,7 +35,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--echo",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-e",
@@ -63,7 +44,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--zero-terminated",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-z",
@@ -72,11 +53,29 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--repeat",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
       "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--input-range",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-i",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--output",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-o",
+      "value_kind": "path",
       "value_optional": false
     }
   ],

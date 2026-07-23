@@ -46,21 +46,17 @@ async def mktemp(
         tmpdir = "/tmp"
     else:
         tmpdir = p
-    try:
-        return await generic_mktemp(
-            *texts,
-            mkdir_fn=partial(ops.require(Operation.MKDIR), accessor),
-            write_bytes_fn=partial(ops.require(Operation.WRITE), accessor),
-            d=d or fl.as_bool("directory"),
-            p=tmpdir,
-            t=t,
-            dry_run=u or fl.as_bool("dry_run"),
-            suffix=fl.as_str("suffix") or "",
-        )
-    except Exception as error:
-        if not (q or fl.as_bool("quiet")):
-            raise
-        return None, IOResult(exit_code=1, stderr=str(error).encode())
+    return await generic_mktemp(
+        *texts,
+        mkdir_fn=partial(ops.require(Operation.MKDIR), accessor),
+        write_bytes_fn=partial(ops.require(Operation.WRITE), accessor),
+        d=d or fl.as_bool("directory"),
+        p=tmpdir,
+        t=t,
+        dry_run=u or fl.as_bool("dry_run"),
+        suffix=fl.as_str("suffix") or "",
+        quiet=q or fl.as_bool("quiet"),
+    )
 
 
 BUILDER = Builder('mktemp',

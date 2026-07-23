@@ -54,6 +54,7 @@ def test_nl_s(env):
 
 
 def test_nl_logical_page_sections(env):
+    # GNU writes an empty line in place of each delimiter line.
     data = b"\\:\\:\\:\nhead\n\\:\\:\nbody\n\\:\nfoot\n"
     result = env.mirage("nl -h a -b a -f a -w 1 -s :", stdin=data)
-    assert result == "1:head\n1:body\n1:foot\n"
+    assert result == "\n1:head\n\n1:body\n\n1:foot\n"

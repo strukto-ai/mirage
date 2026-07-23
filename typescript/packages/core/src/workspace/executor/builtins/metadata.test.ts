@@ -19,34 +19,7 @@ import type { FileStat } from '../../../types.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace.ts'
-import { parseGroup, parseMode, parseOwner, parseTouchStamp } from './metadata.ts'
-
-describe('parseMode', () => {
-  it('parses octal modes', () => {
-    expect(parseMode('644', 0)).toBe(0o644)
-    expect(parseMode('0', 0o777)).toBe(0)
-    expect(parseMode('7777', 0)).toBe(0o7777)
-  })
-
-  it('rejects out-of-range octal', () => {
-    expect(parseMode('77777', 0)).toBeNull()
-  })
-
-  it('applies symbolic add/remove/assign', () => {
-    expect(parseMode('u+x', 0o644)).toBe(0o744)
-    expect(parseMode('+x', 0o644)).toBe(0o755)
-    expect(parseMode('go-r', 0o644)).toBe(0o600)
-    expect(parseMode('a=r', 0o777)).toBe(0o444)
-    expect(parseMode('u=rwx,go=', 0o644)).toBe(0o700)
-    expect(parseMode('u+x,g-r', 0o644)).toBe(0o704)
-  })
-
-  it('rejects invalid symbolic text', () => {
-    expect(parseMode('zz', 0o644)).toBeNull()
-    expect(parseMode('u~x', 0o644)).toBeNull()
-    expect(parseMode('u+q', 0o644)).toBeNull()
-  })
-})
+import { parseGroup, parseOwner, parseTouchStamp } from './metadata.ts'
 
 describe('parseOwner', () => {
   it('parses owner and group forms', () => {

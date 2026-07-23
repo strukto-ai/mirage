@@ -19,7 +19,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--parents",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-p",
@@ -28,12 +28,30 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--verbose",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
       "value_kind": "none",
       "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--mode",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-m",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--context",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-Z",
+      "value_kind": "text",
+      "value_optional": true
     }
   ],
   "positional": [],

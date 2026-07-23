@@ -43,7 +43,35 @@
   },
   "description": null,
   "ignore_tokens": [],
-  "options": [],
+  "options": [
+    {
+      "description": null,
+      "long": "--before",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-b",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--regex",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-r",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--separator",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-s",
+      "value_kind": "text",
+      "value_optional": false
+    }
+  ],
   "positional": [],
   "rest": {
     "kind": "path",

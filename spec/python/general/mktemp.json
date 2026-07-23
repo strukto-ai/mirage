@@ -26,7 +26,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--directory",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
@@ -44,11 +44,47 @@
     },
     {
       "description": null,
+      "long": "--tmpdir",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "path",
+      "value_optional": true
+    },
+    {
+      "description": null,
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-t",
       "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--dry-run",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-u",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--quiet",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-q",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--suffix",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "text",
       "value_optional": false
     }
   ],

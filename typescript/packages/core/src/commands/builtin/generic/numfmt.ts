@@ -33,29 +33,54 @@ function formatNumber(value: number, toMode: string, grouping: boolean): string 
   return body + suffix
 }
 
+function convertField(
+  value: string,
+  toMode: string,
+  fromMode: string,
+  suffix: string,
+  grouping: boolean,
+): string {
+  const stripped = suffix !== '' && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value
+  return formatNumber(parseNumber(stripped, fromMode), toMode, grouping) + suffix
+}
+
+// GNU numfmt converts only --field (1 by default) and copies the remaining
+// fields and their separating whitespace through untouched.
+function convertLine(
+  line: string,
+  toMode: string,
+  fromMode: string,
+  suffix: string,
+  grouping: boolean,
+): string {
+  const match = /^(\s*)(\S+)([\s\S]*)$/.exec(line)
+  if (match === null) return line
+  const [, lead = '', field = '', rest = ''] = match
+  return lead + convertField(field, toMode, fromMode, suffix, grouping) + rest
+}
+
+function splitLinesNoEnds(text: string): string[] {
+  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
+  return stripped === '' ? [] : stripped.split('\n')
+}
+
 export async function numfmtGeneric(
   texts: readonly string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  let values = [...texts]
-  if (values.length === 0) {
-    values = DEC.decode(await materialize(resolveSource(opts.stdin)))
-      .trim()
-      .split(/\s+/)
-  }
   const toMode = typeof opts.flags.to === 'string' ? opts.flags.to : 'none'
   const fromMode = typeof opts.flags.from === 'string' ? opts.flags.from : 'none'
   const suffix = typeof opts.flags.suffix === 'string' ? opts.flags.suffix : ''
-  const output = values.map(
-    (value) =>
-      formatNumber(
-        parseNumber(
-          suffix !== '' && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value,
-          fromMode,
-        ),
-        toMode,
-        opts.flags.grouping === true,
-      ) + suffix,
-  )
+  const grouping = opts.flags.grouping === true
+  let output: string[]
+  if (texts.length > 0) {
+    output = texts.map((value) => convertField(value, toMode, fromMode, suffix, grouping))
+  } else {
+    const data = DEC.decode(await materialize(resolveSource(opts.stdin)))
+    output = splitLinesNoEnds(data).map((line) =>
+      convertLine(line, toMode, fromMode, suffix, grouping),
+    )
+  }
+  if (output.length === 0) return [new Uint8Array(0), new IOResult()]
   return [ENC.encode(output.join('\n') + '\n'), new IOResult()]
 }

@@ -124,7 +124,13 @@ async def split(
 
 async def _record_iterator(data: bytes,
                            separator: bytes) -> AsyncIterator[bytes]:
-    for record in data.rstrip(separator).split(separator):
+    # Every separator terminates a record, so only the final unterminated
+    # remainder is dropped when empty; a second trailing separator still
+    # yields the empty record it terminates (GNU).
+    records = data.split(separator)
+    if records and not records[-1]:
+        records.pop()
+    for record in records:
         yield record
 
 

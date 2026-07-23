@@ -6,6 +6,33 @@ from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
+_ESCAPES = {"n": "\n", "t": "\t", "\\": "\\", "0": ""}
+
+
+def _decode_delimiters(value: str) -> list[str]:
+    """Expand the ``-d`` delimiter list into one delimiter per element.
+
+    GNU ``paste`` recognizes exactly ``\\n``, ``\\t``, ``\\\\`` and ``\\0``,
+    where ``\\0`` means the empty delimiter (fields are concatenated) rather
+    than a NUL byte. A single left-to-right scan keeps ``\\\\0`` reading as a
+    backslash followed by ``0``.
+
+    Args:
+        value (str): Raw ``-d``/``--delimiters`` argument.
+    """
+    chars: list[str] = []
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char == "\\" and index + 1 < len(value) and value[index +
+                                                             1] in _ESCAPES:
+            chars.append(_ESCAPES[value[index + 1]])
+            index += 2
+            continue
+        chars.append(char)
+        index += 1
+    return chars or [""]
+
 
 def _join_fields(fields: tuple[str, ...] | list[str],
                  delimiter_chars: list[str]) -> str:
@@ -47,8 +74,7 @@ async def paste(
             split("\0") if zero_terminated else split_lines(data))
 
     delimiter_sequence = delimiter if delimiter is not None else delimiters
-    decoded = bytes(delimiter_sequence, "utf-8").decode("unicode_escape")
-    delimiter_chars = list(decoded) or [""]
+    delimiter_chars = _decode_delimiters(delimiter_sequence)
 
     if serial:
         out_lines = [

@@ -85,6 +85,19 @@ function pathFlagScopes(cmdName: string, argv: string[], cwd: string): PathSpec[
   )
 }
 
+/** Combine positional and path-flag scopes, keeping operand order. */
+function mergeScopes(positional: PathSpec[], flagScopes: PathSpec[]): PathSpec[] {
+  const merged = [...positional]
+  const seen = new Set(merged.map((p) => p.virtual))
+  for (const scope of flagScopes) {
+    if (!seen.has(scope.virtual)) {
+      seen.add(scope.virtual)
+      merged.push(scope)
+    }
+  }
+  return merged
+}
+
 /** The 126 result for a command no runtime accepted. */
 function admissionDenial(cmdName: string): IOResult {
   const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
@@ -372,8 +385,10 @@ export async function handleCommand(
     ]
   }
 
-  const routingScopes =
-    pathScopes.length > 0 ? pathScopes : pathFlagScopes(cmdName, rawArgv, session.cwd)
+  // Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
+  // positional operands, so they join routing and mount validation instead of
+  // being dropped whenever a positional path is also present.
+  const routingScopes = mergeScopes(pathScopes, pathFlagScopes(cmdName, rawArgv, session.cwd))
 
   let findExprTokens: string[] | null = null
   if (cmdName === 'find') {
@@ -467,9 +482,11 @@ export async function handleCommand(
     return [maybeWithTimeout(csStdout, csIo.safeguard, cmdName), csIo, csExec]
   }
 
-  if (pathScopes.length >= 2) {
+  // Path-flag targets count: a command bound to one mount cannot write its
+  // output through another.
+  if (routingScopes.length >= 2) {
     const mountPrefixes = new Set<string>()
-    for (const s of pathScopes) {
+    for (const s of routingScopes) {
       const m = registry.mountFor(s.virtual)
       if (m !== null) mountPrefixes.add(m.prefix)
     }

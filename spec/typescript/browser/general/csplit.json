@@ -19,7 +19,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--prefix",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
@@ -28,7 +28,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--digits",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
@@ -37,7 +37,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--suffix-format",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-b",
@@ -46,7 +46,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--keep-files",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-k",
@@ -55,10 +55,37 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--quiet",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--silent",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--suppress-matched",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--elide-empty-files",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
       "value_kind": "none",
       "value_optional": false
     }
