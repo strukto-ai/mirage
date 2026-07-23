@@ -30,3 +30,8 @@ def test_paste_d(env):
 def test_paste_stdin(env):
     data = b"a\nb\nc\n"
     assert env.mirage("paste -s", stdin=data) == "a\tb\tc\n"
+
+
+def test_paste_serial_and_delimiter_list(env):
+    env.create_file("f.txt", b"a\nb\nc\n")
+    assert env.mirage("paste -s -d, /data/f.txt") == "a,b,c\n"

@@ -1,9 +1,26 @@
+import re
 from collections.abc import AsyncIterator, Callable
 
 from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+
+async def _reverse_source(source: AsyncIterator[bytes], separator: str,
+                          before: bool, regex: bool) -> bytes:
+    data = b"".join([chunk async for chunk in source])
+    text = data.decode(errors="replace")
+    pattern = separator if regex else re.escape(separator)
+    parts = re.split(f"({pattern})", text)
+    records: list[str] = []
+    for index in range(0, len(parts) - 1, 2):
+        records.append(parts[index + 1] +
+                       parts[index] if before else parts[index] +
+                       parts[index + 1])
+    if len(parts) % 2 == 1 and parts[-1]:
+        records.append(parts[-1])
+    records.reverse()
+    return "".join(records).encode()
 
 
 async def tac(
@@ -11,25 +28,20 @@ async def tac(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
+    separator: str = "\n",
+    before: bool = False,
+    regex: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    # Each operand is reversed independently and the outputs concatenate in
-    # operand order, like GNU tac.
     if paths:
         cache = [p.mount_path for p in paths]
         parts: list[bytes] = []
         for p in paths:
-            lines = [line async for line in AsyncLineIterator(read_stream(p))]
-            lines.reverse()
-            if lines:
-                parts.append(b"\n".join(lines) + b"\n")
+            parts.append(await _reverse_source(read_stream(p), separator,
+                                               before, regex))
         return b"".join(parts), IOResult(cache=cache)
 
     source = _resolve_source(stdin)
-    lines = [line async for line in AsyncLineIterator(source)]
-    lines.reverse()
-    if not lines:
-        return b"", IOResult()
-    return b"\n".join(lines) + b"\n", IOResult()
+    return await _reverse_source(source, separator, before, regex), IOResult()
 
 
 __all__ = ["tac"]

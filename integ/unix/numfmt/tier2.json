@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_tier2_conversion",
+      "seq": 910002,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "numfmt --from=si --to=iec-i --suffix=B 2KB",
+      "expect": {
+        "exit": 0,
+        "stdout": "2.0KiB\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from",
+        "to",
+        "suffix"
+      ]
+    },
+    {
+      "id": "numfmt_tier2_grouping",
+      "seq": 910003,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "numfmt --grouping 1234567",
+      "expect": {
+        "exit": 0,
+        "stdout": "1,234,567\n",
+        "stderr": ""
+      },
+      "flags": [
+        "grouping"
+      ]
+    },
+    {
+      "id": "numfmt_tier2_stdin_preserves_fields",
+      "seq": 910045,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf '1000 foo\\n2000   bar baz\\n' | numfmt --to=si",
+      "expect": {
+        "exit": 0,
+        "stdout": "1K foo\n2K   bar baz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "to"
+      ]
+    }
+  ]
+}

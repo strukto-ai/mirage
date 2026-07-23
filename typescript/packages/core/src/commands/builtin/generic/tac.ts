@@ -12,33 +12,39 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
-async function collectLines(source: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
-  const lines: Uint8Array[] = []
-  const iter = new AsyncLineIterator(source)
-  for await (const line of iter) lines.push(line)
-  return lines
+const ENC = new TextEncoder()
+const DEC = new TextDecoder('utf-8', { fatal: false })
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function reverseJoin(lines: Uint8Array[]): Uint8Array {
-  lines.reverse()
-  let total = 0
-  for (const l of lines) total += l.byteLength + 1
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const l of lines) {
-    out.set(l, offset)
-    offset += l.byteLength
-    out[offset] = 0x0a
-    offset += 1
+async function reverseSource(
+  source: AsyncIterable<Uint8Array>,
+  separator: string,
+  before: boolean,
+  regex: boolean,
+): Promise<Uint8Array> {
+  const text = DEC.decode(await materialize(source))
+  const pattern = regex ? separator : escapeRegex(separator)
+  const matcher = new RegExp(`(${pattern})`, 'g')
+  const parts = text.split(matcher)
+  const records: string[] = []
+  for (let index = 0; index < parts.length - 1; index += 2) {
+    records.push(
+      before
+        ? (parts[index + 1] ?? '') + (parts[index] ?? '')
+        : (parts[index] ?? '') + (parts[index + 1] ?? ''),
+    )
   }
-  return out
+  if (parts.length % 2 === 1 && parts.at(-1) !== '') records.push(parts.at(-1) ?? '')
+  return ENC.encode(records.reverse().join(''))
 }
 
 export async function tacGeneric(
@@ -46,8 +52,10 @@ export async function tacGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  // Each operand is reversed independently and the outputs concatenate in
-  // operand order, like GNU tac.
+  const separatorValue = opts.flags.s ?? opts.flags.separator
+  const separator = typeof separatorValue === 'string' ? separatorValue : '\n'
+  const before = opts.flags.b === true || opts.flags.before === true
+  const regex = opts.flags.r === true || opts.flags.regex === true
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still reverse (GNU tac).
@@ -57,7 +65,7 @@ export async function tacGeneric(
     const parts: Uint8Array[] = []
     let total = 0
     for (const o of ok) {
-      const part = reverseJoin(await collectLines(singleChunk(o.data)))
+      const part = await reverseSource(singleChunk(o.data), separator, before, regex)
       parts.push(part)
       total += part.byteLength
     }
@@ -70,7 +78,11 @@ export async function tacGeneric(
     const result: ByteSource = out
     return [result, io]
   }
-  const lines = await collectLines(resolveSource(opts.stdin))
-  const result: ByteSource = reverseJoin(lines)
+  const result: ByteSource = await reverseSource(
+    resolveSource(opts.stdin),
+    separator,
+    before,
+    regex,
+  )
   return [result, new IOResult()]
 }

@@ -54,4 +54,14 @@ describe.each(NATIVE_BACKENDS)('native paste (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('cycles custom delimiters in serial mode', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('f.txt', ENC.encode('a\nb\nc\n'))
+      expect(await env.mirage('paste -s -d, /data/f.txt')).toBe('a,b,c\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

@@ -65,6 +65,12 @@ describe('parseCommand — value flags', () => {
     expect(p.flags['-o']).toBe('/ram/out.txt')
     expect(p.pathFlagValues).toEqual(['/ram/out.txt'])
   })
+
+  it('routes an attached optional long PATH value', () => {
+    const p = parseCommand(specOf('mktemp'), ['--tmpdir=staging', 'file.XXXX'], '/data')
+    expect(p.flags['--tmpdir']).toBe('/data/staging')
+    expect(p.pathFlagValues).toEqual(['/data/staging'])
+  })
 })
 
 describe('parseCommand — numericShorthand', () => {
@@ -363,6 +369,17 @@ describe('parseCommand — optional-value long options', () => {
     const p = parseCommand(specOf('ls'), ['--color', '/data'], '/')
     expect(p.flags['--color']).toBe(true)
     expect(p.paths()).toEqual(['/data'])
+  })
+})
+
+describe('parseCommand — optional-value short options', () => {
+  it('uses only an attached value and leaves the next option intact', () => {
+    const bare = parseCommand(specOf('split'), ['-d', '-l', '2', '/input', '/prefix'], '/')
+    const attached = parseCommand(specOf('split'), ['-d10', '/input'], '/')
+    expect(bare.flags['-d']).toBe(true)
+    expect(bare.flags['-l']).toBe('2')
+    expect(bare.paths()).toEqual(['/input', '/prefix'])
+    expect(attached.flags['-d']).toBe('10')
   })
 })
 

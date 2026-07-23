@@ -43,7 +43,10 @@ async def unexpand(
     stdin: ByteSource | None = None,
     tabsize: int = 8,
     all_spaces: bool = False,
+    first_only: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if first_only:
+        all_spaces = False
     if paths:
         all_text: list[str] = []
         for p in paths:

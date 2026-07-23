@@ -43,7 +43,7 @@ def test_resource_accessor(config):
 
 def test_resource_commands(config):
     resource = DiscordResource(config)
-    # 54 native (generic factory read set incl. find and sed + bespoke
+    # 56 native (generic factory read set incl. find and sed + bespoke
     # grep/rg/head + discord_* writers + md5sum/sha1sum/sha384sum/sha512sum)
     # + 9 filetype cmds x 7 columnar exts
-    assert len(resource._commands) == 54 + 9 * 7
+    assert len(resource._commands) == 56 + 9 * 7

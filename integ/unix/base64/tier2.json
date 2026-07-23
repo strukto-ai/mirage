@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "base64_tier2_ignore_garbage",
+      "seq": 910005,
+      "targets": ["ram", "disk"],
+      "command": "printf 'aG!VsbG8=' | base64 --decode --ignore-garbage",
+      "expect": { "exit": 0, "stdout": "hello", "stderr": "" },
+      "flags": ["decode", "ignore-garbage"]
+    },
+    {
+      "id": "base64_tier2_wrap_alias",
+      "seq": 910006,
+      "targets": ["ram", "disk"],
+      "command": "printf 'abcdefghij' | base64 --wrap 4",
+      "expect": { "exit": 0, "stdout": "YWJj\nZGVm\nZ2hp\nag==\n", "stderr": "" },
+      "flags": ["wrap"]
+    }
+  ]
+}

@@ -7,16 +7,35 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
+def _split_fields(line: str, delimiter: str | None) -> list[str]:
+    return line.split(delimiter) if delimiter else line.split()
+
+
+def _field_at(fields: list[str], index: int) -> str:
+    """Return a field by index, or the empty string when the line is short.
+
+    Blank and short lines are legal input for GNU ``join``: the missing
+    field simply reads as an empty key rather than aborting the run.
+
+    Args:
+        fields (list[str]): Fields of one input line.
+        index (int): Zero-based field index to read.
+    """
+    return fields[index] if 0 <= index < len(fields) else ""
+
+
 def _build_join_map(
     lines: list[str],
     field_idx: int,
     delimiter: str | None,
+    ignore_case: bool,
 ) -> dict[str, list[list[str]]]:
     result: dict[str, list[list[str]]] = {}
     for line in lines:
-        parts = line.split(delimiter) if delimiter else line.split()
+        parts = _split_fields(line, delimiter)
         if field_idx < len(parts):
-            key = parts[field_idx]
+            key = parts[field_idx].casefold(
+            ) if ignore_case else parts[field_idx]
             if key not in result:
                 result[key] = []
             result[key].append(parts)
@@ -69,21 +88,23 @@ def _join_lines(
     only_unpairable: str | None,
     empty_value: str | None,
     output_format: str | None,
+    ignore_case: bool,
 ) -> list[str]:
-    map2 = _build_join_map(lines2, field2, sep)
+    map2 = _build_join_map(lines2, field2, sep, ignore_case)
     out_sep = sep if sep else " "
     out_lines: list[str] = []
     matched_keys2: set[str] = set()
 
     for line in lines1:
-        parts = line.split(sep) if sep else line.split()
+        parts = _split_fields(line, sep)
         if field1 >= len(parts):
             continue
         key = parts[field1]
-        if key in map2:
-            matched_keys2.add(key)
+        lookup_key = key.casefold() if ignore_case else key
+        if lookup_key in map2:
+            matched_keys2.add(lookup_key)
             if only_unpairable is None:
-                for fields2 in map2[key]:
+                for fields2 in map2[lookup_key]:
                     out_lines.append(
                         _format_row(key, parts, field1, fields2, field2,
                                     output_format, out_sep, empty_value))
@@ -94,11 +115,12 @@ def _join_lines(
 
     if also_unpairable == "2" or only_unpairable == "2":
         for line in lines2:
-            parts = line.split(sep) if sep else line.split()
+            parts = _split_fields(line, sep)
             if field2 >= len(parts):
                 continue
             key = parts[field2]
-            if key not in matched_keys2:
+            lookup_key = key.casefold() if ignore_case else key
+            if lookup_key not in matched_keys2:
                 out_lines.append(
                     _format_row(key, [], field1, parts, field2, output_format,
                                 out_sep, empty_value))
@@ -117,6 +139,10 @@ async def join_cmd(
     only_unpairable: str | None = None,
     empty_value: str | None = None,
     output_format: str | None = None,
+    ignore_case: bool = False,
+    zero_terminated: bool = False,
+    check_order: bool = False,
+    header: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.JOIN, paths[2].raw_path
@@ -125,14 +151,45 @@ async def join_cmd(
         raise ValueError("join: requires two paths")
     data1 = (await read_bytes(paths[0])).decode(errors="replace")
     data2 = (await read_bytes(paths[1])).decode(errors="replace")
-    lines1 = split_lines(data1)
-    lines2 = split_lines(data2)
+    lines1 = data1.rstrip("\0").split(
+        "\0") if zero_terminated else split_lines(data1)
+    lines2 = data2.rstrip("\0").split(
+        "\0") if zero_terminated else split_lines(data2)
+    header_lines: list[str] = []
+    if header and lines1 and lines2:
+        first1 = _split_fields(lines1.pop(0), separator)
+        first2 = _split_fields(lines2.pop(0), separator)
+        header_lines.append(
+            _format_row(_field_at(first1, field1), first1, field1, first2,
+                        field2, output_format, separator or " ", empty_value))
+    key_fn = str.casefold if ignore_case else str
+    stderr = ""
+    if check_order:
+        keys1 = [
+            key_fn(_field_at(_split_fields(line, separator), field1))
+            for line in lines1
+        ]
+        keys2 = [
+            key_fn(_field_at(_split_fields(line, separator), field2))
+            for line in lines2
+        ]
+        if keys1 != sorted(keys1):
+            stderr = "join: file 1 is not in sorted order\n"
+        elif keys2 != sorted(keys2):
+            stderr = "join: file 2 is not in sorted order\n"
     out_lines = _join_lines(lines1, lines2, field1, field2, separator,
                             also_unpairable, only_unpairable, empty_value,
-                            output_format)
+                            output_format, ignore_case)
+    out_lines = header_lines + out_lines
     if not out_lines:
-        return None, IOResult()
-    return ("\n".join(out_lines) + "\n").encode(), IOResult()
+        return None, IOResult(stderr=stderr.encode() if stderr else None,
+                              exit_code=1 if stderr else 0)
+    record_separator = "\0" if zero_terminated else "\n"
+    return (record_separator.join(out_lines) +
+            record_separator).encode(), IOResult(
+                stderr=stderr.encode() if stderr else None,
+                exit_code=1 if stderr else 0,
+            )
 
 
 __all__ = ["join_cmd"]

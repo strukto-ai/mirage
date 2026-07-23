@@ -148,8 +148,11 @@ SPECS: dict[str, CommandSpec] = {
     'paste':
     CommandSpec(
         options=(
-            Option(short="-d", value_kind=OperandKind.TEXT),
-            Option(short="-s"),
+            Option(short="-d",
+                   long="--delimiters",
+                   value_kind=OperandKind.TEXT),
+            Option(short="-s", long="--serial"),
+            Option(short="-z", long="--zero-terminated"),
         ),
         rest=Operand(kind=OperandKind.PATH),
     ),
@@ -186,11 +189,23 @@ SPECS: dict[str, CommandSpec] = {
     'split':
     CommandSpec(
         options=(
-            Option(short="-l", value_kind=OperandKind.TEXT),
-            Option(short="-b", value_kind=OperandKind.TEXT),
-            Option(short="-n", value_kind=OperandKind.TEXT),
-            Option(short="-d"),
-            Option(short="-a", value_kind=OperandKind.TEXT),
+            Option(short="-l", long="--lines", value_kind=OperandKind.TEXT),
+            Option(short="-b", long="--bytes", value_kind=OperandKind.TEXT),
+            Option(short="-n", long="--number", value_kind=OperandKind.TEXT),
+            Option(short="-d",
+                   long="--numeric-suffixes",
+                   value_kind=OperandKind.TEXT,
+                   value_optional=True),
+            Option(short="-x",
+                   long="--hex-suffixes",
+                   value_kind=OperandKind.TEXT,
+                   value_optional=True),
+            Option(short="-a",
+                   long="--suffix-length",
+                   value_kind=OperandKind.TEXT),
+            Option(long="--additional-suffix", value_kind=OperandKind.TEXT),
+            Option(short="-t", long="--separator",
+                   value_kind=OperandKind.TEXT),
         ),
         positional=(
             Operand(kind=OperandKind.PATH),
@@ -200,10 +215,16 @@ SPECS: dict[str, CommandSpec] = {
     'shuf':
     CommandSpec(
         options=(
-            Option(short="-n", value_kind=OperandKind.TEXT),
-            Option(short="-e"),
-            Option(short="-z"),
-            Option(short="-r"),
+            Option(short="-n",
+                   long="--head-count",
+                   value_kind=OperandKind.TEXT),
+            Option(short="-e", long="--echo"),
+            Option(short="-z", long="--zero-terminated"),
+            Option(short="-r", long="--repeat"),
+            Option(short="-i",
+                   long="--input-range",
+                   value_kind=OperandKind.TEXT),
+            Option(short="-o", long="--output", value_kind=OperandKind.PATH),
         ),
         rest=Operand(kind=OperandKind.PATH),
     ),
@@ -215,6 +236,9 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-3"),
             Option(long="--check-order"),
             Option(long="--nocheck-order"),
+            Option(long="--output-delimiter", value_kind=OperandKind.TEXT),
+            Option(long="--total"),
+            Option(short="-z", long="--zero-terminated"),
         ),
         positional=(
             Operand(kind=OperandKind.PATH),
@@ -224,11 +248,16 @@ SPECS: dict[str, CommandSpec] = {
     'csplit':
     CommandSpec(
         options=(
-            Option(short="-f", value_kind=OperandKind.PATH),
-            Option(short="-n", value_kind=OperandKind.TEXT),
-            Option(short="-b", value_kind=OperandKind.TEXT),
-            Option(short="-k"),
-            Option(short="-s"),
+            Option(short="-f", long="--prefix", value_kind=OperandKind.PATH),
+            Option(short="-n", long="--digits", value_kind=OperandKind.TEXT),
+            Option(short="-b",
+                   long="--suffix-format",
+                   value_kind=OperandKind.TEXT),
+            Option(short="-k", long="--keep-files"),
+            Option(short="-s", long="--quiet"),
+            Option(long="--silent"),
+            Option(long="--suppress-matched"),
+            Option(short="-z", long="--elide-empty-files"),
         ),
         positional=(Operand(kind=OperandKind.PATH), ),
         rest=Operand(kind=OperandKind.TEXT),
@@ -245,10 +274,26 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-v", value_kind=OperandKind.TEXT),
             Option(short="-e", value_kind=OperandKind.TEXT),
             Option(short="-o", value_kind=OperandKind.TEXT),
+            Option(short="-i", long="--ignore-case"),
+            Option(short="-j", value_kind=OperandKind.TEXT),
+            Option(short="-z", long="--zero-terminated"),
+            Option(long="--check-order"),
+            Option(long="--nocheck-order"),
+            Option(long="--header"),
         ),
         positional=(
             Operand(kind=OperandKind.PATH),
             Operand(kind=OperandKind.PATH),
         ),
+    ),
+    'numfmt':
+    CommandSpec(
+        options=(
+            Option(long="--to", value_kind=OperandKind.TEXT),
+            Option(long="--from", value_kind=OperandKind.TEXT),
+            Option(long="--suffix", value_kind=OperandKind.TEXT),
+            Option(long="--grouping"),
+        ),
+        rest=Operand(kind=OperandKind.TEXT),
     ),
 }

@@ -19,6 +19,8 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,16 +33,19 @@ async def paste(
     stdin: ByteSource | None = None,
     d: str | None = None,
     s: bool = False,
+    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["paste"])
     paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_paste(paths,
-                               read_bytes=bound_op(ops.read_bytes, accessor,
-                                                   index),
-                               stdin=stdin,
-                               delimiter=d if d else "\t",
-                               serial=s)
+    return await generic_paste(
+        paths,
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        stdin=stdin,
+        delimiters=d or fl.as_str("delimiters") or "\t",
+        serial=s or fl.as_bool("serial"),
+        zero_terminated=(z or fl.as_bool("zero_terminated")))
 
 
 BUILDER = Builder('paste', paste, None, False, None, read=True)

@@ -45,7 +45,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--tabs",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-t",
@@ -54,7 +54,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--initial",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-i",

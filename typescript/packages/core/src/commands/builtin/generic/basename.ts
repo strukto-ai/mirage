@@ -18,8 +18,16 @@ import { gnuBasename } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 
-export const basenameFn: CommandFn = (_accessor, _paths, texts) => {
+export const basenameFn: CommandFn = (_accessor, _paths, texts, opts) => {
+  const suffixValue = opts.flags.s ?? opts.flags.suffix
+  const suffix = typeof suffixValue === 'string' ? suffixValue : undefined
+  const multiple = opts.flags.a === true || opts.flags.multiple === true || suffix !== undefined
   const lines =
-    texts.length === 2 ? [gnuBasename(texts[0] ?? '', texts[1])] : texts.map((t) => gnuBasename(t))
-  return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
+    suffix !== undefined
+      ? texts.map((text) => gnuBasename(text, suffix))
+      : texts.length === 2 && !multiple
+        ? [gnuBasename(texts[0] ?? '', texts[1])]
+        : texts.map((text) => gnuBasename(text))
+  const separator = opts.flags.z === true || opts.flags.zero === true ? '\0' : '\n'
+  return [ENC.encode(lines.join(separator) + separator), new IOResult()]
 }

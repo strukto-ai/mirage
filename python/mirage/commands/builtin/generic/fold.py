@@ -27,6 +27,19 @@ def _fold_line(line: str, width: int, break_spaces: bool) -> str:
     return "\n".join(parts)
 
 
+def _fold_bytes(data: bytes, width: int) -> bytes:
+    lines = data.splitlines(keepends=True)
+    output = bytearray()
+    for line in lines:
+        ending = b"\n" if line.endswith(b"\n") else b""
+        body = line[:-1] if ending else line
+        for offset in range(0, len(body), width):
+            output.extend(body[offset:offset + width])
+            if offset + width < len(body) or ending:
+                output.extend(b"\n")
+    return bytes(output)
+
+
 async def fold(
     paths: list[PathSpec],
     *,
@@ -34,20 +47,29 @@ async def fold(
     stdin: ByteSource | None = None,
     width: int = 80,
     break_spaces: bool = False,
+    count_bytes: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         all_lines: list[str] = []
         for p in paths:
-            data = (await read_bytes(p)).decode(errors="replace")
+            raw = await read_bytes(p)
+            if count_bytes:
+                all_lines.append(
+                    _fold_bytes(raw,
+                                width).decode(errors="replace").rstrip("\n"))
+                continue
+            data = raw.decode(errors="replace")
             for line in split_lines(data):
                 all_lines.append(_fold_line(line, width, break_spaces))
         return (("\n".join(all_lines) +
                  "\n").encode() if all_lines else b""), IOResult()
 
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
+    stdin_raw = await _read_stdin_async(stdin)
+    if stdin_raw is None:
         raise ValueError("fold: missing operand")
-    lines = split_lines(raw.decode(errors="replace"))
+    if count_bytes:
+        return _fold_bytes(stdin_raw, width), IOResult()
+    lines = split_lines(stdin_raw.decode(errors="replace"))
     result = [_fold_line(ln, width, break_spaces) for ln in lines]
     return (("\n".join(result) + "\n").encode() if result else b""), IOResult()
 

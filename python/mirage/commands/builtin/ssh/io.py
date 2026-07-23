@@ -28,6 +28,7 @@ from mirage.core.ssh.rm import rm_r as _rm_r
 from mirage.core.ssh.rmdir import rmdir as _rmdir
 from mirage.core.ssh.stat import stat as _stat
 from mirage.core.ssh.stream import read_stream as _read_stream
+from mirage.core.ssh.truncate import truncate as _truncate
 from mirage.core.ssh.unlink import unlink as _unlink
 from mirage.core.ssh.write import write_bytes as _write
 
@@ -51,6 +52,7 @@ IO = CommandIO(
     find=_find,
     du_total=_du,
     du_all=_du_all,
+    truncate=_truncate,
 )
 
 resolve_glob = IO.resolve_glob

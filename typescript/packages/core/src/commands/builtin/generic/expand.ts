@@ -66,8 +66,9 @@ export async function expandGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const tabsize = typeof opts.flags.t === 'string' ? Number.parseInt(opts.flags.t, 10) : 8
-  const leadingOnly = opts.flags.i === true
+  const tabsValue = opts.flags.t ?? opts.flags.tabs
+  const tabsize = typeof tabsValue === 'string' ? Number.parseInt(tabsValue, 10) : 8
+  const leadingOnly = opts.flags.i === true || opts.flags.initial === true
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still expand (GNU expand).

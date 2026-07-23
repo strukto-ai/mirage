@@ -69,6 +69,7 @@ function matchMixedCluster(
 export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): ParsedArgs {
   const boolFlags = new Set<string>()
   const valueFlags = new Set<string>()
+  const optionalValueFlags = new Set<string>()
   const longBoolFlags = new Set<string>()
   const longValueFlags = new Set<string>()
   const longOptionalFlags = new Set<string>()
@@ -80,6 +81,10 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     if (opt.short !== null) {
       if (opt.valueKind === OperandKind.NONE) {
         boolFlags.add(opt.short)
+      } else if (opt.valueOptional) {
+        boolFlags.add(opt.short)
+        optionalValueFlags.add(opt.short)
+        valueFlagKinds.set(opt.short, opt.valueKind)
       } else {
         valueFlags.add(opt.short)
         valueFlagKinds.set(opt.short, opt.valueKind)
@@ -95,6 +100,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         // via `=`; a detached next token is an operand.
         longBoolFlags.add(opt.long)
         longOptionalFlags.add(opt.long)
+        valueFlagKinds.set(opt.long, opt.valueKind)
       } else {
         longValueFlags.add(opt.long)
         valueFlagKinds.set(opt.long, opt.valueKind)
@@ -206,6 +212,16 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         i += 1
         continue
       }
+      let matchedOptional = false
+      for (const vf of optionalValueFlags) {
+        if (tok.startsWith(vf) && tok.length > vf.length) {
+          setValueFlag(flags, vf, tok.slice(vf.length), repeatFlags)
+          i += 1
+          matchedOptional = true
+          break
+        }
+      }
+      if (matchedOptional) continue
       let matchedValue = false
       for (const vf of valueFlags) {
         if (tok === vf && i + 1 < filteredArgv.length) {

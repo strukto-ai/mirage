@@ -46,10 +46,91 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--check",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--binary",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-b",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--text",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-t",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--tag",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--warn",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-w",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--zero",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--strict",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--ignore-missing",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--status",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--quiet",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
       "value_kind": "none",
       "value_optional": false
     }

@@ -288,6 +288,9 @@ def test_all_commands_have_specs():
         "js",
         "node",
         "history",
+        "numfmt",
+        "od",
+        "truncate",
     }
     assert set(SPECS.keys()) == expected
 

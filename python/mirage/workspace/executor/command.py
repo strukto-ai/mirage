@@ -42,6 +42,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import FileStat, PathSpec, word_text
 from mirage.utils.errors import format_fs_error
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
@@ -59,6 +60,37 @@ from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
+
+
+def _path_flag_scopes(cmd_name: str, argv: list[str],
+                      cwd: str) -> list[PathSpec]:
+    spec = SPECS.get(cmd_name)
+    if spec is None:
+        return []
+    parsed = parse_command(spec, argv, cwd)
+    return [
+        PathSpec(virtual=value,
+                 directory=value,
+                 resource_path="",
+                 raw_path=value) for value in parsed.path_flag_values
+    ]
+
+
+def _merge_scopes(positional: list[PathSpec],
+                  flag_scopes: list[PathSpec]) -> list[PathSpec]:
+    """Combine positional and path-flag scopes, keeping operand order.
+
+    Args:
+        positional (list[PathSpec]): Path operands parsed from the argv tail.
+        flag_scopes (list[PathSpec]): Paths carried by path-valued flags.
+    """
+    merged = list(positional)
+    seen = {p.virtual for p in merged}
+    for scope in flag_scopes:
+        if scope.virtual not in seen:
+            seen.add(scope.virtual)
+            merged.append(scope)
+    return merged
 
 
 async def _exec_node(cmd_str: str, io: IOResult,
@@ -358,6 +390,7 @@ def _parse_flags(
     cmd_name: str,
     cwd: str,
     str_flag_paths: bool = False,
+    mount_prefix: str = "",
 ) -> _ParsedCommand:
     """Parse flags from classified parts, recovering PathSpec for PATH values.
 
@@ -377,6 +410,7 @@ def _parse_flags(
             virtual-path strings instead of PathSpec. Cross-mount
             strategies read flags through FlagView, which type-checks
             str, so they get the string view.
+        mount_prefix (str): prefix stripped from synthesized PATH flag keys.
 
     Returns:
         _ParsedCommand: positional paths, positional texts, parsed flag dict
@@ -426,7 +460,8 @@ def _parse_flags(
                             PathSpec(virtual=part,
                                      directory=part[:part.rfind("/") + 1]
                                      or "/",
-                                     resource_path="",
+                                     resource_path=mount_key(
+                                         part, mount_prefix),
                                      resolved=True)) for part in value
                     ]
                 elif key in single_path_keys and isinstance(value, str):
@@ -434,7 +469,7 @@ def _parse_flags(
                         value,
                         PathSpec(virtual=value,
                                  directory=value[:value.rfind("/") + 1] or "/",
-                                 resource_path="",
+                                 resource_path=mount_key(value, mount_prefix),
                                  resolved=True))
                 elif isinstance(value, str) and value in scope_map:
                     flag_kwargs[key] = scope_map[value]
@@ -595,6 +630,12 @@ async def handle_command(
                                                          exit_code=127,
                                                          stderr=err)
 
+    # Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
+    # positional operands, so they join routing and mount validation instead
+    # of being dropped whenever a positional path is also present.
+    routing_scopes = _merge_scopes(
+        path_scopes, _path_flag_scopes(cmd_name, raw_argv, session.cwd))
+
     find_expr_tokens: list[str] | None = None
     if cmd_name == "find":
         find_expr_tokens = find_expr_tail(raw_argv)
@@ -669,10 +710,11 @@ async def handle_command(
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
         return stdout, io, await _exec_node(cmd_str, io, path_scopes)
 
-    # Reject unsupported cross-mount commands
-    if len(path_scopes) >= 2:
+    # Reject unsupported cross-mount commands. Path-flag targets count: a
+    # command bound to one mount cannot write its output through another.
+    if len(routing_scopes) >= 2:
         mount_prefixes = set()
-        for s in path_scopes:
+        for s in routing_scopes:
             try:
                 mount_prefixes.add(registry.mount_for(s.virtual).prefix)
             except ValueError:
@@ -688,7 +730,7 @@ async def handle_command(
             ), ExecutionNode(command=cmd_str, exit_code=1)
 
     try:
-        mount = await registry.resolve_mount(cmd_name, path_scopes,
+        mount = await registry.resolve_mount(cmd_name, routing_scopes,
                                              session.cwd)
     except MountCommandUnsupported as exc:
         err = f"{exc}\n".encode()
@@ -704,7 +746,7 @@ async def handle_command(
 
     try:
         assert_mount_allowed(mount.prefix)
-        for ps in path_scopes:
+        for ps in routing_scopes:
             target = registry.mount_for(ps.virtual)
             assert_mount_allowed(target.prefix)
     except PermissionError as exc:
@@ -715,8 +757,11 @@ async def handle_command(
                                                          stderr=err)
 
     # Parse flags upstream — mount receives clean args
-    single_parsed = _parse_flags(parts[1:], mount.spec_for(cmd_name), cmd_name,
-                                 session.cwd)
+    single_parsed = _parse_flags(parts[1:],
+                                 mount.spec_for(cmd_name),
+                                 cmd_name,
+                                 session.cwd,
+                                 mount_prefix=mount.prefix.rstrip("/"))
     paths, texts, flag_kwargs, parse_warnings = (single_parsed.paths,
                                                  single_parsed.texts,
                                                  single_parsed.flag_kwargs,

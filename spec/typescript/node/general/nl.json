@@ -45,7 +45,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--body-numbering",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-b",
@@ -54,7 +54,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--section-delimiter",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
@@ -63,7 +63,52 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--footer-numbering",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-f",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--header-numbering",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-h",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--join-blank-lines",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-l",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--number-format",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-n",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--no-renumber",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-p",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--starting-line-number",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
@@ -72,7 +117,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--line-increment",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-i",
@@ -81,7 +126,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--number-width",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
@@ -90,7 +135,7 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--number-separator",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",

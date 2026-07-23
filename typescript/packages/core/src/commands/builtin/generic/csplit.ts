@@ -27,7 +27,11 @@ function splitLinesNoTrailing(text: string): string[] {
   return stripped === '' ? [] : stripped.split('\n')
 }
 
-function splitByPatterns(lines: readonly string[], patterns: readonly string[]): string[][] {
+function splitByPatterns(
+  lines: readonly string[],
+  patterns: readonly string[],
+  suppressMatched: boolean,
+): string[][] {
   const parts: string[][] = []
   let currentStart = 0
   for (const pat of patterns) {
@@ -36,7 +40,7 @@ function splitByPatterns(lines: readonly string[], patterns: readonly string[]):
       for (let idx = currentStart; idx < lines.length; idx++) {
         if (regex.test(lines[idx] ?? '')) {
           parts.push(lines.slice(currentStart, idx))
-          currentStart = idx
+          currentStart = suppressMatched ? idx + 1 : idx
           break
         }
       }
@@ -58,6 +62,17 @@ function splitByPatterns(lines: readonly string[], patterns: readonly string[]):
 function padNum(n: number, digits: number): string {
   const s = String(n)
   return s.length >= digits ? s : '0'.repeat(digits - s.length) + s
+}
+
+function formatSuffix(index: number, digits: number, format: string | null): string {
+  if (format === null) return padNum(index, digits)
+  return format.replace(/%0?(\d*)([doxX])/, (_match, widthRaw: string, kind: string) => {
+    const width = widthRaw === '' ? 0 : Number.parseInt(widthRaw, 10)
+    const radix = kind === 'o' ? 8 : kind === 'x' || kind === 'X' ? 16 : 10
+    let value = index.toString(radix)
+    if (kind === 'X') value = value.toUpperCase()
+    return value.padStart(width, '0')
+  })
 }
 
 function makePathSpec(virtual: string): PathSpec {
@@ -86,15 +101,21 @@ export async function csplitGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const rawPrefix = typeof opts.flags.f === 'string' ? opts.flags.f : 'xx'
+  const prefixValue = opts.flags.f ?? opts.flags.prefix
+  const rawPrefix = typeof prefixValue === 'string' ? prefixValue : 'xx'
   const prefix = new PathSpec({
     virtual: rawPrefix,
     directory: rawPrefix,
     resourcePath: mountKey(rawPrefix, opts.mountPrefix ?? ''),
   }).mountPath
-  const digits = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 2
-  const quiet = opts.flags.s === true
-  const keep = opts.flags.k === true
+  const digitsValue = opts.flags.n ?? opts.flags.digits
+  const suffixValue = opts.flags.b ?? opts.flags.suffix_format
+  const digits = typeof digitsValue === 'string' ? Number.parseInt(digitsValue, 10) : 2
+  const suffixFormat = typeof suffixValue === 'string' ? suffixValue : null
+  const quiet = opts.flags.s === true || opts.flags.quiet === true || opts.flags.silent === true
+  const keep = opts.flags.k === true || opts.flags.keep_files === true
+  const suppressMatched = opts.flags.suppress_matched === true
+  const elideEmpty = opts.flags.z === true || opts.flags.elide_empty_files === true
   let raw: Uint8Array
   if (paths.length > 0) {
     const first = paths[0]
@@ -106,13 +127,14 @@ export async function csplitGeneric(
   }
   const text = DEC.decode(raw)
   const lines = splitLinesNoTrailing(text)
-  const parts = splitByPatterns(lines, texts)
+  const parts = splitByPatterns(lines, texts, suppressMatched)
   const writes: Record<string, Uint8Array> = {}
   const sizes: string[] = []
   try {
     for (let idx = 0; idx < parts.length; idx++) {
       const part = parts[idx] ?? []
-      const filename = prefix + padNum(idx, digits)
+      if (elideEmpty && part.length === 0) continue
+      const filename = prefix + formatSuffix(idx, digits, suffixFormat)
       const data = part.length > 0 ? ENC.encode(part.join('\n') + '\n') : new Uint8Array(0)
       await writePart(write, filename, data, writes)
       sizes.push(String(data.byteLength))

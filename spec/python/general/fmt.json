@@ -46,11 +46,65 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--width",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
       "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--goal",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-g",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--crown-margin",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-c",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--prefix",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-p",
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--split-only",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-s",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--tagged-paragraph",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-t",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--uniform-spacing",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-u",
+      "value_kind": "none",
       "value_optional": false
     }
   ],

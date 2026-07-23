@@ -19,6 +19,8 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,9 +33,12 @@ async def fold(
     stdin: ByteSource | None = None,
     w: str | None = None,
     s: bool = False,
+    b: bool = False,
+    c: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["fold"])
     paths, err = await resolve_readable(ops, accessor, paths, index, "fold")
     if err and not paths:
         return None, IOResult(exit_code=1, stderr=err)
@@ -42,8 +47,9 @@ async def fold(
                            read_bytes=bound_op(ops.read_bytes, accessor,
                                                index),
                            stdin=stdin,
-                           width=int(w) if w is not None else 80,
-                           break_spaces=s), err)
+                           width=int(w or fl.as_str("width") or "80"),
+                           break_spaces=s or fl.as_bool("spaces"),
+                           count_bytes=b or fl.as_bool("bytes")), err)
 
 
 BUILDER = Builder('fold', fold, None, False, None, read=True)

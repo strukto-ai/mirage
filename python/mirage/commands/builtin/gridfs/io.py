@@ -28,6 +28,7 @@ from mirage.core.gridfs.rm import rm_r as _rm_r
 from mirage.core.gridfs.rmdir import rmdir as _rmdir
 from mirage.core.gridfs.stat import stat as _stat
 from mirage.core.gridfs.stream import read_stream as _read_stream
+from mirage.core.gridfs.truncate import truncate as _truncate
 from mirage.core.gridfs.unlink import unlink as _unlink
 from mirage.core.gridfs.write import write_bytes as _write
 
@@ -51,6 +52,7 @@ IO = CommandIO(
     find=_find,
     du_total=_du,
     du_all=_du_all,
+    truncate=_truncate,
 )
 
 resolve_glob = IO.resolve_glob

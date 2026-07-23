@@ -21,6 +21,8 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,22 +38,28 @@ async def csplit(
     b: str | None = None,
     k: bool = False,
     s: bool = False,
+    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["csplit"])
     paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_csplit(paths,
-                                texts,
-                                read_bytes=bound_op(ops.read_bytes, accessor,
-                                                    index),
-                                write_bytes=partial(
-                                    ops.require(Operation.WRITE), accessor),
-                                stdin=stdin,
-                                prefix=f or "xx",
-                                digits=int(n) if n else 2,
-                                suffix_format=b,
-                                keep_on_error=k,
-                                silent=s)
+    prefix_flag = fl.raw("prefix")
+    prefix = prefix_flag if isinstance(prefix_flag,
+                                       (str, PathSpec)) else f or "xx"
+    return await generic_csplit(
+        paths,
+        texts,
+        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        write_bytes=partial(ops.require(Operation.WRITE), accessor),
+        stdin=stdin,
+        prefix=prefix,
+        digits=int(n or fl.as_str("digits") or "2"),
+        suffix_format=b or fl.as_str("suffix_format"),
+        keep_on_error=k or fl.as_bool("keep_files"),
+        silent=s or fl.as_bool("quiet") or fl.as_bool("silent"),
+        suppress_matched=fl.as_bool("suppress_matched"),
+        elide_empty=z or fl.as_bool("elide_empty_files"))
 
 
 BUILDER = Builder('csplit',

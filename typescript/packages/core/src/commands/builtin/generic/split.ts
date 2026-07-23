@@ -20,6 +20,9 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
+import { parseCount } from './od.ts'
+
+const ENC = new TextEncoder()
 
 function alphaSuffix(index: number, length: number): string {
   const chars: string[] = []
@@ -36,6 +39,10 @@ function numericSuffix(index: number, length: number): string {
   return s.length >= length ? s : '0'.repeat(length - s.length) + s
 }
 
+function hexSuffix(index: number, length: number): string {
+  return index.toString(16).padStart(length, '0')
+}
+
 function makePathSpec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
@@ -43,6 +50,17 @@ function makePathSpec(virtual: string): PathSpec {
     resourcePath: stripSlash(virtual),
     resolved: true,
   })
+}
+
+function outputPath(
+  prefix: string,
+  suffix: (index: number, length: number) => string,
+  index: number,
+  start: number,
+  length: number,
+  additional: string,
+): string {
+  return prefix + suffix(index + start, length) + additional
 }
 
 function joinLines(lines: readonly Uint8Array[]): Uint8Array {
@@ -59,6 +77,42 @@ function joinLines(lines: readonly Uint8Array[]): Uint8Array {
   return out
 }
 
+async function* recordIterator(
+  source: AsyncIterable<Uint8Array>,
+  separator: number,
+): AsyncIterable<Uint8Array> {
+  let pending = new Uint8Array(0)
+  for await (const chunk of source) {
+    const merged = new Uint8Array(pending.byteLength + chunk.byteLength)
+    merged.set(pending)
+    merged.set(chunk, pending.byteLength)
+    let start = 0
+    for (let index = 0; index < merged.byteLength; index++) {
+      if (merged[index] === separator) {
+        yield merged.slice(start, index)
+        start = index + 1
+      }
+    }
+    pending = merged.slice(start)
+  }
+  if (pending.byteLength > 0) yield pending
+}
+
+function joinRecords(records: readonly Uint8Array[], separator: number): Uint8Array {
+  if (separator === 0x0a) return joinLines(records)
+  let total = records.length
+  for (const record of records) total += record.byteLength
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const record of records) {
+    out.set(record, offset)
+    offset += record.byteLength
+    out[offset] = separator
+    offset += 1
+  }
+  return out
+}
+
 export async function splitGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -67,21 +121,43 @@ export async function splitGeneric(
 ): Promise<CommandFnResult> {
   if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
   const prefixPath = paths.length >= 2 && paths[1] !== undefined ? paths[1].mountPath : 'x'
-  const linesFlag = typeof opts.flags.args_l === 'string' ? opts.flags.args_l : null
-  const bFlag = typeof opts.flags.b === 'string' ? opts.flags.b : null
-  const nFlag = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const aFlag = typeof opts.flags.a === 'string' ? opts.flags.a : null
-  const dFlag = opts.flags.d === true
+  const linesValue = opts.flags.args_l ?? opts.flags.lines
+  const bytesValue = opts.flags.b ?? opts.flags.bytes
+  const numberValue = opts.flags.n ?? opts.flags.number
+  const lengthValue = opts.flags.a ?? opts.flags.suffix_length
+  const numericValue = opts.flags.d ?? opts.flags.numeric_suffixes
+  const hexValue = opts.flags.x ?? opts.flags.hex_suffixes
+  const separatorValue = opts.flags.t ?? opts.flags.separator
+  const linesFlag = typeof linesValue === 'string' ? linesValue : null
+  const bFlag = typeof bytesValue === 'string' ? bytesValue : null
+  const nFlag = typeof numberValue === 'string' ? numberValue : null
+  const aFlag = typeof lengthValue === 'string' ? lengthValue : null
+  const dFlag = numericValue !== undefined
+  const xFlag = hexValue !== undefined
+  const suffixStart =
+    typeof numericValue === 'string'
+      ? Number.parseInt(numericValue, 10)
+      : typeof hexValue === 'string'
+        ? Number.parseInt(hexValue, 10)
+        : 0
+  const additionalSuffix =
+    typeof opts.flags.additional_suffix === 'string' ? opts.flags.additional_suffix : ''
+  const separator =
+    separatorValue === '\\0'
+      ? 0
+      : typeof separatorValue === 'string'
+        ? (ENC.encode(separatorValue)[0] ?? 0x0a)
+        : 0x0a
   const linesPerFile =
     linesFlag !== null
       ? Number.parseInt(linesFlag, 10)
       : bFlag === null && nFlag === null
         ? 1000
         : 0
-  const byteLimit = bFlag !== null ? Number.parseInt(bFlag, 10) : 0
-  const nChunks = nFlag !== null ? Number.parseInt(nFlag, 10) : 0
+  const byteLimit = bFlag !== null ? parseCount(bFlag) : 0
+  const nChunks = nFlag !== null ? Number.parseInt(nFlag.split('/').at(-1) ?? nFlag, 10) : 0
   const suffixLen = aFlag !== null ? Number.parseInt(aFlag, 10) : 2
-  const suffixFn = dFlag ? numericSuffix : alphaSuffix
+  const suffixFn = xFlag ? hexSuffix : dFlag ? numericSuffix : alphaSuffix
 
   let source: AsyncIterable<Uint8Array>
   const first = paths[0]
@@ -112,7 +188,7 @@ export async function splitGeneric(
     for (let i = 0; i < nChunks; i++) {
       const part = allData.slice(offset, offset + chunkSize)
       if (part.byteLength === 0) break
-      const outPath = prefixPath + suffixFn(i, suffixLen)
+      const outPath = outputPath(prefixPath, suffixFn, i, suffixStart, suffixLen, additionalSuffix)
       await write(makePathSpec(outPath), part)
       writes[outPath] = part
       offset += chunkSize
@@ -125,7 +201,14 @@ export async function splitGeneric(
       merged.set(c, buf.byteLength)
       buf = merged
       while (buf.byteLength >= byteLimit) {
-        const outPath = prefixPath + suffixFn(fileIdx, suffixLen)
+        const outPath = outputPath(
+          prefixPath,
+          suffixFn,
+          fileIdx,
+          suffixStart,
+          suffixLen,
+          additionalSuffix,
+        )
         const data = buf.slice(0, byteLimit)
         await write(makePathSpec(outPath), data)
         writes[outPath] = data
@@ -134,18 +217,33 @@ export async function splitGeneric(
       }
     }
     if (buf.byteLength > 0) {
-      const outPath = prefixPath + suffixFn(fileIdx, suffixLen)
+      const outPath = outputPath(
+        prefixPath,
+        suffixFn,
+        fileIdx,
+        suffixStart,
+        suffixLen,
+        additionalSuffix,
+      )
       await write(makePathSpec(outPath), buf)
       writes[outPath] = buf
     }
   } else {
     const lineBuf: Uint8Array[] = []
-    const iter = new AsyncLineIterator(source)
+    const iter =
+      separator === 0x0a ? new AsyncLineIterator(source) : recordIterator(source, separator)
     for await (const line of iter) {
       lineBuf.push(line)
       if (lineBuf.length >= linesPerFile) {
-        const outPath = prefixPath + suffixFn(fileIdx, suffixLen)
-        const data = joinLines(lineBuf)
+        const outPath = outputPath(
+          prefixPath,
+          suffixFn,
+          fileIdx,
+          suffixStart,
+          suffixLen,
+          additionalSuffix,
+        )
+        const data = joinRecords(lineBuf, separator)
         await write(makePathSpec(outPath), data)
         writes[outPath] = data
         lineBuf.length = 0
@@ -153,8 +251,15 @@ export async function splitGeneric(
       }
     }
     if (lineBuf.length > 0) {
-      const outPath = prefixPath + suffixFn(fileIdx, suffixLen)
-      const data = joinLines(lineBuf)
+      const outPath = outputPath(
+        prefixPath,
+        suffixFn,
+        fileIdx,
+        suffixStart,
+        suffixLen,
+        additionalSuffix,
+      )
+      const data = joinRecords(lineBuf, separator)
       await write(makePathSpec(outPath), data)
       writes[outPath] = data
     }

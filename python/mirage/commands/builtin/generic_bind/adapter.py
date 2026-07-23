@@ -85,6 +85,7 @@ class Operation(StrEnum):
     RMDIR = "rmdir"
     RENAME = "rename"
     COPY = "copy"
+    TRUNCATE = "truncate"
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,7 @@ class CommandIO:
             Operation.RMDIR: self.rmdir,
             Operation.RENAME: self.rename,
             Operation.COPY: self.copy,
+            Operation.TRUNCATE: self.truncate,
         }
         return operations[op]
 
