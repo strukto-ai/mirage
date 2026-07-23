@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "rm_interactive_noops",
+      "seq": 611030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/rmf && touch /data/rmf/a /data/rmf/b && rm -I /data/rmf/a && rm -i /data/rmf/b && ls /data/rmf",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "I",
+        "i"
+      ]
+    }
+  ]
+}

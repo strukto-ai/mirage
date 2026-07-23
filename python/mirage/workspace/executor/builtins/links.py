@@ -38,7 +38,20 @@ async def handle_ln(
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
-    flags, operands = split_flags(args, "sfnv")
+    """ln -s TARGET LINK: create a namespace symbolic link.
+
+    Flags: -f overwrite an existing link, -v report the link, -r store
+    the target relative to the link's directory (GNU --relative). -n
+    (--no-dereference) and -T (--no-target-directory) are accepted no-ops:
+    a namespace link name is never dereferenced nor treated as a directory
+    to descend into, so both are already the effective behavior.
+
+    Args:
+        namespace (Namespace): addressing authority holding the link table.
+        session (Session): session whose cwd resolves relative operands.
+        args (list[str | PathSpec]): args after the command name.
+    """
+    flags, operands = split_flags(args, "sfnvrT")
     if len(operands) < 2:
         return fail("ln", "ln: missing file operand\n")
     # GNU: with more than two operands the last must be a directory;
@@ -50,6 +63,20 @@ async def handle_ln(
             f"Not a directory\n")
     link_abs = abs_path(operands[1], session.cwd)
     target_typed = word_text(operands[0])
+    if "r" in flags:
+        # --relative: rewrite the target relative to the link's own
+        # directory so the link stays valid addressed from anywhere. GNU
+        # canonicalizes existing symlink components of both ends first, so
+        # an aliased directory resolves to its real path (the link survives
+        # the alias being moved/removed); fall back to lexical on a loop.
+        link_dir = posixpath.dirname(link_abs) or "/"
+        target_abs = abs_path(operands[0], session.cwd)
+        try:
+            target_abs = namespace.follow(target_abs)
+            link_dir = namespace.follow(link_dir)
+        except CycleError:
+            pass
+        target_typed = posixpath.relpath(target_abs, link_dir)
     exists = namespace.is_link(link_abs) and "f" not in flags
     if namespace.is_mount_root(link_abs) or exists:
         return fail(

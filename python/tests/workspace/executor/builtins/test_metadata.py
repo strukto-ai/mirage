@@ -20,7 +20,8 @@ from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
-from mirage.workspace.executor.builtins.metadata import (parse_mode,
+from mirage.workspace.executor.builtins.metadata import (parse_group,
+                                                         parse_mode,
                                                          parse_owner,
                                                          parse_touch_stamp)
 
@@ -64,6 +65,12 @@ def test_parse_owner_forms():
     assert parse_owner("alice") == ("alice", None)
     assert parse_owner(":dev") == (None, "dev")
     assert parse_owner("500:501") == (500, 501)
+
+
+def test_parse_group_forms():
+    assert parse_group("staff") == "staff"
+    assert parse_group("20") == 20
+    assert parse_group("") is None
 
 
 def test_parse_touch_stamp_posix():
@@ -178,6 +185,69 @@ async def test_chown_renders_owner_and_group():
     assert code == 0
     _, out, _ = await _run(ws, "ls -l /data")
     assert " 500 dev " in out
+
+
+@pytest.mark.asyncio
+async def test_chgrp_renders_group_keeps_default_owner():
+    ws = _make_ws()
+    code, _, err = await _run(ws, "chgrp staff /data/f.txt")
+    assert code == 0, err
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert " user staff " in out
+
+
+@pytest.mark.asyncio
+async def test_chgrp_changes_only_group_keeping_chown_owner():
+    ws = _make_ws()
+    await _run(ws, "chown alice:devs /data/f.txt")
+    code, _, err = await _run(ws, "chgrp 20 /data/f.txt")
+    assert code == 0, err
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert " alice 20 " in out
+
+
+@pytest.mark.asyncio
+async def test_chgrp_error_shapes():
+    ws = _make_ws()
+    assert (await _run(ws, "chgrp staff"))[0] == 2
+    assert (await _run(ws, "chgrp '' /data/f.txt"))[0] == 1
+    assert (await _run(ws, "chgrp -R staff /data"))[0] == 2
+    code, _, err = await _run(ws, "chgrp staff /data/nope.txt")
+    assert code == 1
+    assert "nope.txt" in err
+
+
+@pytest.mark.asyncio
+async def test_chgrp_h_targets_link_not_target():
+    ws = _make_ws()
+    await _run(ws, "ln -s /data/f.txt /data/link")
+    code, _, err = await _run(ws, "chgrp -h ops /data/link")
+    assert code == 0, err
+    # stat follows the link; -h wrote the link node, so the target is clean.
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
+    assert st.gid is None
+
+
+@pytest.mark.asyncio
+async def test_chgrp_refuses_read_only_mount():
+    ws = _make_ws(MountMode.READ)
+    code, _, err = await _run(ws, "chgrp staff /data/f.txt")
+    assert code == 1
+    assert "read-only mount" in err
+
+
+@pytest.mark.asyncio
+async def test_chgrp_overlay_fallback_writes_only_gid():
+    resource = _OverlayRAMResource()
+    resource._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    code, _, _ = await _run(ws, "chgrp dev /data/f.txt")
+    assert code == 0
+    assert resource._store.attrs == {}
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
+    assert st.gid == "dev"
+    assert st.uid is None
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ import type { FileStat } from '../../../types.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace.ts'
-import { parseMode, parseOwner, parseTouchStamp } from './metadata.ts'
+import { parseGroup, parseMode, parseOwner, parseTouchStamp } from './metadata.ts'
 
 describe('parseMode', () => {
   it('parses octal modes', () => {
@@ -77,6 +77,14 @@ describe('parseTouchStamp', () => {
     expect(() => parseTouchStamp('13011200', '')).toThrow()
     expect(() => parseTouchStamp('2026010215301', null)).toThrow()
     expect(() => parseTouchStamp('202601021530.5', null)).toThrow()
+  })
+})
+
+describe('parseGroup', () => {
+  it('parses names, numeric ids, and empty', () => {
+    expect(parseGroup('staff')).toBe('staff')
+    expect(parseGroup('20')).toBe(20)
+    expect(parseGroup('')).toBeNull()
   })
 })
 
@@ -329,6 +337,63 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     expect(code, err).toBe(0)
     await run(ws, 'echo hi > /data/f.txt')
     expect((await statOf(ws, '/data/f.txt')).mode).toBeNull()
+    await ws.close()
+  })
+
+  it('chgrp renders the group and leaves the owner default', async () => {
+    const [ws] = await makeWs()
+    const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
+    expect(code, err).toBe(0)
+    const [, out] = await run(ws, 'ls -l /data')
+    expect(out).toContain(' user staff ')
+    await ws.close()
+  })
+
+  it('chgrp changes only the group, keeping a prior chown owner', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'chown alice:devs /data/f.txt')
+    const [code, , err] = await run(ws, 'chgrp 20 /data/f.txt')
+    expect(code, err).toBe(0)
+    const [, out] = await run(ws, 'ls -l /data')
+    expect(out).toContain(' alice 20 ')
+    await ws.close()
+  })
+
+  it('chgrp reports missing operand, invalid group, -R, and missing files', async () => {
+    const [ws] = await makeWs()
+    expect((await run(ws, 'chgrp staff'))[0]).toBe(2)
+    expect((await run(ws, "chgrp '' /data/f.txt"))[0]).toBe(1)
+    expect((await run(ws, 'chgrp -R staff /data'))[0]).toBe(2)
+    const [code, , err] = await run(ws, 'chgrp staff /data/nope.txt')
+    expect(code).toBe(1)
+    expect(err).toContain('nope.txt')
+    await ws.close()
+  })
+
+  it('chgrp falls back to the namespace overlay when the mount has no setattr', async () => {
+    const [ws, resource] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [code] = await run(ws, 'chgrp dev /data/f.txt')
+    expect(code).toBe(0)
+    expect(resource.store.attrs.size).toBe(0)
+    expect((await statOf(ws, '/data/f.txt')).gid).toBe('dev')
+    await ws.close()
+  })
+
+  it('chgrp -h targets the link node, leaving the target group untouched', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'ln -s /data/f.txt /data/link')
+    const [code, , err] = await run(ws, 'chgrp -h ops /data/link')
+    expect(code, err).toBe(0)
+    // stat follows the link; -h wrote the link node, so the target is clean.
+    expect((await statOf(ws, '/data/f.txt')).gid).toBeNull()
+    await ws.close()
+  })
+
+  it('chgrp refuses a read-only mount', async () => {
+    const [ws] = await makeWs(MountMode.READ)
+    const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
+    expect(code).toBe(1)
+    expect(err).toContain('read-only mount')
     await ws.close()
   })
 })

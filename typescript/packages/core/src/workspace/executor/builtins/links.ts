@@ -15,7 +15,7 @@
 import { resolvePath } from '../../../utils/path.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
-import { CycleError, norm } from '../../../utils/path.ts'
+import { CycleError, gnuDirname, norm } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -31,6 +31,17 @@ import type { Result } from './scope.ts'
 function abs(arg: string | PathSpec, cwd: string): string {
   if (arg instanceof PathSpec) return arg.virtual
   return resolvePath(arg, cwd)
+}
+
+// Path of `target` relative to directory `startDir` (both absolute posix),
+// the transform behind `ln -r` (GNU --relative).
+function posixRelative(target: string, startDir: string): string {
+  const t = target.split('/').filter(Boolean)
+  const s = startDir.split('/').filter(Boolean)
+  let i = 0
+  while (i < t.length && i < s.length && t[i] === s[i]) i += 1
+  const parts = [...s.slice(i).map(() => '..'), ...t.slice(i)]
+  return parts.length > 0 ? parts.join('/') : '.'
 }
 
 function allKnown(chars: string, known: string): boolean {
@@ -74,12 +85,17 @@ function errorResult(command: string, message: string): Result {
   ]
 }
 
+// ln -s TARGET LINK: create a namespace symbolic link. Flags: -f overwrite
+// an existing link, -v report the link, -r store the target relative to the
+// link's directory (GNU --relative). -n (--no-dereference) and -T
+// (--no-target-directory) are accepted no-ops: a namespace link name is
+// never dereferenced nor treated as a directory to descend into.
 export async function handleLn(
   namespace: Namespace,
   session: Session,
   args: (string | PathSpec)[],
 ): Promise<Result> {
-  const [flags, operands] = splitFlags(args, 'sfnv')
+  const [flags, operands] = splitFlags(args, 'sfnvrT')
   const targetArg = operands[0]
   const linkArg = operands[1]
   if (targetArg === undefined || linkArg === undefined) {
@@ -93,7 +109,23 @@ export async function handleLn(
     return errorResult('ln', `ln: target '${wordText(last ?? '')}': Not a directory\n`)
   }
   const linkAbs = abs(linkArg, session.cwd)
-  const targetTyped = wordText(targetArg)
+  let targetTyped = wordText(targetArg)
+  if (flags.has('r')) {
+    // --relative: rewrite the target relative to the link's own directory
+    // so the link stays valid addressed from anywhere. GNU canonicalizes
+    // existing symlink components of both ends first, so an aliased
+    // directory resolves to its real path (the link survives the alias
+    // being moved/removed); fall back to lexical on a loop.
+    let linkDir = gnuDirname(linkAbs)
+    let targetAbs = abs(targetArg, session.cwd)
+    try {
+      targetAbs = namespace.follow(targetAbs)
+      linkDir = namespace.follow(linkDir)
+    } catch (err) {
+      if (!(err instanceof CycleError)) throw err
+    }
+    targetTyped = posixRelative(targetAbs, linkDir)
+  }
   const exists = namespace.isLink(linkAbs) && !flags.has('f')
   if (namespace.isMountRoot(linkAbs) || exists) {
     return errorResult(

@@ -1,0 +1,59 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-R",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-v",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-f",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-h",
+      "value_kind": "none",
+      "value_optional": false
+    }
+  ],
+  "positional": [
+    {
+      "kind": "text",
+      "provided_by": []
+    }
+  ],
+  "rest": {
+    "kind": "path",
+    "provided_by": []
+  }
+}
