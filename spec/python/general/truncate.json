@@ -8,11 +8,14 @@
       "box",
       "disk",
       "gdrive",
+      "gridfs",
       "nextcloud",
       "onedrive",
       "ram",
+      "redis",
       "s3",
-      "sharepoint"
+      "sharepoint",
+      "ssh"
     ]
   },
   "description": null,
