@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from mirage.commands.config import RegisteredCommand, command, cross_command
 from mirage.commands.spec import CommandSpec, Operand, OperandKind
+from mirage.version import __version__
 
 
 class TestRegisteredCommand:
@@ -129,3 +132,42 @@ class TestCrossCommandDecorator:
         assert rc.src == "s3"
         assert rc.dst == "disk"
         assert rc.resource == "s3->disk"
+
+
+class TestVersionSupport:
+
+    def test_auto_injects_version_option(self):
+        spec = CommandSpec()
+
+        @command("foo", resource="disk", spec=spec)
+        async def my_fn(backend, paths, *texts, **kw):
+            pass
+
+        longs = [o.long for o in my_fn._registered_commands[0].spec.options]
+        assert "--version" in longs
+        assert "--help" in longs
+
+    def test_version_short_circuits_handler(self):
+        called = False
+
+        @command("tsort", resource="disk", spec=CommandSpec())
+        async def my_fn(backend, paths, *texts, **kw):
+            nonlocal called
+            called = True
+            return None, None
+
+        stdout, result = asyncio.run(my_fn._registered_commands[0].fn(
+            None, [], version=True))
+        assert called is False
+        chunks = asyncio.run(_collect(stdout))
+        assert chunks == f"tsort (Mirage) {__version__}\n".encode()
+        assert result.exit_code == 0
+
+
+async def _collect(source):
+    if isinstance(source, (bytes, bytearray)):
+        return bytes(source)
+    parts = []
+    async for chunk in source:
+        parts.append(chunk)
+    return b"".join(parts)

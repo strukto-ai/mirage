@@ -41,6 +41,20 @@ describe('--help and man through the executor', () => {
     expect(out).toContain('--help')
   })
 
+  it('--version on a builtin prints Mirage package version', async () => {
+    const ws = await makeWs()
+    const io = await ws.execute('tsort --version')
+    const out = stdoutStr(io)
+    expect(io.exitCode).toBe(0)
+    expect(out).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+\n$/)
+  })
+
+  it('--version is listed in --help for registered commands', async () => {
+    const ws = await makeWs()
+    const io = await ws.execute('cat --help')
+    expect(stdoutStr(io)).toContain('--version')
+  })
+
   it('man <cmd> prints help from the existing handleMan', async () => {
     const ws = await makeWs()
     const io = await ws.execute('man cat')

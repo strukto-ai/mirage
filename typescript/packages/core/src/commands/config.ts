@@ -19,6 +19,7 @@ import type { Resource } from '../resource/base.ts'
 import type { CommandSafeguard, PathSpec } from '../types.ts'
 import type { Runtime } from '../workspace/executor/runtime.ts'
 import type { StatOverlay } from '../ops/config.ts'
+import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
 import { CommandSpec, OperandKind, Option } from './spec/types.ts'
@@ -142,26 +143,45 @@ const HELP_OPTION = new Option({
   description: 'Show this help and exit',
 })
 
+const VERSION_OPTION = new Option({
+  long: '--version',
+  valueKind: OperandKind.NONE,
+  description: 'Show version information and exit',
+})
+
 const HELP_ENC = new TextEncoder()
 
+/**
+ * Inject --help / --version and short-circuit them before the handler.
+ * Mirrors GNU coreutils: every registered command accepts both flags,
+ * prints to stdout, and exits 0 without running the command body.
+ */
 function withHelpSupport(
   name: string,
   spec: CommandSpec,
   fn: CommandFn,
 ): { spec: CommandSpec; fn: CommandFn } {
   const hasHelp = spec.options.some((o) => o.long === '--help')
+  const hasVersion = spec.options.some((o) => o.long === '--version')
+  const extras: Option[] = []
+  if (!hasHelp) extras.push(HELP_OPTION)
+  if (!hasVersion) extras.push(VERSION_OPTION)
   const init: ConstructorParameters<typeof CommandSpec>[0] = {
-    options: hasHelp ? spec.options : [...spec.options, HELP_OPTION],
+    options: extras.length === 0 ? spec.options : [...spec.options, ...extras],
     positional: spec.positional,
     rest: spec.rest,
     ignoreTokens: [...spec.ignoreTokens],
   }
   if (spec.description !== null) init.description = spec.description
-  const newSpec = hasHelp ? spec : new CommandSpec(init)
+  const newSpec = extras.length === 0 ? spec : new CommandSpec(init)
   const helpText = renderHelp(name, newSpec)
+  const versionText = `${name} (Mirage) ${VERSION}\n`
   const wrappedFn: CommandFn = async (accessor, paths, texts, opts) => {
     if (opts.flags.help === true) {
       return [HELP_ENC.encode(helpText), new IOResult()]
+    }
+    if (opts.flags.version === true) {
+      return [HELP_ENC.encode(versionText), new IOResult()]
     }
     return fn(accessor, paths, texts, opts)
   }

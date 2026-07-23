@@ -99,4 +99,41 @@ describe('command() registers multiple resources', () => {
     expect(text).toContain('bar: do bar')
     expect(text).toContain('--help')
   })
+
+  it('auto-injects --version into spec.options', () => {
+    const cmds = command({
+      name: 'foo',
+      resource: 'disk',
+      spec: new CommandSpec(),
+      fn: noopFn,
+    })
+    const versionOpt = cmds[0]?.spec.options.find((o) => o.long === '--version')
+    expect(versionOpt).toBeDefined()
+  })
+
+  it('--version short-circuits the handler and returns package version', async () => {
+    let handlerCalled = false
+    const cmds = command({
+      name: 'tsort',
+      resource: 'disk',
+      spec: new CommandSpec(),
+      fn: () => {
+        handlerCalled = true
+        return Promise.resolve([new Uint8Array(), new IOResult()])
+      },
+    })
+    const opts = {
+      stdin: null,
+      flags: { version: true },
+      filetypeFns: null,
+      cwd: '/',
+      resource: {} as never,
+    }
+    const result = await cmds[0]?.fn({} as never, [], [], opts)
+    expect(handlerCalled).toBe(false)
+    const stdout = result?.[0]
+    expect(stdout).toBeDefined()
+    const text = new TextDecoder().decode(stdout as Uint8Array)
+    expect(text).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+\n$/)
+  })
 })

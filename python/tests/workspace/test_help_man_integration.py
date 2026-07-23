@@ -41,6 +41,17 @@ def test_help_flag_renders_help_through_executor():
         _materialize(io.stdout))
     assert "Usage: cat" in out
     assert "--help" in out
+    assert "--version" in out
+
+
+def test_version_flag_prints_mirage_package_version():
+    ws = _ws()
+    io = _exec(ws, "tsort --version")
+    assert io.exit_code == 0
+    out = io.stdout.decode() if isinstance(io.stdout, bytes) else _run(
+        _materialize(io.stdout))
+    assert out.startswith("tsort (Mirage) ")
+    assert out.endswith("\n")
 
 
 def test_man_renders_help_for_known_command():
