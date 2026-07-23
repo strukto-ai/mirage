@@ -38,14 +38,14 @@ from mirage.shell.helpers import (  # isort: skip
     ProcessSubDirection, get_command_name, get_parts, get_process_sub_body,
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    follow_paths, handle_bash, handle_cd, handle_chmod, handle_chown,
-    handle_command_builtin, handle_echo, handle_eval, handle_exit,
-    handle_export, handle_getopts, handle_history, handle_ln, handle_local,
-    handle_man, handle_printenv, handle_printf, handle_read, handle_readlink,
-    handle_return, handle_set, handle_shift, handle_sleep, handle_source,
-    handle_test, handle_timeout, handle_touch, handle_trap, handle_type,
-    handle_unset, handle_whoami, handle_xargs, link_flags, prepare_mv,
-    strip_link_operands)
+    follow_paths, handle_bash, handle_cd, handle_chgrp, handle_chmod,
+    handle_chown, handle_command_builtin, handle_echo, handle_eval,
+    handle_exit, handle_export, handle_getopts, handle_history, handle_ln,
+    handle_local, handle_man, handle_printenv, handle_printf, handle_read,
+    handle_readlink, handle_return, handle_set, handle_shift, handle_sleep,
+    handle_source, handle_test, handle_timeout, handle_touch, handle_trap,
+    handle_type, handle_unset, handle_whoami, handle_xargs, link_flags,
+    prepare_mv, strip_link_operands)
 
 _CdArgs = list[str | PathSpec]
 
@@ -451,7 +451,7 @@ async def _run_argv(
 
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
-    if name == "ln" and "s" in link_flags(operands, "sfnv"):
+    if name == "ln" and "s" in link_flags(operands, "sfnvrT"):
         return await handle_ln(namespace, session, operands)
 
     if name == "readlink":
@@ -463,6 +463,8 @@ async def _run_argv(
         return await handle_chmod(namespace, dispatch, operands)
     if name == "chown":
         return await handle_chown(namespace, dispatch, operands)
+    if name == "chgrp":
+        return await handle_chgrp(namespace, dispatch, operands)
     if name == "touch":
         return await handle_touch(namespace, dispatch, session, operands)
 

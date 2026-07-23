@@ -1,0 +1,150 @@
+{
+  "cases": [
+    {
+      "id": "ln_relative",
+      "seq": 611020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lnr/a /data/lnr/b && echo hi > /data/lnr/a/f.txt && ln -sr /data/lnr/a/f.txt /data/lnr/b/link && readlink /data/lnr/b/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "../a/f.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "ln_relative_resolves",
+      "seq": 611021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/lnr/b/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relative_verbose",
+      "seq": 611022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -srv /data/lnr/a/f.txt /data/lnr/b/link2",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/lnr/b/link2' -> '../a/f.txt'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "v"
+      ]
+    },
+    {
+      "id": "ln_relative_canonicalizes_symlinked_dir",
+      "seq": 611025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lns/real/a /data/lns/b && echo t > /data/lns/real/a/f.txt && ln -s /data/lns/real /data/lns/alias && ln -sr /data/lns/alias/a/f.txt /data/lns/b/link && readlink /data/lns/b/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "../real/a/f.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "realpath_follows_symlink",
+      "seq": 611012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s /data/rpe/f.txt /data/rpe/link && realpath /data/rpe/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rpe/f.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

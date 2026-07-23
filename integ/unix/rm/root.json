@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "rm_root_and_fs_flags",
+      "seq": 611031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/rmf/d && touch /data/rmf/d/x /data/rmf/c /data/rmf/e && rm --one-file-system -rf /data/rmf/d && rm --preserve-root -f /data/rmf/c && rm --no-preserve-root -f /data/rmf/e && ls /data/rmf",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rm_no_preserve_root_keeps_protection",
+      "seq": 611032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rm --no-preserve-root -rf /data 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "rm: cannot remove '/data': Device or resource busy\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

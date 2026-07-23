@@ -340,6 +340,39 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
+  // chmod/chown/chgrp self-parse their flags in the executor builtins, but
+  // they still need a spec so the leading MODE/OWNER/GROUP stays TEXT while
+  // the FILE operands classify as PATH (and so relative operands resolve
+  // against the session cwd, not the mount root).
+  chmod: new CommandSpec({
+    options: [
+      new Option({ short: '-R' }),
+      new Option({ short: '-v' }),
+      new Option({ short: '-f' }),
+    ],
+    positional: [new Operand({ kind: OperandKind.TEXT })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+  chown: new CommandSpec({
+    options: [
+      new Option({ short: '-R' }),
+      new Option({ short: '-v' }),
+      new Option({ short: '-f' }),
+      new Option({ short: '-h' }),
+    ],
+    positional: [new Operand({ kind: OperandKind.TEXT })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+  chgrp: new CommandSpec({
+    options: [
+      new Option({ short: '-R' }),
+      new Option({ short: '-v' }),
+      new Option({ short: '-f' }),
+      new Option({ short: '-h' }),
+    ],
+    positional: [new Operand({ kind: OperandKind.TEXT })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
   cp: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
@@ -366,6 +399,17 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-f' }),
       new Option({ short: '-v' }),
       new Option({ short: '-d' }),
+      // Non-interactive control plane: -i/-I are accepted no-ops (there is
+      // no prompt; removal always proceeds).
+      new Option({ short: '-i' }),
+      new Option({ short: '-I' }),
+      // Mount roots (and /) are structurally protected and never removable,
+      // so the root failsafe is always on and cannot be disabled; both
+      // spellings are accepted no-ops. Recursion never crosses a mount
+      // boundary either, so --one-file-system already matches the default.
+      new Option({ long: '--preserve-root' }),
+      new Option({ long: '--no-preserve-root' }),
+      new Option({ long: '--one-file-system' }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),

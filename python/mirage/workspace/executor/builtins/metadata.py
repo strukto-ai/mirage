@@ -104,6 +104,28 @@ def parse_owner(text: str) -> tuple[int | str | None, int | str | None]:
     return uid, gid
 
 
+def parse_group(text: str) -> int | str | None:
+    """Parse a chgrp GROUP argument.
+
+    Numeric ids become ints; names are kept as strings (mirage has no
+    group database; ownership is stored, not enforced). Empty is invalid.
+
+    Args:
+        text (str): the GROUP operand as typed.
+
+    Returns:
+        int | str | None: the gid, or None when the text is empty.
+
+    Example::
+
+        parse_group("staff")  -> "staff"
+        parse_group("20")     -> 20
+    """
+    if not text:
+        return None
+    return int(text) if text.isdigit() else text
+
+
 def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
     """Resolve touch -t/-d into an ISO timestamp.
 
@@ -419,6 +441,55 @@ async def handle_chown(
     return finish("chown", errors)
 
 
+async def handle_chgrp(
+    namespace: Namespace,
+    dispatch: Callable[..., Any],
+    args: list[str | PathSpec],
+) -> Result:
+    """chgrp GROUP FILE...: set group ownership via setattr.
+
+    The group half of chown: writes gid and leaves uid untouched. Group is
+    stored, not enforced (mirage has no group model); a name is kept
+    verbatim, a numeric id becomes an int. ``-h`` writes the link node's
+    own group.
+
+    Args:
+        namespace (Namespace): addressing authority.
+        dispatch (Callable): op dispatcher.
+        args (list[str | PathSpec]): args after the command name.
+    """
+    flags, _values, operands, bad = split_value_flags(args, "Rvfh", "")
+    if bad is not None:
+        return fail("chgrp", f"chgrp: invalid option -- '{bad}'\n", 2)
+    if len(operands) < 2:
+        return fail("chgrp", "chgrp: missing operand\n", 2)
+    if "R" in flags:
+        return fail("chgrp", "chgrp: -R is not supported\n", 2)
+    group_text = operand_text(operands[0])
+    gid = parse_group(group_text)
+    if gid is None:
+        return fail("chgrp", f"chgrp: invalid group: '{group_text}'\n", 1)
+
+    no_deref = "h" in flags
+    errors: list[str] = []
+    for target in await expand_operands(namespace, operands[1:]):
+        if no_deref and namespace.is_link(target.virtual):
+            await namespace.set_attrs(target.virtual, gid=gid)
+            continue
+        found = await _resolve_operand(namespace, dispatch, "chgrp", target,
+                                       errors)
+        if found is None:
+            continue
+        resolved, _stat = found
+        await _apply_attrs(namespace,
+                           dispatch,
+                           "chgrp",
+                           resolved,
+                           errors,
+                           gid=gid)
+    return finish("chgrp", errors)
+
+
 async def handle_touch(
     namespace: Namespace,
     dispatch: Callable[..., Any],
@@ -502,9 +573,11 @@ async def handle_touch(
 
 
 __all__ = [
+    "handle_chgrp",
     "handle_chmod",
     "handle_chown",
     "handle_touch",
+    "parse_group",
     "parse_mode",
     "parse_owner",
     "parse_touch_stamp",
