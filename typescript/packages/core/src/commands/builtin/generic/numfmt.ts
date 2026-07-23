@@ -19,12 +19,15 @@ function parseNumber(value: string, fromMode: string): number {
   return number * (fromMode === 'si' ? 1000 : 1024) ** exponent
 }
 
-// Round away from zero at `places` decimals. The epsilon absorbs binary
-// representation error so 1.5 * 10 does not creep above 15 and round to 16.
+// Round away from zero at `places` decimals. Snapping to 15 significant digits
+// first drops the sub-ulp binary noise a bare ceil can trip over, without the
+// blind spot of a fixed absolute epsilon: subtracting 1e-9 before ceil also
+// erases a genuine offset smaller than that, so 1000.00000001 collapses to
+// 1.0k, while GNU and the Decimal path in Python both keep it at 1.1k.
 function roundAwayFromZero(value: number, places: number): number {
   const factor = 10 ** places
-  const scaled = Math.abs(value) * factor
-  return Math.sign(value) * (Math.ceil(scaled - 1e-9) / factor)
+  const scaled = Number((Math.abs(value) * factor).toPrecision(15))
+  return Math.sign(value) * (Math.ceil(scaled) / factor)
 }
 
 // printf("%.*f") rounds half to even, which is why an unscaled 2.5 prints 2.
