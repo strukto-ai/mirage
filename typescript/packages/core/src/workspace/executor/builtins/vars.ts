@@ -145,6 +145,12 @@ export async function handleEnv(
       i += 1
       continue
     }
+    if (tok === '-') {
+      // GNU: "a mere - implies -i".
+      ignoreEnv = true
+      i += 1
+      continue
+    }
     if (tok === '--unset') {
       if (i + 1 >= args.length) {
         return envError("env: option '--unset' requires an argument")
@@ -209,6 +215,9 @@ export async function handleEnv(
   }
 
   const command = args.slice(i)
+  if (command.length > 0 && nullSep) {
+    return envError('env: cannot specify --null (-0) with command')
+  }
   if (command.length === 0) {
     const sep = nullSep ? '\0' : '\n'
     const out = new TextEncoder().encode(

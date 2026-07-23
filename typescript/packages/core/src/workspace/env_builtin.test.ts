@@ -83,4 +83,20 @@ describe('workspace: env builtin', () => {
     expect(io.exitCode).toBe(125)
     await ws.close()
   })
+
+  it('treats a lone - as --ignore-environment', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('export KEEP=x')
+    const io = await ws.execute('env - A=1')
+    expect(stdoutStr(io)).toBe('A=1\n')
+    await ws.close()
+  })
+
+  it('rejects -0 combined with a command (exit 125)', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('env -0 echo hi')
+    expect(io.exitCode).toBe(125)
+    expect(new TextDecoder().decode(io.stderr)).toContain('cannot specify --null (-0) with command')
+    await ws.close()
+  })
 })

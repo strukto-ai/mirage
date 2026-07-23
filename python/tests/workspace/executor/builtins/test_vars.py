@@ -70,6 +70,25 @@ async def test_env_run_form_forwards_stdin_and_restores_env():
 
 
 @pytest.mark.asyncio
+async def test_env_lone_dash_implies_ignore_environment():
+    session = make_session()
+    session.env["KEEP"] = "x"
+    out, io, _ = await handle_env(_unused_execute_fn, ["-", "A=1"], session)
+    assert io.exit_code == 0
+    assert await materialize(out) == b"A=1\n"
+
+
+@pytest.mark.asyncio
+async def test_env_null_with_command_rejected():
+    _, io, _ = await handle_env(_unused_execute_fn, ["-0", "echo", "hi"],
+                                make_session())
+    assert io.exit_code == 125
+    assert await materialize(
+        io.stderr) == (b"env: cannot specify --null (-0) with command\n"
+                       b"Try 'env --help' for more information.\n")
+
+
+@pytest.mark.asyncio
 async def test_env_invalid_option_exits_125():
     _, io, _ = await handle_env(_unused_execute_fn, ["-Z"], make_session())
     assert io.exit_code == 125

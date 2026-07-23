@@ -148,6 +148,11 @@ async def handle_env(
             null = True
             i += 1
             continue
+        if tok == "-":
+            # GNU: "a mere - implies -i".
+            ignore_env = True
+            i += 1
+            continue
         if tok == "--unset":
             if i + 1 >= len(args):
                 return _env_error("env: option '--unset' requires an argument")
@@ -196,6 +201,8 @@ async def handle_env(
         i += 1
 
     command = args[i:]
+    if command and null:
+        return _env_error("env: cannot specify --null (-0) with command")
     if not command:
         sep = "\0" if null else "\n"
         out = "".join(f"{k}={v}{sep}" for k, v in base.items()).encode()
