@@ -90,6 +90,14 @@ export function parseOwner(text: string): [number | string | null, number | stri
   return [uid, gid]
 }
 
+// Parse a chgrp GROUP argument. Numeric ids become numbers; names are kept
+// as strings (mirage has no group database; ownership is stored, not
+// enforced). Null when the text is empty.
+export function parseGroup(text: string): number | string | null {
+  if (text.length === 0) return null
+  return /^\d+$/.test(text) ? parseInt(text, 10) : text
+}
+
 // Resolve touch -t/-d into an ISO timestamp. `t` is a POSIX
 // `[[CC]YY]MMDDhhmm[.ss]` stamp; `d` is a date string (ISO 8601). Returns
 // null when neither flag is given; throws Error when the stamp is invalid.
@@ -451,6 +459,69 @@ export async function handleChown(
   }
   if (errors.length > 0) return joinedError('chown', errors, exitCode)
   return okResult('chown')
+}
+
+// chgrp GROUP FILE...: set group ownership via setattr. The group half of
+// chown: writes gid and leaves uid untouched. Group is stored, not enforced
+// (mirage has no group model); a name is kept verbatim, a numeric id becomes
+// a number. `-h` writes the link node's own group.
+export async function handleChgrp(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  args: readonly (string | PathSpec)[],
+): Promise<Result> {
+  const { flags, operands, bad } = splitValueFlags(args, 'Rvfh', '')
+  if (bad !== null) return errorResult('chgrp', `chgrp: invalid option -- '${bad}'\n`, 2)
+  if (operands.length < 2) return errorResult('chgrp', 'chgrp: missing operand\n', 2)
+  if (flags.has('R')) return errorResult('chgrp', 'chgrp: -R is not supported\n', 2)
+  const first = operands[0]
+  if (first === undefined) return errorResult('chgrp', 'chgrp: missing operand\n', 2)
+  const groupText = first instanceof PathSpec ? first.virtual : first
+  const gid = parseGroup(groupText)
+  if (gid === null) {
+    return errorResult('chgrp', `chgrp: invalid group: '${groupText}'\n`, 1)
+  }
+
+  const noDeref = flags.has('h')
+  let exitCode = 0
+  const errors: string[] = []
+  for (const target of await expandOperands(namespace, operands.slice(1))) {
+    if (noDeref && namespace.isLink(target.virtual)) {
+      await namespace.setAttrs(target.virtual, { gid })
+      continue
+    }
+    let virtual: string
+    try {
+      virtual = namespace.follow(target.virtual)
+    } catch (err) {
+      if (err instanceof CycleError) {
+        errors.push(`chgrp: cannot access '${target.rawPath}': Too many levels of symbolic links\n`)
+        exitCode = 1
+        continue
+      }
+      throw err
+    }
+    const resolved = PathSpec.fromStrPath(virtual)
+    try {
+      await dispatch('stat', resolved)
+    } catch (err) {
+      if (isEnoent(err)) {
+        errors.push(`chgrp: cannot access '${target.rawPath}': No such file or directory\n`)
+        exitCode = 1
+        continue
+      }
+      throw err
+    }
+    try {
+      await setattrVia(namespace, dispatch, resolved, { gid })
+    } catch (err) {
+      if (!isReadOnlyError(err)) throw err
+      errors.push(readOnlyError('chgrp', namespace, resolved))
+      exitCode = 1
+    }
+  }
+  if (errors.length > 0) return joinedError('chgrp', errors, exitCode)
+  return okResult('chgrp')
 }
 
 // touch: set access/modification times, creating missing files. GNU flags:

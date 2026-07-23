@@ -91,6 +91,36 @@ describe('symlinks (namespace-backed)', () => {
     await ws.close()
   })
 
+  it('ln -sr stores the target relative to the link directory', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('mkdir -p /data/a /data/b')
+    await ws.execute('echo hi > /data/a/f.txt')
+    const r1 = await ws.execute('ln -sr /data/a/f.txt /data/b/link')
+    expect(r1.exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/b/link')).stdout)).toBe('../a/f.txt\n')
+    // the relative link resolves back to the file
+    expect(dec((await ws.execute('cat /data/b/link')).stdout)).toBe('hi\n')
+    await ws.close()
+  })
+
+  it('ln -srv reports the relative link', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('mkdir -p /data/a /data/b')
+    await ws.execute('echo hi > /data/a/f.txt')
+    const r = await ws.execute('ln -srv /data/a/f.txt /data/b/link')
+    expect(dec(r.stdout)).toBe("'/data/b/link' -> '../a/f.txt'\n")
+    await ws.close()
+  })
+
+  it('ln -sn and -sT are accepted no-ops that still create the link', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hi > /data/a.txt')
+    expect((await ws.execute('ln -sn /data/a.txt /data/l1')).exitCode).toBe(0)
+    expect((await ws.execute('ln -sT /data/a.txt /data/l2')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/l1')).stdout)).toBe('/data/a.txt\n')
+    await ws.close()
+  })
+
   it('cd follows a directory symlink', async () => {
     const ws = buildWorkspace()
     await ws.execute('mkdir -p /data/real')

@@ -51,6 +51,7 @@ import {
   handleEval,
   handleExport,
   handleHistory,
+  handleChgrp,
   handleChmod,
   handleChown,
   handleLn,
@@ -591,7 +592,7 @@ async function runArgv(
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
-  if (name === 'ln' && linkFlags(operands, 'sfnv').has('s')) {
+  if (name === 'ln' && linkFlags(operands, 'sfnvrT').has('s')) {
     return await handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
@@ -605,6 +606,9 @@ async function runArgv(
   }
   if (name === 'chown') {
     return handleChown(namespace, dispatch, operands)
+  }
+  if (name === 'chgrp') {
+    return handleChgrp(namespace, dispatch, operands)
   }
   if (name === 'touch') {
     return handleTouch(namespace, dispatch, session, operands)
