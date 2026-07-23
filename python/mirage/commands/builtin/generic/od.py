@@ -7,10 +7,17 @@ from mirage.types import PathSpec
 
 
 def parse_count(value: str) -> int:
-    multipliers = {"b": 512, "K": 1024, "KB": 1000, "M": 1024**2, "MB": 1000**2}
+    multipliers = {
+        "b": 512,
+        "K": 1024,
+        "KB": 1000,
+        "M": 1024**2,
+        "MB": 1000**2
+    }
     suffix = next((key for key in sorted(multipliers, key=len, reverse=True)
                    if value.endswith(key)), "")
-    return int(value[:-len(suffix)] if suffix else value, 0) * multipliers.get(suffix, 1)
+    return int(value[:-len(suffix)] if suffix else value, 0) * multipliers.get(
+        suffix, 1)
 
 
 def _address(offset: int, radix: str) -> str:
@@ -24,7 +31,16 @@ def _address(offset: int, radix: str) -> str:
 
 
 def _char(byte: int) -> str:
-    escapes = {0: "\\0", 7: "\\a", 8: "\\b", 9: "\\t", 10: "\\n", 11: "\\v", 12: "\\f", 13: "\\r"}
+    escapes = {
+        0: "\\0",
+        7: "\\a",
+        8: "\\b",
+        9: "\\t",
+        10: "\\n",
+        11: "\\v",
+        12: "\\f",
+        13: "\\r"
+    }
     if byte in escapes:
         return escapes[byte]
     if 32 <= byte < 127:
@@ -74,8 +90,12 @@ async def od(
     for offset in range(0, len(data), 16):
         block = data[offset:offset + 16]
         for index, type_spec in enumerate(type_specs):
-            address = _address(skip + offset, address_radix) if index == 0 else ""
-            prefix = f"{address} " if address else " " * 8 if address_radix != "n" else ""
+            address = _address(skip +
+                               offset, address_radix) if index == 0 else ""
+            if address:
+                prefix = f"{address} "
+            else:
+                prefix = " " * 8 if address_radix != "n" else ""
             lines.append(prefix + _format_values(block, type_spec))
     final_address = _address(skip + len(data), address_radix)
     if final_address:

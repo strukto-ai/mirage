@@ -33,20 +33,29 @@ function formatNumber(value: number, toMode: string, grouping: boolean): string 
   return body + suffix
 }
 
-export async function numfmtGeneric(texts: readonly string[], opts: CommandOpts): Promise<CommandFnResult> {
+export async function numfmtGeneric(
+  texts: readonly string[],
+  opts: CommandOpts,
+): Promise<CommandFnResult> {
   let values = [...texts]
   if (values.length === 0) {
-    values = DEC.decode(await materialize(resolveSource(opts.stdin))).trim().split(/\s+/)
+    values = DEC.decode(await materialize(resolveSource(opts.stdin)))
+      .trim()
+      .split(/\s+/)
   }
   const toMode = typeof opts.flags.to === 'string' ? opts.flags.to : 'none'
   const fromMode = typeof opts.flags.from === 'string' ? opts.flags.from : 'none'
   const suffix = typeof opts.flags.suffix === 'string' ? opts.flags.suffix : ''
-  const output = values.map((value) =>
-    formatNumber(
-      parseNumber(suffix !== '' && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value, fromMode),
-      toMode,
-      opts.flags.grouping === true,
-    ) + suffix,
+  const output = values.map(
+    (value) =>
+      formatNumber(
+        parseNumber(
+          suffix !== '' && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value,
+          fromMode,
+        ),
+        toMode,
+        opts.flags.grouping === true,
+      ) + suffix,
   )
   return [ENC.encode(output.join('\n') + '\n'), new IOResult()]
 }

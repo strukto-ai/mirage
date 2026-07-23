@@ -4,7 +4,8 @@ from mirage.commands.builtin.generic.od import od as generic_od
 from mirage.commands.builtin.generic.od import parse_count
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult

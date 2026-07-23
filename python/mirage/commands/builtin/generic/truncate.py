@@ -3,7 +3,6 @@ from collections.abc import Awaitable, Callable
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
 
-
 _UNITS = {
     "K": 1024,
     "KB": 1000,
@@ -17,7 +16,8 @@ _UNITS = {
 
 
 def parse_size(value: str, current: int) -> int:
-    operation = value[:1] if value[:1] in {"+", "-", "<", ">", "/", "%"} else ""
+    operation = value[:1] if value[:1] in {"+", "-", "<", ">", "/", "%"
+                                           } else ""
     raw = value[1:] if operation else value
     suffix = next((unit for unit in sorted(_UNITS, key=len, reverse=True)
                    if raw.endswith(unit)), "")

@@ -8,12 +8,19 @@ export const OD_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const index = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, index) : []
-    const source = resolved[0] === undefined ? resolveSource(opts.stdin) : ops.readStream(accessor, resolved[0], index)
+    const source =
+      resolved[0] === undefined
+        ? resolveSource(opts.stdin)
+        : ops.readStream(accessor, resolved[0], index)
     const addressValue = opts.flags.A ?? opts.flags.address_radix
     const skipValue = opts.flags.j ?? opts.flags.skip_bytes
     const limitValue = opts.flags.N ?? opts.flags.read_bytes
     const formatValue = opts.flags.t ?? opts.flags.format
-    const formats = Array.isArray(formatValue) ? formatValue : typeof formatValue === 'string' ? [formatValue] : []
+    const formats = Array.isArray(formatValue)
+      ? formatValue
+      : typeof formatValue === 'string'
+        ? [formatValue]
+        : []
     return odGeneric(
       source,
       typeof addressValue === 'string' ? addressValue : 'o',

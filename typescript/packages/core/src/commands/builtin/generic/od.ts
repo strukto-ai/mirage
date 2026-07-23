@@ -4,7 +4,13 @@ import type { CommandFnResult } from '../../config.ts'
 const ENC = new TextEncoder()
 
 export function parseCount(value: string): number {
-  const units: Readonly<Record<string, number>> = { b: 512, K: 1024, KB: 1000, M: 1024 ** 2, MB: 1000 ** 2 }
+  const units: Readonly<Record<string, number>> = {
+    b: 512,
+    K: 1024,
+    KB: 1000,
+    M: 1024 ** 2,
+    MB: 1000 ** 2,
+  }
   const suffix = Object.keys(units)
     .sort((a, b) => b.length - a.length)
     .find((unit) => value.endsWith(unit))
@@ -19,7 +25,16 @@ function address(offset: number, radix: string): string {
 }
 
 function character(byte: number): string {
-  const escapes: Readonly<Record<number, string>> = { 0: '\\0', 7: '\\a', 8: '\\b', 9: '\\t', 10: '\\n', 11: '\\v', 12: '\\f', 13: '\\r' }
+  const escapes: Readonly<Record<number, string>> = {
+    0: '\\0',
+    7: '\\a',
+    8: '\\b',
+    9: '\\t',
+    10: '\\n',
+    11: '\\v',
+    12: '\\f',
+    13: '\\r',
+  }
   if (escapes[byte] !== undefined) return escapes[byte]
   if (byte >= 32 && byte < 127) return String.fromCharCode(byte)
   return byte.toString(8).padStart(3, '0')
@@ -28,7 +43,8 @@ function character(byte: number): string {
 function formatValues(data: Uint8Array, typeSpec: string): string {
   const kind = typeSpec.slice(0, 1)
   const size = Number.parseInt(typeSpec.slice(1) || (kind === 'f' ? '8' : '2'), 10)
-  if (kind === 'a' || kind === 'c') return [...data].map((byte) => character(byte).padStart(3, ' ')).join(' ')
+  if (kind === 'a' || kind === 'c')
+    return [...data].map((byte) => character(byte).padStart(3, ' ')).join(' ')
   const values: string[] = []
   for (let offset = 0; offset < data.length; offset += size) {
     const bytes = new Uint8Array(size)
@@ -39,7 +55,8 @@ function formatValues(data: Uint8Array, typeSpec: string): string {
       continue
     }
     let value = 0n
-    for (let index = size - 1; index >= 0; index -= 1) value = value * 256n + BigInt(bytes[index] ?? 0)
+    for (let index = size - 1; index >= 0; index -= 1)
+      value = value * 256n + BigInt(bytes[index] ?? 0)
     if (kind === 'd' && (bytes[size - 1] ?? 0) >= 128) value -= 1n << BigInt(size * 8)
     if (kind === 'x') values.push(value.toString(16).padStart(size * 2, '0'))
     else if (kind === 'o') values.push(value.toString(8).padStart(Math.ceil((size * 8) / 3), '0'))

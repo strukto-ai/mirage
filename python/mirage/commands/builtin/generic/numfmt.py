@@ -4,7 +4,6 @@ from decimal import Decimal, InvalidOperation
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 
-
 _SI_SUFFIXES = ("", "K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q")
 
 
@@ -35,7 +34,9 @@ def _format_number(number: Decimal, to_mode: str, grouping: bool) -> str:
         suffix = _SI_SUFFIXES[exponent]
         if to_mode == "iec-i" and exponent:
             suffix += "i"
-    rounded = number.quantize(Decimal("1")) if number == number.to_integral() else number.quantize(Decimal("0.1"))
+    rounded = number.quantize(
+        Decimal("1")) if number == number.to_integral() else number.quantize(
+            Decimal("0.1"))
     text = format(rounded, ",f" if grouping else "f")
     return text + suffix
 
@@ -51,7 +52,8 @@ async def numfmt(
     values = list(texts)
     if not values:
         raw = await _read_stdin_async(stdin)
-        values = raw.decode(errors="replace").split() if raw is not None else []
+        values = raw.decode(
+            errors="replace").split() if raw is not None else []
     output = [
         _format_number(_parse_number(value.removesuffix(suffix), from_mode),
                        to_mode, grouping) + suffix for value in values

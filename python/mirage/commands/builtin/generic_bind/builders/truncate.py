@@ -2,7 +2,8 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.truncate import truncate as generic_truncate
+from mirage.commands.builtin.generic.truncate import \
+    truncate as generic_truncate
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.spec import SPECS
@@ -35,5 +36,7 @@ async def truncate(
     )
 
 
-BUILDER = Builder("truncate", truncate, write=True,
+BUILDER = Builder("truncate",
+                  truncate,
+                  write=True,
                   requirements=frozenset({Operation.TRUNCATE}))
