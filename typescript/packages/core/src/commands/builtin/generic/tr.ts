@@ -89,13 +89,21 @@ async function* trStream(
   }
 }
 
+function boolFlag(flags: Record<string, string | boolean | string[]>, ...names: string[]): boolean {
+  return names.some((n) => flags[n] === true)
+}
+
 function buildOptions(
   texts: readonly string[],
   flags: Record<string, string | boolean | string[]>,
 ): TrOptions {
   if (texts.length === 0) throw new Error('tr: usage: tr [-d] [-s] [-c] set1 [set2] [path]')
+  const complement = boolFlag(flags, 'c', 'C', 'complement')
+  const del = boolFlag(flags, 'd', 'delete')
+  const squeeze = boolFlag(flags, 's', 'squeeze_repeats')
+  const truncateSet1 = boolFlag(flags, 't', 'truncate_set1')
   let set1 = expandRanges(interpretEscapes(texts[0] ?? ''))
-  if (flags.c === true) {
+  if (complement) {
     let allChars = ''
     for (let i = 0; i < 128; i++) allChars += String.fromCharCode(i)
     const s1 = new Set(set1)
@@ -104,12 +112,12 @@ function buildOptions(
       .join('')
   }
   let set2 = texts.length >= 2 ? expandRanges(interpretEscapes(texts[1] ?? '')) : ''
-  if (set2 !== '' && set2.length < set1.length) {
+  if (set2 !== '' && truncateSet1) {
+    set1 = set1.slice(0, set2.length)
+  } else if (set2 !== '' && set2.length < set1.length) {
     const last = set2[set2.length - 1] ?? ''
     set2 = set2 + last.repeat(set1.length - set2.length)
   }
-  const del = flags.d === true
-  const squeeze = flags.s === true
   let table: Map<string, string> | null = null
   if (!del && set2 !== '') {
     table = new Map<string, string>()

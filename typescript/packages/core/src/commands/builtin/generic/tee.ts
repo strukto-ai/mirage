@@ -19,6 +19,27 @@ import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
 
+const OUTPUT_ERROR_MODES = ['warn', 'warn-nopipe', 'exit', 'exit-nopipe']
+
+export interface TeeOptions {
+  append: boolean
+}
+
+export function parseTeeFlags(
+  flags: Record<string, string | boolean | string[]>,
+): TeeOptions | string {
+  const mode = flags.output_error
+  if (typeof mode === 'string' && !OUTPUT_ERROR_MODES.includes(mode)) {
+    const valid = OUTPUT_ERROR_MODES.map((m) => `  - '${m}'`).join('\n')
+    return (
+      `tee: invalid argument '${mode}' for '--output-error'\n` +
+      `Valid arguments are:\n${valid}\n` +
+      "Try 'tee --help' for more information.\n"
+    )
+  }
+  return { append: flags.a === true || flags.append === true }
+}
+
 export async function teeGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -29,12 +50,16 @@ export async function teeGeneric(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tee: missing operand\n') })]
   }
+  const parsed = parseTeeFlags(opts.flags)
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   const first = paths[0]
   if (first === undefined) return [null, new IOResult()]
   const stdinData = await readStdinAsync(opts.stdin)
   const raw: Uint8Array = stdinData ?? ENC.encode(texts.join(' '))
   let writeData = raw
-  if (opts.flags.a === true) {
+  if (parsed.append) {
     try {
       const existing = await materialize(stream(first))
       writeData = new Uint8Array(existing.byteLength + raw.byteLength)

@@ -1,0 +1,133 @@
+{
+  "cases": [
+    {
+      "id": "tee_output_error_invalid",
+      "seq": 610196,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi' | tee --output-error=bogus /data/pt_oe.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tee: invalid argument 'bogus' for '--output-error'\nValid arguments are:\n  - 'warn'\n  - 'warn-nopipe'\n  - 'exit'\n  - 'exit-nopipe'\nTry 'tee --help' for more information.\n"
+      },
+      "flags": [
+        "output-error"
+      ]
+    },
+    {
+      "id": "tee_output_error_valid",
+      "seq": 610197,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee_oe && printf 'hi' | tee --output-error=warn /data/ptee_oe/v.txt > /dev/null && cat /data/ptee_oe/v.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi",
+        "stderr": ""
+      },
+      "flags": [
+        "output-error"
+      ]
+    },
+    {
+      "id": "tee_append_long",
+      "seq": 610198,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee_ap && printf 'hi' > /data/ptee_ap/t.txt && printf 'MORE' | tee --append /data/ptee_ap/t.txt > /dev/null && cat /data/ptee_ap/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hiMORE",
+        "stderr": ""
+      },
+      "flags": [
+        "append"
+      ]
+    },
+    {
+      "id": "tee_ignore_interrupts_noops",
+      "seq": 610199,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee_ip && printf 'X' | tee -i -p /data/ptee_ip/t.txt && printf '|' && cat /data/ptee_ip/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "X|X",
+        "stderr": ""
+      },
+      "flags": [
+        "i",
+        "p"
+      ]
+    }
+  ]
+}

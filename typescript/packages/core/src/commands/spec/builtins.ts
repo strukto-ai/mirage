@@ -399,14 +399,21 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     rest: new Operand({ kind: OperandKind.TEXT }),
   }),
   tee: new CommandSpec({
-    options: [new Option({ short: '-a' })],
+    options: [
+      new Option({ short: '-a', long: '--append' }),
+      new Option({ short: '-i', long: '--ignore-interrupts' }),
+      new Option({ short: '-p' }),
+      new Option({ long: '--output-error', valueKind: OperandKind.TEXT, valueOptional: true }),
+    ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   tr: new CommandSpec({
     options: [
-      new Option({ short: '-d' }),
-      new Option({ short: '-s' }),
-      new Option({ short: '-c' }),
+      new Option({ short: '-d', long: '--delete' }),
+      new Option({ short: '-s', long: '--squeeze-repeats' }),
+      new Option({ short: '-c', long: '--complement' }),
+      new Option({ short: '-C' }),
+      new Option({ short: '-t', long: '--truncate-set1' }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT }), new Operand({ kind: OperandKind.TEXT })],
   }),

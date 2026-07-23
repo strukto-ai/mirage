@@ -1,8 +1,30 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+OUTPUT_ERROR_MODES = ("warn", "warn-nopipe", "exit", "exit-nopipe")
+
+
+@dataclass(frozen=True, slots=True)
+class TeeFlags:
+    append: bool = False
+
+
+def parse_flags(flags: Mapping[str, object]) -> TeeFlags:
+    fl = FlagView(flags, spec=SPECS["tee"])
+    mode = fl.raw("output_error")
+    if isinstance(mode, str) and mode not in OUTPUT_ERROR_MODES:
+        valid = "\n".join(f"  - '{m}'" for m in OUTPUT_ERROR_MODES)
+        raise ValueError(
+            f"tee: invalid argument '{mode}' for '--output-error'\n"
+            f"Valid arguments are:\n{valid}\n"
+            "Try 'tee --help' for more information.")
+    return TeeFlags(append=fl.as_bool("a") or fl.as_bool("append"))
 
 
 async def tee(
@@ -12,15 +34,19 @@ async def tee(
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     stdin: ByteSource | None = None,
-    append: bool = False,
+    flags: Mapping[str, object] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
+    try:
+        parsed = parse_flags(flags or {})
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raw = (" ".join(texts)).encode() if texts else b""
     write_data = raw
-    if append:
+    if parsed.append:
         try:
             existing = b""
             async for chunk in read_stream(paths[0]):
@@ -34,4 +60,4 @@ async def tee(
                          cache=[paths[0].mount_path])
 
 
-__all__ = ["tee"]
+__all__ = ["tee", "parse_flags", "TeeFlags"]

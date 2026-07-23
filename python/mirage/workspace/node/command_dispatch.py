@@ -39,7 +39,7 @@ from mirage.shell.helpers import (  # isort: skip
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
     follow_paths, handle_bash, handle_cd, handle_chmod, handle_chown,
-    handle_command_builtin, handle_echo, handle_eval, handle_exit,
+    handle_command_builtin, handle_echo, handle_env, handle_eval, handle_exit,
     handle_export, handle_history, handle_ln, handle_local, handle_man,
     handle_printenv, handle_printf, handle_read, handle_readlink,
     handle_return, handle_set, handle_shift, handle_sleep, handle_source,
@@ -375,6 +375,9 @@ async def _run_argv(
     if name == SB.PRINTENV:
         var_name = args[0] if args else None
         return await handle_printenv(var_name, session)
+
+    if name == SB.ENV:
+        return await handle_env(execute_fn, args, session, stdin)
 
     if name == SB.WHOAMI:
         return await handle_whoami(namespace)

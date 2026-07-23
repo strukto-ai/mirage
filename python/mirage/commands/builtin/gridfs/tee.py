@@ -14,6 +14,7 @@
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tee import parse_flags
 from mirage.commands.builtin.gridfs.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -30,18 +31,21 @@ async def tee(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    a: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     paths = await resolve_glob(accessor, paths, index)
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raw = (" ".join(texts)).encode() if texts else b""
     write_data = raw
-    if a:
+    if parsed.append:
         try:
             existing = b""
             async for chunk in read_stream(accessor, paths[0], index=index):

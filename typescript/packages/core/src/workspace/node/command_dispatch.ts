@@ -47,6 +47,7 @@ import {
   handleCommandBuiltin,
   handleType,
   handleEcho,
+  handleEnv,
   handleEval,
   handleExport,
   handleHistory,
@@ -521,6 +522,7 @@ async function runArgv(
   if (name === SB.PRINTENV) {
     return handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, session)
   }
+  if (name === SB.ENV) return handleEnv(executeFn, args, session, stdin)
   if (name === SB.WHOAMI) return handleWhoami(namespace)
   if (name === SB.MAN) return handleMan(args, session, registry)
   if (name === SB.HISTORY) return handleHistory(registry, args, session)

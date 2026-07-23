@@ -40,9 +40,9 @@ from mirage.workspace.executor.builtins.timeout import handle_timeout
 from mirage.workspace.executor.builtins.xargs import handle_xargs
 
 from mirage.workspace.executor.builtins.vars import (  # isort: skip
-    handle_exit, handle_export, handle_local, handle_printenv, handle_read,
-    handle_readonly, handle_return, handle_set, handle_shift, handle_trap,
-    handle_unset, handle_whoami)
+    handle_env, handle_exit, handle_export, handle_local, handle_printenv,
+    handle_read, handle_readonly, handle_return, handle_set, handle_shift,
+    handle_trap, handle_unset, handle_whoami)
 
 __all__ = [
     '_collect_man_hits',
@@ -56,6 +56,7 @@ __all__ = [
     'handle_command_builtin',
     'handle_type',
     'handle_echo',
+    'handle_env',
     'handle_eval',
     'handle_exit',
     'handle_export',

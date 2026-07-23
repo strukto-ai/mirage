@@ -121,15 +121,24 @@ SPECS: dict[str, CommandSpec] = {
     ),
     'tee':
     CommandSpec(
-        options=(Option(short="-a"), ),
+        options=(
+            Option(short="-a", long="--append"),
+            Option(short="-i", long="--ignore-interrupts"),
+            Option(short="-p"),
+            Option(long="--output-error",
+                   value_kind=OperandKind.TEXT,
+                   value_optional=True),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'tr':
     CommandSpec(
         options=(
-            Option(short="-d"),
-            Option(short="-s"),
-            Option(short="-c"),
+            Option(short="-d", long="--delete"),
+            Option(short="-s", long="--squeeze-repeats"),
+            Option(short="-c", long="--complement"),
+            Option(short="-C"),
+            Option(short="-t", long="--truncate-set1"),
         ),
         positional=(
             Operand(kind=OperandKind.TEXT),
