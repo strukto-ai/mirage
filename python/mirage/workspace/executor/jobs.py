@@ -120,8 +120,8 @@ async def handle_background(
 
     right_stdout, right_io, right_exec = await execute_node(
         right, session, stdin, call_stack)
-    left_stderr = await materialize(right_io.stderr)
-    right_io.stderr = (job_line + left_stderr if left_stderr else job_line)
+    right_stderr = await materialize(right_io.stderr)
+    right_io.stderr = (job_line + right_stderr if right_stderr else job_line)
     children = [
         ExecutionNode(command=cmd_str, exit_code=0),
         right_exec,

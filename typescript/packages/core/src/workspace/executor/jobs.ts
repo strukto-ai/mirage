@@ -141,8 +141,8 @@ export async function handleBackground(
   }
 
   const [rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
-  const leftStderr = await materialize(rightIo.stderr)
-  rightIo.stderr = leftStderr.byteLength > 0 ? concat([jobLine, leftStderr]) : jobLine
+  const rightStderr = await materialize(rightIo.stderr)
+  rightIo.stderr = rightStderr.byteLength > 0 ? concat([jobLine, rightStderr]) : jobLine
   const children = [new ExecutionNode({ command: cmdStr, exitCode: 0 }), rightExec]
   const tree = new ExecutionNode({
     op: '&',
