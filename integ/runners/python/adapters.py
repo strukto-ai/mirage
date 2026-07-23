@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+import functools
 import imaplib
 import importlib.util
 import json
@@ -1208,6 +1209,24 @@ def build_mounts(
     return mounts, cleanups
 
 
+async def mutate_write(shadow_ws: Workspace, path: str,
+                       content: bytes) -> None:
+    await shadow_ws.ops.write(path, content)
+
+
+async def teardown_target(
+    workspaces: list[Workspace],
+    cleanups: list[Callable[[], Awaitable[None]]],
+    service: "Service | None",
+) -> None:
+    for ws in workspaces:
+        await ws.close()
+    for cleanup in cleanups:
+        await cleanup()
+    if service is not None:
+        await service.teardown()
+
+
 async def open_target(
     target: dict,
     consistency: ConsistencyPolicy | None = None
@@ -1219,15 +1238,7 @@ async def open_target(
         ws = Workspace(mounts, mode=MountMode.WRITE, consistency=consistency)
     else:
         ws = Workspace(mounts, mode=MountMode.WRITE)
-
-    async def cleanup_all() -> None:
-        await ws.close()
-        for cleanup in cleanups:
-            await cleanup()
-        if service is not None:
-            await service.teardown()
-
-    return ws, cleanup_all
+    return ws, functools.partial(teardown_target, [ws], cleanups, service)
 
 
 async def open_consistency(
@@ -1245,16 +1256,9 @@ async def open_consistency(
                         mode=MountMode.WRITE,
                         consistency=consistency)
     shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
-
-    async def mutate(path: str, content: bytes) -> None:
-        await shadow_ws.ops.write(path, content)
-
-    async def cleanup_all() -> None:
-        await read_ws.close()
-        await shadow_ws.close()
-        for cleanup in (*read_cleanups, *shadow_cleanups):
-            await cleanup()
-        if service is not None:
-            await service.teardown()
-
-    return read_ws, mutate, cleanup_all
+    return (
+        read_ws,
+        functools.partial(mutate_write, shadow_ws),
+        functools.partial(teardown_target, [read_ws, shadow_ws],
+                          [*read_cleanups, *shadow_cleanups], service),
+    )
