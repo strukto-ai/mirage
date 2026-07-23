@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "mktemp_tier2_directory_tmpdir_suffix",
+      "seq": 910033,
+      "targets": ["ram", "disk"],
+      "command": "p=$(mktemp --directory --tmpdir=/data/t2mktemp1 --suffix=.dir 'd.XXXX'); test -d \"$p\" && basename \"$p\" | sed 's/[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]/XXXX/'",
+      "expect": { "exit": 0, "stdout": "d.XXXX.dir\n", "stderr": "" },
+      "flags": ["directory", "tmpdir", "suffix"]
+    },
+    {
+      "id": "mktemp_tier2_dry_run_quiet",
+      "seq": 910034,
+      "targets": ["ram", "disk"],
+      "command": "p=$(mktemp --quiet --dry-run -p /data/t2mktemp2 --suffix=.txt 'f.XXXX'); test ! -f \"$p\" && echo dry",
+      "expect": { "exit": 0, "stdout": "dry\n", "stderr": "" },
+      "flags": ["quiet", "dry-run", "p", "suffix"]
+    },
+    {
+      "id": "mktemp_tier2_t_alias",
+      "seq": 910035,
+      "targets": ["ram", "disk"],
+      "command": "p=$(mktemp -t -u 'f.XXXX'); dirname \"$p\"",
+      "expect": { "exit": 0, "stdout": "/tmp\n", "stderr": "" },
+      "flags": ["t", "u"]
+    }
+  ]
+}

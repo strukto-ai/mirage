@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "expand_tier2_long_aliases",
+      "seq": 910017,
+      "targets": ["ram", "disk"],
+      "command": "printf '\ta\tb\n' | expand --initial --tabs 4 | cat -A",
+      "expect": { "exit": 0, "stdout": "    a^Ib$\n", "stderr": "" },
+      "flags": ["initial", "tabs"]
+    }
+  ]
+}

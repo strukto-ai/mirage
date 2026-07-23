@@ -71,6 +71,20 @@ interface RunOnMountCtx {
   routingDecision?: RoutingDecision
 }
 
+function pathFlagScopes(cmdName: string, argv: string[], cwd: string): PathSpec[] {
+  const spec = SPECS[cmdName]
+  if (spec === undefined) return []
+  return parseCommand(spec, argv, cwd).pathFlagValues.map(
+    (value) =>
+      new PathSpec({
+        virtual: value,
+        directory: value,
+        resourcePath: '',
+        rawPath: value,
+      }),
+  )
+}
+
 /** The 126 result for a command no runtime accepted. */
 function admissionDenial(cmdName: string): IOResult {
   const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
@@ -358,6 +372,9 @@ export async function handleCommand(
     ]
   }
 
+  const routingScopes =
+    pathScopes.length > 0 ? pathScopes : pathFlagScopes(cmdName, rawArgv, session.cwd)
+
   let findExprTokens: string[] | null = null
   if (cmdName === 'find') {
     findExprTokens = findExprTail(rawArgv)
@@ -471,7 +488,7 @@ export async function handleCommand(
 
   let mount: MountEntry | null
   try {
-    mount = await registry.resolveMount(cmdName, pathScopes, session.cwd)
+    mount = await registry.resolveMount(cmdName, routingScopes, session.cwd)
   } catch (err) {
     if (err instanceof MountCommandUnsupported) {
       const errBytes = new TextEncoder().encode(`${err.message}\n`)
@@ -570,7 +587,7 @@ export async function handleCommand(
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,
     mount,
-    resolveHint: pathScopes[0] ?? null,
+    resolveHint: routingScopes[0] ?? null,
   })
   let stdout = rawStdout
   if (warnBytes !== null) {

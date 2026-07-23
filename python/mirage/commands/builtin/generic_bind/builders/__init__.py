@@ -48,6 +48,8 @@ from mirage.commands.builtin.generic_bind.builders import mkdir
 from mirage.commands.builtin.generic_bind.builders import mktemp
 from mirage.commands.builtin.generic_bind.builders import mv
 from mirage.commands.builtin.generic_bind.builders import nl
+from mirage.commands.builtin.generic_bind.builders import numfmt
+from mirage.commands.builtin.generic_bind.builders import od
 from mirage.commands.builtin.generic_bind.builders import paste
 from mirage.commands.builtin.generic_bind.builders import patch
 from mirage.commands.builtin.generic_bind.builders import readlink
@@ -71,6 +73,7 @@ from mirage.commands.builtin.generic_bind.builders import tail
 from mirage.commands.builtin.generic_bind.builders import tar
 from mirage.commands.builtin.generic_bind.builders import tee
 from mirage.commands.builtin.generic_bind.builders import touch
+from mirage.commands.builtin.generic_bind.builders import truncate
 from mirage.commands.builtin.generic_bind.builders import tr
 from mirage.commands.builtin.generic_bind.builders import tree
 from mirage.commands.builtin.generic_bind.builders import tsort
@@ -120,6 +123,8 @@ _BUILDERS = (
     mktemp.BUILDER,
     mv.BUILDER,
     nl.BUILDER,
+    numfmt.BUILDER,
+    od.BUILDER,
     paste.BUILDER,
     patch.BUILDER,
     readlink.BUILDER,
@@ -143,6 +148,7 @@ _BUILDERS = (
     tar.BUILDER,
     tee.BUILDER,
     touch.BUILDER,
+    truncate.BUILDER,
     tr.BUILDER,
     tree.BUILDER,
     tsort.BUILDER,

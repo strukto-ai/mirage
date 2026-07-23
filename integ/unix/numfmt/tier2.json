@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_tier2_conversion",
+      "seq": 910002,
+      "targets": ["ram", "disk"],
+      "command": "numfmt --from=si --to=iec-i --suffix=B 2KB",
+      "expect": { "exit": 0, "stdout": "2.0KiB\n", "stderr": "" },
+      "flags": ["from", "to", "suffix"]
+    },
+    {
+      "id": "numfmt_tier2_grouping",
+      "seq": 910003,
+      "targets": ["ram", "disk"],
+      "command": "numfmt --grouping 1234567",
+      "expect": { "exit": 0, "stdout": "1,234,567\n", "stderr": "" },
+      "flags": ["grouping"]
+    }
+  ]
+}

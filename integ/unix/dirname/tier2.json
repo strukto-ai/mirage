@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "dirname_tier2_zero",
+      "seq": 910008,
+      "targets": ["ram", "disk"],
+      "command": "dirname --zero /x/a /y/b",
+      "expect": { "exit": 0, "stdout": "/x\u0000/y\u0000", "stderr": "" },
+      "flags": ["zero"]
+    }
+  ]
+}

@@ -20,6 +20,8 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,17 +34,21 @@ async def base64(
     stdin: ByteSource | None = None,
     d: bool = False,
     D: bool = False,
+    i: bool = False,
     w: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["base64"])
+    wrap_value = w or fl.as_str("wrap")
     paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_base64(paths,
-                                read_stream=bound_op(ops.read_stream, accessor,
-                                                     index),
-                                stdin=stdin,
-                                decode=d or D,
-                                wrap=int(w) if w is not None else None)
+    return await generic_base64(
+        paths,
+        read_stream=bound_op(ops.read_stream, accessor, index),
+        stdin=stdin,
+        decode=d or D or fl.as_bool("decode"),
+        wrap=int(wrap_value) if wrap_value is not None else None,
+        ignore_garbage=(i or fl.as_bool("ignore_garbage")))
 
 
 BUILDER = Builder('base64', base64, None, False, None, read=True)

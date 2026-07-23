@@ -30,6 +30,7 @@ from mirage.core.ram.rmdir import rmdir as _rmdir
 from mirage.core.ram.set_attrs import set_attrs as _set_attrs
 from mirage.core.ram.stat import stat as _stat
 from mirage.core.ram.stream import read_stream as _read_stream
+from mirage.core.ram.truncate import truncate as _truncate
 from mirage.core.ram.unlink import unlink as _unlink
 from mirage.core.ram.write import write_bytes as _write
 
@@ -55,6 +56,7 @@ IO = CommandIO(
     du_all=_du_all,
     append=_append,
     set_attrs=_set_attrs,
+    truncate=_truncate,
 )
 
 resolve_glob = IO.resolve_glob

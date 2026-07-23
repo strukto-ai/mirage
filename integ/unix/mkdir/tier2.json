@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "mkdir_tier2_long_aliases",
+      "seq": 910036,
+      "targets": ["ram", "disk"],
+      "command": "mkdir --parents --verbose --mode=700 --context=ctx /data/t2mkdir/a/b > /dev/null && test -d /data/t2mkdir/a/b && echo ok",
+      "expect": { "exit": 0, "stdout": "ok\n", "stderr": "" },
+      "flags": ["parents", "verbose", "mode", "context"]
+    }
+  ]
+}

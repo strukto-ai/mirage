@@ -16,6 +16,8 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,16 +31,19 @@ async def mkdir(
     p: bool = False,
     v: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["mkdir"])
+    parents = p or fl.as_bool("parents")
+    verbose = v or fl.as_bool("verbose")
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("mkdir: missing operand")
     mkdir_fn = ops.require(Operation.MKDIR)
     paths = await ops.resolve_glob(accessor, paths, index)
     lines: list[str] = []
     for path in paths:
-        await mkdir_fn(accessor, path, parents=p)
-        if v:
+        await mkdir_fn(accessor, path, parents=parents)
+        if verbose:
             lines.append(f"mkdir: created directory '{path.virtual}'")
     output = ("\n".join(lines) + "\n").encode() if lines else None
     return output, IOResult()

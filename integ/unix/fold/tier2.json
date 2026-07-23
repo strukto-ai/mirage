@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "fold_tier2_bytes",
+      "seq": 910011,
+      "targets": ["ram", "disk"],
+      "command": "printf 'abcdef' | fold --bytes --width 3",
+      "expect": { "exit": 0, "stdout": "abc\ndef", "stderr": "" },
+      "flags": ["bytes", "width"]
+    },
+    {
+      "id": "fold_tier2_characters_spaces",
+      "seq": 910012,
+      "targets": ["ram", "disk"],
+      "command": "printf 'one two three\n' | fold --characters --spaces --width 7",
+      "expect": { "exit": 0, "stdout": "one \ntwo \nthree\n", "stderr": "" },
+      "flags": ["characters", "spaces", "width"]
+    }
+  ]
+}

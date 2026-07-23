@@ -37,7 +37,7 @@ def test_nextcloud_write_commands_tagged():
     write_names = {
         "cp", "csplit", "gunzip", "gzip", "iconv", "ln", "mkdir", "mktemp",
         "mv", "patch", "rm", "rmdir", "split", "tar", "tee", "touch", "unlink",
-        "unzip", "zip"
+        "truncate", "unzip", "zip"
     }
     for fn in COMMANDS:
         for rc in fn._registered_commands:

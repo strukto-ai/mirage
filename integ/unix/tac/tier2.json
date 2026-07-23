@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "tac_tier2_separator",
+      "seq": 910045,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a|b|c|' | tac --separator='|'",
+      "expect": { "exit": 0, "stdout": "c|b|a|", "stderr": "" },
+      "flags": ["separator"]
+    },
+    {
+      "id": "tac_tier2_before",
+      "seq": 910046,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a|b|c|' | tac --before --separator='|'",
+      "expect": { "exit": 0, "stdout": "|c|b|a", "stderr": "" },
+      "flags": ["before", "separator"]
+    },
+    {
+      "id": "tac_tier2_regex",
+      "seq": 910047,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a1b22c333' | tac --regex --separator='[0-9]+'",
+      "expect": { "exit": 0, "stdout": "c333b22a1", "stderr": "" },
+      "flags": ["regex", "separator"]
+    }
+  ]
+}

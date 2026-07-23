@@ -47,6 +47,8 @@ import { MKDIR_BUILDER } from './mkdir.ts'
 import { MKTEMP_BUILDER } from './mktemp.ts'
 import { MV_BUILDER } from './mv.ts'
 import { NL_BUILDER } from './nl.ts'
+import { NUMFMT_BUILDER } from './numfmt.ts'
+import { OD_BUILDER } from './od.ts'
 import { PASTE_BUILDER } from './paste.ts'
 import { PATCH_BUILDER } from './patch.ts'
 import { READLINK_BUILDER } from './readlink.ts'
@@ -70,6 +72,7 @@ import { TAIL_BUILDER } from './tail.ts'
 import { TAR_BUILDER } from './tar.ts'
 import { TEE_BUILDER } from './tee.ts'
 import { TOUCH_BUILDER } from './touch.ts'
+import { TRUNCATE_BUILDER } from './truncate.ts'
 import { TR_BUILDER } from './tr.ts'
 import { TREE_BUILDER } from './tree.ts'
 import { TSORT_BUILDER } from './tsort.ts'
@@ -118,6 +121,8 @@ export const BUILDERS: readonly Builder[] = [
   MKTEMP_BUILDER,
   MV_BUILDER,
   NL_BUILDER,
+  NUMFMT_BUILDER,
+  OD_BUILDER,
   PASTE_BUILDER,
   PATCH_BUILDER,
   READLINK_BUILDER,
@@ -141,6 +146,7 @@ export const BUILDERS: readonly Builder[] = [
   TAR_BUILDER,
   TEE_BUILDER,
   TOUCH_BUILDER,
+  TRUNCATE_BUILDER,
   TR_BUILDER,
   TREE_BUILDER,
   TSORT_BUILDER,

@@ -67,4 +67,16 @@ describe.each(NATIVE_BACKENDS)('native split (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('supports a custom record separator and additional suffix', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('f.txt', ENC.encode('a,b,c,d,'))
+      await env.mirage('split -t, -l 2 --additional-suffix=.part /data/f.txt /data/p')
+      expect(await env.mirage('cat /data/paa.part')).toBe('a,b,')
+      expect(await env.mirage('cat /data/pab.part')).toBe('c,d,')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

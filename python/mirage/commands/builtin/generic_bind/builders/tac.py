@@ -19,6 +19,8 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,9 +31,13 @@ async def tac(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
+    b: bool = False,
+    r: bool = False,
+    s: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["tac"])
     paths, err = await resolve_readable(ops, accessor, paths, index, "tac")
     if err and not paths:
         return None, IOResult(exit_code=1, stderr=err)
@@ -39,7 +45,10 @@ async def tac(
         await generic_tac(paths,
                           read_stream=bound_op(ops.read_stream, accessor,
                                                index),
-                          stdin=stdin), err)
+                          stdin=stdin,
+                          separator=s or fl.as_str("separator") or "\n",
+                          before=b or fl.as_bool("before"),
+                          regex=r or fl.as_bool("regex")), err)
 
 
 BUILDER = Builder('tac', tac, None, False, None, read=True)

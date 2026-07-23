@@ -19,8 +19,8 @@ export const MKDIR_BUILDER: Builder = {
   name: 'mkdir',
   write: true,
   fn: async (ops, accessor, paths, _texts, opts) => {
-    const parents = opts.flags.p === true
-    const verbose = opts.flags.v === true
+    const parents = opts.flags.p === true || opts.flags.parents === true
+    const verbose = opts.flags.v === true || opts.flags.verbose === true
     if (paths.length === 0) {
       return [
         null,

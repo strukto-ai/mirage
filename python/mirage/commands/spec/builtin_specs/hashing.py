@@ -37,35 +37,91 @@ SPECS: dict[str, CommandSpec] = {
     'base64':
     CommandSpec(
         options=(
-            Option(short="-d"),
+            Option(short="-d", long="--decode"),
             Option(short="-D"),
-            Option(short="-w", value_kind=OperandKind.TEXT),
+            Option(short="-w", long="--wrap", value_kind=OperandKind.TEXT),
+            Option(short="-i", long="--ignore-garbage"),
         ),
         positional=(Operand(kind=OperandKind.PATH), ),
     ),
     'md5sum':
     CommandSpec(
-        options=(Option(short="-c"), ),
+        options=(
+            Option(short="-c", long="--check"),
+            Option(short="-b", long="--binary"),
+            Option(short="-t", long="--text"),
+            Option(long="--tag"),
+            Option(short="-w", long="--warn"),
+            Option(short="-z", long="--zero"),
+            Option(long="--strict"),
+            Option(long="--ignore-missing"),
+            Option(long="--status"),
+            Option(long="--quiet"),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'sha1sum':
     CommandSpec(
-        options=(Option(short="-c"), ),
+        options=(
+            Option(short="-c", long="--check"),
+            Option(short="-b", long="--binary"),
+            Option(short="-t", long="--text"),
+            Option(long="--tag"),
+            Option(short="-w", long="--warn"),
+            Option(short="-z", long="--zero"),
+            Option(long="--strict"),
+            Option(long="--ignore-missing"),
+            Option(long="--status"),
+            Option(long="--quiet"),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'sha256sum':
     CommandSpec(
-        options=(Option(short="-c"), ),
+        options=(
+            Option(short="-c", long="--check"),
+            Option(short="-b", long="--binary"),
+            Option(short="-t", long="--text"),
+            Option(long="--tag"),
+            Option(short="-w", long="--warn"),
+            Option(short="-z", long="--zero"),
+            Option(long="--strict"),
+            Option(long="--ignore-missing"),
+            Option(long="--status"),
+            Option(long="--quiet"),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'sha384sum':
     CommandSpec(
-        options=(Option(short="-c"), ),
+        options=(
+            Option(short="-c", long="--check"),
+            Option(short="-b", long="--binary"),
+            Option(short="-t", long="--text"),
+            Option(long="--tag"),
+            Option(short="-w", long="--warn"),
+            Option(short="-z", long="--zero"),
+            Option(long="--strict"),
+            Option(long="--ignore-missing"),
+            Option(long="--status"),
+            Option(long="--quiet"),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'sha512sum':
     CommandSpec(
-        options=(Option(short="-c"), ),
+        options=(
+            Option(short="-c", long="--check"),
+            Option(short="-b", long="--binary"),
+            Option(short="-t", long="--text"),
+            Option(long="--tag"),
+            Option(short="-w", long="--warn"),
+            Option(short="-z", long="--zero"),
+            Option(long="--strict"),
+            Option(long="--ignore-missing"),
+            Option(long="--status"),
+            Option(long="--quiet"),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'xxd':

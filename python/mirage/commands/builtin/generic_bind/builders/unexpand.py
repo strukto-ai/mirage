@@ -20,6 +20,8 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,8 +35,9 @@ async def unexpand(
     t: str | None = None,
     a: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["unexpand"])
     paths, err = await resolve_readable(ops, accessor, paths, index,
                                         "unexpand")
     if err and not paths:
@@ -44,8 +47,9 @@ async def unexpand(
                                read_bytes=bound_op(ops.read_bytes, accessor,
                                                    index),
                                stdin=stdin,
-                               tabsize=int(t) if t is not None else 8,
-                               all_spaces=a), err)
+                               tabsize=int(t or fl.as_str("tabs") or "8"),
+                               all_spaces=a or fl.as_bool("all"),
+                               first_only=fl.as_bool("first_only")), err)
 
 
 BUILDER = Builder('unexpand', unexpand, None, False, None, read=True)
