@@ -644,6 +644,9 @@ export async function executeNode(
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.arrays[key]
     }
+    // Reassigning OPTIND (even to its current value) restarts the getopts
+    // scan, matching bash's internal char pointer.
+    if (key === 'OPTIND') session.getoptsOptind = null
     const assignIo = new IOResult()
     if (session.shellOptions.xtrace === true) {
       assignIo.stderr = traceAssignment(key, val, append)

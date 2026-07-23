@@ -570,6 +570,10 @@ async def execute_node(
         else:
             session.env[key] = val
             session.arrays.pop(key, None)
+        # Reassigning OPTIND (even to its current value) restarts the
+        # getopts scan, matching bash's internal char pointer.
+        if key == "OPTIND":
+            session._getopts_optind = None
         io = IOResult()
         if session.shell_options.get("xtrace"):
             io.stderr = trace_assignment(key, val, append)

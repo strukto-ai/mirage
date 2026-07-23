@@ -266,6 +266,8 @@ export async function handleSubshell(
   const savedFunctions = { ...session.functions }
   const savedPositional = [...session.positionalArgs]
   const savedLastBgJob = session.lastBgJobId
+  const savedGetoptsPos = session.getoptsPos
+  const savedGetoptsOptind = session.getoptsOptind
   try {
     const allStdout: ByteSource[] = []
     let mergedIo = new IOResult()
@@ -343,6 +345,8 @@ export async function handleSubshell(
     session.functions = savedFunctions
     session.positionalArgs = savedPositional
     session.lastBgJobId = savedLastBgJob
+    session.getoptsPos = savedGetoptsPos
+    session.getoptsOptind = savedGetoptsOptind
   }
 }
 

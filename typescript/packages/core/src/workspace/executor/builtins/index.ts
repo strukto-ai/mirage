@@ -28,6 +28,7 @@ export {
   handleEnv,
   handleExit,
   handleExport,
+  handleGetopts,
   handleLocal,
   handlePrintenv,
   handleRead,

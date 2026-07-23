@@ -62,6 +62,12 @@ export class Session {
   stdinBuffer: AsyncLineIterator | null = null
   stdinSource: unknown = null
   localVars: Map<string, string | null> | null = null
+  // Hidden `getopts` state: the char offset within the word being
+  // scanned (0 = positioned at the word's leading dash), plus the OPTIND
+  // that offset belongs to. A caller resetting OPTIND makes the seen
+  // value stale, restarting the scan, matching bash's char pointer.
+  getoptsPos = 0
+  getoptsOptind: number | null = null
   mountModes: ReadonlyMap<string, MountMode> | null
   generation: number
   pipelineTimeoutSeconds: number | null
@@ -94,7 +100,7 @@ export class Session {
    * forget one when adding new fields.
    */
   fork(overrides: Partial<SessionInit> = {}): Session {
-    return new Session({
+    const forked = new Session({
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
       env: overrides.env ?? { ...this.env },
@@ -112,6 +118,9 @@ export class Session {
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    forked.getoptsPos = this.getoptsPos
+    forked.getoptsOptind = this.getoptsOptind
+    return forked
   }
 
   /**
