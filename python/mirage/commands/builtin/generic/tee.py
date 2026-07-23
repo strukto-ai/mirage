@@ -27,6 +27,24 @@ def parse_flags(flags: Mapping[str, object]) -> TeeFlags:
     return TeeFlags(append=fl.as_bool("a") or fl.as_bool("append"))
 
 
+async def write_output(
+    write_bytes: Callable[..., Awaitable[None]],
+    path: PathSpec,
+    data: bytes,
+    passthrough: ByteSource,
+) -> tuple[ByteSource | None, IOResult]:
+    try:
+        await write_bytes(path, data)
+    except OSError as exc:
+        # GNU tee still copies stdin to stdout on a write error, prints a
+        # diagnostic, and exits non-zero. With a single output sink the
+        # --output-error modes (warn/exit/*-nopipe) collapse to this.
+        err = f"tee: {path.mount_path}: {exc}\n".encode()
+        return passthrough, IOResult(exit_code=1, stderr=err)
+    return passthrough, IOResult(writes={path.mount_path: data},
+                                 cache=[path.mount_path])
+
+
 async def tee(
     paths: list[PathSpec],
     texts: tuple[str, ...],
@@ -55,9 +73,7 @@ async def tee(
         except FileNotFoundError:
             # GNU tee -a creates a missing file: append to empty.
             pass
-    await write_bytes(paths[0], write_data)
-    return raw, IOResult(writes={paths[0].mount_path: write_data},
-                         cache=[paths[0].mount_path])
+    return await write_output(write_bytes, paths[0], write_data, raw)
 
 
-__all__ = ["tee", "parse_flags", "TeeFlags"]
+__all__ = ["tee", "parse_flags", "TeeFlags", "write_output"]

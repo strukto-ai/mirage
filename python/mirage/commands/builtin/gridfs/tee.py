@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.tee import parse_flags
+from mirage.commands.builtin.generic.tee import parse_flags, write_output
 from mirage.commands.builtin.gridfs.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -54,6 +56,5 @@ async def tee(
         except FileNotFoundError:
             # appending to a missing object starts from empty
             pass
-    await write_bytes(accessor, paths[0], write_data)
-    return raw, IOResult(writes={paths[0].mount_path: write_data},
-                         cache=[paths[0].mount_path])
+    return await write_output(partial(write_bytes, accessor), paths[0],
+                              write_data, raw)

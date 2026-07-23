@@ -13,7 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseTeeFlags } from './tee.ts'
+import { PathSpec } from '../../../types.ts'
+import { parseTeeFlags, writeOutput } from './tee.ts'
+
+const DEC = new TextDecoder()
 
 describe('parseTeeFlags', () => {
   it('accepts -a / --append', () => {
@@ -44,5 +47,38 @@ describe('parseTeeFlags', () => {
         "  - 'warn'\n  - 'warn-nopipe'\n  - 'exit'\n  - 'exit-nopipe'\n" +
         "Try 'tee --help' for more information.\n",
     )
+  })
+})
+
+describe('writeOutput', () => {
+  const ENC = new TextEncoder()
+  const path = PathSpec.fromStrPath('/out.txt')
+
+  it('reports writes and cache on success', async () => {
+    const written: Record<string, Uint8Array> = {}
+    const [out, io] = await writeOutput(
+      (p, d) => {
+        written[p.mountPath] = d
+        return Promise.resolve()
+      },
+      path,
+      ENC.encode('hi'),
+      ENC.encode('hi'),
+    )
+    expect(DEC.decode(out as Uint8Array)).toBe('hi')
+    expect(io.exitCode).toBe(0)
+    expect(io.cache).toEqual(['/out.txt'])
+  })
+
+  it('passes stdout through and exits 1 on a write error', async () => {
+    const [out, io] = await writeOutput(
+      () => Promise.reject(new Error('disk full')),
+      path,
+      ENC.encode('hi'),
+      ENC.encode('hi'),
+    )
+    expect(DEC.decode(out as Uint8Array)).toBe('hi')
+    expect(io.exitCode).toBe(1)
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('tee: /out.txt: disk full\n')
   })
 })

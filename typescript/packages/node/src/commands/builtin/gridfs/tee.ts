@@ -21,7 +21,7 @@ import {
   readStdinAsync,
   resolveGlobOf,
   specOf,
-  type ByteSource,
+  writeOutput,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
@@ -69,15 +69,7 @@ async function teeCommand(
       writeData.set(raw, existing.byteLength)
     }
   }
-  await gridfsWrite(accessor, first, writeData)
-  const out: ByteSource = raw
-  return [
-    out,
-    new IOResult({
-      writes: { [first.mountPath]: writeData },
-      cache: [first.mountPath],
-    }),
-  ]
+  return writeOutput((p, d) => gridfsWrite(accessor, p, d), first, writeData, raw)
 }
 
 export const GRIDFS_TEE = command({

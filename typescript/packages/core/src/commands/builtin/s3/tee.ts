@@ -15,11 +15,11 @@
 import type { S3Accessor } from '../../../accessor/s3.ts'
 import { exists as s3Exists } from '../../../core/s3/exists.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { parseTeeFlags } from '../generic/tee.ts'
+import { parseTeeFlags, writeOutput } from '../generic/tee.ts'
 import { S3_IO } from './io.ts'
 import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -62,15 +62,7 @@ async function teeCommand(
       writeData.set(raw, existing.byteLength)
     }
   }
-  await s3Write(accessor, first, writeData)
-  const out: ByteSource = raw
-  return [
-    out,
-    new IOResult({
-      writes: { [first.mountPath]: writeData },
-      cache: [first.mountPath],
-    }),
-  ]
+  return writeOutput((p, d) => s3Write(accessor, p, d), first, writeData, raw)
 }
 
 export const S3_TEE = command({

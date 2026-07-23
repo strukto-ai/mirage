@@ -56,6 +56,28 @@ async def test_bad_output_error_mode_exits_one():
 
 
 @pytest.mark.asyncio
+async def test_write_error_passes_stdout_and_exits_one():
+
+    async def _write(_p, _d):
+        raise OSError("disk full")
+
+    async def _read(_p):
+        if False:
+            yield b""
+
+    source, io = await tee([_spec("/out.txt")], (),
+                           read_stream=_read,
+                           write_bytes=_write,
+                           stdin=b"hello",
+                           flags={})
+    # GNU tee still copies stdin to stdout on a write error.
+    assert await materialize(source) == b"hello"
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == b"tee: /out.txt: disk full\n"
+    assert not io.writes
+
+
+@pytest.mark.asyncio
 async def test_writes_stdin_and_reports_cache():
     written = {}
 

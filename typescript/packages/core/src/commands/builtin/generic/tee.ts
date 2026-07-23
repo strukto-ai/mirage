@@ -69,13 +69,29 @@ export async function teeGeneric(
       if (!(err instanceof Error) || !/not found/i.test(err.message)) throw err
     }
   }
-  await write(first, writeData)
-  const out: ByteSource = raw
+  return writeOutput(write, first, writeData, raw)
+}
+
+export async function writeOutput(
+  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  path: PathSpec,
+  data: Uint8Array,
+  passthrough: ByteSource,
+): Promise<[ByteSource | null, IOResult]> {
+  try {
+    await write(path, data)
+  } catch (err) {
+    // GNU tee still copies stdin to stdout on a write error, prints a
+    // diagnostic, and exits non-zero. With a single output sink the
+    // --output-error modes (warn/exit/*-nopipe) collapse to this.
+    const msg = err instanceof Error ? err.message : String(err)
+    return [
+      passthrough,
+      new IOResult({ exitCode: 1, stderr: ENC.encode(`tee: ${path.mountPath}: ${msg}\n`) }),
+    ]
+  }
   return [
-    out,
-    new IOResult({
-      writes: { [first.mountPath]: writeData },
-      cache: [first.mountPath],
-    }),
+    passthrough,
+    new IOResult({ writes: { [path.mountPath]: data }, cache: [path.mountPath] }),
   ]
 }
