@@ -37,6 +37,37 @@ _VERSION_OPTION = Option(
 )
 
 
+def _version_line(name: str) -> bytes:
+    """Render the GNU-style version line for a command.
+
+    Args:
+        name (str): command name as invoked.
+    """
+    return f"{name} (Mirage) {__version__}\n".encode()
+
+
+def version_request(name: str, spec: CommandSpec | None,
+                    argv: list[str]) -> bytes | None:
+    """Version output when argv asks a command for the injected --version.
+
+    None when the command declares its own --version, when the flag is
+    absent, or when it sits after the `--` end-of-options marker.
+
+    Args:
+        name (str): command name as invoked.
+        spec (CommandSpec | None): the command's registered spec.
+        argv (list[str]): the words after the command name.
+    """
+    if spec is None or not any(o is _VERSION_OPTION for o in spec.options):
+        return None
+    for arg in argv:
+        if arg == "--":
+            return None
+        if arg == "--version":
+            return _version_line(name)
+    return None
+
+
 def _with_help_support(
         name: str, spec: CommandSpec,
         fn: Callable[..., Any]) -> tuple[CommandSpec, Callable[..., Any]]:
@@ -53,7 +84,7 @@ def _with_help_support(
     new_spec = (spec if not extras else replace(
         spec, options=spec.options + tuple(extras)))
     help_text = render_help(name, new_spec).encode()
-    version_text = f"{name} (Mirage) {__version__}\n".encode()
+    version_text = _version_line(name)
 
     @functools.wraps(fn)
     async def wrapper(accessor, paths, *texts, **kwargs):

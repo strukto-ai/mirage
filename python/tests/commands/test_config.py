@@ -14,9 +14,30 @@
 
 import asyncio
 
-from mirage.commands.config import RegisteredCommand, command, cross_command
-from mirage.commands.spec import CommandSpec, Operand, OperandKind
+from mirage.commands.config import (RegisteredCommand, command, cross_command,
+                                    version_request)
+from mirage.commands.spec import CommandSpec, Operand, OperandKind, Option
 from mirage.version import __version__
+
+_HANDLER_CALLS: list[str] = []
+
+
+async def _noop_handler(backend, paths, *texts, **kw):
+    return None, None
+
+
+async def _recording_handler(backend, paths, *texts, **kw):
+    _HANDLER_CALLS.append("called")
+    return None, None
+
+
+async def _collect(source):
+    if isinstance(source, (bytes, bytearray)):
+        return bytes(source)
+    parts = []
+    async for chunk in source:
+        parts.append(chunk)
+    return b"".join(parts)
 
 
 class TestRegisteredCommand:
@@ -137,37 +158,55 @@ class TestCrossCommandDecorator:
 class TestVersionSupport:
 
     def test_auto_injects_version_option(self):
-        spec = CommandSpec()
-
-        @command("foo", resource="disk", spec=spec)
-        async def my_fn(backend, paths, *texts, **kw):
-            pass
-
-        longs = [o.long for o in my_fn._registered_commands[0].spec.options]
+        registered = command("foo", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        longs = [
+            o.long for o in registered._registered_commands[0].spec.options
+        ]
         assert "--version" in longs
         assert "--help" in longs
 
     def test_version_short_circuits_handler(self):
-        called = False
-
-        @command("tsort", resource="disk", spec=CommandSpec())
-        async def my_fn(backend, paths, *texts, **kw):
-            nonlocal called
-            called = True
-            return None, None
-
-        stdout, result = asyncio.run(my_fn._registered_commands[0].fn(
+        _HANDLER_CALLS.clear()
+        registered = command("tsort", resource="disk",
+                             spec=CommandSpec())(_recording_handler)
+        stdout, result = asyncio.run(registered._registered_commands[0].fn(
             None, [], version=True))
-        assert called is False
-        chunks = asyncio.run(_collect(stdout))
-        assert chunks == f"tsort (Mirage) {__version__}\n".encode()
+        assert _HANDLER_CALLS == []
+        assert asyncio.run(
+            _collect(stdout)) == f"tsort (Mirage) {__version__}\n".encode()
         assert result.exit_code == 0
 
 
-async def _collect(source):
-    if isinstance(source, (bytes, bytearray)):
-        return bytes(source)
-    parts = []
-    async for chunk in source:
-        parts.append(chunk)
-    return b"".join(parts)
+class TestVersionRequest:
+
+    def test_matches_injected_option(self):
+        registered = command("tsort", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        spec = registered._registered_commands[0].spec
+        assert version_request(
+            "tsort", spec,
+            ["--version"]) == f"tsort (Mirage) {__version__}\n".encode()
+
+    def test_none_without_the_flag(self):
+        registered = command("tsort", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        spec = registered._registered_commands[0].spec
+        assert version_request("tsort", spec, ["/data/a.txt"]) is None
+
+    def test_none_after_end_of_options(self):
+        registered = command("grep", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        spec = registered._registered_commands[0].spec
+        assert version_request("grep", spec, ["--", "--version"]) is None
+
+    def test_none_for_unregistered_command(self):
+        assert version_request("nope", None, ["--version"]) is None
+
+    def test_none_when_command_declares_its_own_version(self):
+        spec = CommandSpec(options=(Option(long="--version"), ))
+        registered = command("custom", resource="disk",
+                             spec=spec)(_noop_handler)
+        assert version_request("custom",
+                               registered._registered_commands[0].spec,
+                               ["--version"]) is None

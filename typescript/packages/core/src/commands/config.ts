@@ -151,6 +151,29 @@ const VERSION_OPTION = new Option({
 
 const HELP_ENC = new TextEncoder()
 
+/** Render the GNU-style version line for a command. */
+function versionLine(name: string): string {
+  return `${name} (Mirage) ${VERSION}\n`
+}
+
+/**
+ * Version output when argv asks a command for the injected --version.
+ * Null when the command declares its own --version, when the flag is
+ * absent, or when it sits after the `--` end-of-options marker.
+ */
+export function versionRequest(
+  name: string,
+  spec: CommandSpec | null,
+  argv: string[],
+): Uint8Array | null {
+  if (!spec?.options.some((o) => o === VERSION_OPTION)) return null
+  for (const arg of argv) {
+    if (arg === '--') return null
+    if (arg === '--version') return HELP_ENC.encode(versionLine(name))
+  }
+  return null
+}
+
 /**
  * Inject --help / --version and short-circuit them before the handler.
  * Mirrors GNU coreutils: every registered command accepts both flags,
@@ -175,7 +198,7 @@ function withHelpSupport(
   if (spec.description !== null) init.description = spec.description
   const newSpec = extras.length === 0 ? spec : new CommandSpec(init)
   const helpText = renderHelp(name, newSpec)
-  const versionText = `${name} (Mirage) ${VERSION}\n`
+  const versionText = versionLine(name)
   const wrappedFn: CommandFn = async (accessor, paths, texts, opts) => {
     if (opts.flags.help === true) {
       return [HELP_ENC.encode(helpText), new IOResult()]

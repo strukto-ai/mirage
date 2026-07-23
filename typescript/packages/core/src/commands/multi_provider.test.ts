@@ -13,14 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { command, RegisteredCommand } from './config.ts'
-import { CommandSpec } from './spec/types.ts'
+import { command, RegisteredCommand, versionRequest } from './config.ts'
+import { CommandSpec, Option } from './spec/types.ts'
 import { IOResult } from '../io/types.ts'
 
-describe('command() registers multiple resources', () => {
-  const noopFn = (): Promise<[Uint8Array, IOResult]> =>
-    Promise.resolve([new Uint8Array(), new IOResult()])
+const noopFn = (): Promise<[Uint8Array, IOResult]> =>
+  Promise.resolve([new Uint8Array(), new IOResult()])
 
+function specFor(name: string, spec = new CommandSpec()): CommandSpec | null {
+  return command({ name, resource: 'disk', spec, fn: noopFn })[0]?.spec ?? null
+}
+
+function decode(out: Uint8Array | null): string | null {
+  return out === null ? null : new TextDecoder().decode(out)
+}
+
+describe('command() registers multiple resources', () => {
   it('returns one RegisteredCommand per resource when passed an array', () => {
     const cmds = command({
       name: 'cat',
@@ -135,5 +143,29 @@ describe('command() registers multiple resources', () => {
     expect(stdout).toBeDefined()
     const text = new TextDecoder().decode(stdout as Uint8Array)
     expect(text).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+\n$/)
+  })
+})
+
+describe('versionRequest', () => {
+  it('matches the injected option', () => {
+    const out = versionRequest('tsort', specFor('tsort'), ['--version'])
+    expect(decode(out)).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+\n$/)
+  })
+
+  it('is null without the flag', () => {
+    expect(versionRequest('tsort', specFor('tsort'), ['/data/a.txt'])).toBeNull()
+  })
+
+  it('is null after the end-of-options marker', () => {
+    expect(versionRequest('grep', specFor('grep'), ['--', '--version'])).toBeNull()
+  })
+
+  it('is null for an unregistered command', () => {
+    expect(versionRequest('nope', null, ['--version'])).toBeNull()
+  })
+
+  it('is null when the command declares its own --version', () => {
+    const own = new CommandSpec({ options: [new Option({ long: '--version' })] })
+    expect(versionRequest('custom', specFor('custom', own), ['--version'])).toBeNull()
   })
 })
