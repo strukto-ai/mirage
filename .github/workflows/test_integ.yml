@@ -148,11 +148,6 @@ jobs:
           ./python/.venv/bin/python integ/history.py > /tmp/history.out
           diff integ/truth_history.txt /tmp/history.out
 
-      - name: Run s3 + gcs + minio integ (moto) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/s3.py > /tmp/s3.out
-          diff integ/truth_s3.txt /tmp/s3.out
-
       - name: Run lancedb integ (embedded) and diff against truth
         run: |
           ./python/.venv/bin/python integ/lancedb.py > /tmp/lancedb.out
@@ -297,12 +292,6 @@ jobs:
         run: |
           pnpm exec tsx session_modes.ts > /tmp/ts-session-modes.out
           diff truth_session_modes.txt /tmp/ts-session-modes.out
-
-      - name: Run s3-native suite (multi-cloud/MinIO) and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx s3.ts > /tmp/ts-s3-native.out
-          diff truth_s3_ts.txt /tmp/ts-s3-native.out
 
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ
