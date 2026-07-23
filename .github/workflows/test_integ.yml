@@ -807,13 +807,6 @@ jobs:
           curl -s http://localhost:8080/status.php || true
           exit 1
 
-      - name: Run Nextcloud backend and check against truth
-        shell: bash
-        run: |
-          set -o pipefail
-          ./python/.venv/bin/python integ/nextcloud.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_nextcloud.txt
-
       - name: Run declarative battery on nextcloud
         run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud
 
