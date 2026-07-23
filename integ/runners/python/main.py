@@ -24,35 +24,61 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import adapters  # noqa: E402
 import harness  # noqa: E402
 
+from mirage.types import ConsistencyPolicy  # noqa: E402
+
 HOST = "python"
+
+
+def _emit_or_record(emit: list[dict] | None, report: harness.Report | None,
+                    target_id: str, case: dict, exit_code: int, out: str,
+                    err: str, elapsed: float) -> None:
+    if emit is not None:
+        emit.append({
+            "target": target_id,
+            "id": case["id"],
+            "exit": exit_code,
+            "stdout": out,
+            "stderr": err,
+        })
+    elif report is not None:
+        report.record(target_id, case["id"],
+                      harness.compare(case, exit_code, out, err, elapsed))
+
+
+async def run_consistency_case(target: dict, case: dict,
+                               report: harness.Report | None,
+                               emit: list[dict] | None) -> None:
+    policy = ConsistencyPolicy(case["consistency"])
+    read_ws, mutate, cleanup = await adapters.open_consistency(target, policy)
+    try:
+        exit_code, out = await harness.run_scenario(read_ws, mutate,
+                                                    case["scenario"])
+        _emit_or_record(emit, report, target["id"], case, exit_code, out, "",
+                        0.0)
+    finally:
+        await cleanup()
 
 
 async def run_target(target: dict, cases: list[dict], root: Path,
                      report: harness.Report | None,
                      emit: list[dict] | None) -> None:
+    selected = [c for c in cases if target["id"] in c["targets"]]
     ws, cleanup = await adapters.open_target(target)
     try:
         for mount in target["mounts"]:
             await harness.seed_fixture(ws, mount.get("fixture"), mount["path"],
                                        root)
-        for case in cases:
-            if target["id"] not in case["targets"]:
+        for case in selected:
+            if "consistency" in case:
                 continue
             exit_code, out, err, elapsed = await harness.run_case(ws, case)
-            if emit is not None:
-                emit.append({
-                    "target": target["id"],
-                    "id": case["id"],
-                    "exit": exit_code,
-                    "stdout": out,
-                    "stderr": err,
-                })
-            elif report is not None:
-                report.record(
-                    target["id"], case["id"],
-                    harness.compare(case, exit_code, out, err, elapsed))
+            _emit_or_record(emit, report, target["id"], case, exit_code, out,
+                            err, elapsed)
     finally:
         await cleanup()
+    for case in selected:
+        if "consistency" in case:
+            await run_consistency_case(target, case, report, emit)
 
 
 async def main() -> None:

@@ -84,6 +84,7 @@ from mirage.resource.supabase import SupabaseConfig, SupabaseResource
 from mirage.resource.tencent import TencentConfig, TencentResource
 from mirage.resource.trello import TrelloConfig, TrelloResource
 from mirage.resource.wasabi import WasabiConfig, WasabiResource
+from mirage.types import ConsistencyPolicy
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
@@ -1155,42 +1156,45 @@ BUILDERS = {
 }
 
 
-async def open_target(
-        target: dict) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
-    run_id = uuid.uuid4().hex[:8]
-    service: Service | None = None
+async def make_service(target: dict, run_id: str) -> "Service | None":
     if target.get("service") == "s3":
-        service = S3Service(run_id)
-    elif target.get("service") == "gridfs":
-        service = GridFSService(run_id)
-    elif target.get("service") == "databricks":
-        service = await DatabricksVolumeService.create(run_id)
-    elif target.get("service") == "onedrive":
-        service = await OneDriveService.create()
-    elif target.get("service") == "sharepoint":
-        service = await SharePointService.create()
-    elif target.get("service") == "ssh":
-        service = await SSHService.create(run_id, target)
-    elif target.get("service") == "nextcloud":
-        service = await NextcloudService.create(run_id, target)
-    elif target.get("service") == "gws":
-        service = await GwsService.create(run_id, target)
-    elif target.get("service") == "email":
-        service = await EmailService.create(run_id, target)
-    elif target.get("service") == "hf":
-        service = await HfService.create(run_id)
-    elif target.get("service") == "box":
-        service = await BoxService.create(run_id)
-    elif target.get("service") == "dropbox":
-        service = await DropboxService.create(target)
-    elif target.get("service") == "slack":
-        service = await SlackService.create()
-    elif target.get("service") == "trello":
-        service = await TrelloService.create()
-    elif target.get("service") == "linear":
-        service = await LinearService.create()
-    elif target.get("service") == "dify":
-        service = await DifyService.create(target)
+        return S3Service(run_id)
+    if target.get("service") == "gridfs":
+        return GridFSService(run_id)
+    if target.get("service") == "databricks":
+        return await DatabricksVolumeService.create(run_id)
+    if target.get("service") == "onedrive":
+        return await OneDriveService.create()
+    if target.get("service") == "sharepoint":
+        return await SharePointService.create()
+    if target.get("service") == "ssh":
+        return await SSHService.create(run_id, target)
+    if target.get("service") == "nextcloud":
+        return await NextcloudService.create(run_id, target)
+    if target.get("service") == "gws":
+        return await GwsService.create(run_id, target)
+    if target.get("service") == "email":
+        return await EmailService.create(run_id, target)
+    if target.get("service") == "hf":
+        return await HfService.create(run_id)
+    if target.get("service") == "box":
+        return await BoxService.create(run_id)
+    if target.get("service") == "dropbox":
+        return await DropboxService.create(target)
+    if target.get("service") == "slack":
+        return await SlackService.create()
+    if target.get("service") == "trello":
+        return await TrelloService.create()
+    if target.get("service") == "linear":
+        return await LinearService.create()
+    if target.get("service") == "dify":
+        return await DifyService.create(target)
+    return None
+
+
+def build_mounts(
+    target: dict, run_id: str, service: "Service | None"
+) -> tuple[dict[str, object], list[Callable[[], Awaitable[None]]]]:
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
     for mount in target["mounts"]:
@@ -1201,7 +1205,20 @@ async def open_target(
         else:
             mounts[mount["path"]] = resource
         cleanups.append(cleanup)
-    ws = Workspace(mounts, mode=MountMode.WRITE)
+    return mounts, cleanups
+
+
+async def open_target(
+    target: dict,
+    consistency: ConsistencyPolicy | None = None
+) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
+    run_id = uuid.uuid4().hex[:8]
+    service = await make_service(target, run_id)
+    mounts, cleanups = build_mounts(target, run_id, service)
+    if consistency is not None:
+        ws = Workspace(mounts, mode=MountMode.WRITE, consistency=consistency)
+    else:
+        ws = Workspace(mounts, mode=MountMode.WRITE)
 
     async def cleanup_all() -> None:
         await ws.close()
@@ -1211,3 +1228,33 @@ async def open_target(
             await service.teardown()
 
     return ws, cleanup_all
+
+
+async def open_consistency(
+    target: dict, consistency: ConsistencyPolicy
+) -> tuple[
+        Workspace,
+        Callable[[str, bytes], Awaitable[None]],
+        Callable[[], Awaitable[None]],
+]:
+    run_id = uuid.uuid4().hex[:8]
+    service = await make_service(target, run_id)
+    read_mounts, read_cleanups = build_mounts(target, run_id, service)
+    shadow_mounts, shadow_cleanups = build_mounts(target, run_id, service)
+    read_ws = Workspace(read_mounts,
+                        mode=MountMode.WRITE,
+                        consistency=consistency)
+    shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
+
+    async def mutate(path: str, content: bytes) -> None:
+        await shadow_ws.ops.write(path, content)
+
+    async def cleanup_all() -> None:
+        await read_ws.close()
+        await shadow_ws.close()
+        for cleanup in (*read_cleanups, *shadow_cleanups):
+            await cleanup()
+        if service is not None:
+            await service.teardown()
+
+    return read_ws, mutate, cleanup_all

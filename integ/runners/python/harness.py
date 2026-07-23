@@ -118,6 +118,20 @@ async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
     return result.exit_code, out, err, elapsed
 
 
+async def run_scenario(read_ws, mutate, steps: list[dict]) -> tuple[int, str]:
+    outs: list[str] = []
+    exit_code = 0
+    for step in steps:
+        if "mutate" in step:
+            spec = step["mutate"]
+            await mutate(spec["path"], spec["content"].encode())
+            continue
+        result = await read_ws.execute(step["command"])
+        outs.append(await result.stdout_str())
+        exit_code = result.exit_code
+    return exit_code, "".join(outs)
+
+
 def compare(case: dict, exit_code: int, out: str, err: str,
             elapsed: float) -> list[str]:
     expect = case["expect"]
