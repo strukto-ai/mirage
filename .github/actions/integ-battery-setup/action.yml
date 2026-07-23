@@ -3,6 +3,13 @@ description: >-
   Toolchain + shared fake-server fleet for the declarative integ battery.
   Both the python-host and typescript-host battery jobs use this so the
   setup stays defined once.
+inputs:
+  build-packages:
+    description: >-
+      Build the mirage TypeScript packages (core/node/browser). Required by
+      the typescript-host battery; the python host only needs node for the
+      tsx fake servers (which import no mirage package), so it passes false.
+    default: "true"
 runs:
   using: composite
   steps:
@@ -37,16 +44,19 @@ runs:
       run: pnpm install --frozen-lockfile=false
 
     - name: Build mirage-core
+      if: ${{ inputs.build-packages == 'true' }}
       working-directory: typescript
       shell: bash
       run: pnpm --filter @struktoai/mirage-core build
 
     - name: Build mirage-node
+      if: ${{ inputs.build-packages == 'true' }}
       working-directory: typescript
       shell: bash
       run: pnpm --filter @struktoai/mirage-node build
 
     - name: Build mirage-browser
+      if: ${{ inputs.build-packages == 'true' }}
       working-directory: typescript
       shell: bash
       run: pnpm --filter @struktoai/mirage-browser build
