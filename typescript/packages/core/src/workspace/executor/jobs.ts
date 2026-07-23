@@ -205,6 +205,9 @@ export async function handleWait(jobTable: JobTable, parts: string[]): Promise<J
   const job = await jobTable.wait(jobId)
   const stdout = await job.console.snapshot(Channel.STDOUT)
   const stderr = await job.console.snapshot(Channel.STDERR)
+  // Reaped like GNU bash reaps a job waited on by id, so a later bare
+  // `wait` does not adopt this console a second time.
+  jobTable.reap(jobId)
   const io = new IOResult({
     exitCode: job.exitCode,
     stderr: stderr.byteLength > 0 ? stderr : null,
@@ -247,6 +250,7 @@ export async function handleFg(jobTable: JobTable, parts: string[]): Promise<Job
   const header = new TextEncoder().encode(job.command + '\n')
   const body = await job.console.snapshot(Channel.STDOUT)
   const stderr = await job.console.snapshot(Channel.STDERR)
+  jobTable.reap(jobId)
   const stdout = new Uint8Array(header.byteLength + body.byteLength)
   stdout.set(header, 0)
   stdout.set(body, header.byteLength)

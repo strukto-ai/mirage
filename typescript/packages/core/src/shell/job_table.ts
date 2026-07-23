@@ -151,6 +151,10 @@ export class JobTable {
     agent?: string
     sessionId?: string
   }): Job {
+    // GNU bash restarts job numbering at 1 once the job list empties.
+    // Without this, reaping after a targeted `wait` would leave a
+    // later `wait %1` pointing at nothing.
+    if (this.jobs.size === 0) this.nextId = 1
     const job = new Job({
       id: this.nextId,
       command: init.command,
@@ -226,6 +230,18 @@ export class JobTable {
       await this.wait(job.id)
     }
     return running
+  }
+
+  /**
+   * Remove one job from the table.
+   *
+   * What a targeted `wait`/`fg` does after adopting the job's output,
+   * matching GNU bash, where a job waited on by id is deleted from the
+   * job list. Leaving it would let a later bare `wait` snapshot the
+   * same console and print the output twice.
+   */
+  reap(jobId: number): void {
+    this.jobs.delete(jobId)
   }
 
   /**

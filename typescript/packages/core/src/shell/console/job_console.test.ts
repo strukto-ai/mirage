@@ -62,6 +62,14 @@ describe('RAMConsoleStore', () => {
     expect(chunks.map((c) => dec(c.data))).toEqual(['b', 'c'])
   })
 
+  it('never trims the terminal control chunk', async () => {
+    const store = new RAMConsoleStore(2)
+    await store.append(Channel.STDOUT, enc('payload'))
+    await store.append(Channel.CONTROL, enc('exit:0'))
+    const [chunks] = await store.readFrom(0)
+    expect(chunks.map((c) => c.channel)).toEqual([Channel.CONTROL])
+  })
+
   it('does not report truncation to a reader still in range', async () => {
     const store = new RAMConsoleStore(2)
     for (const p of ['a', 'b', 'c']) await store.append(Channel.STDOUT, enc(p))
@@ -208,6 +216,13 @@ describe('JobConsole', () => {
 
   it('waitFinished returns immediately when already finished', async () => {
     const c = new JobConsole()
+    await c.finish(exitOutcome(0))
+    await c.waitFinished()
+  })
+
+  it('waitFinished survives an outcome bigger than the budget', async () => {
+    const c = new JobConsole(new RAMConsoleStore(2))
+    await c.emit(Channel.STDOUT, enc('payload'))
     await c.finish(exitOutcome(0))
     await c.waitFinished()
   })

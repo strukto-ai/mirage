@@ -67,6 +67,22 @@ function balancedEnd(text: string, start: number): number | null {
 }
 
 /**
+ * Whether the construct at `start` is a real arithmetic command.
+ *
+ * Decided by parsing the balanced span on its own: `((i++))` stands
+ * alone cleanly, while `((echo x); echo $i)` does not. Judging each
+ * opener separately is what keeps a valid `((i++))` safe when it shares
+ * a line with a broken one, since tree-sitter's error region covers
+ * both. An unbalanced span is assumed arithmetic and left alone.
+ */
+function isArithmetic(parser: Parser, command: string, start: number): boolean {
+  const end = balancedEnd(command, start)
+  if (end === null) return true
+  const span = parser.parse(command.slice(start, end))
+  return !span?.rootNode.hasError
+}
+
+/**
  * Offsets of `((` tokens the parser could not make sense of.
  *
  * Only openers inside an ERROR subtree are reported.
@@ -117,16 +133,10 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
       // so a valid `((i++))` next to a bad opener reports as errored
       // too. Splitting it would silently turn arithmetic into a subshell
       // running `i++`, which is a wrong parse rather than a rejected
-      // one. Each opener is judged on its own span instead: `((i++))`
-      // stands alone cleanly, `((echo x); echo $i)` does not. An
-      // unbalanced span is assumed arithmetic and left alone.
-      const isArithmetic = (start: number): boolean => {
-        const end = balancedEnd(command, start)
-        if (end === null) return true
-        const span = parser.parse(command.slice(start, end))
-        return !span?.rootNode.hasError
-      }
-      const offsets = [...new Set(failedArithOpeners(root))].filter((o) => !isArithmetic(o))
+      // one. Each opener is judged on its own span instead.
+      const offsets = [...new Set(failedArithOpeners(root))].filter(
+        (o) => !isArithmetic(parser, command, o),
+      )
       if (offsets.length === 0) return root
       let text = command
       for (const offset of offsets.sort((a, b) => b - a)) {

@@ -297,5 +297,10 @@ def test_two_nested_subshells_on_one_line():
     assert not parse("((echo a); echo b); ((echo c); echo d)").has_error
 
 
+def test_multibyte_text_before_the_opener_does_not_shift_offsets():
+    """tree-sitter reports byte offsets; ``é`` is two bytes in UTF-8."""
+    assert not parse("echo é; ((echo a); echo b)").has_error
+
+
 def test_unrelated_syntax_error_still_reports():
     assert parse("if then").has_error

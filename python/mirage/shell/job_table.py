@@ -152,6 +152,11 @@ class JobTable:
             agent (str): agent that started the job.
             session_id (str): session the job belongs to.
         """
+        if not self._jobs:
+            # GNU bash restarts job numbering at 1 once the job list
+            # empties. Without this, reaping after a targeted `wait`
+            # would leave a later `wait %1` pointing at nothing.
+            self._next_id = 1
         job = Job(id=self._next_id,
                   command=command,
                   task=None,
@@ -229,6 +234,19 @@ class JobTable:
         for job in running:
             await self.wait(job.id)
         return running
+
+    def reap(self, job_id: int) -> None:
+        """Remove one job from the table.
+
+        What a targeted ``wait``/``fg`` does after adopting the job's
+        output, matching GNU bash, where a job waited on by id is
+        deleted from the job list. Leaving it would let a later bare
+        ``wait`` snapshot the same console and print the output twice.
+
+        Args:
+            job_id (int): the job to remove.
+        """
+        self._jobs.pop(job_id, None)
 
     def pop_completed(self) -> list[Job]:
         """Return completed/killed jobs and remove them from the table.

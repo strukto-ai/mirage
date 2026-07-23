@@ -185,6 +185,10 @@ describe('(( reparse: subshell that immediately opens a subshell', () => {
     expect(parser.parse('((echo a); echo b); ((echo c); echo d)').hasError).toBe(false)
   })
 
+  it('multibyte text before the opener does not shift offsets', () => {
+    expect(parser.parse('echo é; ((echo a); echo b)').hasError).toBe(false)
+  })
+
   it('still reports an unrelated syntax error', () => {
     expect(parser.parse('if then').hasError).toBe(true)
   })

@@ -27,6 +27,16 @@ def console():
 
 
 @pytest.mark.asyncio
+async def test_wait_finished_survives_an_outcome_bigger_than_the_budget():
+    """Retention must never evict the terminal chunk, or this blocks."""
+    console = JobConsole(RAMConsoleStore(max_bytes=2))
+    await console.emit(Channel.STDOUT, b"payload")
+    await console.finish(exit_outcome(0))
+
+    await asyncio.wait_for(console.wait_finished(), timeout=1)
+
+
+@pytest.mark.asyncio
 async def test_emit_then_read_from_the_start(console):
     await console.emit(Channel.STDOUT, b"hello\n")
     await console.emit(Channel.STDERR, b"oops\n")

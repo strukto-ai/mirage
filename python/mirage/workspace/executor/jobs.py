@@ -175,8 +175,12 @@ async def handle_wait(
                                                          exit_code=1,
                                                          stderr=err)
     job = await job_table.wait(job_id)
+    stdout = await job.console.snapshot(Channel.STDOUT)
     stderr = await job.console.snapshot(Channel.STDERR)
-    return await job.console.snapshot(Channel.STDOUT), IOResult(
+    # Reaped like GNU bash reaps a job waited on by id, so a later bare
+    # `wait` does not adopt this console a second time.
+    job_table.reap(job_id)
+    return stdout, IOResult(
         exit_code=job.exit_code,
         stderr=stderr or None,
     ), ExecutionNode(command=cmd_str, exit_code=job.exit_code)
@@ -224,6 +228,7 @@ async def handle_fg(
     header = (job.command + "\n").encode()
     stdout = header + await job.console.snapshot(Channel.STDOUT)
     stderr = await job.console.snapshot(Channel.STDERR)
+    job_table.reap(job_id)
     return stdout, IOResult(
         exit_code=job.exit_code,
         stderr=stderr or None,

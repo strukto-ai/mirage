@@ -2431,30 +2431,36 @@ def test_subshell_cd_and_cat_bare_filename():
 def test_bg_sleep_kill_and_jobs_cleanup():
     """Background sleep, kill it, jobs shows killed; second empty."""
     ws = _ws()
-    # Start a long sleep in background, then kill it
-    io = _exec(ws, "sleep 10 & kill %1; wait %1; jobs")
+    # `kill %1` joins the job, so the killed status is already settled
+    # when `jobs` lists it. After the listing, pop_completed removes it.
+    io = _exec(ws, "sleep 10 & kill %1; jobs")
     out = _stdout(io)
     assert b"killed" in out
 
-    # After jobs listed them, pop_completed removes them
     io = _exec(ws, "jobs")
     out = _stdout(io)
     assert out == b""
 
 
-def test_completed_jobs_cleaned_after_jobs_command():
-    """Completed jobs appear in first `jobs`, removed by second `jobs`."""
+def test_wait_by_id_reaps_so_jobs_is_empty_after_it():
+    """GNU deletes a job waited on by id; `jobs` prints nothing after."""
     ws = _ws()
-    # `wait %1` waits without reaping, so the job is still listable.
-    # Bare `wait` reaps, matching GNU, and is covered separately below.
     io = _exec(ws, "echo hi & wait %1; jobs")
-    out = _stdout(io)
-    assert b"completed" in out
+    assert _stdout(io) == b"hi\n"
 
-    # Second `jobs` should be empty — pop_completed removed them
-    io = _exec(ws, "jobs")
-    out = _stdout(io)
-    assert out == b""
+
+def test_bare_wait_does_not_replay_a_targeted_waits_output():
+    """`wait %1` adopted the output; bare `wait` must not print it again."""
+    ws = _ws()
+    io = _exec(ws, "echo hi & wait %1; wait")
+    assert _stdout(io) == b"hi\n"
+
+
+def test_job_numbering_restarts_once_the_table_empties():
+    """GNU numbers the next job [1] again after the list empties."""
+    ws = _ws()
+    io = _exec(ws, "echo a & wait %1; echo b & wait %1")
+    assert _stdout(io) == b"a\nb\n"
 
 
 def test_bare_wait_reaps_so_jobs_is_empty_after_it():

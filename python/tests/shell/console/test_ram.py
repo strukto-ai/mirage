@@ -82,6 +82,18 @@ async def test_retention_drops_oldest_and_reports_truncation():
 
 
 @pytest.mark.asyncio
+async def test_trim_never_drops_the_terminal_control_chunk():
+    """The chunk that releases wait_finished() outranks the budget."""
+    store = RAMConsoleStore(max_bytes=2)
+    await store.append(Channel.STDOUT, b"payload")
+
+    await store.append(Channel.CONTROL, b"exit:0")
+
+    chunks, _, _ = await store.read_from(0)
+    assert [c.channel for c in chunks] == [Channel.CONTROL]
+
+
+@pytest.mark.asyncio
 async def test_reader_still_in_range_is_not_told_it_was_truncated():
     store = RAMConsoleStore(max_bytes=2)
     for payload in (b"a", b"b", b"c"):

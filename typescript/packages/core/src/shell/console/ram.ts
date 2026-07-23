@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Channel } from './config.ts'
-import { type ConsoleChunk, type ReadResult } from './config.ts'
+import { Channel, type ConsoleChunk, type ReadResult } from './config.ts'
 import type { ConsoleStore } from './store.ts'
 
 interface Waiter {
@@ -94,10 +93,14 @@ export class RAMConsoleStore implements ConsoleStore {
 
   private trim(): void {
     if (this.maxBytes === null) return
-    while (this.chunks.length > 0 && this.bytes > this.maxBytes) {
-      const dropped = this.chunks.shift()
-      if (dropped === undefined) break
-      this.bytes -= dropped.data.byteLength
+    while (this.bytes > this.maxBytes) {
+      const head = this.chunks[0]
+      // The terminal chunk is what releases waitFinished() and ends
+      // follow(); dropping it would leave both blocked forever, so it
+      // outranks the byte budget.
+      if (head === undefined || head.channel === Channel.CONTROL) break
+      this.chunks.shift()
+      this.bytes -= head.data.byteLength
       this.baseSeq += 1
     }
   }

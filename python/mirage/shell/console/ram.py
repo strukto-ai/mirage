@@ -117,6 +117,11 @@ class RAMConsoleStore:
         if self._max_bytes is None:
             return
         while self._chunks and self._bytes > self._max_bytes:
+            if self._chunks[0].channel == Channel.CONTROL:
+                # The terminal chunk is what releases wait_finished()
+                # and ends follow(); dropping it would leave both
+                # blocked forever, so it outranks the byte budget.
+                break
             dropped = self._chunks.pop(0)
             self._bytes -= len(dropped.data)
             self._base_seq += 1

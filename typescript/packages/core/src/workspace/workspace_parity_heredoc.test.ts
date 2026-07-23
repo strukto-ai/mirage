@@ -229,21 +229,33 @@ describe('workspace: CommandSpec PATH classification (bare filenames)', () => {
 describe('workspace: job table cleanup', () => {
   it('bg sleep + kill + jobs cleanup', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('sleep 10 & kill %1; wait %1; jobs')
+    // `kill %1` joins the job, so the killed status is already settled
+    // when `jobs` lists it. After the listing, popCompleted removes it.
+    const io = await ws.execute('sleep 10 & kill %1; jobs')
     expect(stdoutStr(io)).toContain('killed')
     const io2 = await ws.execute('jobs')
     expect(stdoutStr(io2)).toBe('')
     await ws.close()
   })
 
-  it('completed jobs cleared after listing', async () => {
+  it('wait by id reaps, so jobs is empty after it', async () => {
     const { ws } = await makeWorkspace()
-    // `wait %1` waits without reaping, so the job is still listable.
-    // Bare `wait` reaps, matching GNU, and is covered separately below.
     const io = await ws.execute('echo hi & wait %1; jobs')
-    expect(stdoutStr(io)).toContain('completed')
-    const io2 = await ws.execute('jobs')
-    expect(stdoutStr(io2)).toBe('')
+    expect(stdoutStr(io)).toBe('hi\n')
+    await ws.close()
+  })
+
+  it('bare wait does not replay a targeted wait output', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('echo hi & wait %1; wait')
+    expect(stdoutStr(io)).toBe('hi\n')
+    await ws.close()
+  })
+
+  it('job numbering restarts once the table empties', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('echo a & wait %1; echo b & wait %1')
+    expect(stdoutStr(io)).toBe('a\nb\n')
     await ws.close()
   })
 
