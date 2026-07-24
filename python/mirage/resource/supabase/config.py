@@ -29,7 +29,7 @@ class SupabaseConfig(BaseModel):
     session_token: SecretStr | None = None
     key_prefix: str | None = None
     timeout: int = 30
-    proxy: str | None = None
+    proxy: SecretStr | None = None
 
     def resolved_endpoint_url(self) -> str:
         if self.endpoint_url:

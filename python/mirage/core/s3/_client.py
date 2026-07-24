@@ -43,6 +43,7 @@ def _client_kwargs(config: S3Config) -> dict[str, Any]:
     access_key_id = reveal_secret(config.aws_access_key_id)
     secret_access_key = reveal_secret(config.aws_secret_access_key)
     session_token = reveal_secret(config.aws_session_token)
+    proxy = reveal_secret(config.proxy)
     if access_key_id and secret_access_key:
         kwargs["aws_access_key_id"] = access_key_id
         kwargs["aws_secret_access_key"] = secret_access_key
@@ -52,8 +53,8 @@ def _client_kwargs(config: S3Config) -> dict[str, Any]:
         "connect_timeout": config.timeout,
         "read_timeout": config.timeout,
     }
-    if config.proxy:
-        cfg_kwargs["proxies"] = {"https": config.proxy, "http": config.proxy}
+    if proxy:
+        cfg_kwargs["proxies"] = {"https": proxy, "http": proxy}
     if config.path_style:
         cfg_kwargs["s3"] = {"addressing_style": "path"}
     kwargs["config"] = Config(**cfg_kwargs)

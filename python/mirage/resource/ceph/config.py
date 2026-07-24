@@ -28,7 +28,7 @@ class CephConfig(BaseModel):
     path_style: bool = True
     key_prefix: str | None = None
     timeout: int = 30
-    proxy: str | None = None
+    proxy: SecretStr | None = None
 
     def to_s3_config(self) -> S3Config:
         return S3Config(
