@@ -55,6 +55,7 @@ import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { UsageError } from '../../commands/errors.ts'
+import { versionRequest } from '../../commands/config.ts'
 import { formatFsError } from '../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
@@ -383,6 +384,17 @@ export async function handleCommand(
       new IOResult({ exitCode: 127, stderr: errBytes }),
       new ExecutionNode({ command: cmdStr, exitCode: 127, stderr: errBytes }),
     ]
+  }
+
+  // --version answers from the package, never from a backend, so it is
+  // served before mount permission checks and cross-mount routing:
+  // otherwise `rm --version /ro/x` hits the read-only refusal and
+  // `cat --version /ram/a /disk/b` parses against the shared spec, which
+  // carries no injected --version, and fails as an unknown option.
+  const cmdMount = registry.mountForCommand(cmdName)
+  const versionOut = versionRequest(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv)
+  if (versionOut !== null) {
+    return [versionOut, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 
   // Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like

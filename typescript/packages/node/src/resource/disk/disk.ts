@@ -12,15 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chmod, mkdir, readdir, readFile, stat as fsStat, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readFile,
+  stat as fsStat,
+  statfs as fsStatfs,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 import {
   BaseResource,
+  CapacityState,
   PathSpec,
   ResourceName,
   makeResolveGlob,
   mountKey,
   mountPrefixOf,
+  type CapacityResult,
   type FileStat,
   type FindOptions,
   type RegisteredCommand,
@@ -114,6 +124,22 @@ export class DiskResource extends BaseResource implements Resource {
 
   close(): Promise<void> {
     return Promise.resolve()
+  }
+
+  // A real filesystem reports real numbers (QUOTA). GNU df: used counts
+  // reserved blocks (blocks - bfree), available excludes them (bavail).
+  override async statfs(): Promise<CapacityResult> {
+    const st = await fsStatfs(this.root)
+    const bsize = st.bsize
+    return {
+      state: CapacityState.QUOTA,
+      total: st.blocks * bsize,
+      used: (st.blocks - st.bfree) * bsize,
+      available: st.bavail * bsize,
+      inodes: st.files,
+      inodesUsed: st.files - st.ffree,
+      inodesFree: st.ffree,
+    }
   }
 
   ops(): readonly RegisteredOp[] {

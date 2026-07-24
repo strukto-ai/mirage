@@ -1,0 +1,143 @@
+{
+  "cases": [
+    {
+      "id": "df_unknown",
+      "seq": 612001,
+      "targets": [
+        "ram"
+      ],
+      "command": "df /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "Filesystem     1K-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_type",
+      "seq": 612002,
+      "targets": [
+        "ram"
+      ],
+      "command": "df -T /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "Filesystem     Type 1K-blocks Used Available Use% Mounted on\nram            ram          -    -         -    - /data\n",
+        "stderr": ""
+      },
+      "flags": [
+        "T"
+      ]
+    },
+    {
+      "id": "df_inodes",
+      "seq": 612003,
+      "targets": [
+        "ram"
+      ],
+      "command": "df -i /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "Filesystem     Inodes IUsed IFree IUse% Mounted on\nram                 -     -     -     - /data\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "df_posix",
+      "seq": 612004,
+      "targets": [
+        "ram"
+      ],
+      "command": "df -P /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "Filesystem     1024-blocks Used Available Capacity Mounted on\nram                      -    -         -        - /data\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P"
+      ]
+    },
+    {
+      "id": "df_invalid_option",
+      "seq": 612005,
+      "targets": [
+        "ram"
+      ],
+      "command": "df -z /data 2>&1",
+      "expect": {
+        "exit": 2,
+        "stdout": "df: invalid option -- 'z'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_existing_file",
+      "seq": 612006,
+      "targets": [
+        "ram"
+      ],
+      "command": "df /data/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Filesystem     1K-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_missing_file",
+      "seq": 612007,
+      "targets": [
+        "ram"
+      ],
+      "command": "df /data/nonexistent 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "df: /data/nonexistent: No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_block_zero",
+      "seq": 612008,
+      "targets": [
+        "ram"
+      ],
+      "command": "df -B0 /data 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "df: invalid -B argument '0'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_format_block_last",
+      "seq": 612009,
+      "targets": [
+        "ram"
+      ],
+      "command": "df -h -B1M /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "Filesystem     1M-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_format_human_last",
+      "seq": 612010,
+      "targets": [
+        "ram"
+      ],
+      "command": "df -B1M -h /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "Filesystem     Size Used Avail Use% Mounted on\nram               -    -     -    - /data\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

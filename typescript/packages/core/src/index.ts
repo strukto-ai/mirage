@@ -17,6 +17,8 @@ export {
   CommandSafeguard,
   type CommandSafeguardInit,
   ConsistencyPolicy,
+  CapacityState,
+  type CapacityResult,
   type CopyFn,
   type CopyStrategy,
   DriftPolicy,

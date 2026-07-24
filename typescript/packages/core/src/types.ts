@@ -258,6 +258,33 @@ export class FileStat {
   }
 }
 
+// How a mount's capacity relates to a df-style report. QUOTA: real
+// total/used/available are known (a real filesystem, or a provider that
+// exposes a storage quota). ELASTIC: no fixed size (object stores that grow
+// without a quota). NA: no filesystem-capacity concept (message/table
+// surfaces). UNKNOWN: bounded but not cheaply measurable / not reported yet.
+// df renders real numbers for QUOTA and a literal `-` for the rest — never a
+// fabricated total.
+export const CapacityState = {
+  QUOTA: 'quota',
+  ELASTIC: 'elastic',
+  NA: 'na',
+  UNKNOWN: 'unknown',
+} as const
+export type CapacityState = (typeof CapacityState)[keyof typeof CapacityState]
+
+// One mount's capacity for df. Byte counts are null/undefined unless the
+// state is QUOTA.
+export interface CapacityResult {
+  state: CapacityState
+  total?: number | null
+  used?: number | null
+  available?: number | null
+  inodes?: number | null
+  inodesUsed?: number | null
+  inodesFree?: number | null
+}
+
 export type ReadBytesFn<Args extends unknown[] = [path: PathSpec]> = (
   ...args: Args
 ) => Promise<Uint8Array>

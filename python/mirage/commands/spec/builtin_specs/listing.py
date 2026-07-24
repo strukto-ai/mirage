@@ -120,6 +120,20 @@ SPECS: dict[str,
                     ),
                     rest=Operand(kind=OperandKind.PATH),
                 ),
+                'df':
+                CommandSpec(
+                    options=(
+                        Option(short="-h"),
+                        Option(short="-H"),
+                        Option(short="-k"),
+                        Option(short="-i"),
+                        Option(short="-a"),
+                        Option(short="-T"),
+                        Option(short="-P"),
+                        Option(short="-B", value_kind=OperandKind.TEXT),
+                    ),
+                    rest=Operand(kind=OperandKind.PATH),
+                ),
                 'file':
                 CommandSpec(
                     options=(

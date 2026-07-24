@@ -123,7 +123,7 @@ function nowIso(): string {
   return isoNoMs(new Date())
 }
 
-interface SplitValueFlags {
+export interface SplitValueFlags {
   flags: Set<string>
   values: Map<string, string>
   operands: (string | PathSpec)[]
@@ -131,7 +131,7 @@ interface SplitValueFlags {
 }
 
 // Split leading flags where some take a value (`-t STAMP`).
-function splitValueFlags(
+export function splitValueFlags(
   args: readonly (string | PathSpec)[],
   boolean: string,
   valued: string,
@@ -152,19 +152,17 @@ function splitValueFlags(
     }
     if (parsing && s !== '-' && s.length >= 2 && s.startsWith('-') && !s.startsWith('--')) {
       const body = s.slice(1)
-      let bad: string | null = null
-      for (const c of body) {
-        if (!boolean.includes(c) && !valued.includes(c)) {
-          bad = c
-          break
-        }
-      }
-      if (bad !== null) return { flags, values, operands, bad }
       for (let j = 0; j < body.length; j++) {
         const c = body.charAt(j)
         if (boolean.includes(c)) {
           flags.add(c)
           continue
+        }
+        // A valued flag consumes the rest of the token (-tSTAMP) or the next
+        // argument (-t STAMP); those trailing chars are its value, not flags,
+        // so validation must stop here rather than pre-scanning the token.
+        if (!valued.includes(c)) {
+          return { flags, values, operands, bad: c }
         }
         const rest = body.slice(j + 1)
         if (rest.length > 0) {

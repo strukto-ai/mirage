@@ -205,6 +205,7 @@ def test_all_commands_have_specs():
         "find",
         "tree",
         "du",
+        "df",
         "cat",
         "head",
         "tail",

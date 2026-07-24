@@ -24,6 +24,7 @@ from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.types import Strategy
 from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      maybe_with_timeout)
+from mirage.commands.config import version_request
 from mirage.commands.errors import UsageError
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
 from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
@@ -629,6 +630,19 @@ async def handle_command(
                               stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=127,
                                                          stderr=err)
+
+    # --version answers from the package, never from a backend, so it is
+    # served before mount permission checks and cross-mount routing:
+    # otherwise `rm --version /ro/x` hits the read-only refusal and
+    # `cat --version /ram/a /disk/b` parses against the shared spec, which
+    # carries no injected --version, and fails as an unknown option.
+    cmd_mount = registry.mount_for_command(cmd_name)
+    version_out = version_request(
+        cmd_name,
+        cmd_mount.spec_for(cmd_name) if cmd_mount else None, raw_argv)
+    if version_out is not None:
+        return version_out, IOResult(), ExecutionNode(command=cmd_str,
+                                                      exit_code=0)
 
     # Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
     # positional operands, so they join routing and mount validation instead

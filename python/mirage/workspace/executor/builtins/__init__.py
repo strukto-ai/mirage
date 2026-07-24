@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.workspace.executor.builtins.capacity import handle_df
 from mirage.workspace.executor.builtins.command import (handle_command_builtin,
                                                         handle_type)
 from mirage.workspace.executor.builtins.condition import handle_test
@@ -67,6 +68,7 @@ __all__ = [
     'handle_readlink',
     'link_flags',
     'follow_paths',
+    'handle_df',
     'handle_chgrp',
     'handle_chmod',
     'handle_chown',

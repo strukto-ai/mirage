@@ -62,6 +62,6 @@ describe('BUILTIN_SPECS', () => {
   })
 
   it('covers the full python set size', () => {
-    expect(Object.keys(BUILTIN_SPECS).length).toBe(92)
+    expect(Object.keys(BUILTIN_SPECS).length).toBe(93)
   })
 })

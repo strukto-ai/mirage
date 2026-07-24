@@ -20,7 +20,8 @@ import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PredNode } from '../commands/builtin/findEval.ts'
 import type { RegisteredCommand } from '../commands/config.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
-import type { FileStat, PathSpec } from '../types.ts'
+import type { CapacityResult, FileStat, PathSpec } from '../types.ts'
+import { CapacityState } from '../types.ts'
 
 export interface FindOptions {
   name?: string | null
@@ -89,6 +90,10 @@ export interface Resource {
   du?(path: PathSpec): Promise<number>
   find?(path: PathSpec, options?: FindOptions): Promise<string[]>
   glob?(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
+  // Capacity for df. Absent -> treated as UNKNOWN (rendered `-`). Implement
+  // only where a truthful number exists (a real filesystem, or a provider
+  // quota); never fabricate a total.
+  statfs?(): Promise<CapacityResult>
 }
 
 export function throwUnsupported(op: string): never {
@@ -127,5 +132,11 @@ export abstract class BaseResource {
     }
     const ttl = config === undefined ? this.indexTtl : (config.ttl ?? 600)
     return new RAMIndexCacheStore({ ttl })
+  }
+
+  // Default df capacity: UNKNOWN (rendered `-`). Backends that can report
+  // truthfully — a real filesystem, or a provider quota — override this.
+  statfs(): Promise<CapacityResult> {
+    return Promise.resolve({ state: CapacityState.UNKNOWN })
   }
 }
