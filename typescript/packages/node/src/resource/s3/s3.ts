@@ -108,11 +108,12 @@ export class S3Resource extends BaseResource implements Resource {
       delete cfg.keyPrefix
     }
     this.config = cfg
-    const accessorConfig: S3Config = { ...cfg }
-    if (cfg.proxy !== undefined) {
-      accessorConfig.requestHandler = createProxyRequestHandler(cfg.proxy, cfg.timeoutMs)
-    }
-    this.accessor = new S3Accessor(accessorConfig)
+    this.accessor = new S3Accessor({
+      ...cfg,
+      ...(cfg.proxy !== undefined
+        ? { requestHandler: createProxyRequestHandler(cfg.proxy, cfg.timeoutMs) }
+        : {}),
+    })
   }
 
   open(): Promise<void> {

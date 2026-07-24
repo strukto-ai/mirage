@@ -42,7 +42,6 @@ export const S3ConfigSchema = z.object({
   sessionToken: secretStr().optional(),
   forcePathStyle: z.boolean().optional(),
   timeoutMs: z.number().optional(),
-  requestHandler: secretSchema(z.unknown()).optional(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
   ).optional(),
@@ -59,7 +58,6 @@ export interface S3Config {
   sessionToken?: string
   forcePathStyle?: boolean
   timeoutMs?: number
-  requestHandler?: unknown
   presignedUrlProvider?: S3BrowserPresignedUrlProvider
   defaultContentType?: string
   keyPrefix?: string
@@ -72,12 +70,11 @@ export function normalizeKeyPrefix(v: string | undefined): string | undefined {
 
 export interface S3ConfigRedacted extends Omit<
   S3Config,
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'requestHandler' | 'presignedUrlProvider'
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'presignedUrlProvider'
 > {
   accessKeyId?: string
   secretAccessKey?: string
   sessionToken?: string
-  requestHandler?: '<REDACTED>'
   presignedUrlProvider?: '<REDACTED>'
 }
 
