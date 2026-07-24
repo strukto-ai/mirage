@@ -39,6 +39,56 @@ async def _never_ending_run(job):
     return IOResult(exit_code=0), ExecutionNode(command="noisy", exit_code=0)
 
 
+_DEAF_RELEASE: list[asyncio.Event] = []
+
+
+async def _deaf_run(job):
+    """A runner that does not die on the first cancel.
+
+    Models a command with cleanup of its own: cancellation is delivered,
+    swallowed, and the runner keeps going, so nothing settles the job
+    unless ``kill`` settles it.
+    """
+    await job.console.emit(Channel.STDOUT, b"partial")
+    release = asyncio.Event()
+    _DEAF_RELEASE.append(release)
+    try:
+        await asyncio.sleep(30)
+    except asyncio.CancelledError:
+        await release.wait()
+    return IOResult(exit_code=0), ExecutionNode(command="deaf", exit_code=0)
+
+
+def test_kill_settles_a_runner_that_ignores_the_cancel():
+    """kill must not join a runner that may never notice it was cancelled."""
+
+    async def _run():
+        _DEAF_RELEASE.clear()
+        table = JobTable()
+        job = table.submit(command="deaf", run=_deaf_run, cwd="/")
+        while not await job.console.snapshot(Channel.STDOUT):
+            await asyncio.sleep(0)
+
+        # Joining here would hang on exactly the job being stopped.
+        assert await asyncio.wait_for(table.kill(1), timeout=5)
+
+        assert job.status == JobStatus.KILLED
+        assert job.exit_code == 137
+        assert job.console.finished
+
+        # The runner finishes normally afterwards; it must not relabel
+        # the job it no longer owns.
+        while not _DEAF_RELEASE:
+            await asyncio.sleep(0)
+        _DEAF_RELEASE[0].set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert job.status == JobStatus.KILLED
+        assert job.exit_code == 137
+
+    asyncio.run(_run())
+
+
 def test_wait_handles_task_exception():
 
     async def _run():

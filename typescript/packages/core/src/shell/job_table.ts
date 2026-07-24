@@ -187,19 +187,28 @@ export class JobTable {
   }
 
   /**
-   * Stop a job and wait for it to actually be dead.
+   * Stop a job and record it as killed.
    *
-   * The abort signal reaches the executor, which checks it at every
-   * node, so aborting genuinely ends the walk rather than leaving it
-   * running. That is what makes joining here safe, and it keeps the
-   * single-writer rule intact: `settle` records the killed status, not
-   * this method.
+   * The job is settled here rather than by waiting for the aborted
+   * runner to unwind. The signal is only observed where someone checks
+   * it, which today is the executor between nodes and the commands that
+   * take it, so a job sitting inside one long command would not notice
+   * until it finished on its own. Joining would hang the shell on
+   * exactly the runaway job the caller is trying to stop.
+   *
+   * The console's own guards make the early ending safe: emits after the
+   * ending chunk are dropped, so a runner still unwinding cannot append
+   * past its own death, and `settle` returns early once the job is no
+   * longer RUNNING so it cannot relabel it.
    */
   async kill(jobId: number): Promise<boolean> {
     const job = this.jobs.get(jobId)
     if (job?.status !== JobStatus.RUNNING) return false
     job.abort?.abort()
-    await job.console.waitFinished()
+    job.status = JobStatus.KILLED
+    job.exitCode = KILLED_EXIT_CODE
+    await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
+    await job.console.finish(KILLED_OUTCOME)
     return true
   }
 

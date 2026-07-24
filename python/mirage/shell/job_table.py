@@ -86,9 +86,12 @@ def cancel_job(job: Job) -> None:
 async def _settle(run: JobRunner, job: Job) -> None:
     """Run a job to completion and record how it ended.
 
-    Every write to a job's status, exit code, and console ending happens
-    here, in the job's own task, so the table has exactly one writer and
-    needs no locking. The runner only produces output.
+    A job settles exactly once. Normally that happens here, in the job's
+    own task, and the runner only produces output. The exception is
+    ``kill``, which settles the job itself so the caller never has to
+    wait for a runner that may not notice it was cancelled; a runner
+    still unwinding afterwards must not reopen or relabel the job, which
+    is what the status checks below enforce.
 
     Status is set before the console is finished, so a reader released by
     the ending chunk always sees settled fields.
@@ -100,6 +103,8 @@ async def _settle(run: JobRunner, job: Job) -> None:
     try:
         io_result, exec_node = await run(job)
     except asyncio.CancelledError:
+        if job.status != JobStatus.RUNNING:
+            raise
         job.status = JobStatus.KILLED
         job.exit_code = KILLED_EXIT_CODE
         # Awaiting while cancelled is safe only because the in-memory
@@ -112,10 +117,14 @@ async def _settle(run: JobRunner, job: Job) -> None:
         # re-raised: nobody awaits this task, so re-raising would only
         # strand the error in an unretrieved future.
         logger.debug("background job %d failed: %s", job.id, exc)
+        if job.status != JobStatus.RUNNING:
+            return
         job.status = JobStatus.COMPLETED
         job.exit_code = 1
         await job.console.emit(Channel.STDERR, str(exc).encode())
         await job.console.finish(exit_outcome(1))
+        return
+    if job.status != JobStatus.RUNNING:
         return
     job.io_result = io_result
     job.execution_node = exec_node
@@ -190,13 +199,25 @@ class JobTable:
         ]
 
     async def kill(self, job_id: int) -> bool:
-        """Stop a job and wait for it to actually end.
+        """Stop a job and record it as killed.
 
-        The cancel is routed through the task's own loop and the join
-        happens on the console, never on the task, because a caller may
-        be on a different thread and loop than the job (an agent adapter
-        reaching in through the sync bridge, a server request handler).
-        Awaiting a foreign task would raise; the console is loop-neutral.
+        The cancel is routed through the task's own loop, never awaited
+        directly, because a caller may be on a different thread and loop
+        than the job (an agent adapter reaching in through the sync
+        bridge, a server request handler); awaiting a foreign task would
+        raise.
+
+        The job is settled here rather than by joining the cancelled
+        runner. Cancellation is only observed where someone checks it,
+        which today is the executor between nodes and the commands that
+        take it, so a job sitting inside one long command would not
+        notice until it finished on its own. Joining would hang the shell
+        on exactly the runaway job the caller is trying to stop.
+
+        The console's own guards make the early ending safe: emits after
+        the ending chunk are dropped, so a runner still unwinding cannot
+        append past its own death, and ``_settle`` returns early once the
+        job is no longer RUNNING so it cannot relabel it.
 
         Args:
             job_id (int): the job to stop.
@@ -207,7 +228,10 @@ class JobTable:
         if job.task is None:
             return False
         cancel_job(job)
-        await job.console.wait_finished()
+        job.status = JobStatus.KILLED
+        job.exit_code = KILLED_EXIT_CODE
+        await job.console.emit(Channel.STDERR, b"Killed")
+        await job.console.finish(KILLED_OUTCOME)
         return True
 
     async def kill_all(self) -> list[Job]:

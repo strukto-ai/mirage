@@ -32,6 +32,19 @@ function talking(text: string, exitCode = 0): JobRunner {
   }
 }
 
+/**
+ * A runner that never observes the abort signal, like a long command
+ * that does not check it. Only `release.fire()` ends it.
+ */
+function deaf(release: { fire?: () => void }): JobRunner {
+  return async () => {
+    await new Promise<void>((resolve) => {
+      release.fire = resolve
+    })
+    return [new IOResult(), new ExecutionNode()] as JobResult
+  }
+}
+
 /** A runner that never finishes on its own; only an abort ends it. */
 function pending(abort: AbortController, prelude?: string): JobRunner {
   return async (job) => {
@@ -113,6 +126,27 @@ describe('JobTable.kill', () => {
     const j = jt.submit({ command: 'sleep', run: pending(abort), abort, cwd: '/' })
     expect(await jt.kill(j.id)).toBe(true)
     expect(j.console.finished).toBe(true)
+  })
+
+  it('settles a job whose runner never observes the abort, instead of joining it', async () => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const release: { fire?: () => void } = {}
+    const j = jt.submit({ command: 'long', run: deaf(release), abort, cwd: '/' })
+
+    // The signal is only seen where someone checks it. Joining the runner
+    // here would hang the shell on exactly the runaway job being stopped.
+    expect(await jt.kill(j.id)).toBe(true)
+
+    expect(j.status).toBe(JobStatus.KILLED)
+    expect(j.exitCode).toBe(137)
+    expect(j.console.finished).toBe(true)
+
+    // The runner unwinding afterwards must not reopen or relabel the job.
+    release.fire?.()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(j.status).toBe(JobStatus.KILLED)
+    expect(j.exitCode).toBe(137)
   })
 
   it('returns false for unknown and already-finished jobs', async () => {
