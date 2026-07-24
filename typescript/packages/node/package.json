@@ -49,7 +49,6 @@
   },
   "dependencies": {
     "@napi-rs/lzma": "^1.4.5",
-    "@smithy/node-http-handler": "^4.7.3",
     "@struktoai/mirage-core": "workspace:*",
     "compressjs": "^1.0.3",
     "fast-xml-parser": "^5.9.0",

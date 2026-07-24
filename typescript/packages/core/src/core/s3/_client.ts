@@ -15,7 +15,6 @@
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { S3Client } from '@aws-sdk/client-s3'
 import type { PathSpec } from '../../types.ts'
-import type { S3RuntimeConfig } from '../../accessor/s3.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../resource/s3/config.ts'
@@ -45,7 +44,7 @@ export interface S3SendClient {
 }
 
 export async function withClient<T>(
-  config: S3RuntimeConfig,
+  config: S3Config,
   fn: (client: S3SendClient) => Promise<T>,
 ): Promise<T> {
   const client = (await createS3Client(config)) as unknown as S3SendClient
@@ -94,7 +93,7 @@ export async function loadS3Module(config?: S3Config): Promise<S3Module> {
   return cachedModule
 }
 
-export async function createS3Client(config: S3RuntimeConfig): Promise<S3Client> {
+export async function createS3Client(config: S3Config): Promise<S3Client> {
   if (config.presignedUrlProvider !== undefined) {
     const { createBrowserS3Client } = await import('./_client_browser.ts')
     return createBrowserS3Client(config) as unknown as S3Client
@@ -111,13 +110,14 @@ export async function createS3Client(config: S3RuntimeConfig): Promise<S3Client>
       ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     }
   }
-  if (config.requestHandler !== undefined) {
-    options.requestHandler = config.requestHandler
-  } else if (config.timeoutMs !== undefined) {
-    options.requestHandler = {
-      connectionTimeout: config.timeoutMs,
-      requestTimeout: config.timeoutMs,
-    }
+  const requestHandler: Record<string, unknown> = {
+    ...(config.timeoutMs !== undefined
+      ? { connectionTimeout: config.timeoutMs, requestTimeout: config.timeoutMs }
+      : {}),
+    ...(config.httpAgentProvider !== undefined ? config.httpAgentProvider() : {}),
+  }
+  if (Object.keys(requestHandler).length > 0) {
+    options.requestHandler = requestHandler
   }
   return new mod.S3Client(options)
 }

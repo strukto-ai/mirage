@@ -491,9 +491,6 @@ importers:
       '@napi-rs/lzma':
         specifier: ^1.4.5
         version: 1.4.5(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
-      '@smithy/node-http-handler':
-        specifier: ^4.7.3
-        version: 4.7.3
       '@struktoai/mirage-core':
         specifier: workspace:*
         version: link:../core

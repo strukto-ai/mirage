@@ -16,14 +16,10 @@ import { Accessor } from './base.ts'
 import type { Resource } from '../resource/base.ts'
 import type { S3Config } from '../resource/s3/config.ts'
 
-export interface S3RuntimeConfig extends S3Config {
-  requestHandler?: unknown
-}
-
 export class S3Accessor extends Accessor {
-  readonly config: S3RuntimeConfig
+  readonly config: S3Config
 
-  constructor(config: S3RuntimeConfig) {
+  constructor(config: S3Config) {
     super()
     this.config = config
   }
