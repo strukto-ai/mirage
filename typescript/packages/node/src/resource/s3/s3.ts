@@ -49,9 +49,20 @@ import {
   unlink as unlinkCore,
   write as writeCore,
 } from '@struktoai/mirage-core'
+import { NodeHttpHandler } from '@smithy/node-http-handler'
+import { HttpProxyAgent } from 'http-proxy-agent'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
 
 const globCore = makeResolveGlob(readdirCore, S3_SCOPE_ERROR)
+
+function createProxyRequestHandler(proxy: string, timeoutMs: number | undefined): NodeHttpHandler {
+  return new NodeHttpHandler({
+    httpAgent: new HttpProxyAgent(proxy),
+    httpsAgent: new HttpsProxyAgent(proxy),
+    ...(timeoutMs !== undefined ? { connectionTimeout: timeoutMs, requestTimeout: timeoutMs } : {}),
+  })
+}
 
 export interface S3ResourceState {
   type: string
@@ -97,7 +108,11 @@ export class S3Resource extends BaseResource implements Resource {
       delete cfg.keyPrefix
     }
     this.config = cfg
-    this.accessor = new S3Accessor(this.config)
+    const accessorConfig: S3Config = { ...cfg }
+    if (cfg.proxy !== undefined) {
+      accessorConfig.requestHandler = createProxyRequestHandler(cfg.proxy, cfg.timeoutMs)
+    }
+    this.accessor = new S3Accessor(accessorConfig)
   }
 
   open(): Promise<void> {

@@ -24,6 +24,7 @@ export interface BackblazeConfig {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface BackblazeConfigRedacted {
@@ -35,6 +36,7 @@ export interface BackblazeConfigRedacted {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const BackblazeConfigSchema = z.object({
@@ -46,6 +48,7 @@ const BackblazeConfigSchema = z.object({
   forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function resolvedBackblazeEndpoint(config: BackblazeConfig): string {
@@ -64,6 +67,7 @@ export function backblazeToS3Config(config: BackblazeConfig): S3Config {
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -87,6 +91,5 @@ export function normalizeBackblazeConfig(input: Record<string, unknown>): Backbl
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as BackblazeConfig
 }

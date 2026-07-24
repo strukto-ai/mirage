@@ -25,6 +25,7 @@ export interface SupabaseConfig {
   sessionToken?: string
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface SupabaseConfigRedacted {
@@ -37,6 +38,7 @@ export interface SupabaseConfigRedacted {
   sessionToken?: string
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const SupabaseConfigSchema = z.object({
@@ -49,6 +51,7 @@ const SupabaseConfigSchema = z.object({
   sessionToken: secretStr().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function resolvedSupabaseEndpoint(config: SupabaseConfig): string {
@@ -70,6 +73,7 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
     ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -94,6 +98,5 @@ export function normalizeSupabaseConfig(input: Record<string, unknown>): Supabas
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as SupabaseConfig
 }

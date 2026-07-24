@@ -26,6 +26,7 @@ export interface R2Config {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface R2ConfigRedacted {
@@ -39,6 +40,7 @@ export interface R2ConfigRedacted {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const R2ConfigSchema = z.object({
@@ -52,6 +54,7 @@ const R2ConfigSchema = z.object({
   forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 function resolvedR2Endpoint(config: R2Config): string {
@@ -73,6 +76,7 @@ export function r2ToS3Config(config: R2Config): S3Config {
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -99,6 +103,5 @@ export function normalizeR2Config(input: Record<string, unknown>): R2Config {
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as R2Config
 }

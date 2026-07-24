@@ -24,6 +24,7 @@ export interface WasabiConfig {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface WasabiConfigRedacted {
@@ -35,6 +36,7 @@ export interface WasabiConfigRedacted {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const WasabiConfigSchema = z.object({
@@ -46,6 +48,7 @@ const WasabiConfigSchema = z.object({
   forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function resolvedWasabiEndpoint(config: WasabiConfig): string {
@@ -64,6 +67,7 @@ export function wasabiToS3Config(config: WasabiConfig): S3Config {
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -88,6 +92,5 @@ export function normalizeWasabiConfig(input: Record<string, unknown>): WasabiCon
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as WasabiConfig
 }

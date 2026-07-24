@@ -24,6 +24,7 @@ export interface QingStorConfig {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface QingStorConfigRedacted {
@@ -35,6 +36,7 @@ export interface QingStorConfigRedacted {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const QingStorConfigSchema = z.object({
@@ -46,6 +48,7 @@ const QingStorConfigSchema = z.object({
   forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function resolvedQingStorEndpoint(config: QingStorConfig): string {
@@ -64,6 +67,7 @@ export function qingStorToS3Config(config: QingStorConfig): S3Config {
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -87,6 +91,5 @@ export function normalizeQingStorConfig(input: Record<string, unknown>): QingSto
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as QingStorConfig
 }

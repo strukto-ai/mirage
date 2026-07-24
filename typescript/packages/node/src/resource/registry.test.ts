@@ -97,7 +97,7 @@ describe('node resource registry', () => {
       endpoint_url: 'https://example.com',
       path_style: true,
       timeout: 30,
-      proxy: 'http://discarded',
+      proxy: 'http://proxy.example',
     })) as unknown as { config: Record<string, unknown> }
     expect(config).toMatchObject({
       bucket: 'b',
@@ -109,8 +109,8 @@ describe('node resource registry', () => {
       endpoint: 'https://example.com',
       forcePathStyle: true,
       timeoutMs: 30_000,
+      proxy: 'http://proxy.example',
     })
-    expect(config).not.toHaveProperty('proxy')
   })
 
   it('S3: accepts already-camelCase keys (TS-idiomatic)', async () => {
@@ -164,6 +164,7 @@ describe('node resource registry', () => {
       accessKeyId: 'A',
       endpoint: 'https://x',
       timeoutMs: 5_000,
+      proxy: 'p',
     })
   })
 })
