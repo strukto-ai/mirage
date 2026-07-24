@@ -164,6 +164,11 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     const tok = filteredArgv[i]
     if (tok === undefined) break
 
+    if (!endOfFlags && spec.ignoreTokens.has(tok)) {
+      i += 1
+      continue
+    }
+
     if (tok === '--' && !endOfFlags) {
       endOfFlags = true
       i += 1

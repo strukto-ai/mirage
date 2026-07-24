@@ -110,7 +110,9 @@ export async function createS3Client(config: S3Config): Promise<S3Client> {
       ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     }
   }
-  if (config.timeoutMs !== undefined) {
+  if (config.requestHandler !== undefined) {
+    options.requestHandler = config.requestHandler
+  } else if (config.timeoutMs !== undefined) {
     options.requestHandler = {
       connectionTimeout: config.timeoutMs,
       requestTimeout: config.timeoutMs,

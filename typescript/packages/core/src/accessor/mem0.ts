@@ -1,0 +1,45 @@
+import { Accessor } from './base.ts'
+import {
+  resolveMem0Config,
+  type Mem0Config,
+  type Mem0ConfigResolved,
+} from '../resource/mem0/config.ts'
+import { md5Hex } from '../utils/hash.ts'
+
+const ENCODER = new TextEncoder()
+
+export class Mem0Accessor extends Accessor {
+  readonly config: Mem0ConfigResolved
+
+  constructor(config: Mem0Config) {
+    super()
+    this.config = resolveMem0Config(config)
+  }
+
+  async request(
+    method: string,
+    endpoint: string,
+    options: { params?: Record<string, string | number>; json?: unknown } = {},
+  ): Promise<Record<string, unknown>> {
+    const url = new URL(this.config.host + endpoint)
+    for (const [name, value] of Object.entries(options.params ?? {})) {
+      url.searchParams.set(name, String(value))
+    }
+    const headers: Record<string, string> = {
+      Authorization: `Token ${this.config.apiKey}`,
+      'Mem0-User-ID': md5Hex(ENCODER.encode(this.config.apiKey)),
+    }
+    const init: RequestInit = { method, headers }
+    if (options.json !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(options.json)
+    }
+    const response = await fetch(url, init)
+    if (!response.ok) throw new Error(`Mem0 request failed with status ${String(response.status)}`)
+    const payload: unknown = await response.json()
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('Mem0 response must be a JSON object')
+    }
+    return payload as Record<string, unknown>
+  }
+}

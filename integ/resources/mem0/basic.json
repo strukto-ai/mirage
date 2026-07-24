@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "mem0_ls_paginated",
+      "seq": 590000,
+      "targets": [
+        "mem0"
+      ],
+      "command": "ls /memories",
+      "expect": {
+        "exit": 0,
+        "stdout": "mem-alpha.json\nmem-beta.json\nmem-gamma.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_read_memory",
+      "seq": 590001,
+      "targets": [
+        "mem0"
+      ],
+      "command": "jq -r '.memory' /memories/mem-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "Quarterly planning happens on Tuesday.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_read_metadata",
+      "seq": 590002,
+      "targets": [
+        "mem0"
+      ],
+      "command": "jq -r '.metadata.topic' /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "preferences\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_find_json",
+      "seq": 590003,
+      "targets": [
+        "mem0"
+      ],
+      "command": "find /memories -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/memories/mem-alpha.json\n/memories/mem-beta.json\n/memories/mem-gamma.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_search",
+      "seq": 590004,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search --top-k 2 planning /memories",
+      "expect": {
+        "exit": 0,
+        "stdout": "/memories/mem-alpha.json:0.97\nQuarterly planning happens on Tuesday.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_search_scoped",
+      "seq": 590005,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search planning /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_search_threshold",
+      "seq": 590006,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search --threshold 0.98 planning /memories",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

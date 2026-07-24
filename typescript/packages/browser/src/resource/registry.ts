@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, type Resource } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  type Mem0Config,
+  type OneDriveConfig,
+  type Resource,
+  type SharePointConfig,
+} from '@struktoai/mirage-core'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 
 /**
@@ -329,6 +335,18 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { GDriveResource } = await import('./gdrive/gdrive.ts')
     const { normalizeGDriveConfig } = await import('./gdrive/config.ts')
     return new GDriveResource(normalizeGDriveConfig(config))
+  },
+  onedrive: async (config) => {
+    const { OneDriveResource } = await import('@struktoai/mirage-core')
+    return new OneDriveResource(normalizeFields(config) as unknown as OneDriveConfig)
+  },
+  sharepoint: async (config) => {
+    const { SharePointResource } = await import('@struktoai/mirage-core')
+    return new SharePointResource(normalizeFields(config) as unknown as SharePointConfig)
+  },
+  mem0: async (config) => {
+    const { Mem0Resource } = await import('@struktoai/mirage-core')
+    return new Mem0Resource(normalizeFields(config) as unknown as Mem0Config)
   },
   dropbox: async (config) => {
     const { DropboxResource } = await import('./dropbox/dropbox.ts')

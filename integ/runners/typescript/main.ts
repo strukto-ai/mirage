@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { writeFileSync } from 'node:fs'
-import { ADAPTERS } from './adapters.ts'
+import { ConsistencyPolicy } from '@struktoai/mirage-node'
+import { ADAPTERS, CONSISTENCY_ADAPTERS } from './adapters.ts'
 import type { Case, Target } from './harness.ts'
 import {
   Report,
@@ -22,6 +23,7 @@ import {
   loadCases,
   loadTargets,
   runCase,
+  runScenario,
   seedFixture,
 } from './harness.ts'
 
@@ -58,8 +60,6 @@ async function runTarget(
     for (const mount of target.mounts) await seedFixture(ws, mount.fixture, mount.path, root)
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue
-      // Consistency scenarios (out-of-band mutate + policy) run on the python
-      // host only for now; the typescript mirror is a follow-up.
       if (c.consistency !== undefined) continue
       const { exitCode, out, err, elapsed } = await runCase(ws, c)
       if (emit !== null) {
@@ -70,6 +70,26 @@ async function runTarget(
     }
   } finally {
     await cleanup()
+  }
+  const consistencyAdapter = CONSISTENCY_ADAPTERS[target.mounts[0].resource]
+  if (consistencyAdapter === undefined) return
+  for (const c of cases) {
+    if (!c.targets.includes(target.id) || c.consistency === undefined || c.scenario === undefined) {
+      continue
+    }
+    const policy =
+      c.consistency === 'always' ? ConsistencyPolicy.ALWAYS : ConsistencyPolicy.LAZY
+    const opened = await consistencyAdapter(target, policy)
+    try {
+      const { exitCode, out } = await runScenario(opened.ws, opened.mutate, c.scenario)
+      if (emit !== null) {
+        emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: '' })
+      } else if (report !== null) {
+        report.record(target.id, c.id, compare(c, exitCode, out, '', 0))
+      }
+    } finally {
+      await opened.cleanup()
+    }
   }
 }
 

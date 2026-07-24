@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec, mountKey } from '@struktoai/mirage-core'
+import { NodeHttpHandler } from '@smithy/node-http-handler'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { S3Resource } from './s3.ts'
 import type { S3Config } from './config.ts'
@@ -57,6 +58,19 @@ describe('S3Resource credential redaction', () => {
     expect(serialized).not.toContain('AKIA-OBVIOUS-LEAK')
     expect(serialized).not.toContain('SECRET-OBVIOUS-LEAK')
     expect(serialized).not.toContain('TOKEN-OBVIOUS-LEAK')
+    expect(serialized).toContain('<REDACTED>')
+  })
+
+  it('configures a Node request handler and redacts proxy credentials', async () => {
+    const res = new S3Resource({
+      bucket: 'b',
+      proxy: 'http://proxy-user:proxy-secret@localhost:8080',
+      timeoutMs: 1234,
+    })
+    expect(res.accessor.config.requestHandler).toBeInstanceOf(NodeHttpHandler)
+    const serialized = JSON.stringify(await res.getState())
+    expect(serialized).not.toContain('proxy-user')
+    expect(serialized).not.toContain('proxy-secret')
     expect(serialized).toContain('<REDACTED>')
   })
 })

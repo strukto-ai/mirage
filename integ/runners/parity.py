@@ -24,6 +24,8 @@ SHARED_TARGETS = ["ram", "disk", "redis"]
 S3_TARGETS = ["s3", "s3-prefix", "object-storage-prefix"]
 SSH_TARGETS = ["ssh"]
 GDRIVE_TARGETS = ["gdrive", "gdrive-folder", "gdrive-shared", "gapps", "gmail"]
+GRAPH_TARGETS = ["onedrive", "sharepoint", "sharepoint-prefix"]
+MEMORY_TARGETS = ["mem0"]
 
 
 def load(path: str) -> dict[tuple[str, str], dict]:
@@ -61,7 +63,7 @@ def diff_row(a: dict, b: dict) -> list[str]:
 
 
 def main() -> None:
-    default_targets = list(SHARED_TARGETS)
+    default_targets = list(SHARED_TARGETS + GRAPH_TARGETS + MEMORY_TARGETS)
     if os.environ.get("S3_ENDPOINT"):
         default_targets += S3_TARGETS
     if os.environ.get("SSH_HOST"):

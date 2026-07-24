@@ -16,6 +16,7 @@ import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { LanceRow } from './_driver.ts'
 import { PathSpec } from '../../types.ts'
+import { decodeBase64 } from '../../utils/base64.ts'
 import { renderCard } from './render.ts'
 import { type LanceDBScope, ScopeLevel, detectScope } from './scope.ts'
 
@@ -35,7 +36,7 @@ async function resolveRow(accessor: LanceDBAccessor, scope: LanceDBScope): Promi
 
 function blobBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return value
-  if (typeof value === 'string') return Uint8Array.from(Buffer.from(value, 'base64'))
+  if (typeof value === 'string') return decodeBase64(value)
   throw new Error('blob column is not bytes or base64 string')
 }
 

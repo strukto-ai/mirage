@@ -71,10 +71,14 @@ export interface Case {
   provision?: boolean
   clear_cache?: boolean
   consistency?: 'always' | 'lazy'
-  scenario?: unknown[]
+  scenario?: ScenarioStep[]
   expect: Expect
   _source?: string
 }
+
+export type ScenarioStep =
+  | { mutate: { path: string; content: string } }
+  | { command: string }
 
 export interface ProvisionInfo {
   networkRead: number | string
@@ -169,6 +173,25 @@ export async function seedFixture(
     await ws.execute(`mkdir -p ${parent}`)
     await ws.execute(`tee ${dest} > /dev/null`, { stdin: new Uint8Array(readFileSync(file)) })
   }
+}
+
+export async function runScenario(
+  ws: ExecWorkspace,
+  mutate: (path: string, content: Uint8Array) => Promise<void>,
+  steps: ScenarioStep[],
+): Promise<{ exitCode: number; out: string }> {
+  const outputs: string[] = []
+  let exitCode = 0
+  for (const step of steps) {
+    if ('mutate' in step) {
+      await mutate(step.mutate.path, ENC.encode(step.mutate.content))
+      continue
+    }
+    const result = await ws.execute(step.command)
+    outputs.push(DEC.decode(result.stdout))
+    exitCode = result.exitCode
+  }
+  return { exitCode, out: outputs.join('') }
 }
 
 function checkField(st: HarnessStat, name: string): string {

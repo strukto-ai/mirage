@@ -162,13 +162,18 @@ describe('region-derived S3 aliases', () => {
     })
 
     it(`${c.name}: toS3Config maps fields`, () => {
-      const s3 = c.toS3({ ...c.make(c.region), timeoutMs: 5000 } as never)
+      const s3 = c.toS3({
+        ...c.make(c.region),
+        timeoutMs: 5000,
+        proxy: 'http://localhost:8080',
+      } as never)
       expect(s3.bucket).toBe('b')
       expect(s3.region).toBe(c.region)
       expect(s3.endpoint).toBe(c.expectedEndpoint)
       expect(s3.accessKeyId).toBe('AKIA-LEAK')
       expect(s3.secretAccessKey).toBe('SECRET-LEAK')
       expect(s3.timeoutMs).toBe(5000)
+      expect(s3.proxy).toBe('http://localhost:8080')
       expect(s3.forcePathStyle).toBeUndefined()
     })
 
@@ -190,7 +195,7 @@ describe('region-derived S3 aliases', () => {
       expect(norm.forcePathStyle).toBe(true)
       expect(norm.keyPrefix).toBe('team/reports')
       expect(norm.timeoutMs).toBe(30000)
-      expect(norm).not.toHaveProperty('proxy')
+      expect(norm.proxy).toBe('http://localhost:8080')
       expect(norm).not.toHaveProperty('access_key_id')
     })
 
@@ -204,11 +209,14 @@ describe('region-derived S3 aliases', () => {
     })
 
     it(`${c.name}: getState redacts creds`, async () => {
-      const state = await c.build(c.make(c.region) as never).getState()
+      const state = await c
+        .build({ ...c.make(c.region), proxy: 'http://user:secret@localhost:8080' } as never)
+        .getState()
       expect(state.type).toBe(c.kind)
       const blob = JSON.stringify(state)
       expect(blob.includes('AKIA-LEAK')).toBe(false)
       expect(blob.includes('SECRET-LEAK')).toBe(false)
+      expect(blob.includes('user:secret')).toBe(false)
       expect(blob.includes('<REDACTED>')).toBe(true)
     })
   }
@@ -247,7 +255,7 @@ describe('wasabi endpoint defaults', () => {
     expect(norm.forcePathStyle).toBe(true)
     expect(norm.keyPrefix).toBe('team/reports')
     expect(norm.timeoutMs).toBe(30000)
-    expect(norm).not.toHaveProperty('proxy')
+    expect(norm.proxy).toBe('p')
   })
 
   it('resource remaps kind and redacts state', async () => {
@@ -317,7 +325,7 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
       expect(norm.forcePathStyle).toBe(false)
       expect(norm.keyPrefix).toBe('team/reports')
       expect(norm.timeoutMs).toBe(30000)
-      expect(norm).not.toHaveProperty('proxy')
+      expect(norm.proxy).toBe('p')
     })
 
     it(`${c.name}: resource remaps kind and redacts state`, async () => {
@@ -413,6 +421,18 @@ describe('S3 alias subfolder mounts', () => {
       const s3 = c.toS3({ ...c.config, keyPrefix: '/team/reports/' } as never)
       expect(s3.keyPrefix).toBe('/team/reports/')
       expect(s3.forcePathStyle).toBe(true)
+    })
+  }
+
+  for (const c of PREFIX_CASES) {
+    it(`${c.name}: forwards proxy`, () => {
+      const s3 = c.toS3({
+        ...c.config,
+        proxy: 'http://localhost:8080',
+      } as never) as S3CoreConfig & {
+        proxy?: string
+      }
+      expect(s3.proxy).toBe('http://localhost:8080')
     })
   }
 })

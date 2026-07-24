@@ -58,6 +58,8 @@ describe('ResourceName', () => {
     expect(ResourceName.GSHEETS).toBe('gsheets')
     expect(ResourceName.GSLIDES).toBe('gslides')
     expect(ResourceName.GDRIVE).toBe('gdrive')
+    expect(ResourceName.ONEDRIVE).toBe('onedrive')
+    expect(ResourceName.SHAREPOINT).toBe('sharepoint')
     expect(ResourceName.SLACK).toBe('slack')
     expect(ResourceName.DISCORD).toBe('discord')
     expect(ResourceName.GMAIL).toBe('gmail')
@@ -85,10 +87,11 @@ describe('ResourceName', () => {
     expect(ResourceName.ALIYUN).toBe('aliyun')
     expect(ResourceName.SCALEWAY).toBe('scaleway')
     expect(ResourceName.QINGSTOR).toBe('qingstor')
+    expect(ResourceName.MEM0).toBe('mem0')
   })
 
-  it('contains exactly 50 entries', () => {
-    expect(Object.keys(ResourceName)).toHaveLength(50)
+  it('contains exactly 53 entries', () => {
+    expect(Object.keys(ResourceName)).toHaveLength(53)
   })
 
   it('is frozen at runtime', () => {

@@ -44,9 +44,12 @@ import {
   HfBucketsResource,
   LinearResource,
   MinIOResource,
+  Mem0Resource,
+  ConsistencyPolicy,
   MountMode,
   NextcloudResource,
   OCIResource,
+  OneDriveResource,
   QingStorResource,
   R2Resource,
   RAMResource,
@@ -54,6 +57,7 @@ import {
   S3Resource,
   ScalewayResource,
   SeaweedFSResource,
+  SharePointResource,
   SlackResource,
   SSHResource,
   SupabaseResource,
@@ -67,10 +71,15 @@ import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages
 import { startFakeDropbox, type FakeDropbox } from '../../server/dropbox.ts'
 import { integRoot, walkFiles } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
+import { startPythonServer } from './server_process.ts'
 
 export interface Open {
   ws: ExecWorkspace
   cleanup: () => Promise<void>
+}
+
+export interface OpenConsistency extends Open {
+  mutate: (path: string, content: Uint8Array) => Promise<void>
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
@@ -97,14 +106,21 @@ type FetchInit = Parameters<typeof globalThis.fetch>[1]
 
 let realFetch: typeof globalThis.fetch | null = null
 let fakeGoogleBase = ''
+let fakeGraphBase = ''
 
 function redirectGoogleUrl(input: FetchInput): FetchInput {
   if (typeof input !== 'string' && !(input instanceof URL)) return input
   const raw = input instanceof URL ? input.href : input
   if (!raw.startsWith('http://') && !raw.startsWith('https://')) return input
   const url = new URL(raw)
-  if (!GOOGLE_API_HOSTS.has(url.hostname)) return input
-  return `${fakeGoogleBase}${url.pathname}${url.search}`
+  if (GOOGLE_API_HOSTS.has(url.hostname)) {
+    return `${fakeGoogleBase}${url.pathname}${url.search}`
+  }
+  if (url.hostname === 'graph.microsoft.com' && fakeGraphBase !== '') {
+    const path = url.pathname.startsWith('/v1.0') ? url.pathname.slice(5) || '/' : url.pathname
+    return `${fakeGraphBase}${path}${url.search}`
+  }
+  return input
 }
 
 function fakeGoogleFetch(input: FetchInput, init?: FetchInit): Promise<Response> {
@@ -114,6 +130,13 @@ function fakeGoogleFetch(input: FetchInput, init?: FetchInit): Promise<Response>
 
 function useFakeGoogleEndpoints(base: string): void {
   fakeGoogleBase = base
+  if (realFetch !== null) return
+  realFetch = globalThis.fetch
+  globalThis.fetch = fakeGoogleFetch
+}
+
+function useFakeGraphEndpoint(base: string): void {
+  fakeGraphBase = base
   if (realFetch !== null) return
   realFetch = globalThis.fetch
   globalThis.fetch = fakeGoogleFetch
@@ -533,6 +556,115 @@ async function openDropbox(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function openOneDrive(target: Target): Promise<Open> {
+  const server = await startPythonServer('onedrive_server.py', {
+    MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
+  })
+  useFakeGraphEndpoint(server.endpoint)
+  const mounts: Record<string, OneDriveResource> = {}
+  for (const mount of target.mounts) {
+    mounts[mount.path] = new OneDriveResource({
+      accessToken: 'integ-token',
+      ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    fakeGraphBase = ''
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openSharePoint(target: Target): Promise<Open> {
+  const server = await startPythonServer('onedrive_server.py', {
+    MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
+  })
+  useFakeGraphEndpoint(server.endpoint)
+  const mounts: Record<string, SharePointResource> = {}
+  for (const mount of target.mounts) {
+    mounts[mount.path] = new SharePointResource({
+      accessToken: 'integ-token',
+      site: 'Main',
+      drive: mount.drive,
+      ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    fakeGraphBase = ''
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openGraphConsistency(
+  target: Target,
+  consistency: ConsistencyPolicy,
+): Promise<OpenConsistency> {
+  const server = await startPythonServer('onedrive_server.py', {
+    MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
+  })
+  useFakeGraphEndpoint(server.endpoint)
+  const readMounts: Record<string, OneDriveResource | SharePointResource> = {}
+  const shadowMounts: Record<string, OneDriveResource | SharePointResource> = {}
+  for (const mount of target.mounts) {
+    if (mount.resource === 'onedrive') {
+      const config = {
+        accessToken: 'integ-token',
+        ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+      }
+      readMounts[mount.path] = new OneDriveResource(config)
+      shadowMounts[mount.path] = new OneDriveResource(config)
+    } else {
+      const config = {
+        accessToken: 'integ-token',
+        site: 'Main',
+        drive: mount.drive,
+        ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+      }
+      readMounts[mount.path] = new SharePointResource(config)
+      shadowMounts[mount.path] = new SharePointResource(config)
+    }
+  }
+  const ws = new Workspace(readMounts, { mode: MountMode.WRITE, consistency })
+  const shadow = new Workspace(shadowMounts, { mode: MountMode.WRITE })
+  const mutate = async (path: string, content: Uint8Array): Promise<void> => {
+    const result = await shadow.execute(`tee ${path} > /dev/null`, { stdin: content })
+    if (result.exitCode !== 0) {
+      throw new Error(new TextDecoder().decode(result.stderr))
+    }
+  }
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await shadow.close()
+    fakeGraphBase = ''
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, mutate, cleanup }
+}
+
+async function openMem0(target: Target): Promise<Open> {
+  const server = await startPythonServer('mem0_server.py')
+  const mounts: Record<string, Mem0Resource> = {}
+  for (const mount of target.mounts) {
+    mounts[mount.path] = new Mem0Resource({
+      apiKey: 'integ-key',
+      host: server.endpoint,
+      userId: 'integ-user',
+      defaultPageSize: 2,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 async function adminExec(ws: Workspace, command: string): Promise<void> {
   const result = await ws.execute(command)
   if (result.exitCode !== 0) {
@@ -874,8 +1006,19 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   hf: openHf,
   box: openBox,
   dropbox: openDropbox,
+  onedrive: openOneDrive,
+  sharepoint: openSharePoint,
+  mem0: openMem0,
   slack: openSlack,
   trello: openTrello,
   linear: openLinear,
   dify: openDify,
+}
+
+export const CONSISTENCY_ADAPTERS: Record<
+  string,
+  (target: Target, consistency: ConsistencyPolicy) => Promise<OpenConsistency>
+> = {
+  onedrive: openGraphConsistency,
+  sharepoint: openGraphConsistency,
 }

@@ -235,6 +235,14 @@ export {
 } from './resource/gslides/config.ts'
 export { GDriveResource, type GDriveResourceState } from './resource/gdrive/gdrive.ts'
 export {
+  Mem0Resource,
+  OneDriveResource,
+  SharePointResource,
+  type Mem0Config,
+  type OneDriveConfig,
+  type SharePointConfig,
+} from '@struktoai/mirage-core'
+export {
   normalizeGDriveConfig,
   redactGDriveConfig,
   type GDriveConfig,

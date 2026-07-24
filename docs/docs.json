@@ -487,6 +487,14 @@
                 ]
               },
               {
+                "group": "Microsoft",
+                "icon": "microsoft",
+                "pages": [
+                  "typescript/setup/onedrive",
+                  "typescript/setup/sharepoint"
+                ]
+              },
+              {
                 "group": "Cloud Files",
                 "icon": "folder-open",
                 "pages": [
@@ -524,6 +532,13 @@
                   "typescript/setup/chroma",
                   "typescript/setup/lancedb",
                   "typescript/setup/qdrant"
+                ]
+              },
+              {
+                "group": "Memory",
+                "icon": "/images/mem0.svg",
+                "pages": [
+                  "typescript/setup/mem0"
                 ]
               },
               {

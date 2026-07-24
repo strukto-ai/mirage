@@ -492,7 +492,8 @@
     {
       "id": "onedrive",
       "hosts": [
-        "python"
+        "python",
+        "typescript-node"
       ],
       "service": "onedrive",
       "mounts": [
@@ -581,7 +582,8 @@
     {
       "id": "sharepoint",
       "hosts": [
-        "python"
+        "python",
+        "typescript-node"
       ],
       "service": "sharepoint",
       "mounts": [
@@ -610,7 +612,8 @@
     {
       "id": "sharepoint-prefix",
       "hosts": [
-        "python"
+        "python",
+        "typescript-node"
       ],
       "service": "sharepoint",
       "mounts": [
@@ -636,6 +639,22 @@
           "drive": "shared",
           "prefix": "team/reports/res",
           "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "mem0",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "mem0",
+      "mounts": [
+        {
+          "path": "/memories",
+          "resource": "mem0",
+          "backend": "mem0",
+          "mode": "read"
         }
       ]
     },

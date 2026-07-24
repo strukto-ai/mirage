@@ -1,0 +1,35 @@
+---
+title: OneDrive
+icon: microsoft
+description: Mount OneDrive through Microsoft Graph from Node or the browser.
+---
+
+`OneDriveResource` exposes one Microsoft Graph drive as a read-write filesystem. It uses the same browser-safe core in the Node and browser packages.
+
+```ts
+import { MountMode, OneDriveResource, Workspace } from '@struktoai/mirage-node'
+
+const drive = new OneDriveResource({
+  accessToken: () => getMicrosoftGraphToken(),
+  // driveId: '...',       // optional; defaults to /me/drive
+  // siteId: '...',        // optional alternative to driveId
+  // keyPrefix: 'Reports', // optional folder-scoped mount
+})
+
+const ws = new Workspace({ '/onedrive': drive }, { mode: MountMode.WRITE })
+await ws.execute('ls /onedrive/')
+```
+
+Use `@struktoai/mirage-browser` for the same API in a browser. An access-token callback is recommended so a `401` can refresh the token and retry once.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `accessToken` | required | Token string or sync/async callback returning a token. Redacted in snapshots. |
+| `driveId` | unset | Explicit Graph drive ID. |
+| `siteId` | unset | Use the default drive for a Graph site. |
+| `keyPrefix` | unset | Mount a folder subtree as the resource root. |
+| `tenantHost` | unset | Tenant metadata retained for Graph-compatible configuration. |
+| `timeout` | `30` | Request and copy-monitor timeout in seconds. |
+| `maxRetries` | `5` | Retries for `429`, `503`, and `504`. |
+
+Reads, writes, resumable uploads, recursive copy, move, delete, directory creation, and version-pinned snapshot reads mirror the [Python OneDrive resource](/python/resource/onedrive).

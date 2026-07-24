@@ -451,6 +451,15 @@ describe('parseCommand — clusters ending in a value flag (getopt)', () => {
     const p = parseCommand(specOf('find'), ['/data', '-name', '*.txt'], '/')
     expect(p.flags['-name']).toEqual(['*.txt'])
   })
+
+  it('find grouping tokens are not classified as path operands', () => {
+    const p = parseCommand(
+      specOf('find'),
+      ['/data', '(', '-name', 'inner.txt', '-o', '-name', 'deep.txt', ')'],
+      '/',
+    )
+    expect(p.paths()).toEqual(['/data'])
+  })
 })
 
 describe('parseToKwargs', () => {

@@ -24,6 +24,7 @@ export interface SeaweedFSConfig {
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface SeaweedFSConfigRedacted {
@@ -35,6 +36,7 @@ export interface SeaweedFSConfigRedacted {
   forcePathStyle: boolean
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const SeaweedFSConfigSchema = z.object({
@@ -46,6 +48,7 @@ const SeaweedFSConfigSchema = z.object({
   forcePathStyle: z.boolean(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function seaweedfsToS3Config(config: SeaweedFSConfig): S3Config {
@@ -58,6 +61,7 @@ export function seaweedfsToS3Config(config: SeaweedFSConfig): S3Config {
     forcePathStyle: config.forcePathStyle ?? true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -82,6 +86,5 @@ export function normalizeSeaweedFSConfig(input: Record<string, unknown>): Seawee
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as SeaweedFSConfig
 }

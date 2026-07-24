@@ -24,6 +24,7 @@ export interface OCIConfig {
   endpoint?: string
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface OCIConfigRedacted {
@@ -35,6 +36,7 @@ export interface OCIConfigRedacted {
   endpoint: string
   keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const OCIConfigSchema = z.object({
@@ -46,6 +48,7 @@ const OCIConfigSchema = z.object({
   endpoint: z.string(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 function resolvedOciEndpoint(config: OCIConfig): string {
@@ -63,6 +66,7 @@ export function ociToS3Config(config: OCIConfig): S3Config {
     forcePathStyle: true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -85,6 +89,5 @@ export function normalizeOciConfig(input: Record<string, unknown>): OCIConfig {
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as OCIConfig
 }

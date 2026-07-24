@@ -25,7 +25,23 @@ describe('node resource registry', () => {
     expect(names).toContain('s3')
     expect(names).toContain('postgres')
     expect(names).toContain('mongodb')
+    expect(names).toContain('onedrive')
+    expect(names).toContain('sharepoint')
+    expect(names).toContain('mem0')
     expect(names).toEqual([...names].sort())
+  })
+
+  it('builds Microsoft Graph and Mem0 resources from snake_case config', async () => {
+    const oneDrive = await buildResource('onedrive', {
+      access_token: 'token',
+      drive_id: 'drive',
+    })
+    const sharePoint = await buildResource('sharepoint', { access_token: 'token' })
+    const mem0 = await buildResource('mem0', { api_key: 'key', user_id: 'user' })
+
+    expect(oneDrive.kind).toBe('onedrive')
+    expect(sharePoint.kind).toBe('sharepoint')
+    expect(mem0.kind).toBe('mem0')
   })
 
   it('builds MongoDB with uri', async () => {
@@ -97,7 +113,7 @@ describe('node resource registry', () => {
       endpoint_url: 'https://example.com',
       path_style: true,
       timeout: 30,
-      proxy: 'http://discarded',
+      proxy: 'http://proxy.example',
     })) as unknown as { config: Record<string, unknown> }
     expect(config).toMatchObject({
       bucket: 'b',
@@ -109,8 +125,8 @@ describe('node resource registry', () => {
       endpoint: 'https://example.com',
       forcePathStyle: true,
       timeoutMs: 30_000,
+      proxy: 'http://proxy.example',
     })
-    expect(config).not.toHaveProperty('proxy')
   })
 
   it('S3: accepts already-camelCase keys (TS-idiomatic)', async () => {
@@ -164,6 +180,7 @@ describe('node resource registry', () => {
       accessKeyId: 'A',
       endpoint: 'https://x',
       timeoutMs: 5_000,
+      proxy: 'p',
     })
   })
 })

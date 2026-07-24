@@ -894,6 +894,71 @@ export { readdir as gdriveReaddir } from './core/gdrive/readdir.ts'
 export { stat as gdriveStat } from './core/gdrive/stat.ts'
 export { GDRIVE_PROMPT } from './resource/gdrive/prompt.ts'
 export {
+  type AccessTokenProvider,
+  type MsGraphConfig,
+  type MsGraphConfigResolved,
+  resolveMsGraphConfig,
+} from './core/msgraph/config.ts'
+export {
+  GRAPH_API,
+  MAX_BACKOFF as MSGRAPH_MAX_BACKOFF,
+  RETRY_STATUSES as MSGRAPH_RETRY_STATUSES,
+  GraphError,
+  graphDelete,
+  graphGet,
+  graphGetBytes,
+  graphHeaders,
+  graphList,
+  graphPatch,
+  graphPost,
+  graphPostMonitor,
+  graphPutBytes,
+  graphStream,
+  pollMonitor,
+  uploadChunk,
+} from './core/msgraph/client.ts'
+export { DriveLoc } from './core/msgraph/drive.ts'
+export {
+  OneDriveAccessor,
+  type OneDriveConfig,
+  type OneDriveConfigResolved,
+  oneDriveBase,
+  oneDriveItemUrl,
+  oneDriveRefPath,
+  resolveOneDriveConfig,
+} from './accessor/onedrive.ts'
+export { ONEDRIVE_COMMANDS } from './commands/builtin/onedrive/index.ts'
+export { ONEDRIVE_OPS } from './ops/onedrive/index.ts'
+export * as onedrive from './core/onedrive/index.ts'
+export { OneDriveResource } from './resource/onedrive/onedrive.ts'
+export { ONEDRIVE_PROMPT } from './resource/onedrive/prompt.ts'
+export {
+  SharePointAccessor,
+  type SharePointConfig,
+  type SharePointConfigResolved,
+  type ResolvedSharePointPath,
+  resolveSharePointConfig,
+  sharePointItemUrl,
+  sharePointRefPath,
+} from './accessor/sharepoint.ts'
+export { SHAREPOINT_COMMANDS } from './commands/builtin/sharepoint/index.ts'
+export { SHAREPOINT_OPS } from './ops/sharepoint/index.ts'
+export * as sharepoint from './core/sharepoint/index.ts'
+export { SharePointResource } from './resource/sharepoint/sharepoint.ts'
+export { SHAREPOINT_PROMPT } from './resource/sharepoint/prompt.ts'
+export { Mem0Accessor } from './accessor/mem0.ts'
+export { MEM0_COMMANDS } from './commands/builtin/mem0/index.ts'
+export { MEM0_OPS } from './ops/mem0/index.ts'
+export * as mem0 from './core/mem0/index.ts'
+export {
+  type Mem0Config,
+  type Mem0ConfigResolved,
+  type Mem0ScopeKind,
+  resolveMem0Config,
+} from './resource/mem0/config.ts'
+export { Mem0Resource } from './resource/mem0/mem0.ts'
+export { MEM0_PROMPT } from './resource/mem0/prompt.ts'
+export {
   DROPBOX_API_BASE,
   DROPBOX_CONTENT_BASE,
   DROPBOX_TOKEN_URL,

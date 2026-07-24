@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import base64
 import functools
 import imaplib
@@ -20,6 +21,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
@@ -67,6 +69,7 @@ from mirage.resource.gslides.config import GSlidesConfig
 from mirage.resource.gslides.gslides import GSlidesResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 from mirage.resource.linear import LinearConfig, LinearResource
+from mirage.resource.mem0 import Mem0Config, Mem0Resource
 from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.resource.oci import OCIConfig, OCIResource
@@ -694,6 +697,44 @@ class OneDriveService:
         await self.runner.cleanup()
 
 
+class Mem0Service:
+
+    def __init__(self, endpoint: str,
+                 process: asyncio.subprocess.Process) -> None:
+        self.endpoint = endpoint
+        self.process = process
+
+    @classmethod
+    async def create(cls) -> "Mem0Service":
+        script = (Path(__file__).resolve().parents[2] / "server" /
+                  "mem0_server.py")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        endpoint = (await process.stdout.readline()).decode().strip()
+        if not endpoint:
+            assert process.stderr is not None
+            detail = (await process.stderr.read()).decode().strip()
+            raise RuntimeError(f"mem0 fake failed to start: {detail}")
+        return cls(endpoint, process)
+
+    def resource(self, mount: dict) -> Mem0Resource:
+        return Mem0Resource(
+            Mem0Config(api_key="integ-key",
+                       host=self.endpoint,
+                       user_id="integ-user",
+                       default_page_size=2))
+
+    async def teardown(self) -> None:
+        if self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
+
+
 class DropboxService:
     """Per-account fake Dropbox servers.
 
@@ -945,7 +986,8 @@ class SharePointService:
         await self.runner.cleanup()
 
 
-Service = (S3Service | OneDriveService | SharePointService | SSHService
+Service = (S3Service | OneDriveService | SharePointService | Mem0Service
+           | SSHService
            | NextcloudService | GwsService | HfService | BoxService
            | DropboxService | GridFSService | SlackService | TrelloService
            | LinearService | DifyService | DatabricksVolumeService)
@@ -1008,6 +1050,13 @@ def build_sharepoint(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, SharePointService)
+    return service.resource(mount), _noop
+
+
+def build_mem0(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, Mem0Service)
     return service.resource(mount), _noop
 
 
@@ -1139,6 +1188,7 @@ BUILDERS = {
     "databricks_volume": build_databricks_volume,
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,
+    "mem0": build_mem0,
     "ssh": build_ssh,
     "nextcloud": build_nextcloud,
     "gdrive": build_gdrive,
@@ -1168,6 +1218,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await OneDriveService.create()
     if target.get("service") == "sharepoint":
         return await SharePointService.create()
+    if target.get("service") == "mem0":
+        return await Mem0Service.create()
     if target.get("service") == "ssh":
         return await SSHService.create(run_id, target)
     if target.get("service") == "nextcloud":
