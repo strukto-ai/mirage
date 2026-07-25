@@ -462,8 +462,8 @@ export async function expandArrayAt(
   const env = session.env
   let arr = session.arrays[p.varName ?? '']
   if (arr === undefined) {
-    const scalar = env[p.varName ?? ''] ?? ''
-    arr = scalar !== '' ? [scalar] : []
+    const scalar = env[p.varName ?? '']
+    arr = scalar === undefined ? [] : [scalar]
   }
   if (p.indirectOp) return arrayIndices(arr).map((i) => String(i))
   const values = arrayValues(arr)
@@ -543,8 +543,10 @@ export async function expandBraces(
   if (p.subscript !== null && p.varName !== null) {
     let arr = arrays[p.varName]
     if (arr === undefined) {
-      const scalar = env[p.varName] ?? ''
-      arr = scalar !== '' ? [scalar] : []
+      // A scalar is element 0 of a one-element array, even when empty:
+      // ${#x[@]} is 1 for x="" but 0 for an unset name.
+      const scalar = env[p.varName]
+      arr = scalar === undefined ? [] : [scalar]
     }
     varInEnv = p.varName in arrays || p.varName in env
     if (p.subscript === '@' || p.subscript === '*') {

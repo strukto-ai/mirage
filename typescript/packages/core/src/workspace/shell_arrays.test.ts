@@ -70,6 +70,11 @@ const CASES: [string, string][] = [
   ['a=(x y z); unset "a[0]"; echo "[$a]"', '[]\n'],
   ['a=(x y z); unset "a[1]"; a[1]=NEW; echo "[${!a[@]}] [${a[@]}]"', '[0 1 2] [x NEW z]\n'],
   ['declare -a e; e[3]=x; e[1]=y; echo "${#e[@]} [${!e[@]}] [${e[@]}]"', '2 [1 3] [y x]\n'],
+  // A scalar is element 0 of a one-element array, even when empty; an
+  // unset name has no elements at all.
+  ['Z=""; echo "${#Z[@]} [${Z[@]}] [${!Z[@]}]"', '1 [] [0]\n'],
+  ['Y=v; echo "${#Y[@]} [${!Y[@]}]"', '1 [0]\n'],
+  ['unset Q; echo "${#Q[@]} [${!Q[@]}]"', '0 []\n'],
 ]
 
 describe('shell arrays', () => {

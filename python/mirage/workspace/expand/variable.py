@@ -469,8 +469,9 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
     if p.subscript is not None and p.var_name is not None:
         arr = arrays.get(p.var_name)
         if arr is None:
-            scalar = env.get(p.var_name, "")
-            arr = [scalar] if scalar else []
+            # A scalar is element 0 of a one-element array, even when
+            # empty: ${#x[@]} is 1 for x="" but 0 for an unset name.
+            arr = [env[p.var_name]] if p.var_name in env else []
         var_in_env = p.var_name in arrays or p.var_name in env
         if p.subscript in ("@", "*"):
             # ${a[@]} and friends see only the assigned elements: a hole
@@ -623,8 +624,8 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
     arrays = getattr(session, "arrays", {})
     arr = arrays.get(p.var_name)
     if arr is None:
-        scalar = session.env.get(p.var_name or "", "")
-        arr = [scalar] if scalar else []
+        name = p.var_name or ""
+        arr = [session.env[name]] if name in session.env else []
     if p.indirect_op:
         return [str(i) for i in array_indices(arr)]
     values = array_values(arr)
