@@ -22,6 +22,7 @@ import type { RegisteredCommand } from '../commands/config.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
 import type { CapacityResult, FileStat, PathSpec } from '../types.ts'
 import { CapacityState } from '../types.ts'
+import type { DeltaHook } from '../watch/base.ts'
 
 export interface FindOptions {
   name?: string | null
@@ -94,6 +95,7 @@ export interface Resource {
   // only where a truthful number exists (a real filesystem, or a provider
   // quota); never fabricate a total.
   statfs?(): Promise<CapacityResult>
+  deltaHook?(): DeltaHook
 }
 
 export function throwUnsupported(op: string): never {

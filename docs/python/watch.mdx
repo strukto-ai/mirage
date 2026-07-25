@@ -178,7 +178,8 @@ loops end cleanly) and the workspace returns to its idle state; the next
   invalidated on the mount that owns its path (longest prefix). Detection
   stays per backend, so each mount needs its own signal feeding
   `ws.notify`.
-- Python only for now; the TypeScript mirror is planned.
+- The TypeScript API has the same delivery, queue, and delta-hook design; see
+  [TypeScript Watch](/typescript/watch).
 - Nextcloud is the first backend with a `delta_hook`; push mode works with any
   backend today since `ws.notify` accepts events from any detection you run.
   See the [Watch Matrix](/python/watch-matrix) for per-resource support.

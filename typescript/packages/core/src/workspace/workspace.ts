@@ -41,7 +41,7 @@ import { readFileBytes } from './snapshot/fs.ts'
 import { applyStateDict, buildMountArgs, toStateDict } from './snapshot/state.ts'
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
-import type { FileStat } from '../types.ts'
+import type { FileEvent, FileStat } from '../types.ts'
 import {
   type CommandSafeguard,
   ConsistencyPolicy,
@@ -100,6 +100,8 @@ import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
 import { stripSlash } from '../utils/slash.ts'
+import type { WatchRuntime } from '../watch/base.ts'
+import { Watcher } from '../watch/watcher.ts'
 
 /**
  * One mount entry: a bare resource takes the workspace default mode, a
@@ -261,6 +263,7 @@ export class Workspace {
   readonly fs: WorkspaceFS
   private closed = false
   private readonly closers: (() => Promise<void>)[] = []
+  private watchRuntime: WatchRuntime | null = null
   private readonly runtimeEntries: Runtime[]
   private runtimeBindings: Record<string, Runtime>
   private readonly route: RouteFn | null
@@ -793,6 +796,36 @@ export class Workspace {
 
   mount(prefix: string): MountEntry | null {
     return this.registry.mountFor(prefix)
+  }
+
+  attachWatchRuntime(runtime: WatchRuntime): void {
+    if (this.watchRuntime !== null) {
+      throw new Error(
+        'watch runtime already attached: detachWatchRuntime first, or attach before the first watch()/notify()',
+      )
+    }
+    this.watchRuntime = runtime
+  }
+
+  async detachWatchRuntime(): Promise<void> {
+    if (this.watchRuntime === null) return
+    await this.watchRuntime.close()
+    this.watchRuntime = null
+  }
+
+  private watchDelegate(): WatchRuntime {
+    this.watchRuntime ??= new Watcher(this.registry)
+    return this.watchRuntime
+  }
+
+  watch(path: string | PathSpec | readonly (string | PathSpec)[]): AsyncIterable<FileEvent> {
+    const raw = typeof path === 'string' || path instanceof PathSpec ? [path] : [...path]
+    const specs = raw.map((item) => (item instanceof PathSpec ? item : PathSpec.fromStrPath(item)))
+    return this.watchDelegate().watch(specs)
+  }
+
+  notify(change: FileEvent): Promise<void> {
+    return this.watchDelegate().notify(change)
   }
 
   /**
@@ -1380,6 +1413,10 @@ export class Workspace {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    if (this.watchRuntime !== null) {
+      await this.watchRuntime.close()
+      this.watchRuntime = null
+    }
     const drainTasks = [...(this.cache.drainTasks?.values() ?? [])]
     for (const task of drainTasks) {
       await task

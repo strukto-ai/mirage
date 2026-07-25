@@ -261,6 +261,94 @@ export class FileStat {
   }
 }
 
+export const FileChangeKind = Object.freeze({
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+  MOVE: 'move',
+  UNKNOWN: 'unknown',
+} as const)
+
+export type FileChangeKind = (typeof FileChangeKind)[keyof typeof FileChangeKind]
+
+export interface FileMetadataInit {
+  fingerprint?: string | null
+  size?: number | null
+  modified?: string | null
+}
+
+export class FileMetadata {
+  readonly fingerprint: string | null
+  readonly size: number | null
+  readonly modified: string | null
+
+  constructor(init: FileMetadataInit = {}) {
+    this.fingerprint = init.fingerprint ?? null
+    this.size = init.size ?? null
+    this.modified = init.modified ?? null
+    Object.freeze(this)
+  }
+}
+
+export interface FileEventInit {
+  kind: FileChangeKind
+  path: PathSpec
+  timestamp: Date
+  previousPath?: PathSpec | null
+  metadata?: FileMetadata | null
+}
+
+export class FileEvent {
+  readonly kind: FileChangeKind
+  readonly path: PathSpec
+  readonly timestamp: Date
+  readonly previousPath: PathSpec | null
+  readonly metadata: FileMetadata | null
+
+  constructor(init: FileEventInit) {
+    this.kind = init.kind
+    this.path = init.path
+    this.timestamp = init.timestamp
+    this.previousPath = init.previousPath ?? null
+    this.metadata = init.metadata ?? null
+    Object.freeze(this)
+  }
+}
+
+export interface DeltaInit {
+  changes: readonly FileEvent[]
+  checkpoint: string | null
+}
+
+export class Delta {
+  readonly changes: readonly FileEvent[]
+  readonly checkpoint: string | null
+
+  constructor(init: DeltaInit) {
+    this.changes = Object.freeze([...init.changes])
+    this.checkpoint = init.checkpoint
+    Object.freeze(this)
+  }
+}
+
+export interface WalkEntry {
+  virtual: string
+  isDir: boolean
+  fingerprint: string | null
+  size?: number | null
+  modified?: string | null
+}
+
+export type WalkFn = (root: PathSpec) => AsyncIterable<WalkEntry>
+
+export const OverflowPolicy = Object.freeze({
+  COLLAPSE: 'collapse',
+  DROP_OLDEST: 'drop_oldest',
+  ERROR: 'error',
+} as const)
+
+export type OverflowPolicy = (typeof OverflowPolicy)[keyof typeof OverflowPolicy]
+
 // How a mount's capacity relates to a df-style report. QUOTA: real
 // total/used/available are known (a real filesystem, or a provider that
 // exposes a storage quota). ELASTIC: no fixed size (object stores that grow

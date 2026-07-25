@@ -558,6 +558,14 @@
             ]
           },
           {
+            "group": "Watch",
+            "icon": "bell",
+            "pages": [
+              "typescript/watch",
+              "typescript/watch-matrix"
+            ]
+          },
+          {
             "group": "Runtimes",
             "pages": [
               "typescript/runtime/python",
