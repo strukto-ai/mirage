@@ -20,6 +20,7 @@ import {
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
+import { stripSlash } from '../utils/slash.ts'
 
 export interface OneDriveConfig extends MsGraphConfig {
   driveId?: string
@@ -34,7 +35,7 @@ export interface OneDriveConfigResolved extends MsGraphConfigResolved {
 }
 
 function normalizePrefix(value: string | undefined): string {
-  return (value ?? '').replace(/^\/+|\/+$/g, '')
+  return stripSlash(value ?? '')
 }
 
 function optionalText(value: string | undefined): string | null {
@@ -67,7 +68,7 @@ function encodedPath(path: string): string {
 }
 
 function fullPath(config: OneDriveConfigResolved, path: string): string {
-  const stripped = path.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(path)
   if (config.keyPrefix !== '' && stripped !== '') return `${config.keyPrefix}/${stripped}`
   return config.keyPrefix || stripped
 }
@@ -97,8 +98,8 @@ export class OneDriveAccessor extends Accessor {
   loc(path: string, virtual = path): DriveLoc {
     return new DriveLoc({
       drive: '',
-      path: path.replace(/^\/+|\/+$/g, ''),
-      virtual: virtual.replace(/^\/+|\/+$/g, ''),
+      path: stripSlash(path),
+      virtual: stripSlash(virtual),
       url: (item, action) => oneDriveItemUrl(this.config, item, action),
       ref: (folder) => oneDriveRefPath(this.config, folder),
     })

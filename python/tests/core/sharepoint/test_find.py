@@ -87,3 +87,95 @@ async def test_find_maxdepth_one(_patched):
     acc = SimpleNamespace(config=None)
     out = await find_mod.find(acc, _spec(), maxdepth=1)
     assert out == ["/reports", "/reports/a.txt", "/reports/sub"]
+
+
+_LIB_TREE = [
+    ("Team/Documents/a.txt", {
+        "name": "a.txt",
+        "size": 10
+    }, False),
+    ("Team/Documents/sub", {
+        "name": "sub",
+        "folder": {
+            "childCount": 0
+        }
+    }, True),
+]
+
+
+async def _fake_lib_iter_tree(config, loc, session=None):
+    prefix = loc.virt
+    for rel, item, is_dir in _LIB_TREE:
+        if rel.startswith(prefix + "/"):
+            yield rel, item, is_dir
+
+
+@pytest.fixture
+def _unscoped(monkeypatch):
+    monkeypatch.setattr(drive_ops, "iter_tree", _fake_lib_iter_tree)
+    monkeypatch.setattr(drive_ops, "new_session",
+                        lambda config: _FakeSession())
+    monkeypatch.setattr(find_mod, "site_entries", _fake_site_entries)
+    monkeypatch.setattr(find_mod, "drive_entries", _fake_drive_entries)
+    monkeypatch.setattr(find_mod, "drive_root_empty", _fake_drive_root_empty)
+
+
+async def _fake_site_entries(accessor):
+    return [("Team", "site-id")]
+
+
+async def _fake_drive_entries(accessor, site_id):
+    return [("Documents", "drive-id")]
+
+
+async def _fake_drive_root_empty(config, loc):
+    return False
+
+
+def _root_spec() -> PathSpec:
+    return PathSpec(resource_path="", virtual="/sp", directory="/sp")
+
+
+def _site_spec() -> PathSpec:
+    return PathSpec(resource_path=mount_key("/sp/Team", "/sp"),
+                    virtual="/sp/Team",
+                    directory="/sp/Team")
+
+
+@pytest.mark.asyncio
+async def test_find_unscoped_root_walks_sites_and_libraries(
+        _unscoped, monkeypatch):
+    monkeypatch.setattr(find_mod, "resolve",
+                        lambda accessor, path: _resolved("root", None))
+    acc = SimpleNamespace(config=None)
+    out = await find_mod.find(acc, _root_spec())
+    assert out == [
+        "/",
+        "/Team",
+        "/Team/Documents",
+        "/Team/Documents/a.txt",
+        "/Team/Documents/sub",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_find_unscoped_root_maxdepth_stops_at_sites(
+        _unscoped, monkeypatch):
+    monkeypatch.setattr(find_mod, "resolve",
+                        lambda accessor, path: _resolved("root", None))
+    acc = SimpleNamespace(config=None)
+    out = await find_mod.find(acc, _root_spec(), maxdepth=1)
+    assert out == ["/", "/Team"]
+
+
+@pytest.mark.asyncio
+async def test_find_unscoped_site_walks_libraries(_unscoped, monkeypatch):
+    monkeypatch.setattr(find_mod, "resolve",
+                        lambda accessor, path: _resolved("site", "s"))
+    acc = SimpleNamespace(config=None)
+    out = await find_mod.find(acc, _site_spec(), type="f")
+    assert out == ["/Team/Documents/a.txt"]
+
+
+async def _resolved(level, site_id):
+    return ResolvedPath(level=level, site_id=site_id)

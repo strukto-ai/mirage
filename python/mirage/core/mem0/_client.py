@@ -16,6 +16,10 @@ from typing import Any
 
 from mem0 import AsyncMemoryClient
 from mem0.client.types import GetAllMemoryOptions, SearchMemoryOptions
+from mem0.exceptions import MemoryNotFoundError
+
+from mirage.types import PathSpec
+from mirage.utils.errors import enoent
 
 
 async def get_all_memories(
@@ -47,15 +51,23 @@ async def get_all_memories(
     return results
 
 
-async def get_memory(client: AsyncMemoryClient,
-                     memory_id: str) -> dict[str, Any]:
+async def get_memory(client: AsyncMemoryClient, memory_id: str,
+                     path: PathSpec) -> dict[str, Any]:
     """Fetch one memory by id.
+
+    A deleted or unknown memory id 404s; filesystem callers need ENOENT so
+    ``test -e``, ``cat`` and friends report "No such file or directory"
+    instead of leaking the provider error.
 
     Args:
         client (AsyncMemoryClient): mem0 async client.
         memory_id (str): memory id.
+        path (PathSpec): virtual path the id came from, for the error.
     """
-    return await client.get(memory_id)
+    try:
+        return await client.get(memory_id)
+    except MemoryNotFoundError as exc:
+        raise enoent(path) from exc
 
 
 async def search_memories(

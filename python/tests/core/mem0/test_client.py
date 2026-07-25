@@ -1,13 +1,16 @@
 import pytest
+from mem0.exceptions import MemoryNotFoundError, RateLimitError
 
 from mirage.core.mem0._client import (get_all_memories, get_memory,
                                       search_memories)
+from mirage.types import PathSpec
 
 
 class FakeClient:
 
-    def __init__(self, pages):
+    def __init__(self, pages, error=None):
         self.pages = pages
+        self.error = error
         self.calls = []
 
     async def get_all(self, options=None):
@@ -16,6 +19,8 @@ class FakeClient:
         return self.pages[page - 1]
 
     async def get(self, memory_id):
+        if self.error is not None:
+            raise self.error
         return {"id": memory_id, "memory": "hi"}
 
     async def search(self, query, options=None):
@@ -57,7 +62,31 @@ async def test_get_all_paginates():
 @pytest.mark.asyncio
 async def test_get_memory():
     client = FakeClient([])
-    assert await get_memory(client, "xyz") == {"id": "xyz", "memory": "hi"}
+    path = PathSpec.from_str_path("/memories/xyz.json", "xyz.json")
+    assert await get_memory(client, "xyz", path) == {
+        "id": "xyz",
+        "memory": "hi"
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_memory_missing_is_enoent():
+    client = FakeClient([],
+                        error=MemoryNotFoundError(message="Memory not found",
+                                                  error_code="HTTP_404"))
+    path = PathSpec.from_str_path("/memories/gone.json", "gone.json")
+    with pytest.raises(FileNotFoundError):
+        await get_memory(client, "gone", path)
+
+
+@pytest.mark.asyncio
+async def test_get_memory_other_provider_error_propagates():
+    client = FakeClient([],
+                        error=RateLimitError(message="slow down",
+                                             error_code="HTTP_429"))
+    path = PathSpec.from_str_path("/memories/gone.json", "gone.json")
+    with pytest.raises(RateLimitError):
+        await get_memory(client, "gone", path)
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ import {
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
+import { stripSlash } from '../utils/slash.ts'
 
 export interface SharePointConfig extends MsGraphConfig {
   siteFilter?: string
@@ -43,7 +44,7 @@ export interface ResolvedSharePointPath {
 }
 
 function normalizePrefix(value: string | undefined): string {
-  const normalized = (value ?? '').replace(/^\/+|\/+$/g, '')
+  const normalized = stripSlash(value ?? '')
   if (normalized.split('/').includes('..'))
     throw new Error("keyPrefix must not contain '..' segments")
   return normalized
@@ -74,7 +75,7 @@ function encodedPath(path: string): string {
 
 export function sharePointItemUrl(driveId: string, path: string, action = ''): string {
   const base = `${GRAPH_API}/drives/${encodeURIComponent(driveId)}`
-  const stripped = path.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(path)
   if (stripped === '') return `${base}/root${action}`
   const stem = `${base}/root:/${encodedPath(stripped)}`
   return action !== '' ? `${stem}:${action}` : stem
@@ -82,7 +83,7 @@ export function sharePointItemUrl(driveId: string, path: string, action = ''): s
 
 export function sharePointRefPath(driveId: string, folder = ''): string {
   const base = `/drives/${driveId}`
-  const stripped = folder.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(folder)
   return stripped !== '' ? `${base}/root:/${encodedPath(stripped)}` : `${base}/root:`
 }
 
@@ -126,28 +127,36 @@ export class SharePointAccessor extends Accessor {
     })
   }
 
-  async listSites(): Promise<string[]> {
-    const names: string[] = []
+  async siteEntries(): Promise<[string, string][]> {
+    const entries: [string, string][] = []
     for (const site of await this.siteItems()) {
       const id = typeof site.id === 'string' ? site.id : null
       const display = displayName(site)
       const name = typeof site.name === 'string' ? site.name : ''
       if (id === null || display === '') continue
-      names.push(display)
+      entries.push([display, id])
       this.siteCache.set(display, id)
       if (name !== '') this.siteCache.set(name, id)
     }
-    return names.sort()
+    return entries.sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+  }
+
+  async listSites(): Promise<string[]> {
+    return (await this.siteEntries()).map((entry) => entry[0])
+  }
+
+  async driveEntries(siteId: string): Promise<[string, string][]> {
+    const entries: [string, string][] = []
+    for (const drive of await this.driveItems(siteId)) {
+      if (typeof drive.id !== 'string' || typeof drive.name !== 'string') continue
+      entries.push([drive.name, drive.id])
+      this.driveCache.set(`${siteId}\0${drive.name}`, drive.id)
+    }
+    return entries.sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
   }
 
   async listDrives(siteId: string): Promise<string[]> {
-    const names: string[] = []
-    for (const drive of await this.driveItems(siteId)) {
-      if (typeof drive.id !== 'string' || typeof drive.name !== 'string') continue
-      names.push(drive.name)
-      this.driveCache.set(`${siteId}\0${drive.name}`, drive.id)
-    }
-    return names.sort()
+    return (await this.driveEntries(siteId)).map((entry) => entry[0])
   }
 
   private async siteId(name: string): Promise<string | null> {
@@ -162,7 +171,7 @@ export class SharePointAccessor extends Accessor {
   }
 
   async resolve(path: string): Promise<ResolvedSharePointPath> {
-    const raw = path.replace(/^\/+|\/+$/g, '')
+    const raw = stripSlash(path)
     if (this.config.site !== null && this.config.drive !== null) {
       const siteId = await this.siteId(this.config.site)
       if (siteId === null) return { level: 'site', siteId: null, driveId: null, itemPath: null }
@@ -192,7 +201,7 @@ export class SharePointAccessor extends Accessor {
     return new DriveLoc({
       drive: resolved.driveId,
       path: resolved.itemPath ?? '',
-      virtual: virtual.replace(/^\/+|\/+$/g, ''),
+      virtual: stripSlash(virtual),
       url: (item, action) => sharePointItemUrl(resolved.driveId ?? '', item, action),
       ref: (folder) => sharePointRefPath(resolved.driveId ?? '', folder),
     })

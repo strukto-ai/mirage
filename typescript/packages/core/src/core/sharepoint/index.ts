@@ -20,16 +20,25 @@ import {
 } from '../../cache/context.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { startBasename } from '../../commands/builtin/findEval.ts'
+import {
+  emitStartPath,
+  keep,
+  optionsTree,
+  startBasename,
+  type FindEntry,
+  type PredNode,
+} from '../../commands/builtin/findEval.ts'
 import { record } from '../../observe/context.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { GraphError, graphDelete } from '../msgraph/client.ts'
 import {
   copyTree,
   createChildFolder,
+  driveRootEmpty,
   duTreeEntries,
   duTreeTotal,
   findItems,
@@ -336,8 +345,12 @@ export async function du(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<number> {
-  const info = await stat(accessor, path, index)
-  if (info.type !== FileType.DIRECTORY) return info.size ?? 0
+  try {
+    const info = await stat(accessor, path, index)
+    if (info.type !== FileType.DIRECTORY) return info.size ?? 0
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== 'ENOENT') throw error
+  }
   const resolved = await accessor.resolve(path.resourcePath)
   if (resolved.driveId === null) return 0
   return duTreeTotal(accessor.config, accessor.loc(resolved, path.resourcePath))
@@ -348,11 +361,101 @@ export async function duAll(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<[[string, number][], number]> {
-  const info = await stat(accessor, path, index)
-  if (info.type !== FileType.DIRECTORY) return [[], info.size ?? 0]
+  try {
+    const info = await stat(accessor, path, index)
+    if (info.type !== FileType.DIRECTORY) return [[], info.size ?? 0]
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== 'ENOENT') throw error
+  }
   const resolved = await accessor.resolve(path.resourcePath)
   if (resolved.driveId === null) return [[], 0]
   return duTreeEntries(accessor.config, accessor.loc(resolved, path.resourcePath))
+}
+
+function driveResolved(siteId: string, driveId: string): ResolvedSharePointPath {
+  return { level: 'drive', siteId, driveId, itemPath: null }
+}
+
+function pushNamespaceDir(
+  results: string[],
+  key: string,
+  name: string,
+  depth: number,
+  isEmpty: boolean | null,
+  tree: PredNode,
+  options: FindOptions,
+): void {
+  if (options.maxDepth != null && depth > options.maxDepth) return
+  const entry: FindEntry = { key, name, kind: 'd', depth, isEmpty }
+  if (!keep(entry, tree, options.minDepth)) return
+  // Directories count as size 0 for -size (documented GNU divergence).
+  if (options.minSize != null && options.minSize > 0) return
+  results.push(key)
+}
+
+// An unscoped SharePoint mount exposes two synthetic directory levels above
+// the document libraries (`/<Site>/<Library>/...`). `readdir` walks them, so
+// `find` has to as well: delegating straight to findItems would need a
+// driveId the namespace levels do not have, and the whole tree would come
+// back empty. Each library subtree is walked with a depth offset so
+// -maxdepth/-mindepth count from the real start path.
+async function findNamespace(
+  accessor: SharePointAccessor,
+  path: PathSpec,
+  resolved: ResolvedSharePointPath,
+  options: FindOptions,
+): Promise<string[]> {
+  const tree = optionsTree(options)
+  const base = stripSlash(path.resourcePath)
+  const atRoot = resolved.level === 'root'
+  const offset = atRoot ? 1 : 0
+  const sites: [string, string][] = atRoot
+    ? await accessor.siteEntries()
+    : [[base, resolved.siteId ?? '']]
+  const results: string[] = []
+  let startEmpty = sites.length === 0
+  for (const [siteName, siteId] of sites) {
+    const siteKey = atRoot ? siteName : base
+    const wantDrives =
+      options.empty === true || options.maxDepth == null || options.maxDepth >= offset + 1
+    const drives = wantDrives ? await accessor.driveEntries(siteId) : []
+    if (atRoot) {
+      pushNamespaceDir(results, `/${siteKey}`, siteName, 1, drives.length === 0, tree, options)
+    } else {
+      startEmpty = drives.length === 0
+    }
+    for (const [driveName, driveId] of drives) {
+      const driveKey = `${siteKey}/${driveName}`
+      const loc = accessor.loc(driveResolved(siteId, driveId), driveKey)
+      const empty = options.empty === true ? await driveRootEmpty(accessor.config, loc) : null
+      pushNamespaceDir(results, `/${driveKey}`, driveName, offset + 1, empty, tree, options)
+      if (options.maxDepth != null && options.maxDepth <= offset + 1) continue
+      results.push(
+        ...(await findItems(
+          accessor.config,
+          loc,
+          driveName,
+          () => Promise.resolve(false),
+          options,
+          {
+            depthOffset: offset + 1,
+            emitStart: false,
+          },
+        )),
+      )
+    }
+  }
+  emitStartPath(results, base === '' ? '/' : `/${base}`, startBasename(path.virtual), {
+    kind: 'd',
+    isEmpty: options.empty === true ? startEmpty : null,
+    exists: true,
+    tree,
+    maxDepth: options.maxDepth,
+    minDepth: options.minDepth,
+    minSize: options.minSize,
+    maxSize: options.maxSize,
+  })
+  return results.sort()
 }
 
 export async function find(
@@ -361,12 +464,17 @@ export async function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const resolved = await accessor.resolve(path.resourcePath)
-  if (resolved.driveId === null) return []
-  return findItems(
-    accessor.config,
-    accessor.loc(resolved, path.resourcePath),
-    startBasename(path.virtual),
-    async () => (await stat(accessor, path)).type === FileType.DIRECTORY,
-    options,
-  )
+  if (resolved.driveId !== null) {
+    return findItems(
+      accessor.config,
+      accessor.loc(resolved, path.resourcePath),
+      startBasename(path.virtual),
+      async () => (await stat(accessor, path)).type === FileType.DIRECTORY,
+      options,
+    )
+  }
+  if (resolved.level === 'root' || (resolved.level === 'site' && resolved.siteId !== null)) {
+    return findNamespace(accessor, path, resolved, options)
+  }
+  return []
 }

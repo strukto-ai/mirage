@@ -1,3 +1,5 @@
+import { rstripSlash } from '../../utils/slash.ts'
+
 export type Mem0ScopeKind = 'user' | 'agent' | 'run'
 
 export interface Mem0Config {
@@ -43,7 +45,7 @@ export function resolveMem0Config(config: Mem0Config): Mem0ConfigResolved {
   }
   return {
     apiKey: config.apiKey,
-    host: (config.host ?? 'https://api.mem0.ai').replace(/\/+$/, ''),
+    host: rstripSlash(config.host ?? 'https://api.mem0.ai'),
     userId: config.userId ?? null,
     agentId: config.agentId ?? null,
     runId: config.runId ?? null,

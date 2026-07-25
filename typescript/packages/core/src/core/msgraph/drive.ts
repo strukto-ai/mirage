@@ -12,14 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { buildTree, emitStartPath, keep, type PredNode } from '../../commands/builtin/findEval.ts'
 import { record, recordingActive, recordStream, revisionFor } from '../../observe/context.ts'
 import type { FindOptions } from '../../resource/base.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent, enotdir } from '../../utils/errors.ts'
 import { guessType } from '../../utils/filetype.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { MsGraphConfigResolved } from './config.ts'
 import {
   GraphError,
@@ -88,9 +90,14 @@ export class DriveLoc {
 }
 
 function baseName(path: string): string {
-  const stripped = path.replace(/\/+$/, '')
+  const stripped = rstripSlash(path)
   const index = stripped.lastIndexOf('/')
   return index < 0 ? stripped : stripped.slice(index + 1)
+}
+
+function virtSpec(loc: DriveLoc): PathSpec {
+  const stripped = stripSlash(loc.virtual)
+  return PathSpec.fromStrPath(stripped !== '' ? `/${stripped}` : '/', stripped)
 }
 
 function asString(value: unknown): string | null {
@@ -103,6 +110,14 @@ function asNumber(value: unknown): number | null {
 
 function isFolder(item: Record<string, unknown>): boolean {
   return item.folder !== undefined
+}
+
+// Graph returns the folder facet's childCount by default, so `-empty` needs
+// no extra request. Absent (a $select that dropped it) reads as unknown.
+function folderChildCount(item: Record<string, unknown>): number | null {
+  const facet = item.folder
+  if (facet === null || typeof facet !== 'object' || Array.isArray(facet)) return null
+  return asNumber((facet as Record<string, unknown>).childCount)
 }
 
 function parentReference(src: DriveLoc, dst: DriveLoc): Record<string, unknown> {
@@ -152,7 +167,10 @@ export async function copyTree(
   dst: DriveLoc,
 ): Promise<void> {
   const conflict = await copyOnce(config, src, dst)
-  if (conflict === null) return
+  if (conflict === null) {
+    await invalidateAfterWrite(virtSpec(dst))
+    return
+  }
   if (conflict.code !== 'nameAlreadyExists') throw conflict
   const srcItem = await graphGet(config, src.item())
   const dstItem = await graphGet(config, dst.item())
@@ -167,6 +185,7 @@ export async function copyTree(
   await graphDelete(config, dst.item())
   const secondConflict = await copyOnce(config, src, dst)
   if (secondConflict !== null) throw secondConflict
+  await invalidateAfterWrite(virtSpec(dst))
 }
 
 export async function renameReplace(
@@ -262,11 +281,14 @@ function rangeHeader(offset: number, size?: number): string | undefined {
 function entryStat(item: Record<string, unknown>): FileStat {
   const name = asString(item.name) ?? ''
   if (isFolder(item)) {
+    // Graph's folder `size` is aggregate storage metadata, not the byte
+    // length of any rendered content: keep it out of FileStat.size (see
+    // CLAUDE.md FUSE rules) and expose it as `extra.size_bytes`.
     return new FileStat({
       name,
       type: FileType.DIRECTORY,
-      size: asNumber(item.size),
       modified: asString(item.lastModifiedDateTime),
+      extra: { size_bytes: asNumber(item.size), child_count: folderChildCount(item) },
     })
   }
   return new FileStat({
@@ -419,12 +441,23 @@ export async function duTreeEntries(
   return [entries, total]
 }
 
+// Walk knobs for callers that stack findItems under synthetic namespace
+// levels (SharePoint's site/library directories): `depthOffset` shifts the
+// reported depth so `-maxdepth`/`-mindepth` count from the real start path,
+// and `emitStart` suppresses the per-library start path so only the caller's
+// own start is emitted.
+export interface DriveWalk {
+  depthOffset?: number
+  emitStart?: boolean
+}
+
 export async function findItems(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
   startName: string,
   dirExists: () => Promise<boolean>,
   options: FindOptions = {},
+  walk: DriveWalk = {},
 ): Promise<string[]> {
   const results: string[] = []
   let sawDescendant = false
@@ -439,9 +472,13 @@ export async function findItems(
       orNames: options.orNames,
       empty: options.empty,
     })
+  const offset = walk.depthOffset ?? 0
+  let startChildren = 0
   for await (const [relative, item, folder] of iterTree(config, loc)) {
     const childPath = loc.virtual === '' ? relative : relative.slice(loc.virtual.length + 1)
-    const depth = childPath.split('/').length
+    const relDepth = childPath.split('/').length
+    const depth = relDepth + offset
+    if (relDepth === 1) startChildren += 1
     if (options.maxDepth != null && depth > options.maxDepth) continue
     sawDescendant = true
     const size = asNumber(item.size) ?? 0
@@ -450,7 +487,7 @@ export async function findItems(
       name: baseName(relative),
       kind: folder ? ('d' as const) : ('f' as const),
       depth,
-      isEmpty: options.empty === true ? (folder ? false : size === 0) : null,
+      isEmpty: options.empty === true ? (folder ? folderChildCount(item) === 0 : size === 0) : null,
     }
     if (!keep(entry, tree, options.minDepth)) continue
     const effective = folder ? 0 : size
@@ -458,10 +495,10 @@ export async function findItems(
     if (options.maxSize != null && effective > options.maxSize) continue
     results.push(entry.key)
   }
-  if (sawDescendant || (await dirExists())) {
+  if (walk.emitStart !== false && (sawDescendant || (await dirExists()))) {
     emitStartPath(results, loc.virtual === '' ? '/' : `/${loc.virtual}`, startName, {
       kind: 'd',
-      isEmpty: options.empty === true ? false : null,
+      isEmpty: options.empty === true ? startChildren === 0 : null,
       exists: true,
       tree,
       maxDepth: options.maxDepth,
@@ -471,6 +508,13 @@ export async function findItems(
     })
   }
   return results.sort()
+}
+
+export async function driveRootEmpty(
+  config: MsGraphConfigResolved,
+  loc: DriveLoc,
+): Promise<boolean> {
+  return (await graphList(config, loc.item('/children'))).length === 0
 }
 
 export async function readdirItems(
@@ -498,16 +542,26 @@ export async function readdirItems(
   for (const child of children) {
     const name = asString(child.name) ?? ''
     const path = `${base}/${name}`
+    const folder = isFolder(child)
     names.push(path)
     entries.push([
       name,
       new IndexEntry({
         id: path,
         name,
-        resourceType: isFolder(child) ? ResourceType.FOLDER : ResourceType.FILE,
-        size: asNumber(child.size),
+        resourceType: folder ? ResourceType.FOLDER : ResourceType.FILE,
+        // Folder `size` is aggregate storage metadata, never rendered
+        // content length: cache it as extra, not as the entry size.
+        size: folder ? null : asNumber(child.size),
         remoteTime: asString(child.lastModifiedDateTime) ?? '',
-        extra: { ctag: child.cTag, etag: child.eTag },
+        extra: folder
+          ? {
+              ctag: child.cTag,
+              etag: child.eTag,
+              size_bytes: asNumber(child.size),
+              child_count: folderChildCount(child),
+            }
+          : { ctag: child.cTag, etag: child.eTag },
       }),
     ])
   }

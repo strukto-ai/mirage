@@ -4,6 +4,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent, enotdir } from '../../utils/errors.ts'
 import { formatScore } from '../../utils/score.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { getAllMemories, getMemory, searchMemories } from './api.ts'
 
 const ENCODER = new TextEncoder()
@@ -11,7 +12,7 @@ const ENCODER = new TextEncoder()
 type Mem0Scope = { level: 'root' } | { level: 'memory'; memoryId: string } | { level: 'invalid' }
 
 function detect(path: PathSpec): Mem0Scope {
-  const key = path.resourcePath.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(path.resourcePath)
   if (key === '') return { level: 'root' }
   const parts = key.split('/')
   if (parts.some((part) => part.startsWith('.'))) return { level: 'invalid' }
@@ -45,7 +46,7 @@ async function resolveMemory(
 ): Promise<Record<string, unknown>> {
   const scope = detect(path)
   if (scope.level !== 'memory') throw enoent(path)
-  return (await cachedMemory(index, path)) ?? getMemory(accessor, scope.memoryId)
+  return (await cachedMemory(index, path)) ?? getMemory(accessor, scope.memoryId, path)
 }
 
 export async function read(
@@ -98,7 +99,7 @@ export async function readdir(
         extra: { memory },
       }),
     ])
-    names.push(`${path.virtual.replace(/\/$/, '')}/${filename}`)
+    names.push(`${rstripSlash(path.virtual)}/${filename}`)
   }
   if (index !== undefined) await index.setDir(path.virtual, entries)
   return names
@@ -147,7 +148,7 @@ export async function searchRendered(
   for (const result of await searchMemories(accessor, query, topK, threshold)) {
     const id = String(result.id)
     if (memoryIds !== undefined && !memoryIds.has(id)) continue
-    const path = `${mountPrefix.replace(/\/$/, '')}/${id}.json`
+    const path = `${rstripSlash(mountPrefix)}/${id}.json`
     const score = formatScore(result.score)
     const memory = typeof result.memory === 'string' ? result.memory : ''
     lines.push(`${score === null ? path : `${path}:${score}`}\n${memory}`)

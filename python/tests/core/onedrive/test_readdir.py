@@ -144,4 +144,8 @@ async def test_readdir_stores_remote_time_for_folders():
         await readdir(_accessor(), PathSpec.from_str_path("/"), index)
     lookup = await index.get("/Docs")
     assert lookup.entry.remote_time == "2026-05-28T02:10:00Z"
-    assert lookup.entry.size == 5000
+    # Graph folder size is aggregate storage metadata, never a rendered
+    # content length: it lives in extra, not in the entry size.
+    assert lookup.entry.size is None
+    assert lookup.entry.extra["size_bytes"] == 5000
+    assert lookup.entry.extra["child_count"] == 3

@@ -79,8 +79,8 @@ async def handle(request: web.Request) -> web.Response:
         start = (page - 1) * page_size
         batch = MEMORIES[start:start + page_size]
         next_url = (f"{request.scheme}://{request.host}/v3/memories/"
-                    f"?page={page + 1}&page_size={page_size}"
-                    if start + page_size < len(MEMORIES) else None)
+                    f"?page={page + 1}&page_size={page_size}" if start +
+                    page_size < len(MEMORIES) else None)
         return web.json_response({
             "count": len(MEMORIES),
             "next": next_url,

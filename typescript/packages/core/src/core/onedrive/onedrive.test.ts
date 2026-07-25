@@ -4,7 +4,7 @@ import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
-import { read, readdir, stat, write } from './index.ts'
+import { find, read, readdir, stat, write } from './index.ts'
 
 function requestUrl(input: URL | RequestInfo): string {
   if (typeof input === 'string') return input
@@ -99,6 +99,63 @@ describe('OneDrive filesystem operations', () => {
     expect(writeInit?.method).toBe('PUT')
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/root:/a.txt:/content')
     expect(records[0]).toMatchObject({ op: 'write', source: 'onedrive', bytes: 5 })
+  })
+
+  it('keeps a folder aggregate size out of FileStat.size', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 'folder',
+            name: 'Docs',
+            size: 4096,
+            lastModifiedDateTime: '2026-01-01T00:00:00Z',
+            folder: { childCount: 2 },
+          }),
+          { status: 200 },
+        ),
+      ),
+    )
+    const accessor = new OneDriveAccessor({ accessToken: 'token' })
+    const info = await stat(accessor, PathSpec.fromStrPath('/od/Docs', 'Docs'))
+
+    expect(info.size).toBeNull()
+    expect(info.extra).toMatchObject({ size_bytes: 4096, child_count: 2 })
+  })
+
+  it('matches -empty against a childless folder', async () => {
+    const fetchMock = vi.fn((input: URL | RequestInfo) => {
+      const url = requestUrl(input)
+      if (url.includes('/root:/hollow:/children') || url.includes('/root:/full:/children')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              value: url.includes('hollow') ? [] : [{ id: '4', name: 'c.txt', size: 1, file: {} }],
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            value: [
+              { id: '1', name: 'a.txt', size: 3, file: {} },
+              { id: '2', name: 'hollow', folder: { childCount: 0 } },
+              { id: '3', name: 'full', folder: { childCount: 1 } },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const accessor = new OneDriveAccessor({ accessToken: 'token' })
+
+    expect(
+      await find(accessor, PathSpec.fromStrPath('/od', ''), { type: 'd', empty: true }),
+    ).toEqual(['/hollow'])
   })
 
   it('reports ENOTDIR when readdir targets a file', async () => {

@@ -135,6 +135,23 @@ async def resolve(accessor: SharePointAccessor,
                         item_path=item_path)
 
 
+async def site_entries(accessor: SharePointAccessor) -> list[tuple[str, str]]:
+    """Return (display name, id) for all accessible sites.
+
+    Args:
+        accessor (SharePointAccessor): The accessor.
+
+    Returns:
+        list[tuple[str, str]]: Sorted (display name, site id) pairs.
+    """
+    entries: list[tuple[str, str]] = []
+    for s in await _list_sites(accessor):
+        display = s.get("displayName", s.get("name", ""))
+        entries.append((display, s["id"]))
+        _site_cache[display] = s["id"]
+    return sorted(entries)
+
+
 async def list_sites(accessor: SharePointAccessor) -> list[str]:
     """Return display names of all accessible sites.
 
@@ -144,13 +161,26 @@ async def list_sites(accessor: SharePointAccessor) -> list[str]:
     Returns:
         list[str]: Site display names.
     """
-    sites = await _list_sites(accessor)
-    names: list[str] = []
-    for s in sites:
-        display = s.get("displayName", s.get("name", ""))
-        names.append(display)
-        _site_cache[display] = s["id"]
-    return sorted(names)
+    return [name for name, _ in await site_entries(accessor)]
+
+
+async def drive_entries(accessor: SharePointAccessor,
+                        site_id: str) -> list[tuple[str, str]]:
+    """Return (drive name, id) for a site.
+
+    Args:
+        accessor (SharePointAccessor): The accessor.
+        site_id (str): Site ID.
+
+    Returns:
+        list[tuple[str, str]]: Sorted (drive name, drive id) pairs.
+    """
+    entries: list[tuple[str, str]] = []
+    for d in await _list_drives(accessor, site_id):
+        name = d.get("name", "")
+        entries.append((name, d["id"]))
+        _drive_cache[(site_id, name)] = d["id"]
+    return sorted(entries)
 
 
 async def list_drives(accessor: SharePointAccessor, site_id: str) -> list[str]:
@@ -163,13 +193,7 @@ async def list_drives(accessor: SharePointAccessor, site_id: str) -> list[str]:
     Returns:
         list[str]: Drive names.
     """
-    drives = await _list_drives(accessor, site_id)
-    names: list[str] = []
-    for d in drives:
-        name = d.get("name", "")
-        names.append(name)
-        _drive_cache[(site_id, name)] = d["id"]
-    return sorted(names)
+    return [name for name, _ in await drive_entries(accessor, site_id)]
 
 
 def drive_loc(resolved: ResolvedPath, virt: str) -> DriveLoc:

@@ -89,7 +89,7 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.execute('echo leaked > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('read-only')
+    expect(stderrStr(denied)).toBe('echo: /a/y.txt: Permission denied\n')
     expect(a.store.files.has('/y.txt')).toBe(false)
   })
 
@@ -108,7 +108,7 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.execute('echo up > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('read-only')
+    expect(stderrStr(denied)).toBe('echo: /a/y.txt: Permission denied\n')
   })
 
   it('list form inherits the mount mode', async () => {
@@ -145,7 +145,7 @@ describe('per-session mount grants', () => {
 
     const writeDenied = await ws.execute('echo x > /root.txt', { sessionId: 'root_ro' })
     expect(writeDenied.exitCode).not.toBe(0)
-    expect(stderrStr(writeDenied)).toContain('read-only')
+    expect(stderrStr(writeDenied)).toBe('echo: /root.txt: Permission denied\n')
   })
 
   it('the implicit scratch root keeps pathless commands working', async () => {

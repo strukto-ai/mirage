@@ -55,6 +55,30 @@ describe('Mem0 filesystem', () => {
     expect((await stat(accessor, memory)).type).toBe('json')
   })
 
+  it('translates a missing memory into ENOENT', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ detail: 'Memory not found' }), { status: 404 }),
+        ),
+    )
+    const accessor = new Mem0Accessor({ apiKey: 'key', userId: 'alex' })
+    const missing = PathSpec.fromStrPath('/memories/gone.json', 'gone.json')
+
+    await expect(read(accessor, missing)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(accessor, missing)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('propagates a non-404 provider failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 500 })))
+    const accessor = new Mem0Accessor({ apiKey: 'key', userId: 'alex' })
+    const path = PathSpec.fromStrPath('/memories/m1.json', 'm1.json')
+
+    await expect(read(accessor, path)).rejects.toThrow(/status 500/)
+  })
+
   it('renders filtered semantic results with scores', async () => {
     vi.stubGlobal(
       'fetch',

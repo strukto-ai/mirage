@@ -8,6 +8,16 @@ import { md5Hex } from '../utils/hash.ts'
 
 const ENCODER = new TextEncoder()
 
+export class Mem0Error extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`Mem0 request failed with status ${String(status)}`)
+    this.name = 'Mem0Error'
+    this.status = status
+  }
+}
+
 export class Mem0Accessor extends Accessor {
   readonly config: Mem0ConfigResolved
 
@@ -35,7 +45,7 @@ export class Mem0Accessor extends Accessor {
       init.body = JSON.stringify(options.json)
     }
     const response = await fetch(url, init)
-    if (!response.ok) throw new Error(`Mem0 request failed with status ${String(response.status)}`)
+    if (!response.ok) throw new Mem0Error(response.status)
     const payload: unknown = await response.json()
     if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
       throw new Error('Mem0 response must be a JSON object')

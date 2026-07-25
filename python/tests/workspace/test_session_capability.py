@@ -283,7 +283,7 @@ def test_read_grant_blocks_redirect_write():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"read-only" in (io.stderr or b"")
+    assert io.stderr == b"echo: /a/y.txt: Permission denied\n"
     assert "/y.txt" not in a._store.files
 
 
@@ -310,7 +310,7 @@ def test_grant_cannot_widen_read_mount():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"read-only" in (io.stderr or b"")
+    assert io.stderr == b"echo: /a/y.txt: Permission denied\n"
 
 
 def test_user_root_mount_governed_by_grants():
@@ -336,7 +336,7 @@ def test_user_root_mount_governed_by_grants():
     assert b"not allowed" in (denied.stderr or b"")
     assert read_ok.exit_code == 0 and b"top" in (read_ok.stdout or b"")
     assert write_denied.exit_code != 0
-    assert b"read-only" in (write_denied.stderr or b"")
+    assert write_denied.stderr == b"echo: /root.txt: Permission denied\n"
 
 
 def test_implicit_root_keeps_pathless_commands_working():

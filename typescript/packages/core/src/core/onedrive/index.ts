@@ -103,11 +103,6 @@ export async function readdir(
     const cached = await index.listDir(key)
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
   }
-  if (index === undefined) {
-    return (await graphList(accessor.config, accessor.loc(target.resourcePath).item('/children')))
-      .map((item) => `${key === '/' ? '' : key}/${typeof item.name === 'string' ? item.name : ''}`)
-      .sort()
-  }
   const prefix = mountPrefixOf(target.virtual, target.resourcePath)
   return readdirItems(
     accessor.config,

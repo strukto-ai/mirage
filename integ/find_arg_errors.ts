@@ -28,8 +28,8 @@ import {
   MountMode,
   OneDriveResource,
   type Resource,
-  SlackResource,
   SharePointResource,
+  SlackResource,
   TrelloResource,
   Workspace,
 } from "@struktoai/mirage-node";
@@ -66,8 +66,8 @@ function resources(): Array<readonly [string, string, Resource]> {
     ["linear", "/linear", new LinearResource({ apiKey: "k" })],
     ["mem0", "/mem0", new Mem0Resource({ apiKey: "k", userId: "u" })],
     ["onedrive", "/onedrive", new OneDriveResource({ accessToken: "t" })],
-    ["slack", "/slack", new SlackResource({ token: "x" })],
     ["sharepoint", "/sharepoint", new SharePointResource({ accessToken: "t" })],
+    ["slack", "/slack", new SlackResource({ token: "x" })],
     ["trello", "/trello", new TrelloResource({ apiKey: "k", apiToken: "t" })],
   ];
 }
