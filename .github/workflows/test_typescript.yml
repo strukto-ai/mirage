@@ -10,6 +10,7 @@ permissions:
       - typescript/**
       - examples/typescript/**
       - integ/**
+      - conformance/**
       - .github/workflows/test_typescript.yml
   pull_request:
     branches: [main]
@@ -36,6 +37,7 @@ jobs:
               - 'typescript/**'
               - 'examples/typescript/**'
               - 'integ/**'
+              - 'conformance/**'
               - '.github/workflows/test_typescript.yml'
 
   test:

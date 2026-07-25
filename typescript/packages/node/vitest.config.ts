@@ -12,19 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lsGeneric } from '../../generic/ls.ts'
-import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
+import { defineConfig } from 'vitest/config'
 
-export const LS_BUILDER: Builder = {
-  name: 'ls',
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return lsGeneric(
-      resolved,
-      opts,
-      (p) => ops.readdir(accessor, p, idx),
-      overlaidStat((p) => ops.stat(accessor, p, idx), opts.statOverlay),
-    )
+export default defineConfig({
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
+    // This package's tests do real I/O: temp directories, Redis connections,
+    // and the lazy `redis` import the first case in a worker pays for.
+    // Vitest's 5s default is sized for pure computation, and the first Redis
+    // test in a file was already marginal under the full 200-file run.
+    testTimeout: 15_000,
   },
-}
+})

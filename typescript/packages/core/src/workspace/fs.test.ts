@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
+import { enotdir } from '../utils/errors.ts'
 import { Workspace } from './workspace.ts'
 
 function mkWorkspace(): Workspace {
@@ -23,6 +24,25 @@ function mkWorkspace(): Workspace {
   const ops = new OpsRegistry()
   for (const op of resource.ops()) ops.register(op)
   return new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+}
+
+// The Workspace constructor re-registers each mount's ops, so the failing
+// stat has to land on the registry after the workspace is built.
+function mkFailingStat(err: unknown): Workspace {
+  const resource = new RAMResource()
+  const ops = new OpsRegistry()
+  for (const op of resource.ops()) ops.register(op)
+  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+  ops.register({
+    name: 'stat',
+    resource: resource.kind,
+    filetype: null,
+    fn: () => {
+      throw err
+    },
+    write: false,
+  })
+  return ws
 }
 
 describe('WorkspaceFS', () => {
@@ -87,5 +107,35 @@ describe('WorkspaceFS', () => {
     const ws = mkWorkspace()
     await ws.fs.writeFile('/data/t.txt', 'content')
     expect(await ws.fs.cat('/data/t.txt')).toBe('content')
+  })
+})
+
+describe('WorkspaceFS existence probes', () => {
+  it('report false for a missing path', async () => {
+    const ws = mkWorkspace()
+    expect(await ws.fs.exists('/data/nope')).toBe(false)
+    expect(await ws.fs.isDir('/data/nope')).toBe(false)
+    expect(await ws.fs.isFile('/data/nope')).toBe(false)
+  })
+
+  it('report false for a path outside every mount', async () => {
+    const ws = mkWorkspace()
+    expect(await ws.fs.exists('/nowhere/x')).toBe(false)
+    expect(await ws.fs.isDir('/nowhere/x')).toBe(false)
+    expect(await ws.fs.isFile('/nowhere/x')).toBe(false)
+  })
+
+  it('propagate a backend failure instead of reporting it as missing', async () => {
+    const ws = mkFailingStat(new Error('401 Unauthorized'))
+    await expect(ws.fs.exists('/data/a.txt')).rejects.toThrow('401 Unauthorized')
+    await expect(ws.fs.isDir('/data/a.txt')).rejects.toThrow('401 Unauthorized')
+    await expect(ws.fs.isFile('/data/a.txt')).rejects.toThrow('401 Unauthorized')
+  })
+
+  it('propagate a non-ENOENT fs error, matching Python which swallows only two', async () => {
+    const ws = mkFailingStat(enotdir('/data/a.txt'))
+    await expect(ws.fs.exists('/data/a.txt')).rejects.toThrow('/data/a.txt')
+    await expect(ws.fs.isDir('/data/a.txt')).rejects.toThrow('/data/a.txt')
+    await expect(ws.fs.isFile('/data/a.txt')).rejects.toThrow('/data/a.txt')
   })
 })

@@ -10,8 +10,18 @@ empty output, and binary output are all part of the contract.
 - Python: `python/tests/conformance/test_conformance.py` runs every case
   against `ram` and `disk`, plus `redis` when `REDIS_URL` is set. Runs as part
   of `uv run pytest`.
-- TypeScript: `typescript/packages/node/src/conformance.test.ts` runs every
-  case against `ram`. Runs as part of `pnpm test`.
+- TypeScript: `typescript/packages/node/src/conformance.test.ts` runs the same
+  matrix — `ram` and `disk`, plus `redis` when `REDIS_URL` is set. Runs as part
+  of `pnpm test`.
+
+Both CI test jobs provide a `redis:7` service and set `REDIS_URL`, so the
+redis rows run there rather than skipping.
+
+A third runner, `integ/runners/parity.py`, is a different net: instead of
+checking each language against a fixed expectation, it runs both integ
+batteries over the shared targets (`ram`, `disk`, `redis`) and diffs them case
+by case, so a change that breaks *identically* in both languages still fails.
+CI runs it as the `integ-shared-parity` job.
 
 ## Files
 
@@ -27,7 +37,10 @@ empty output, and binary output are all part of the contract.
     {
       "id": "wc_default",
       "cmd": "wc /data/a.txt",
-      "matrix": { "python": ["ram", "disk", "redis"], "typescript": ["ram"] },
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
       "expect": {
         "exit": 0,
         "stdout_text": " 5  5 24 /data/a.txt\n",
@@ -76,7 +89,7 @@ expectations as the existing implementations:
    ```json
    "matrix": {
      "python": ["ram", "disk", "redis", "github"],
-     "typescript": ["ram", "github"]
+     "typescript": ["ram", "disk", "redis", "github"]
    }
    ```
 

@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync, readdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { MountMode, RAMResource, Workspace } from './index.ts'
+import { DiskResource, MountMode, RAMResource, RedisResource, Workspace } from './index.ts'
 
 const CONFORMANCE_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -30,9 +31,10 @@ const CONFORMANCE_DIR = join(
 )
 
 const ENC = new TextEncoder()
+const REDIS_URL = process.env.REDIS_URL ?? ''
 const SUPPORTED_MATRIX: Record<string, ReadonlySet<string>> = {
   python: new Set(['ram', 'disk', 'redis']),
-  typescript: new Set(['ram']),
+  typescript: new Set(['ram', 'disk', 'redis']),
 }
 
 interface ConformanceExpect {
@@ -142,8 +144,53 @@ async function seedWorkspace(ws: Workspace): Promise<void> {
   }
 }
 
-async function runCase(c: ConformanceCase): Promise<void> {
-  const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+// Each case gets a workspace with fresh backend state: a new RAM store, a
+// new temp directory, or a Redis key prefix cleared before the run.
+//
+// Teardown is split because Workspace.close() closes the mount's resource,
+// and for Redis that destroys the client. Anything needing a live connection
+// has to run in `reset` (before the close); anything outliving the resource
+// runs in `dispose` (after). Clearing Redis in `dispose` would silently open
+// a second connection per case just to delete keys.
+interface Backend {
+  ws: Workspace
+  reset: () => Promise<void>
+  dispose: () => Promise<void>
+}
+
+const NOOP = (): Promise<void> => Promise.resolve()
+
+async function buildBackend(backend: string, caseId: string): Promise<Backend> {
+  if (backend === 'ram') {
+    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    return { ws, reset: NOOP, dispose: NOOP }
+  }
+  if (backend === 'disk') {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-conformance-'))
+    const ws = new Workspace({ '/': new DiskResource({ root }) }, { mode: MountMode.WRITE })
+    return {
+      ws,
+      reset: NOOP,
+      dispose: () => {
+        rmSync(root, { recursive: true, force: true })
+        return Promise.resolve()
+      },
+    }
+  }
+  if (backend === 'redis') {
+    const resource = new RedisResource({
+      url: REDIS_URL,
+      keyPrefix: `test:conformance:ts:${caseId}:`,
+    })
+    await resource.store.clear()
+    const ws = new Workspace({ '/': resource }, { mode: MountMode.WRITE })
+    return { ws, reset: () => resource.store.clear(), dispose: NOOP }
+  }
+  throw new Error(`unknown typescript backend in matrix: ${backend}`)
+}
+
+async function runCase(c: ConformanceCase, backend: string): Promise<void> {
+  const { ws, reset, dispose } = await buildBackend(backend, c.id)
   try {
     await seedWorkspace(ws)
     const hasStdin = 'stdin_text' in c || 'stdin_base64' in c
@@ -157,24 +204,29 @@ async function runCase(c: ConformanceCase): Promise<void> {
       comparable(decodeBytes(c.expect, 'stderr_text', 'stderr_base64')),
     )
   } finally {
+    await reset()
     await ws.close()
+    await dispose()
   }
 }
 
-describe('command conformance spec (ram)', () => {
-  for (const c of CASES) {
-    const backends = c.matrix.typescript ?? []
-    if (!backends.includes('ram')) continue
-    it(c.id, async () => {
-      await runCase(c)
-    })
-  }
-})
+for (const backend of ['ram', 'disk', 'redis']) {
+  describe(`command conformance spec (${backend})`, () => {
+    for (const c of CASES) {
+      const backends = c.matrix.typescript ?? []
+      if (!backends.includes(backend)) continue
+      const run = backend === 'redis' && REDIS_URL === '' ? it.skip : it
+      run(c.id, async () => {
+        await runCase(c, backend)
+      })
+    }
+  })
+}
 
 describe('command conformance matrix validation', () => {
   it.each([
     [{ pyhton: ['ram'] }, 'unknown matrix language'],
-    [{ typescript: ['disk'] }, 'unsupported typescript backend'],
+    [{ typescript: ['s3'] }, 'unsupported typescript backend'],
     [{ python: [], typescript: [] }, 'applies to no backend'],
   ])('rejects invalid targets', (matrix, message) => {
     const c = {
@@ -194,7 +246,7 @@ describe('command conformance matrix validation', () => {
       cmd: 'true',
       matrix: {
         python: ['ram', 'disk', 'redis'],
-        typescript: ['ram'],
+        typescript: ['ram', 'disk', 'redis'],
       },
       expect: { exit: 0, stdout_text: '', stderr_text: '' },
     }

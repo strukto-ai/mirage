@@ -11,7 +11,9 @@
           "redis"
         ],
         "typescript": [
-          "ram"
+          "ram",
+          "disk",
+          "redis"
         ]
       },
       "expect": {
@@ -30,7 +32,9 @@
           "redis"
         ],
         "typescript": [
-          "ram"
+          "ram",
+          "disk",
+          "redis"
         ]
       },
       "expect": {

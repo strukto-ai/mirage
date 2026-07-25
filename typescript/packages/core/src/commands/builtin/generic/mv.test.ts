@@ -16,7 +16,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, type PrimitiveMove, type ReaddirFn } from '../../../types.ts'
-import { eacces, enotsup } from '../../../utils/errors.ts'
+import { eacces, enoent, enotsup } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mvFlags, mvGeneric, parseMvFlags, type MvFlags } from './mv.ts'
 
@@ -48,7 +48,7 @@ function makeBackend(
       )
     }
     const data = files.get(k)
-    if (data === undefined) return Promise.reject(new Error(`not found: ${k}`))
+    if (data === undefined) return Promise.reject(enoent(k))
     return Promise.resolve(
       new FileStat({
         name: k.split('/').pop() ?? '',
@@ -59,7 +59,7 @@ function makeBackend(
   }
   const rename = (src: PathSpec, dst: PathSpec): Promise<void> => {
     const data = files.get(key(src))
-    if (data === undefined) return Promise.reject(new Error(`not found: ${key(src)}`))
+    if (data === undefined) return Promise.reject(enoent(key(src)))
     files.delete(key(src))
     files.set(key(dst), data)
     return Promise.resolve()
@@ -196,7 +196,7 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
     const err = readErr.get(key(p))
     if (err !== undefined) return Promise.reject(err)
     const data = files.get(key(p))
-    if (data === undefined) return Promise.reject(new Error(`not found: ${key(p)}`))
+    if (data === undefined) return Promise.reject(enoent(key(p)))
     return Promise.resolve(data)
   }
   const write = (p: PathSpec, data: Uint8Array): Promise<void> => {
@@ -690,7 +690,7 @@ function treeRename(files: Map<string, Uint8Array>, dirs: Set<string>) {
       return Promise.resolve()
     }
     const data = files.get(s)
-    if (data === undefined) return Promise.reject(new Error(`not found: ${s}`))
+    if (data === undefined) return Promise.reject(enoent(s))
     files.delete(s)
     files.set(d, data)
     return Promise.resolve()

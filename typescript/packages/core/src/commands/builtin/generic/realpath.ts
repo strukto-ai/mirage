@@ -15,6 +15,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { isMissingPath } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
@@ -34,8 +35,9 @@ async function pathExists(stat: (p: PathSpec) => Promise<unknown>, p: PathSpec):
   try {
     await stat(p)
     return true
-  } catch {
-    return false
+  } catch (err) {
+    if (isMissingPath(err)) return false
+    throw err
   }
 }
 
