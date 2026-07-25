@@ -65,10 +65,17 @@ export function arrayGet(arr: ShellArray, idx: number): string {
   return arr[idx] ?? ''
 }
 
-/** Assign `value` at `idx`, extending with holes as needed. */
+/**
+ * Assign `value` at `idx`, extending with holes as needed.
+ *
+ * The subscript comes from script text, so the write goes through
+ * `splice` rather than `arr[idx] = value`: an element assignment on a
+ * caller-supplied key is a prototype-pollution shape, and `splice`
+ * cannot name a property at all.
+ */
 export function arraySet(arr: ShellArray, idx: number, value: string): void {
   while (arr.length <= idx) arr.push(null)
-  arr[idx] = value
+  arr.splice(idx, 1, value)
 }
 
 /** Append values after the highest assigned index, as `arr+=(...)`. */
@@ -84,6 +91,6 @@ export function arrayAppend(arr: ShellArray, values: string[]): void {
  */
 export function arrayUnset(arr: ShellArray, idx: number): void {
   if (idx < 0 || idx >= arr.length) return
-  arr[idx] = null
+  arr.splice(idx, 1, null)
   while (arr.length > 0 && arr[arr.length - 1] === null) arr.pop()
 }
