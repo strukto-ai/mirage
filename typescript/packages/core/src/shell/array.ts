@@ -84,6 +84,30 @@ export function arrayAppend(arr: ShellArray, values: string[]): void {
 }
 
 /**
+ * Take the assigned elements from index `offset` on, in index order.
+ *
+ * bash slices an indexed array by *subscript*, not by position among the
+ * assigned values: for `a=([1]=b [3]=d [9]=j)`, `${a[@]:2}` is `d j`
+ * because it keeps every index >= 2. `length` then caps how many of those
+ * are taken. A negative offset counts back from the extent and yields
+ * nothing if it is still negative.
+ */
+export function arraySlice(arr: ShellArray, offset: number, length: number | null): string[] {
+  let start = offset
+  if (start < 0) {
+    start += arrayExtent(arr)
+    if (start < 0) return []
+  }
+  const picked: string[] = []
+  arr.forEach((v, i) => {
+    if (v !== null && i >= start) picked.push(v)
+  })
+  if (length === null) return picked
+  if (length < 0) return picked.slice(0, Math.max(0, picked.length + length))
+  return picked.slice(0, length)
+}
+
+/**
  * Clear one element, keeping the indices of the elements after it.
  *
  * Trailing holes are dropped so the extent stays at one past the highest

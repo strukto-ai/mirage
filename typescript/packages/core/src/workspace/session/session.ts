@@ -89,6 +89,9 @@ export class Session {
   stdinBuffer: AsyncLineIterator | null = null
   stdinSource: unknown = null
   localVars: Map<string, string | null> | null = null
+  // Arrays shadowed by `local -a` / `declare -a` in the running
+  // function; null means the caller had no array of that name.
+  localArrays: Map<string, ShellArray | null> | null = null
   // Hidden `getopts` state: the char offset within the word being
   // scanned (0 = positioned at the word's leading dash), plus the OPTIND
   // that offset belongs to. A caller resetting OPTIND makes the seen

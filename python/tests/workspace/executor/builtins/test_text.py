@@ -240,6 +240,23 @@ async def test_printf_v_invalid_name_suppresses_conversion_errors():
 
 
 @pytest.mark.asyncio
+async def test_printf_v_empty_subscript_is_not_an_identifier():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "a[]", "x"], session)
+    assert node.exit_code == 2
+    assert io.stderr == b"printf: `a[]': not a valid identifier\n"
+    assert "a" not in session.arrays
+
+
+@pytest.mark.asyncio
+async def test_printf_v_blank_subscript_is_arithmetic_zero():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "a[ ]", "x"], session)
+    assert node.exit_code == 0
+    assert session.arrays["a"] == ["x"]
+
+
+@pytest.mark.asyncio
 async def test_printf_v_readonly_scalar_is_rejected():
     session = Session(session_id="s1")
     session.env["R"] = "orig"

@@ -165,6 +165,20 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(s.env.Z).toBe('sc')
   })
 
+  it('unset of a negative element outside the extent errors', () => {
+    const s = new Session({ sessionId: 'test' })
+    s.arrays.arr = ['x']
+    const [, io] = handleUnset(['arr[-2]'], s)
+    expect(io.exitCode).toBe(1)
+    // bash prints only the bracketed part here, not the base name.
+    expect(decode(io.stderr as Uint8Array)).toBe('bash: unset: [-2]: bad array subscript\n')
+    expect(s.arrays.arr).toEqual(['x'])
+    s.arrays.two = ['x', 'y']
+    const [, io2] = handleUnset(['two[-2]'], s)
+    expect(io2.exitCode).toBe(0)
+    expect(s.arrays.two).toEqual([null, 'y'])
+  })
+
   it('unset of an element of an unset name is a no-op', () => {
     const s = new Session({ sessionId: 'test' })
     const [, io] = handleUnset(['GONE[3]'], s)
@@ -388,6 +402,18 @@ describe('handlePrintf', () => {
     const [, io2] = handlePrintf(['-v', '1bad', '%d', 'nope'], s)
     expect(io2.exitCode).toBe(2)
     expect(decode(io2.stderr as Uint8Array)).toBe("printf: `1bad': not a valid identifier\n")
+  })
+
+  it('-v rejects an empty subscript but allows a blank one', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', 'a[]', 'x'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toBe("printf: `a[]': not a valid identifier\n")
+    expect('a' in s.arrays).toBe(false)
+    // `a[ ]` is a valid arithmetic 0, not an empty subscript.
+    const [, io2] = handlePrintf(['-v', 'a[ ]', 'x'], s)
+    expect(io2.exitCode).toBe(0)
+    expect(s.arrays.a).toEqual(['x'])
   })
 
   it('-v refuses a readonly scalar and a readonly array element', () => {

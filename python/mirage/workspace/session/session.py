@@ -48,6 +48,10 @@ class Session:
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
     _stdin_source: object = field(default=None, repr=False)
     _local_vars: dict[str, str | None] | None = field(default=None, repr=False)
+    # Arrays shadowed by `local -a` / `declare -a` in the running
+    # function; None means the caller had no array of that name.
+    _local_arrays: (dict[str, ShellArray | None]
+                    | None) = field(default=None, repr=False)
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,

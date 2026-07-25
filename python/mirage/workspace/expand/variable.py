@@ -19,8 +19,8 @@ from dataclasses import dataclass
 import tree_sitter
 
 from mirage.shell.arith import evaluate_arith
-from mirage.shell.array import (array_extent, array_get, array_has,
-                                array_indices, array_values)
+from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
+                                array_indices, array_slice, array_values)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.helpers import get_text
@@ -483,7 +483,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
             if p.length_op:
                 return str(len(values))
             if p.op == ":":
-                sliced = _slice_array(values, groups, env)
+                sliced = _slice_array(arr, groups, env)
                 return " ".join(sliced)
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
                 return " ".join(
@@ -562,25 +562,26 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
     return _value_op(p.op, val, groups, env)
 
 
-def _slice_array(arr: list[str], groups: list[str],
+def _slice_array(arr: ShellArray, groups: list[str],
                  env: dict[str, str]) -> list[str]:
+    """Resolve ``${a[@]:offset:length}`` against a shell array.
+
+    Args:
+        arr (ShellArray): the array being sliced.
+        groups (list[str]): the raw offset and length words.
+        env (dict[str, str]): environment for the arithmetic context.
+    """
     if not groups:
-        return arr
+        return array_values(arr)
     offset = _arith_int(groups[0], env)
     if offset is None:
-        return arr
+        return array_values(arr)
     length = None
     if len(groups) > 1:
         length = _arith_int(groups[1], env)
         if length is None:
-            return arr
-    if offset < 0:
-        offset = max(0, len(arr) + offset)
-    if length is None:
-        return arr[offset:]
-    if length < 0:
-        return arr[offset:max(offset, len(arr) + length)]
-    return arr[offset:offset + length]
+            return array_values(arr)
+    return array_slice(arr, offset, length)
 
 
 def is_multiword_at(node: tree_sitter.Node) -> bool:
@@ -637,5 +638,5 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         groups.append(await _expand_group(group, expand_child, pattern_mode,
                                           session, call_stack))
     if p.op == ":":
-        return _slice_array(values, groups, session.env)
+        return _slice_array(arr, groups, session.env)
     return [_value_op(p.op, el, groups, session.env) for el in values]

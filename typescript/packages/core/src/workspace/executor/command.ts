@@ -22,6 +22,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
+import type { ShellArray } from '../../shell/array.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
@@ -931,7 +932,9 @@ async function executeShellFunction(
   const textArgs = restParts.map(wordText)
   cs.push(textArgs, cmdName)
   const savedLocals = new Map<string, string | null>()
+  const savedArrays = new Map<string, ShellArray | null>()
   session.localVars = savedLocals
+  session.localArrays = savedArrays
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: cmdName, exitCode: 0 })
@@ -977,7 +980,16 @@ async function executeShellFunction(
         session.env[key] = oldVal
       }
     }
+    for (const [key, oldArr] of savedArrays) {
+      if (oldArr === null) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete session.arrays[key]
+      } else {
+        session.arrays[key] = oldArr
+      }
+    }
     session.localVars = null
+    session.localArrays = null
   }
 
   const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null

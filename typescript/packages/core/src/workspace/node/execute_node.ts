@@ -41,7 +41,14 @@ import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { evaluateArith } from '../../shell/arith.ts'
-import { arrayAppend, arrayExtent, arrayGet, arraySet, makeArray } from '../../shell/array.ts'
+import {
+  type ShellArray,
+  arrayAppend,
+  arrayExtent,
+  arrayGet,
+  arraySet,
+  makeArray,
+} from '../../shell/array.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
@@ -61,6 +68,7 @@ import {
   handleReadonly,
   handleTest,
   handleUnset,
+  noteLocalArray,
 } from '../executor/builtins/index.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
@@ -478,7 +486,9 @@ export async function executeNode(
   if (kind === NodeKind.DECLARATION) {
     const keyword = getDeclarationKeyword(node)
     const assignments: string[] = []
-    const arrayNames: string[] = []
+    // Array literals are staged, not stored: `readonly -a a=(y)` on an
+    // already-readonly name has to fail with the old value intact.
+    const staged: { name: string; append: boolean; items: string[] }[] = []
     const flagChars = new Set<string>()
     for (const child of node.namedChildren) {
       if (child.type === NT.VARIABLE_ASSIGNMENT) {
@@ -488,10 +498,12 @@ export async function executeNode(
           const text = getText(child)
           const eq = text.indexOf('=')
           const key = eq >= 0 ? text.slice(0, eq) : text
-          session.arrays[key] = makeArray(
-            await expandArrayItems(firstVal, session, executeFn, registry, callStack),
-          )
-          arrayNames.push(key.endsWith('+') ? key.slice(0, -1) : key)
+          const append = key.endsWith('+')
+          staged.push({
+            name: append ? key.slice(0, -1) : key,
+            append,
+            items: await expandArrayItems(firstVal, session, executeFn, registry, callStack),
+          })
           continue
         }
         assignments.push(await expandNode(child, session, executeFn, callStack))
@@ -513,16 +525,56 @@ export async function executeNode(
         }
       }
     }
+    const arrayNames = staged.map((entry) => entry.name)
+    const isReadonly = keyword === 'readonly' || flagChars.has('r')
+    for (const name of arrayNames) {
+      if (isReadonly && session.readonlyVars.has(name)) {
+        const err = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: err }),
+          new ExecutionNode({ command: keyword, exitCode: 1, stderr: err }),
+        ]
+      }
+    }
+    for (const { name, append, items } of staged) {
+      noteLocalArray(session, name)
+      let base: ShellArray
+      if (append) {
+        const existing = session.arrays[name]
+        if (existing === undefined) {
+          const scalar = session.env[name]
+          base = scalar === undefined ? [] : [scalar]
+        } else {
+          base = existing
+        }
+        arrayAppend(base, items)
+      } else {
+        base = makeArray(items)
+      }
+      session.arrays[name] = base
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.env[name]
+    }
     if (flagChars.has('a')) {
       // `declare -a NAME` with no value declares an empty array, so
       // ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
       for (const bare of assignments) {
-        if (!bare.includes('=') && !Object.hasOwn(session.arrays, bare)) {
+        if (bare.includes('=')) continue
+        if (noteLocalArray(session, bare)) {
+          // Inside a function this shadows whatever the caller had with a
+          // fresh empty array.
           session.arrays[bare] = []
+        } else if (!Object.hasOwn(session.arrays, bare)) {
+          // At top level an existing scalar becomes element 0.
+          const scalar = session.env[bare]
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete session.env[bare]
+          session.arrays[bare] = scalar === undefined ? [] : [scalar]
         }
       }
     }
-    if (keyword === 'readonly' || flagChars.has('r')) {
+    if (isReadonly) {
       // An array assignment stores itself above, but the name still has
       // to be marked readonly.
       return handleReadonly([...assignments, ...arrayNames], session)

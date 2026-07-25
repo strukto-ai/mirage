@@ -58,7 +58,8 @@ from mirage.shell.helpers import (  # isort: skip
     get_negated_command, get_pipeline_commands, get_redirects, get_text,
     get_unset_args, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    handle_export, handle_local, handle_readonly, handle_test, handle_unset)
+    handle_export, handle_local, handle_readonly, handle_test, handle_unset,
+    note_local_array)
 
 
 async def _expand_array_items(
@@ -425,7 +426,9 @@ async def execute_node(
     if kind == NodeKind.DECLARATION:
         keyword = get_declaration_keyword(node)
         assignments = []
-        array_names: list[str] = []
+        # Array literals are staged, not stored: `readonly -a a=(y)` on an
+        # already-readonly name has to fail with the old value intact.
+        staged: list[tuple[str, bool, list[str]]] = []
         flag_chars: set[str] = set()
         for child in node.named_children:
             if child.type == NT.VARIABLE_ASSIGNMENT:
@@ -435,9 +438,10 @@ async def execute_node(
                 ]
                 if val_nodes and val_nodes[0].type == NT.ARRAY:
                     key = get_text(child).partition("=")[0]
-                    session.arrays[key] = make_array(await _expand_array_items(
-                        val_nodes[0], session, execute_fn, registry, cs))
-                    array_names.append(key.removesuffix("+"))
+                    items = await _expand_array_items(val_nodes[0], session,
+                                                      execute_fn, registry, cs)
+                    staged.append(
+                        (key.removesuffix("+"), key.endswith("+"), items))
                     continue
                 expanded = await expand_node(child, session, execute_fn, cs)
                 assignments.append(expanded)
@@ -452,13 +456,40 @@ async def execute_node(
                     flag_chars.update(expanded[1:])
                 else:
                     assignments.append(expanded)
+        array_names = [name for name, _, _ in staged]
+        is_readonly = keyword == "readonly" or "r" in flag_chars
+        for name in array_names:
+            if is_readonly and name in session.readonly_vars:
+                err = f"bash: {name}: readonly variable\n".encode()
+                return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
+                    command=keyword, exit_code=1, stderr=err)
+        for name, append, items in staged:
+            note_local_array(session, name)
+            if append:
+                base = session.arrays.get(name)
+                if base is None:
+                    scalar = session.env.get(name)
+                    base = [] if scalar is None else [scalar]
+                array_append(base, items)
+            else:
+                base = make_array(items)
+            session.arrays[name] = base
+            session.env.pop(name, None)
         if "a" in flag_chars:
             # `declare -a NAME` with no value declares an empty array, so
             # ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
             for bare in assignments:
-                if "=" not in bare:
-                    session.arrays.setdefault(bare, [])
-        if keyword == "readonly" or "r" in flag_chars:
+                if "=" in bare:
+                    continue
+                if note_local_array(session, bare):
+                    # Inside a function this shadows whatever the caller
+                    # had with a fresh empty array.
+                    session.arrays[bare] = []
+                elif bare not in session.arrays:
+                    # At top level an existing scalar becomes element 0.
+                    scalar = session.env.pop(bare, None)
+                    session.arrays[bare] = [] if scalar is None else [scalar]
+        if is_readonly:
             # An array assignment stores itself above, but the name still
             # has to be marked readonly.
             return await handle_readonly(assignments + array_names, session)

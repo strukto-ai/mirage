@@ -23,7 +23,9 @@ from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
-_PRINTF_TARGET_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[(.*)\])?\Z")
+# A subscript must be non-empty: bash rejects `a[]` as an invalid
+# identifier, while `a[ ]` is a valid arithmetic 0.
+_PRINTF_TARGET_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?\Z")
 
 _SIMPLE_ESCAPES = {
     "\\": "\\",

@@ -90,15 +90,18 @@ def _unset_variable(session: Session, name: str) -> str:
 
     A subscript on a scalar names element 0 only: ``x[0]`` unsets the
     scalar and any other subscript is an error. A subscript on a name
-    that holds nothing at all is a silent no-op.
+    that holds nothing at all is a silent no-op, but on an existing array
+    a negative subscript still below zero after the extent is added is a
+    bad-subscript error.
 
     Args:
         session (Session): shell session state.
         name (str): a variable name or ``name[subscript]``.
 
     Returns:
-        str: ``"ok"``, or ``"notarray"`` when a non-zero subscript was
-            applied to a scalar.
+        str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
+            applied to a scalar, or ``"subscript"`` for a negative
+            subscript outside an existing array.
     """
     match = _PRINTF_TARGET_RE.match(name)
     if match is not None and match.group(2) is not None:
@@ -114,6 +117,8 @@ def _unset_variable(session: Session, name: str) -> str:
         idx = _array_index(subscript, session.env)
         if idx < 0:
             idx += array_extent(arr)
+            if idx < 0:
+                return "subscript"
         array_unset(arr, idx)
         return "ok"
     session.env.pop(name, None)
@@ -184,8 +189,14 @@ async def handle_unset(
                                                              exit_code=1,
                                                              stderr=err)
         existed = is_element or name in session.env or name in session.arrays
-        if _unset_variable(session, name) == "notarray":
-            err = f"bash: unset: {base}: not an array variable\n".encode()
+        status = _unset_variable(session, name)
+        if status != "ok":
+            # bash names the base for "not an array variable" but prints
+            # only the bracketed part for a bad subscript.
+            detail = (f"unset: {base}: not an array variable"
+                      if status == "notarray" else
+                      f"unset: {name[len(base):]}: bad array subscript")
+            err = f"bash: {detail}\n".encode()
             return None, IOResult(exit_code=1,
                                   stderr=err), ExecutionNode(command="unset",
                                                              exit_code=1,
@@ -416,6 +427,30 @@ async def handle_read(
         # the variable_assignment path.
         session.arrays.pop(var, None)
     return None, IOResult(), ExecutionNode(command="read", exit_code=0)
+
+
+def note_local_array(session: Session, name: str) -> bool:
+    """Record the caller's array before a function shadows ``name``.
+
+    ``local -a`` / ``declare -a`` inside a function shadow the caller's
+    array, so the old value (or its absence) has to be remembered for the
+    teardown in ``execute_command``.
+
+    Args:
+        session (Session): shell session state.
+        name (str): the array name being declared.
+
+    Returns:
+        bool: True when a function scope is active, so the caller should
+            shadow rather than reuse whatever is already there.
+    """
+    local_arrays = session._local_arrays
+    if local_arrays is None:
+        return False
+    if name not in local_arrays:
+        existing = session.arrays.get(name)
+        local_arrays[name] = None if existing is None else list(existing)
+    return True
 
 
 async def handle_local(

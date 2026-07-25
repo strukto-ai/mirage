@@ -1,6 +1,7 @@
 from mirage.shell.array import (array_append, array_count, array_extent,
                                 array_get, array_has, array_indices, array_set,
-                                array_unset, array_values, make_array)
+                                array_slice, array_unset, array_values,
+                                make_array)
 
 
 def test_make_array_is_dense_from_zero():
@@ -81,3 +82,36 @@ def test_empty_string_is_an_element_not_a_hole():
     assert array_count(arr) == 2
     assert array_indices(arr) == [0, 1]
     assert array_values(arr) == ["", "y"]
+
+
+def test_slice_keeps_subscripts_not_ordinals():
+    arr: list[str | None] = []
+    array_set(arr, 1, "b")
+    array_set(arr, 3, "d")
+    array_set(arr, 9, "j")
+    # Offset 2 means "index >= 2", not "skip the first two values".
+    assert array_slice(arr, 2, None) == ["d", "j"]
+    assert array_slice(arr, 0, None) == ["b", "d", "j"]
+    assert array_slice(arr, 4, None) == ["j"]
+    assert array_slice(arr, 20, None) == []
+
+
+def test_slice_length_counts_elements_taken():
+    arr: list[str | None] = []
+    array_set(arr, 1, "b")
+    array_set(arr, 3, "d")
+    array_set(arr, 9, "j")
+    assert array_slice(arr, 2, 1) == ["d"]
+    assert array_slice(arr, 0, 2) == ["b", "d"]
+    assert array_slice(arr, 0, -1) == ["b", "d"]
+
+
+def test_slice_negative_offset_counts_from_the_extent():
+    arr: list[str | None] = []
+    array_set(arr, 1, "b")
+    array_set(arr, 9, "j")
+    assert array_slice(arr, -1, None) == ["j"]
+    # Still negative after the extent is added: nothing, not everything.
+    assert array_slice(arr, -20, None) == []
+    assert array_slice(make_array(["x", "y", "z"]), -5, None) == []
+    assert array_slice(make_array(["x", "y", "z"]), -2, None) == ["y", "z"]

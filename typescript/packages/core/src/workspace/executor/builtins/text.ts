@@ -22,7 +22,9 @@ import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
-export const PRINTF_TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.*)\])?$/
+// A subscript must be non-empty: bash rejects `a[]` as an invalid
+// identifier, while `a[ ]` is a valid arithmetic 0.
+export const PRINTF_TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?$/
 
 /**
  * Print arguments, honoring GNU echo's option rules.

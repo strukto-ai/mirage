@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { evaluateArith } from '../../shell/arith.ts'
-import { arrayExtent, arrayGet, arrayHas, arrayIndices, arrayValues } from '../../shell/array.ts'
+import {
+  type ShellArray,
+  arrayExtent,
+  arrayGet,
+  arrayHas,
+  arrayIndices,
+  arraySlice,
+  arrayValues,
+} from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -420,21 +428,19 @@ function substring(val: string, groups: string[], env: Record<string, string>): 
   return val.slice(offset, offset + length)
 }
 
-function sliceArray(arr: string[], groups: string[], env: Record<string, string>): string[] {
+/** Resolve `${a[@]:offset:length}` against a shell array. */
+function sliceArray(arr: ShellArray, groups: string[], env: Record<string, string>): string[] {
   const offsetRaw = groups[0]
-  if (offsetRaw === undefined) return arr
-  let offset = arithInt(offsetRaw, env)
-  if (offset === null) return arr
+  if (offsetRaw === undefined) return arrayValues(arr)
+  const offset = arithInt(offsetRaw, env)
+  if (offset === null) return arrayValues(arr)
   let length: number | null = null
   const lengthRaw = groups[1]
   if (lengthRaw !== undefined) {
     length = arithInt(lengthRaw, env)
-    if (length === null) return arr
+    if (length === null) return arrayValues(arr)
   }
-  if (offset < 0) offset = Math.max(0, arr.length + offset)
-  if (length === null) return arr.slice(offset)
-  if (length < 0) return arr.slice(offset, Math.max(offset, arr.length + length))
-  return arr.slice(offset, offset + length)
+  return arraySlice(arr, offset, length)
 }
 
 // True for the "${a[@]...}" forms bash keeps as one word per element:
@@ -474,7 +480,7 @@ export async function expandArrayAt(
     const patternMode = gi === 0 && PATTERN_OPS.has(op)
     groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
   }
-  if (op === ':') return sliceArray(values, groups, env)
+  if (op === ':') return sliceArray(arr, groups, env)
   return values.map((el) => valueOp(op, el, groups, env))
 }
 
@@ -561,7 +567,7 @@ export async function expandBraces(
       }
       if (p.lengthOp) return String(values.length)
       if (p.op === ':') {
-        return sliceArray(values, groups, env).join(' ')
+        return sliceArray(arr, groups, env).join(' ')
       }
       if (p.op !== null && (STRIP_OPS.has(p.op) || REPLACE_OPS.has(p.op) || CASE_OPS.has(p.op))) {
         const op = p.op

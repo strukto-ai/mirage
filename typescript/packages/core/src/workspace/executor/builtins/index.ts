@@ -40,6 +40,7 @@ export {
   handleTrap,
   handleUnset,
   handleWhoami,
+  noteLocalArray,
 } from './vars.ts'
 export { handleMan } from './man.ts'
 export { handleHistory } from './history.ts'

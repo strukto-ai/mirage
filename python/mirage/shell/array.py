@@ -107,6 +107,34 @@ def array_append(arr: ShellArray, values: list[str]) -> None:
     arr.extend(values)
 
 
+def array_slice(arr: ShellArray, offset: int, length: int | None) -> list[str]:
+    """Take the assigned elements from index ``offset`` on, in order.
+
+    bash slices an indexed array by *subscript*, not by position among
+    the assigned values: for ``a=([1]=b [3]=d [9]=j)``, ``${a[@]:2}`` is
+    ``d j`` because it keeps every index >= 2. ``length`` then caps how
+    many of those are taken. A negative offset counts back from the
+    extent and yields nothing if it is still negative.
+
+    Args:
+        arr (ShellArray): the array.
+        offset (int): the first subscript to keep, or a negative count
+            back from the extent.
+        length (int | None): how many elements to take; a negative value
+            drops that many from the end.
+    """
+    if offset < 0:
+        offset += array_extent(arr)
+        if offset < 0:
+            return []
+    picked = [v for i, v in enumerate(arr) if v is not None and i >= offset]
+    if length is None:
+        return picked
+    if length < 0:
+        return picked[:max(0, len(picked) + length)]
+    return picked[:length]
+
+
 def array_unset(arr: ShellArray, idx: int) -> None:
     """Clear one element, keeping the indices of the elements after it.
 

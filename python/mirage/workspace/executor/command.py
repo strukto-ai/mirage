@@ -38,6 +38,7 @@ from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.route import RoutingDecision
 from mirage.runtime.table import VfsRuntime
+from mirage.shell.array import ShellArray
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -584,7 +585,9 @@ async def handle_command(
         text_args = [word_text(p) for p in parts[1:]]
         cs.push(text_args, function_name=cmd_name)
         saved_locals: dict[str, str | None] = {}
+        saved_arrays: dict[str, ShellArray | None] = {}
         session._local_vars = saved_locals
+        session._local_arrays = saved_arrays
         try:
             all_stdout: list[Any] = []
             merged_io = IOResult()
@@ -620,7 +623,13 @@ async def handle_command(
                     session.env.pop(key, None)
                 else:
                     session.env[key] = old_val
+            for key, old_arr in saved_arrays.items():
+                if old_arr is None:
+                    session.arrays.pop(key, None)
+                else:
+                    session.arrays[key] = old_arr
             session._local_vars = None
+            session._local_arrays = None
 
     # Cross-mount: paths span different mounts (e.g. cp /ram/a /disk/b).
     # Use dispatch to read/write across mounts directly.

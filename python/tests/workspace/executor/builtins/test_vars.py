@@ -134,6 +134,26 @@ async def test_unset_nonzero_element_of_a_scalar_errors():
 
 
 @pytest.mark.asyncio
+async def test_unset_negative_element_outside_the_extent_errors():
+    session = make_session()
+    session.arrays["arr"] = ["x"]
+    _, io, node = await handle_unset(["arr[-2]"], session)
+    assert node.exit_code == 1
+    # bash prints only the bracketed part here, not the base name.
+    assert io.stderr == b"bash: unset: [-2]: bad array subscript\n"
+    assert session.arrays["arr"] == ["x"]
+
+
+@pytest.mark.asyncio
+async def test_unset_negative_element_inside_the_extent_works():
+    session = make_session()
+    session.arrays["arr"] = ["x", "y"]
+    _, io, node = await handle_unset(["arr[-2]"], session)
+    assert node.exit_code == 0
+    assert session.arrays["arr"] == [None, "y"]
+
+
+@pytest.mark.asyncio
 async def test_unset_element_of_an_unset_name_is_a_no_op():
     session = make_session()
     _, io, node = await handle_unset(["GONE[3]"], session)

@@ -22,6 +22,7 @@ import {
   arrayHas,
   arrayIndices,
   arraySet,
+  arraySlice,
   arrayUnset,
   arrayValues,
   makeArray,
@@ -99,6 +100,39 @@ describe('shell array', () => {
     arraySet(arr, 1, 'new')
     expect(arr).toEqual(['x', 'new', 'z'])
     expect(arrayCount(arr)).toBe(3)
+  })
+
+  it('slicing keeps subscripts, not ordinals', () => {
+    const arr: ShellArray = []
+    arraySet(arr, 1, 'b')
+    arraySet(arr, 3, 'd')
+    arraySet(arr, 9, 'j')
+    // Offset 2 means "index >= 2", not "skip the first two values".
+    expect(arraySlice(arr, 2, null)).toEqual(['d', 'j'])
+    expect(arraySlice(arr, 0, null)).toEqual(['b', 'd', 'j'])
+    expect(arraySlice(arr, 4, null)).toEqual(['j'])
+    expect(arraySlice(arr, 20, null)).toEqual([])
+  })
+
+  it('slice length counts elements taken', () => {
+    const arr: ShellArray = []
+    arraySet(arr, 1, 'b')
+    arraySet(arr, 3, 'd')
+    arraySet(arr, 9, 'j')
+    expect(arraySlice(arr, 2, 1)).toEqual(['d'])
+    expect(arraySlice(arr, 0, 2)).toEqual(['b', 'd'])
+    expect(arraySlice(arr, 0, -1)).toEqual(['b', 'd'])
+  })
+
+  it('a negative slice offset counts from the extent', () => {
+    const arr: ShellArray = []
+    arraySet(arr, 1, 'b')
+    arraySet(arr, 9, 'j')
+    expect(arraySlice(arr, -1, null)).toEqual(['j'])
+    // Still negative after the extent is added: nothing, not everything.
+    expect(arraySlice(arr, -20, null)).toEqual([])
+    expect(arraySlice(makeArray(['x', 'y', 'z']), -5, null)).toEqual([])
+    expect(arraySlice(makeArray(['x', 'y', 'z']), -2, null)).toEqual(['y', 'z'])
   })
 
   it('an empty string is an element, not a hole', () => {

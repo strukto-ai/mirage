@@ -85,9 +85,11 @@ export function handleReadonly(assignments: string[], session: Session): Result 
  *
  * A subscript on a scalar names element 0 only: `x[0]` unsets the scalar
  * and any other subscript reports `notarray`. A subscript on a name that
- * holds nothing at all is a silent no-op.
+ * holds nothing at all is a silent no-op, but on an existing array a
+ * negative subscript still below zero after the extent is added reports
+ * `subscript`.
  */
-function unsetVariable(session: Session, name: string): 'ok' | 'notarray' {
+function unsetVariable(session: Session, name: string): 'ok' | 'notarray' | 'subscript' {
   const match = PRINTF_TARGET_RE.exec(name)
   if (match?.[2] !== undefined) {
     const base = match[1] ?? ''
@@ -100,7 +102,10 @@ function unsetVariable(session: Session, name: string): 'ok' | 'notarray' {
       return 'ok'
     }
     let idx = arrayIndex(match[2], session.env)
-    if (idx < 0) idx += arrayExtent(arr)
+    if (idx < 0) {
+      idx += arrayExtent(arr)
+      if (idx < 0) return 'subscript'
+    }
     arrayUnset(arr, idx)
     return 'ok'
   }
@@ -173,8 +178,15 @@ export function handleUnset(args: string[], session: Session): Result {
       ]
     }
     const existed = isElement || name in session.env || name in session.arrays
-    if (unsetVariable(session, name) === 'notarray') {
-      const err = new TextEncoder().encode(`bash: unset: ${base}: not an array variable\n`)
+    const status = unsetVariable(session, name)
+    if (status !== 'ok') {
+      // bash names the base for "not an array variable" but prints only
+      // the bracketed part for a bad subscript.
+      const detail =
+        status === 'notarray'
+          ? `unset: ${base}: not an array variable`
+          : `unset: ${name.slice(base.length)}: bad array subscript`
+      const err = new TextEncoder().encode(`bash: ${detail}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -353,6 +365,24 @@ export function handleWhoami(namespace: Namespace): Result {
   }
   const out = new TextEncoder().encode(`${namespace.user}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
+}
+
+/**
+ * Record the caller's array before a function shadows `name`.
+ *
+ * `local -a` / `declare -a` inside a function shadow the caller's array,
+ * so the old value (or its absence) has to be remembered for the teardown
+ * in `executeCommand`. Returns true when a function scope is active, so
+ * the caller should shadow rather than reuse whatever is already there.
+ */
+export function noteLocalArray(session: Session, name: string): boolean {
+  const localArrays = session.localArrays
+  if (localArrays === null) return false
+  if (!localArrays.has(name)) {
+    const existing = sessionEntry(session.arrays, name)
+    localArrays.set(name, existing === undefined ? null : [...existing])
+  }
+  return true
 }
 
 export function handleLocal(assignments: string[], session: Session): Result {

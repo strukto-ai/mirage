@@ -82,6 +82,45 @@ CASES = [
     ('Z=""; echo "${#Z[@]} [${Z[@]}] [${!Z[@]}]"', "1 [] [0]\n"),
     ('Y=v; echo "${#Y[@]} [${!Y[@]}]"', "1 [0]\n"),
     ('unset Q; echo "${#Q[@]} [${!Q[@]}]"', "0 []\n"),
+    # Slicing an indexed array works on subscripts, not on position among
+    # the assigned values, and a negative offset counts from the extent.
+    # Pinned against GNU bash 5.2.
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]:2}]"', "[d j]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]:0}]"', "[b d j]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]:2:1}]"', "[d]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]:4}]"', "[j]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]:0:2}]"', "[b d]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]: -1}]"', "[j]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]: -3}]"', "[j]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]: -20}]"', "[]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[@]:20}]"', "[]\n"),
+    ('a=(); a[1]=b; a[3]=d; a[9]=j; echo "[${a[*]:2}]"', "[d j]\n"),
+    ('a=(x y z w); unset "a[1]"; echo "[${a[@]:1}]"', "[z w]\n"),
+    ('a=(x y z); echo "[${a[@]: -5}]"', "[]\n"),
+    ('a=(x y z); echo "[${a[@]: -2}]"', "[y z]\n"),
+    # `declare -a` / `local -a` are local to a function and shadow the
+    # caller's array with a fresh empty one.
+    ('f(){ declare -a leak; leak[2]=x; }; f; echo "[${leak[@]}] ${#leak[@]}"',
+     "[] 0\n"),
+    ('g=(outer); f(){ declare -a g; g[0]=inner; echo "in=${g[@]}"; }; f; '
+     'echo "out=${g[@]}"', "in=inner\nout=outer\n"),
+    ('f(){ local -a l=(a b); echo "in=${l[@]}"; }; f; echo "out=[${l[@]}]"',
+     "in=a b\nout=[]\n"),
+    ('m=(keep); f(){ local -a m; m[1]=x; echo "in=${!m[@]}"; }; f; '
+     'echo "out=${m[@]}"', "in=1\nout=keep\n"),
+    ('n=(outer); f(){ declare -a n=(inner); }; f; echo "out=${n[@]}"',
+     "out=outer\n"),
+    ('x=foo; f(){ declare -a x; echo "in=[${x[@]}] ${#x[@]}"; }; f; '
+     'echo "out=$x"', "in=[] 0\nout=foo\n"),
+    # At top level `declare -a` keeps an existing array and migrates an
+    # existing scalar to element 0.
+    ('x=foo; declare -a x; echo "${#x[@]} [${!x[@]}] [${x[0]}]"',
+     "1 [0] [foo]\n"),
+    ('x=""; declare -a x; echo "${#x[@]} [${!x[@]}]"', "1 [0]\n"),
+    ('unset x; declare -a x; echo "${#x[@]}"', "0\n"),
+    ('a=(1 2 3); declare -a a; echo "[${a[@]}]"', "[1 2 3]\n"),
+    ('a=(x); declare -a a+=(y); echo "[${a[@]}]"', "[x y]\n"),
+    ('b=(p); declare b+=(q); echo "[${b[@]}]"', "[p q]\n"),
 ]
 
 
