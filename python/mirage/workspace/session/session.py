@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.shell.array import ShellArray
 from mirage.shell.types import FunctionBody
 from mirage.types import MountMode
 
@@ -31,7 +32,7 @@ class Session:
     last_exit_code: int = 0
     shell_options: dict[str, bool] = field(default_factory=dict)
     readonly_vars: set[str] = field(default_factory=set)
-    arrays: dict[str, list[str]] = field(default_factory=dict)
+    arrays: dict[str, ShellArray] = field(default_factory=dict)
     mount_modes: dict[str, MountMode] | None = None
     generation: int = 0
     pipeline_timeout_seconds: float | None = None

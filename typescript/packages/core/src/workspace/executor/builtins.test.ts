@@ -133,11 +133,11 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new Session({ sessionId: 'test' })
     s.arrays.arr = ['x', 'y', 'z']
     // An interior element leaves a hole so later indices keep their
-    // positions; a trailing one shortens the array, as bash does.
+    // positions; a trailing one drops off, as bash does.
     handleUnset(['arr[1]'], s)
-    expect(s.arrays.arr).toEqual(['x', '', 'z'])
+    expect(s.arrays.arr).toEqual(['x', null, 'z'])
     handleUnset(['arr[2]'], s)
-    expect(s.arrays.arr).toEqual(['x', ''])
+    expect(s.arrays.arr).toEqual(['x'])
     handleUnset(['arr'], s)
     expect('arr' in s.arrays).toBe(false)
   })
@@ -376,7 +376,8 @@ describe('handlePrintf', () => {
     const s = new Session({ sessionId: 'test' })
     const [, io] = handlePrintf(['-v', 'arr[2]', 'hi'], s)
     expect(io.exitCode).toBe(0)
-    expect(s.arrays.arr).toEqual(['', '', 'hi'])
+    // Indices 0 and 1 are holes, not empty elements.
+    expect(s.arrays.arr).toEqual([null, null, 'hi'])
   })
 
   it('-v with an invalid name errors before the format runs', () => {

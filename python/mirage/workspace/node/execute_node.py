@@ -20,6 +20,8 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.runtime.route import RoutingDecision
 from mirage.shell.arith import evaluate_arith
+from mirage.shell.array import (array_append, array_extent, array_get,
+                                array_set, make_array)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.job_table import JobTable
@@ -433,8 +435,8 @@ async def execute_node(
                 ]
                 if val_nodes and val_nodes[0].type == NT.ARRAY:
                     key = get_text(child).partition("=")[0]
-                    session.arrays[key] = await _expand_array_items(
-                        val_nodes[0], session, execute_fn, registry, cs)
+                    session.arrays[key] = make_array(await _expand_array_items(
+                        val_nodes[0], session, execute_fn, registry, cs))
                     array_names.append(key.removesuffix("+"))
                     continue
                 expanded = await expand_node(child, session, execute_fn, cs)
@@ -450,6 +452,12 @@ async def execute_node(
                     flag_chars.update(expanded[1:])
                 else:
                     assignments.append(expanded)
+        if "a" in flag_chars:
+            # `declare -a NAME` with no value declares an empty array, so
+            # ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
+            for bare in assignments:
+                if "=" not in bare:
+                    session.arrays.setdefault(bare, [])
         if keyword == "readonly" or "r" in flag_chars:
             # An array assignment stores itself above, but the name still
             # has to be marked readonly.
@@ -529,10 +537,13 @@ async def execute_node(
                 base = session.arrays.get(key)
                 if base is None:
                     scalar = session.env.pop(key, None)
-                    base = [scalar] if scalar else []
-                session.arrays[key] = base + items
+                    base = [] if scalar is None else [scalar]
+                # `arr+=(...)` starts at the extent, so it fills the hole
+                # a trailing `unset arr[last]` left but skips interior ones.
+                array_append(base, items)
+                session.arrays[key] = base
             else:
-                session.arrays[key] = items
+                session.arrays[key] = make_array(items)
                 session.env.pop(key, None)
             return None, IOResult(), ExecutionNode(command=text, exit_code=0)
         if val_nodes:
@@ -548,10 +559,10 @@ async def execute_node(
             arr = session.arrays.get(key)
             if arr is None:
                 scalar = session.env.pop(key, None)
-                arr = [scalar] if scalar else []
+                arr = [] if scalar is None else [scalar]
             idx = _array_index(idx_text, session.env)
             if idx < 0:
-                idx += len(arr)
+                idx += array_extent(arr)
             if idx < 0:
                 # bash aborts the whole line on a bad assignment
                 # subscript (status 1); containment mirrors ${var:?}.
@@ -560,17 +571,13 @@ async def execute_node(
                                  stderr=(f"bash: {name_text}: "
                                          "bad array subscript\n").encode(),
                                  contained_code=1)
-            while len(arr) <= idx:
-                arr.append("")
-            arr[idx] = arr[idx] + val if append else val
+            array_set(arr, idx, array_get(arr, idx) + val if append else val)
             session.arrays[key] = arr
             return None, IOResult(), ExecutionNode(command=text, exit_code=0)
         if append:
             arr = session.arrays.get(key)
-            if arr:
-                arr[0] = arr[0] + val
-            elif arr is not None:
-                arr.append(val)
+            if arr is not None:
+                array_set(arr, 0, array_get(arr, 0) + val)
             else:
                 session.env[key] = session.env.get(key, "") + val
         else:

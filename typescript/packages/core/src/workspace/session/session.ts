@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import type { ShellArray } from '../../shell/array.ts'
 import type { MountMode } from '../../types.ts'
 
 /**
@@ -51,7 +52,7 @@ export interface SessionInit {
   positionalArgs?: string[]
   shellOptions?: Record<string, boolean>
   readonlyVars?: Set<string>
-  arrays?: Record<string, string[]>
+  arrays?: Record<string, ShellArray>
   /**
    * Per-mount mode caps for this session. `null` (the default) means
    * no restriction: every mount in the workspace is reachable at its own
@@ -77,7 +78,7 @@ export class Session {
   positionalArgs: string[]
   shellOptions: Record<string, boolean>
   readonlyVars: Set<string>
-  arrays: Record<string, string[]>
+  arrays: Record<string, ShellArray>
   // Transient `set -e` marker: true when the failure just returned
   // came from a short-circuited &&/|| branch or a `!`-negated command,
   // which bash exempts from errexit. Reset on every node execution.

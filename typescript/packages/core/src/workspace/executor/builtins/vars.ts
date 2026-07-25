@@ -22,6 +22,7 @@ import { ExitSignal } from '../../../shell/errors.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
@@ -76,11 +77,11 @@ export function handleReadonly(assignments: string[], session: Session): Result 
 /**
  * Remove a scalar/array variable, or one array element `name[idx]`.
  *
- * Clearing an element keeps the positions of the elements after it, as
- * bash does: only a trailing element shortens the array, an interior one
- * leaves an empty hole. Mirage stores arrays densely, so a hole is an
- * empty string (the same representation `arr[9]=v` produces) and still
- * counts toward `${#arr[@]}` and `${arr[@]}`, where bash would skip it.
+ * Clearing an element keeps the indices of the elements after it, as bash
+ * does: it leaves a hole, which neither expands in `${arr[@]}` nor counts
+ * toward `${#arr[@]}` but keeps `${arr[i]}` addressing the same values.
+ * Trailing holes are dropped, so `arr+=(x)` refills the slot a trailing
+ * unset freed.
  *
  * A subscript on a scalar names element 0 only: `x[0]` unsets the scalar
  * and any other subscript reports `notarray`. A subscript on a name that
@@ -99,10 +100,8 @@ function unsetVariable(session: Session, name: string): 'ok' | 'notarray' {
       return 'ok'
     }
     let idx = arrayIndex(match[2], session.env)
-    if (idx < 0) idx += arr.length
-    if (idx < 0 || idx >= arr.length) return 'ok'
-    if (idx === arr.length - 1) arr.pop()
-    else arr[idx] = ''
+    if (idx < 0) idx += arrayExtent(arr)
+    arrayUnset(arr, idx)
     return 'ok'
   }
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete

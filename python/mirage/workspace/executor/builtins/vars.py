@@ -22,6 +22,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
+from mirage.shell.array import array_extent, array_unset
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.types import SET_FLAG_TO_OPTION
@@ -81,12 +82,11 @@ async def handle_readonly(
 def _unset_variable(session: Session, name: str) -> str:
     """Remove a scalar/array variable, or one array element ``name[idx]``.
 
-    Clearing an element keeps the positions of the elements after it, as
-    bash does: only a trailing element shortens the array, an interior
-    one leaves an empty hole. Mirage stores arrays densely, so a hole is
-    an empty string (the same representation ``arr[9]=v`` produces) and
-    still counts toward ``${#arr[@]}`` and ``${arr[@]}``, where bash
-    would skip it.
+    Clearing an element keeps the indices of the elements after it, as
+    bash does: it leaves a hole, which neither expands in ``${arr[@]}``
+    nor counts toward ``${#arr[@]}`` but keeps ``${arr[i]}`` addressing
+    the same values. Trailing holes are dropped, so ``arr+=(x)`` refills
+    the slot a trailing unset freed.
 
     A subscript on a scalar names element 0 only: ``x[0]`` unsets the
     scalar and any other subscript is an error. A subscript on a name
@@ -113,13 +113,8 @@ def _unset_variable(session: Session, name: str) -> str:
             return "ok"
         idx = _array_index(subscript, session.env)
         if idx < 0:
-            idx += len(arr)
-        if not 0 <= idx < len(arr):
-            return "ok"
-        if idx == len(arr) - 1:
-            del arr[idx]
-        else:
-            arr[idx] = ""
+            idx += array_extent(arr)
+        array_unset(arr, idx)
         return "ok"
     session.env.pop(name, None)
     session.arrays.pop(name, None)

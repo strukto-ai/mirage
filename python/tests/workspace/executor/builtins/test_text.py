@@ -219,7 +219,8 @@ async def test_printf_v_targets_array_element():
     out, io, node = await handle_printf(["-v", "arr[2]", "hi"], session)
     assert out is None
     assert node.exit_code == 0
-    assert session.arrays["arr"] == ["", "", "hi"]
+    # Indices 0 and 1 are holes, not empty elements.
+    assert session.arrays["arr"] == [None, None, "hi"]
 
 
 @pytest.mark.asyncio

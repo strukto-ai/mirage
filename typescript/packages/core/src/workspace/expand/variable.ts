@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { evaluateArith } from '../../shell/arith.ts'
+import { arrayExtent, arrayGet, arrayHas, arrayIndices, arrayValues } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -155,7 +156,7 @@ export function lookupVar(
   }
   const fromArray = session.arrays[name]
   if (fromArray !== undefined) {
-    return fromArray[0] ?? ''
+    return arrayGet(fromArray, 0)
   }
   if (name === 'PWD') return session.cwd
   if (name === 'HOME') return homeDir(session) ?? ''
@@ -464,16 +465,17 @@ export async function expandArrayAt(
     const scalar = env[p.varName ?? ''] ?? ''
     arr = scalar !== '' ? [scalar] : []
   }
-  if (p.indirectOp) return arr.map((_, i) => String(i))
-  if (p.op === null) return [...arr]
+  if (p.indirectOp) return arrayIndices(arr).map((i) => String(i))
+  const values = arrayValues(arr)
+  if (p.op === null) return values
   const op = p.op
   const groups: string[] = []
   for (let gi = 0; gi < p.groups.length; gi++) {
     const patternMode = gi === 0 && PATTERN_OPS.has(op)
     groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
   }
-  if (op === ':') return sliceArray(arr, groups, env)
-  return arr.map((el) => valueOp(op, el, groups, env))
+  if (op === ':') return sliceArray(values, groups, env)
+  return values.map((el) => valueOp(op, el, groups, env))
 }
 
 // bash evaluates subscripts in arithmetic context (${a[i+1]});
@@ -546,28 +548,29 @@ export async function expandBraces(
     }
     varInEnv = p.varName in arrays || p.varName in env
     if (p.subscript === '@' || p.subscript === '*') {
+      // ${a[@]} and friends see only the assigned elements: a hole left
+      // by `unset a[i]` (or skipped by a[9]=v) neither expands nor
+      // counts, though it keeps the later indices in place.
+      const values = arrayValues(arr)
       if (p.indirectOp) {
-        return arr.map((_, i) => String(i)).join(' ')
+        return arrayIndices(arr)
+          .map((i) => String(i))
+          .join(' ')
       }
-      if (p.lengthOp) return String(arr.length)
+      if (p.lengthOp) return String(values.length)
       if (p.op === ':') {
-        return sliceArray(arr, groups, env).join(' ')
+        return sliceArray(values, groups, env).join(' ')
       }
       if (p.op !== null && (STRIP_OPS.has(p.op) || REPLACE_OPS.has(p.op) || CASE_OPS.has(p.op))) {
         const op = p.op
-        return arr.map((el) => valueOp(op, el, groups, env)).join(' ')
+        return values.map((el) => valueOp(op, el, groups, env)).join(' ')
       }
-      val = arr.join(' ')
+      val = values.join(' ')
     } else {
       let idx = arrayIndex(p.subscript, env)
-      if (idx < 0) idx += arr.length
-      if (idx >= 0 && idx < arr.length) {
-        val = arr[idx] ?? ''
-        varInEnv = true
-      } else {
-        val = ''
-        varInEnv = false
-      }
+      if (idx < 0) idx += arrayExtent(arr)
+      val = arrayGet(arr, idx)
+      varInEnv = arrayHas(arr, idx)
     }
   } else if (p.varName !== null) {
     if (callStack) {
@@ -578,8 +581,7 @@ export async function expandBraces(
       }
     }
     if (!varInEnv && p.varName in arrays) {
-      const arr = arrays[p.varName] ?? []
-      val = arr[0] ?? ''
+      val = arrayGet(arrays[p.varName] ?? [], 0)
       varInEnv = true
     }
     if (!varInEnv && p.varName in env) {

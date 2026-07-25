@@ -95,10 +95,10 @@ async def test_unset_removes_whole_array_and_one_element():
     # An interior element leaves a hole: the later indices keep their
     # positions, as bash does.
     await handle_unset(["arr[1]"], session)
-    assert session.arrays["arr"] == ["x", "", "z"]
-    # A trailing element shortens the array instead.
+    assert session.arrays["arr"] == ["x", None, "z"]
+    # A trailing element drops off, so the extent shrinks with it.
     await handle_unset(["arr[2]"], session)
-    assert session.arrays["arr"] == ["x", ""]
+    assert session.arrays["arr"] == ["x"]
     await handle_unset(["arr"], session)
     assert "arr" not in session.arrays
 

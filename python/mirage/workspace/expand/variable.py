@@ -19,6 +19,8 @@ from dataclasses import dataclass
 import tree_sitter
 
 from mirage.shell.arith import evaluate_arith
+from mirage.shell.array import (array_extent, array_get, array_has,
+                                array_indices, array_values)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.helpers import get_text
@@ -121,8 +123,7 @@ def _lookup_var(var: str,
             return local_val
     arrays = getattr(session, "arrays", None)
     if arrays and var in arrays:
-        arr = arrays[var]
-        return arr[0] if arr else ""
+        return array_get(arrays[var], 0)
     if var == "PWD":
         return session.cwd
     if var == "HOME":
@@ -472,26 +473,27 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
             arr = [scalar] if scalar else []
         var_in_env = p.var_name in arrays or p.var_name in env
         if p.subscript in ("@", "*"):
+            # ${a[@]} and friends see only the assigned elements: a hole
+            # left by `unset a[i]` (or skipped by a[9]=v) neither expands
+            # nor counts, though it keeps the later indices in place.
+            values = array_values(arr)
             if p.indirect_op:
-                return " ".join(str(i) for i in range(len(arr)))
+                return " ".join(str(i) for i in array_indices(arr))
             if p.length_op:
-                return str(len(arr))
+                return str(len(values))
             if p.op == ":":
-                sliced = _slice_array(arr, groups, env)
+                sliced = _slice_array(values, groups, env)
                 return " ".join(sliced)
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
-                return " ".join(_value_op(p.op, el, groups, env) for el in arr)
-            val = " ".join(arr)
+                return " ".join(
+                    _value_op(p.op, el, groups, env) for el in values)
+            val = " ".join(values)
         else:
             idx = _array_index(p.subscript, env)
             if idx < 0:
-                idx += len(arr)
-            if 0 <= idx < len(arr):
-                val = arr[idx]
-                var_in_env = True
-            else:
-                val = ""
-                var_in_env = False
+                idx += array_extent(arr)
+            val = array_get(arr, idx)
+            var_in_env = array_has(arr, idx)
     elif p.var_name:
         if call_stack:
             local_val = call_stack.get_local(p.var_name)
@@ -499,8 +501,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
                 val = local_val
                 var_in_env = True
         if not var_in_env and p.var_name in arrays:
-            arr = arrays[p.var_name]
-            val = arr[0] if arr else ""
+            val = array_get(arrays[p.var_name], 0)
             var_in_env = True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]
@@ -625,14 +626,15 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         scalar = session.env.get(p.var_name or "", "")
         arr = [scalar] if scalar else []
     if p.indirect_op:
-        return [str(i) for i in range(len(arr))]
+        return [str(i) for i in array_indices(arr)]
+    values = array_values(arr)
     if p.op is None:
-        return list(arr)
+        return values
     groups: list[str] = []
     for gi, group in enumerate(p.groups):
         pattern_mode = gi == 0 and p.op in _PATTERN_OPS
         groups.append(await _expand_group(group, expand_child, pattern_mode,
                                           session, call_stack))
     if p.op == ":":
-        return _slice_array(arr, groups, session.env)
-    return [_value_op(p.op, el, groups, session.env) for el in arr]
+        return _slice_array(values, groups, session.env)
+    return [_value_op(p.op, el, groups, session.env) for el in values]

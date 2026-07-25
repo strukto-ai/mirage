@@ -41,6 +41,7 @@ import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import { arrayAppend, arrayExtent, arrayGet, arraySet, makeArray } from '../../shell/array.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
@@ -487,12 +488,8 @@ export async function executeNode(
           const text = getText(child)
           const eq = text.indexOf('=')
           const key = eq >= 0 ? text.slice(0, eq) : text
-          session.arrays[key] = await expandArrayItems(
-            firstVal,
-            session,
-            executeFn,
-            registry,
-            callStack,
+          session.arrays[key] = makeArray(
+            await expandArrayItems(firstVal, session, executeFn, registry, callStack),
           )
           arrayNames.push(key.endsWith('+') ? key.slice(0, -1) : key)
           continue
@@ -513,6 +510,15 @@ export async function executeNode(
           for (const ch of expanded.slice(1)) flagChars.add(ch)
         } else {
           assignments.push(expanded)
+        }
+      }
+    }
+    if (flagChars.has('a')) {
+      // `declare -a NAME` with no value declares an empty array, so
+      // ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
+      for (const bare of assignments) {
+        if (!bare.includes('=') && !Object.hasOwn(session.arrays, bare)) {
+          session.arrays[bare] = []
         }
       }
     }
@@ -590,11 +596,14 @@ export async function executeNode(
           const scalar = session.env[key]
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete session.env[key]
-          base = scalar !== undefined && scalar !== '' ? [scalar] : []
+          base = scalar === undefined ? [] : [scalar]
         }
-        session.arrays[key] = [...base, ...items]
+        // `arr+=(...)` starts at the extent, so it fills the hole a
+        // trailing `unset arr[last]` left but skips interior ones.
+        arrayAppend(base, items)
+        session.arrays[key] = base
       } else {
-        session.arrays[key] = items
+        session.arrays[key] = makeArray(items)
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete session.env[key]
       }
@@ -617,10 +626,10 @@ export async function executeNode(
         const scalar = session.env[key]
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete session.env[key]
-        arr = scalar !== undefined && scalar !== '' ? [scalar] : []
+        arr = scalar === undefined ? [] : [scalar]
       }
       let idx = arrayIndex(idxText, session.env)
-      if (idx < 0) idx += arr.length
+      if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) {
         // bash aborts the whole line on a bad assignment subscript
         // (status 1); containment mirrors ${var:?}.
@@ -632,17 +641,14 @@ export async function executeNode(
           1,
         )
       }
-      while (arr.length <= idx) arr.push('')
-      arr.splice(idx, 1, append ? (arr[idx] ?? '') + val : val)
+      arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
       session.arrays[key] = arr
       return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
     }
     if (append) {
       const arr = session.arrays[key]
-      if (arr !== undefined && arr.length > 0) {
-        arr[0] = (arr[0] ?? '') + val
-      } else if (arr !== undefined) {
-        arr.push(val)
+      if (arr !== undefined) {
+        arraySet(arr, 0, arrayGet(arr, 0) + val)
       } else {
         session.env[key] = (session.env[key] ?? '') + val
       }

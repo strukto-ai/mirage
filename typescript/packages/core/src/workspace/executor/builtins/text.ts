@@ -15,6 +15,7 @@
 import { interpretEscapes } from '../../../commands/builtin/utils/escapes.ts'
 import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
+import { arrayExtent, arraySet } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry, setSessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
@@ -778,8 +779,7 @@ function assignPrintfTarget(
   if (subscript === undefined) {
     const existing = sessionEntry(session.arrays, name)
     if (existing === undefined) setSessionEntry(session.env, name, value)
-    else if (existing.length > 0) existing[0] = value
-    else existing.push(value)
+    else arraySet(existing, 0, value)
     return 'ok'
   }
   const existing = sessionEntry(session.arrays, name)
@@ -792,10 +792,9 @@ function assignPrintfTarget(
     arr = scalar === undefined ? [] : [scalar]
   }
   let idx = arrayIndex(subscript, session.env)
-  if (idx < 0) idx += arr.length
+  if (idx < 0) idx += arrayExtent(arr)
   if (idx < 0) return 'subscript'
-  while (arr.length <= idx) arr.push('')
-  arr[idx] = value
+  arraySet(arr, idx, value)
   if (fromScalar) {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete session.env[name]

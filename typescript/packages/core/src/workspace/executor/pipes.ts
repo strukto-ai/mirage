@@ -17,6 +17,7 @@ import { asyncChain, closeQuietly, mergeStdoutStderr } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import type { ShellArray } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
@@ -261,7 +262,7 @@ export async function handleSubshell(
   const savedEnv = { ...session.env }
   const savedOptions = { ...session.shellOptions }
   const savedReadonly = new Set(session.readonlyVars)
-  const savedArrays: Record<string, string[]> = {}
+  const savedArrays: Record<string, ShellArray> = {}
   for (const [k, v] of Object.entries(session.arrays)) savedArrays[k] = [...v]
   const savedFunctions = { ...session.functions }
   const savedPositional = [...session.positionalArgs]

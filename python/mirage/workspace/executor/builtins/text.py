@@ -18,6 +18,7 @@ import re
 from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.array import array_extent, array_set
 from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -663,10 +664,8 @@ def _assign_printf_target(session: Session, name: str, subscript: str | None,
         arr = session.arrays.get(name)
         if arr is None:
             session.env[name] = value
-        elif arr:
-            arr[0] = value
         else:
-            arr.append(value)
+            array_set(arr, 0, value)
         return "ok"
     arr = session.arrays.get(name)
     from_scalar = arr is None
@@ -677,12 +676,10 @@ def _assign_printf_target(session: Session, name: str, subscript: str | None,
         arr = [] if scalar is None else [scalar]
     idx = _array_index(subscript, session.env)
     if idx < 0:
-        idx += len(arr)
+        idx += array_extent(arr)
     if idx < 0:
         return "subscript"
-    while len(arr) <= idx:
-        arr.append("")
-    arr[idx] = value
+    array_set(arr, idx, value)
     if from_scalar:
         session.env.pop(name, None)
     session.arrays[name] = arr

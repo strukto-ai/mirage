@@ -50,6 +50,26 @@ const CASES: [string, string][] = [
   ['a=(w x y z); printf "<%s>" "p${a[@]:1:2}s"; echo', '<px><ys>\n'],
   ['a=(cat car cow); printf "<%s>" "${a[@]/c/K}"; echo', '<Kat><Kar><Kow>\n'],
   ['a=(w x y z); printf "<%s>" "${!a[@]}"; echo', '<0><1><2><3>\n'],
+  // Sparse arrays: `unset a[i]` leaves a hole and `a[9]=v` skips one, so
+  // the later indices hold still while ${a[@]}/${#a[@]}/${!a[@]} see only
+  // the assigned elements. Pinned against GNU bash 5.2.
+  [
+    'a=(zero one two); unset "a[1]"; echo "${#a[@]} [${a[@]}] [${!a[@]}] [${a[*]}]"',
+    '2 [zero two] [0 2] [zero two]\n',
+  ],
+  ['a=(zero one two); unset "a[1]"; echo "[${a[0]}][${a[1]}][${a[2]}]"', '[zero][][two]\n'],
+  ['a=(); a[9]=v; echo "${#a[@]} [${a[@]}] [${!a[@]}] [${a[-1]}]"', '1 [v] [9] [v]\n'],
+  ['a=(x y z); unset "a[1]"; echo "[${a[-1]}] [${a[-2]}] [${a[-3]}]"', '[z] [] [x]\n'],
+  ['a=(a b c d); unset "a[1]"; echo "[${a[@]:1:2}]"', '[c d]\n'],
+  ['a=(a b c d); unset "a[1]"; echo "[${a[@]^^}]"', '[A C D]\n'],
+  ['a=(x y z); unset "a[1]"; echo "${a[@]/x/Q}"', 'Q z\n'],
+  ['a=(x y z); unset "a[1]"; a+=(w); echo "[${!a[@]}] [${a[@]}]"', '[0 2 3] [x z w]\n'],
+  ['a=(x y z); unset "a[2]"; a+=(w); echo "[${!a[@]}] [${a[@]}]"', '[0 1 2] [x y w]\n'],
+  ['a=(x y z); unset "a[1]"; echo "${#a[1]} ${#a[2]}"', '0 1\n'],
+  ['a=(x y z); unset "a[1]"; for v in "${a[@]}"; do echo "v=[$v]"; done', 'v=[x]\nv=[z]\n'],
+  ['a=(x y z); unset "a[0]"; echo "[$a]"', '[]\n'],
+  ['a=(x y z); unset "a[1]"; a[1]=NEW; echo "[${!a[@]}] [${a[@]}]"', '[0 1 2] [x NEW z]\n'],
+  ['declare -a e; e[3]=x; e[1]=y; echo "${#e[@]} [${!e[@]}] [${e[@]}]"', '2 [1 3] [y x]\n'],
 ]
 
 describe('shell arrays', () => {
