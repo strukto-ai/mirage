@@ -21,12 +21,12 @@ import {
   type WalkEntry,
   type WalkFn,
 } from '../types.ts'
-import { stripSlash } from '../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import type { DeltaHook } from './base.ts'
 import { DIR_FINGERPRINT } from './constants.ts'
 
 export function specFor(root: PathSpec, virtual: string): PathSpec {
-  const cut = root.virtual.replace(/\/+$/, '').length - root.resourcePath.length
+  const cut = rstripSlash(root.virtual).length - root.resourcePath.length
   return PathSpec.fromStrPath(virtual, stripSlash(virtual.slice(cut)))
 }
 

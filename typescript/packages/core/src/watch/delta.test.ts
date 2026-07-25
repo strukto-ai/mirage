@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FileChangeKind, PathSpec, type WalkEntry } from '../types.ts'
-import { ListingDeltaHook } from './delta.ts'
+import { ListingDeltaHook, specFor } from './delta.ts'
 
 function walkFrom(tree: Map<string, string | null>) {
   return async function* walk(): AsyncGenerator<WalkEntry> {
@@ -12,6 +12,11 @@ function walkFrom(tree: Map<string, string | null>) {
 }
 
 describe('ListingDeltaHook', () => {
+  it('frames paths from roots with trailing slashes', () => {
+    const root = PathSpec.fromStrPath('/nc///', '')
+    expect(specFor(root, '/nc/file.txt').resourcePath).toBe('file.txt')
+  })
+
   it('uses the first pull as a baseline', async () => {
     const hook = new ListingDeltaHook(walkFrom(new Map([['/nc/a.txt', 'e1']])))
     const delta = await hook.pull(PathSpec.fromStrPath('/nc'), null)
