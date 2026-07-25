@@ -26,6 +26,11 @@ const s3 = new S3Resource({
   region: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  // Optional:
+  // endpoint: 'http://localhost:9000',  // MinIO
+  // forcePathStyle: true,               // For MinIO/R2
+  // timeoutMs: 30_000,
+  // proxy: 'http://proxy:8080',
 })
 
 const ws = new Workspace({ '/bucket/': s3 }, { mode: MountMode.READ })

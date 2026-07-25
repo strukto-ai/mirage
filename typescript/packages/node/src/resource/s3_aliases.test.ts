@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ResourceName, type S3Config as S3CoreConfig } from '@struktoai/mirage-core'
+import { ResourceName } from '@struktoai/mirage-core'
 import { S3Resource } from './s3/s3.ts'
+import type { S3Config } from './s3/config.ts'
 import {
   aliyunToS3Config,
   normalizeAliyunConfig,
@@ -272,7 +273,7 @@ const ENDPOINT_CASES = [
   {
     name: 'minio',
     kind: ResourceName.MINIO,
-    toS3: minioToS3Config as (config: never) => S3CoreConfig,
+    toS3: minioToS3Config as (config: never) => S3Config,
     normalize: normalizeMinIOConfig as (input: Record<string, unknown>) => unknown,
     make: (): MinIOConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new MinIOResource(config),
@@ -280,7 +281,7 @@ const ENDPOINT_CASES = [
   {
     name: 'ceph',
     kind: ResourceName.CEPH,
-    toS3: cephToS3Config as (config: never) => S3CoreConfig,
+    toS3: cephToS3Config as (config: never) => S3Config,
     normalize: normalizeCephConfig as (input: Record<string, unknown>) => unknown,
     make: (): CephConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new CephResource(config),
@@ -288,7 +289,7 @@ const ENDPOINT_CASES = [
   {
     name: 'seaweedfs',
     kind: ResourceName.SEAWEEDFS,
-    toS3: seaweedfsToS3Config as (config: never) => S3CoreConfig,
+    toS3: seaweedfsToS3Config as (config: never) => S3Config,
     normalize: normalizeSeaweedFSConfig as (input: Record<string, unknown>) => unknown,
     make: (): SeaweedFSConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new SeaweedFSResource(config),
@@ -346,72 +347,72 @@ const PREFIX_CASES = [
   {
     name: 'aliyun',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as AliyunConfig,
-    toS3: aliyunToS3Config as (config: never) => S3CoreConfig,
+    toS3: aliyunToS3Config as (config: never) => S3Config,
   },
   {
     name: 'backblaze',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as BackblazeConfig,
-    toS3: backblazeToS3Config as (config: never) => S3CoreConfig,
+    toS3: backblazeToS3Config as (config: never) => S3Config,
   },
   {
     name: 'ceph',
     config: { ...CREDS, endpoint: 'http://localhost:9000' } as CephConfig,
-    toS3: cephToS3Config as (config: never) => S3CoreConfig,
+    toS3: cephToS3Config as (config: never) => S3Config,
   },
   {
     name: 'digitalocean',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as DigitalOceanConfig,
-    toS3: digitalOceanToS3Config as (config: never) => S3CoreConfig,
+    toS3: digitalOceanToS3Config as (config: never) => S3Config,
   },
   {
     name: 'gcs',
     config: { ...CREDS, forcePathStyle: true } as GCSConfig,
-    toS3: gcsToS3Config as (config: never) => S3CoreConfig,
+    toS3: gcsToS3Config as (config: never) => S3Config,
   },
   {
     name: 'minio',
     config: { ...CREDS, endpoint: 'http://localhost:9000' } as MinIOConfig,
-    toS3: minioToS3Config as (config: never) => S3CoreConfig,
+    toS3: minioToS3Config as (config: never) => S3Config,
   },
   {
     name: 'oci',
     config: { ...CREDS, namespace: 'ns', region: 'us-east-1' } as OCIConfig,
-    toS3: ociToS3Config as (config: never) => S3CoreConfig,
+    toS3: ociToS3Config as (config: never) => S3Config,
   },
   {
     name: 'qingstor',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as QingStorConfig,
-    toS3: qingStorToS3Config as (config: never) => S3CoreConfig,
+    toS3: qingStorToS3Config as (config: never) => S3Config,
   },
   {
     name: 'r2',
     config: { ...CREDS, accountId: 'account', forcePathStyle: true } as R2Config,
-    toS3: r2ToS3Config as (config: never) => S3CoreConfig,
+    toS3: r2ToS3Config as (config: never) => S3Config,
   },
   {
     name: 'scaleway',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as ScalewayConfig,
-    toS3: scalewayToS3Config as (config: never) => S3CoreConfig,
+    toS3: scalewayToS3Config as (config: never) => S3Config,
   },
   {
     name: 'seaweedfs',
     config: { ...CREDS, endpoint: 'http://localhost:9000' } as SeaweedFSConfig,
-    toS3: seaweedfsToS3Config as (config: never) => S3CoreConfig,
+    toS3: seaweedfsToS3Config as (config: never) => S3Config,
   },
   {
     name: 'supabase',
     config: { ...CREDS, projectRef: 'project', region: 'us-east-1' } as SupabaseConfig,
-    toS3: supabaseToS3Config as (config: never) => S3CoreConfig,
+    toS3: supabaseToS3Config as (config: never) => S3Config,
   },
   {
     name: 'tencent',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as TencentConfig,
-    toS3: tencentToS3Config as (config: never) => S3CoreConfig,
+    toS3: tencentToS3Config as (config: never) => S3Config,
   },
   {
     name: 'wasabi',
     config: { ...CREDS, forcePathStyle: true } as WasabiConfig,
-    toS3: wasabiToS3Config as (config: never) => S3CoreConfig,
+    toS3: wasabiToS3Config as (config: never) => S3Config,
   },
 ] as const
 
@@ -429,9 +430,7 @@ describe('S3 alias subfolder mounts', () => {
       const s3 = c.toS3({
         ...c.config,
         proxy: 'http://localhost:8080',
-      } as never) as S3CoreConfig & {
-        proxy?: string
-      }
+      } as never)
       expect(s3.proxy).toBe('http://localhost:8080')
     })
   }

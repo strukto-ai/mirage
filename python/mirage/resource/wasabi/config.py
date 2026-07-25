@@ -28,7 +28,7 @@ class WasabiConfig(BaseModel):
     path_style: bool = False
     key_prefix: str | None = None
     timeout: int = 30
-    proxy: str | None = None
+    proxy: SecretStr | None = None
 
     def resolved_endpoint_url(self) -> str:
         if self.endpoint_url:

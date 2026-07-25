@@ -33,6 +33,19 @@ export type S3BrowserPresignedUrlProvider = (
   options?: S3BrowserSignOptions,
 ) => Promise<string>
 
+export interface S3HttpAgents {
+  httpAgent: unknown
+  httpsAgent: unknown
+}
+
+/**
+ * Runtime-supplied transport agents (Node proxy support). Called once per
+ * client so each client owns its own agents: every S3 op destroys its client
+ * when it finishes, and a shared agent pair would tear down sockets that
+ * concurrent ops are still using.
+ */
+export type S3HttpAgentProvider = () => S3HttpAgents
+
 export const S3ConfigSchema = z.object({
   bucket: z.string(),
   region: z.string().optional(),
@@ -42,9 +55,11 @@ export const S3ConfigSchema = z.object({
   sessionToken: secretStr().optional(),
   forcePathStyle: z.boolean().optional(),
   timeoutMs: z.number().optional(),
-  requestHandler: secretSchema(z.unknown()).optional(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
+  ).optional(),
+  httpAgentProvider: secretSchema(
+    z.custom<S3HttpAgentProvider>((value) => typeof value === 'function'),
   ).optional(),
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
@@ -59,8 +74,8 @@ export interface S3Config {
   sessionToken?: string
   forcePathStyle?: boolean
   timeoutMs?: number
-  requestHandler?: unknown
   presignedUrlProvider?: S3BrowserPresignedUrlProvider
+  httpAgentProvider?: S3HttpAgentProvider
   defaultContentType?: string
   keyPrefix?: string
 }
@@ -72,13 +87,13 @@ export function normalizeKeyPrefix(v: string | undefined): string | undefined {
 
 export interface S3ConfigRedacted extends Omit<
   S3Config,
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'requestHandler' | 'presignedUrlProvider'
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'presignedUrlProvider' | 'httpAgentProvider'
 > {
   accessKeyId?: string
   secretAccessKey?: string
   sessionToken?: string
-  requestHandler?: '<REDACTED>'
   presignedUrlProvider?: '<REDACTED>'
+  httpAgentProvider?: '<REDACTED>'
 }
 
 export function redactConfig(config: S3Config): S3ConfigRedacted {

@@ -59,7 +59,8 @@ def test_seaweedfs_config_to_s3_config():
     assert s3.path_style is True
     assert reveal_secret(s3.aws_access_key_id) == "weed"
     assert reveal_secret(s3.aws_secret_access_key) == "weed"
-    assert s3.proxy == "http://localhost:8080"
+    assert s3.proxy is not None
+    assert s3.proxy.get_secret_value() == "http://localhost:8080"
 
 
 def test_seaweedfs_config_path_style_override():

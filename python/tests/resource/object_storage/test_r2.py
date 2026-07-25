@@ -51,7 +51,8 @@ def test_r2config_to_s3_config():
         "https://account-123.r2.cloudflarestorage.com")
     assert reveal_secret(s3_config.aws_access_key_id) == "access-key"
     assert reveal_secret(s3_config.aws_secret_access_key) == "secret-key"
-    assert s3_config.proxy == "http://localhost:8080"
+    assert s3_config.proxy is not None
+    assert s3_config.proxy.get_secret_value() == "http://localhost:8080"
 
 
 def test_r2config_custom_endpoint():
