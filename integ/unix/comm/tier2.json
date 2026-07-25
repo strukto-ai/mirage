@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "comm_tier2_delimiter_total",
+      "seq": 910022,
+      "targets": ["ram", "disk"],
+      "command": "comm --output-delimiter=: --total /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": { "exit": 0, "stdout": "apple\n::banana\ncherry\n:date\n:elder\n2:2:1:total\n", "stderr": "" },
+      "flags": ["output-delimiter", "total"]
+    },
+    {
+      "id": "comm_tier2_zero",
+      "seq": 910023,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2comm && printf 'a\\0b\\0' > /data/t2comm/a && printf 'b\\0c\\0' > /data/t2comm/b && comm --zero-terminated /data/t2comm/a /data/t2comm/b",
+      "expect": { "exit": 0, "stdout": "a\u0000\t\tb\u0000\tc\u0000", "stderr": "" },
+      "flags": ["zero-terminated"]
+    }
+  ]
+}

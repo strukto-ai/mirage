@@ -45,7 +45,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--delimiters",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
@@ -54,10 +54,19 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--serial",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--zero-terminated",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
       "value_kind": "none",
       "value_optional": false
     }

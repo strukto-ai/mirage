@@ -19,6 +19,82 @@
         "stdout_text": "/data/a.txt 24\n",
         "stderr_text": ""
       }
+    },
+    {
+      "id": "stat_type_file",
+      "cmd": "stat -c \"%F\" /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "regular file\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "stat_type_dir",
+      "cmd": "stat -c \"%F %n\" /data",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "directory /data\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "stat_percent_literal",
+      "cmd": "stat -c \"%s%%\" /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "24%\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "stat_block_unit_and_birth_sentinels",
+      "cmd": "stat -c \"%B %w %W\" /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "512 - 0\n",
+        "stderr_text": ""
+      }
     }
   ]
 }

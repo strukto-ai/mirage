@@ -44,18 +44,28 @@ export function parseSize(text: string): number {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function permTriplet(bits: number): string {
-  return (bits & 4 ? 'r' : '-') + (bits & 2 ? 'w' : '-') + (bits & 1 ? 'x' : '-')
+function permTriplet(bits: number, special?: string): string {
+  const execBit =
+    special !== undefined
+      ? bits & 1
+        ? special.toLowerCase()
+        : special.toUpperCase()
+      : bits & 1
+        ? 'x'
+        : '-'
+  return (bits & 4 ? 'r' : '-') + (bits & 2 ? 'w' : '-') + execBit
 }
 
-function lsModeString(s: FileStat): string {
+export function lsModeString(s: FileStat): string {
   const isDir = s.type === FileType.DIRECTORY
   const typeChar = isDir ? 'd' : '-'
-  if (s.mode !== null) {
-    return typeChar + permTriplet(s.mode >> 6) + permTriplet(s.mode >> 3) + permTriplet(s.mode)
-  }
-  const perms = isDir ? 'rwxr-xr-x' : 'rw-r--r--'
-  return `${typeChar}${perms}`
+  const mode = s.mode ?? (isDir ? 0o755 : 0o644)
+  return (
+    typeChar +
+    permTriplet(mode >> 6, mode & 0o4000 ? 's' : undefined) +
+    permTriplet(mode >> 3, mode & 0o2000 ? 's' : undefined) +
+    permTriplet(mode, mode & 0o1000 ? 't' : undefined)
+  )
 }
 
 function padLeft(s: string, width: number): string {

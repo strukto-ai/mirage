@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "id": "checksum_tier2_binary_text_tag_zero",
+      "seq": 910037,
+      "targets": ["ram", "disk"],
+      "command": "md5sum --binary /data/one_byte.txt; sha1sum --text /data/one_byte.txt; sha256sum --tag /data/one_byte.txt; sha384sum --zero /data/one_byte.txt | wc -c",
+      "expect": { "exit": 0, "stdout": "9dd4e461268c8034f5c8564e155c67a6 */data/one_byte.txt\n11f6ad8ec52a2984abaafd7c3b516503785c2072  /data/one_byte.txt\nSHA256 (/data/one_byte.txt) = 2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881\n117\n", "stderr": "" },
+      "flags": ["binary", "text", "tag", "zero"]
+    },
+    {
+      "id": "checksum_tier2_status_quiet",
+      "seq": 910038,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2checksum1 && sha512sum /data/one_byte.txt > /data/t2checksum1/sums && sha512sum --check --status /data/t2checksum1/sums && sha512sum --check --quiet /data/t2checksum1/sums && echo ok",
+      "expect": { "exit": 0, "stdout": "ok\n", "stderr": "" },
+      "flags": ["check", "status", "quiet"]
+    },
+    {
+      "id": "checksum_tier2_ignore_missing",
+      "seq": 910039,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2checksum2 && printf '00000000000000000000000000000000  /data/not-there\n' > /data/t2checksum2/sums && md5sum --check --ignore-missing /data/t2checksum2/sums && echo ignored",
+      "expect": { "exit": 0, "stdout": "ignored\n", "stderr": "" },
+      "flags": ["check", "ignore-missing"]
+    },
+    {
+      "id": "checksum_tier2_warn_strict",
+      "seq": 910040,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2checksum3 && printf 'bad\n' > /data/t2checksum3/sums && sha1sum --check --warn /data/t2checksum3/sums 2>&1; echo warn=$?; sha1sum --check --strict /data/t2checksum3/sums > /dev/null 2>&1; echo strict=$?",
+      "expect": { "exit": 0, "stdout": "WARNING: 1 line is improperly formatted\nwarn=0\nstrict=1\n", "stderr": "" },
+      "flags": ["check", "warn", "strict"]
+    },
+    {
+      "id": "checksum_tier2_tag_check_roundtrip",
+      "seq": 910041,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2checksum4 && sha256sum --tag /data/one_byte.txt > /data/t2checksum4/sums && sha256sum --check --strict /data/t2checksum4/sums; echo rc=$?",
+      "expect": { "exit": 0, "stdout": "/data/one_byte.txt: OK\nrc=0\n", "stderr": "" },
+      "flags": ["tag", "check", "strict"]
+    }
+  ]
+}

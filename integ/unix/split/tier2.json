@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "split_tier2_numeric_suffix",
+      "seq": 910027,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/t2split1 && printf 'a\nb\nc\n' > /data/t2split1/in && split --lines 2 --numeric-suffixes=7 --suffix-length 2 --additional-suffix=.part /data/t2split1/in /data/t2split1/n && ls /data/t2split1 | grep '^n' | sort | tr '\n' ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "n07.part n08.part ",
+        "stderr": ""
+      },
+      "flags": [
+        "lines",
+        "numeric-suffixes",
+        "suffix-length",
+        "additional-suffix"
+      ]
+    },
+    {
+      "id": "split_tier2_hex_bytes",
+      "seq": 910028,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/t2split2 && printf 'abcdef' > /data/t2split2/in && split --bytes 3 --hex-suffixes=10 /data/t2split2/in /data/t2split2/h && cat /data/t2split2/h0a && printf '|' && cat /data/t2split2/h0b",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc|def",
+        "stderr": ""
+      },
+      "flags": [
+        "bytes",
+        "hex-suffixes"
+      ]
+    },
+    {
+      "id": "split_tier2_number",
+      "seq": 910029,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/t2split3 && printf 'abcdef' > /data/t2split3/in && split --number 2 /data/t2split3/in /data/t2split3/n && cat /data/t2split3/naa && printf '|' && cat /data/t2split3/nab",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc|def",
+        "stderr": ""
+      },
+      "flags": [
+        "number"
+      ]
+    },
+    {
+      "id": "split_tier2_separator",
+      "seq": 910030,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/t2split4 && printf 'a|b|c|' > /data/t2split4/in && split --lines 2 --separator='|' /data/t2split4/in /data/t2split4/s && cat /data/t2split4/saa && cat /data/t2split4/sab",
+      "expect": {
+        "exit": 0,
+        "stdout": "a|b|c|",
+        "stderr": ""
+      },
+      "flags": [
+        "lines",
+        "separator"
+      ]
+    },
+    {
+      "id": "split_tier2_trailing_separator_empty_record",
+      "seq": 910047,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/t2split5 && printf 'a||' > /data/t2split5/in && split --lines 1 --separator='|' /data/t2split5/in /data/t2split5/s && ls /data/t2split5 | grep '^s' | sort | tr '\\n' ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "saa sab ",
+        "stderr": ""
+      },
+      "flags": [
+        "separator",
+        "lines"
+      ]
+    }
+  ]
+}

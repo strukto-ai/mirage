@@ -29,15 +29,27 @@ async def shuf(
     echo: bool = False,
     zero_terminated: bool = False,
     with_replacement: bool = False,
+    input_range: str | None = None,
+    output: PathSpec | None = None,
+    write_bytes: Callable[[PathSpec, bytes], Awaitable[None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     sep = "\x00" if zero_terminated else "\n"
 
-    if echo:
+    if input_range is not None:
+        low_raw, separator, high_raw = input_range.partition("-")
+        if not separator:
+            raise ValueError(f"shuf: invalid input range: {input_range}")
+        items = [
+            str(value) for value in range(int(low_raw),
+                                          int(high_raw) + 1)
+        ]
+        result = _sample(items, count, with_replacement)
+        rendered = (sep.join(result) + sep).encode()
+    elif echo:
         items = [p.mount_path for p in paths] if paths else list(texts)
         result = _sample(items, count, with_replacement)
-        return (sep.join(result) + sep).encode(), IOResult()
-
-    if paths:
+        rendered = (sep.join(result) + sep).encode()
+    elif paths:
         all_lines: list[str] = []
         for p in paths:
             data = (await read_bytes(p)).decode(errors="replace")
@@ -46,15 +58,21 @@ async def shuf(
             else:
                 all_lines.extend(split_lines(data))
         result = _sample(all_lines, count, with_replacement)
-        return (sep.join(result) + sep).encode(), IOResult()
-
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("shuf: missing operand")
-    text = raw.decode(errors="replace")
-    lines = text.split("\x00") if zero_terminated else split_lines(text)
-    result = _sample(lines, count, with_replacement)
-    return (sep.join(result) + sep).encode(), IOResult()
+        rendered = (sep.join(result) + sep).encode()
+    else:
+        raw = await _read_stdin_async(stdin)
+        if raw is None:
+            raise ValueError("shuf: missing operand")
+        text = raw.decode(errors="replace")
+        lines = text.split("\x00") if zero_terminated else split_lines(text)
+        result = _sample(lines, count, with_replacement)
+        rendered = (sep.join(result) + sep).encode()
+    if output is not None:
+        if write_bytes is None:
+            raise ValueError("shuf: backend provides no write op")
+        await write_bytes(output, rendered)
+        return None, IOResult(writes={output.mount_path: rendered})
+    return rendered, IOResult()
 
 
 __all__ = ["shuf"]

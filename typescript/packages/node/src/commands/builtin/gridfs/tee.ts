@@ -17,10 +17,11 @@ import {
   ResourceName,
   command,
   materialize,
+  parseTeeFlags,
   readStdinAsync,
   resolveGlobOf,
   specOf,
-  type ByteSource,
+  writeOutput,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
@@ -44,13 +45,17 @@ async function teeCommand(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tee: missing operand\n') })]
   }
+  const parsed = parseTeeFlags(opts.flags)
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
   const first = resolved[0]
   if (first === undefined) return [null, new IOResult()]
   const stdinData = await readStdinAsync(opts.stdin)
   const raw: Uint8Array = stdinData ?? ENC.encode(texts.join(' '))
   let writeData = raw
-  if (opts.flags.a === true) {
+  if (parsed.append) {
     let existingFound = false
     try {
       existingFound = await gridfsExists(accessor, first)
@@ -64,15 +69,7 @@ async function teeCommand(
       writeData.set(raw, existing.byteLength)
     }
   }
-  await gridfsWrite(accessor, first, writeData)
-  const out: ByteSource = raw
-  return [
-    out,
-    new IOResult({
-      writes: { [first.mountPath]: writeData },
-      cache: [first.mountPath],
-    }),
-  ]
+  return writeOutput((p, d) => gridfsWrite(accessor, p, d), first, writeData, raw)
 }
 
 export const GRIDFS_TEE = command({

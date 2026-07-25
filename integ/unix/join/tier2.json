@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "join_tier2_ignore_case_header_order",
+      "seq": 910024,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2join && printf 'KEY left\na one\nB two\n' > /data/t2join/a && printf 'KEY right\nA x\nb y\n' > /data/t2join/b && join --ignore-case -j 1 --header --check-order /data/t2join/a /data/t2join/b",
+      "expect": { "exit": 0, "stdout": "KEY left right\na one x\nB two y\n", "stderr": "" },
+      "flags": ["ignore-case", "j", "header", "check-order"]
+    },
+    {
+      "id": "join_tier2_nocheck_order",
+      "seq": 910025,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2join2 && printf 'b one\na two\n' > /data/t2join2/a && printf 'a x\nb y\n' > /data/t2join2/b && join --nocheck-order /data/t2join2/a /data/t2join2/b",
+      "expect": { "exit": 0, "stdout": "b one y\na two x\n", "stderr": "" },
+      "flags": ["nocheck-order"]
+    },
+    {
+      "id": "join_tier2_zero",
+      "seq": 910026,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2join3 && printf '1 a\\02 b\\0' > /data/t2join3/a && printf '1 x\\02 y\\0' > /data/t2join3/b && join --zero-terminated /data/t2join3/a /data/t2join3/b",
+      "expect": { "exit": 0, "stdout": "1 a\u0002 b x\u0002 y\u0000", "stderr": "" },
+      "flags": ["zero-terminated"]
+    }
+  ]
+}

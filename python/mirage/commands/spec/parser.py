@@ -72,6 +72,7 @@ def parse_command(
 ) -> ParsedArgs:
     bool_flags: set[str] = set()
     value_flags: set[str] = set()
+    optional_value_flags: set[str] = set()
     long_bool_flags: set[str] = set()
     long_value_flags: set[str] = set()
     long_optional_flags: set[str] = set()
@@ -82,6 +83,10 @@ def parse_command(
         if opt.short:
             if opt.value_kind == OperandKind.NONE:
                 bool_flags.add(opt.short)
+            elif opt.value_optional:
+                bool_flags.add(opt.short)
+                optional_value_flags.add(opt.short)
+                value_flag_kinds[opt.short] = opt.value_kind
             else:
                 value_flags.add(opt.short)
                 value_flag_kinds[opt.short] = opt.value_kind
@@ -97,6 +102,7 @@ def parse_command(
                 # attaches via `=`; a detached next token is an operand.
                 long_bool_flags.add(opt.long)
                 long_optional_flags.add(opt.long)
+                value_flag_kinds[opt.long] = opt.value_kind
             else:
                 long_value_flags.add(opt.long)
                 value_flag_kinds[opt.long] = opt.value_kind
@@ -190,6 +196,15 @@ def parse_command(
             if numeric_shorthand_flag is not None and NUMERIC_SHORT.match(tok):
                 flags[numeric_shorthand_flag] = tok[1:]
                 i += 1
+                continue
+            matched_optional = False
+            for vf in optional_value_flags:
+                if tok.startswith(vf) and len(tok) > len(vf):
+                    _set_value_flag(flags, vf, tok[len(vf):], repeat_flags)
+                    i += 1
+                    matched_optional = True
+                    break
+            if matched_optional:
                 continue
             matched_value = False
             for vf in value_flags:

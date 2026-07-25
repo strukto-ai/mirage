@@ -15,10 +15,11 @@
 import type { S3Accessor } from '../../../accessor/s3.ts'
 import { exists as s3Exists } from '../../../core/s3/exists.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
+import { parseTeeFlags, writeOutput } from '../generic/tee.ts'
 import { S3_IO } from './io.ts'
 import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -37,13 +38,17 @@ async function teeCommand(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tee: missing operand\n') })]
   }
+  const parsed = parseTeeFlags(opts.flags)
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
   const first = resolved[0]
   if (first === undefined) return [null, new IOResult()]
   const stdinData = await readStdinAsync(opts.stdin)
   const raw: Uint8Array = stdinData ?? ENC.encode(texts.join(' '))
   let writeData = raw
-  if (opts.flags.a === true) {
+  if (parsed.append) {
     let existingFound = false
     try {
       existingFound = await s3Exists(accessor, first)
@@ -57,15 +62,7 @@ async function teeCommand(
       writeData.set(raw, existing.byteLength)
     }
   }
-  await s3Write(accessor, first, writeData)
-  const out: ByteSource = raw
-  return [
-    out,
-    new IOResult({
-      writes: { [first.mountPath]: writeData },
-      cache: [first.mountPath],
-    }),
-  ]
+  return writeOutput((p, d) => s3Write(accessor, p, d), first, writeData, raw)
 }
 
 export const S3_TEE = command({

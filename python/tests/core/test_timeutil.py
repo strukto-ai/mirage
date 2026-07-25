@@ -14,7 +14,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from mirage.core.timeutil import epoch_to_iso, now_iso, to_iso_z
+from mirage.core.timeutil import epoch_to_iso, iso_to_epoch, now_iso, to_iso_z
 
 
 def test_to_iso_z_converts_utc_offset_to_z():
@@ -40,3 +40,24 @@ def test_epoch_to_iso_whole_second():
 
 def test_epoch_to_iso_truncates_sub_second():
     assert epoch_to_iso(1609459200.987) == "2021-01-01T00:00:00Z"
+
+
+def test_iso_to_epoch_inverts_epoch_to_iso():
+    assert iso_to_epoch("2021-01-01T00:00:00Z") == 1609459200
+    assert iso_to_epoch("2026-01-02T15:30:45Z") == 1767367845
+
+
+def test_iso_to_epoch_reads_naive_stamp_as_utc():
+    assert iso_to_epoch("2026-01-02T15:30:45") == 1767367845
+
+
+def test_iso_to_epoch_honors_offset_and_truncates_sub_second():
+    assert iso_to_epoch("2021-01-01T01:00:00+01:00") == 1609459200
+    assert iso_to_epoch("2026-07-22T06:57:48.064802Z") == 1784703468
+
+
+def test_epoch_floors_negative_fractional_like_typescript():
+    # A pre-1970 fractional second floors to -1 (matching Math.floor in TS),
+    # not 0 as int() truncation would give.
+    assert iso_to_epoch("1969-12-31T23:59:59.500Z") == -1
+    assert epoch_to_iso(-0.5) == "1969-12-31T23:59:59Z"

@@ -961,6 +961,22 @@
           "backend": "dify"
         }
       ]
+    },
+    {
+      "id": "statvfs",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "agentId": "mirage-agent",
+      "mounts": [
+        {
+          "path": "/vfs",
+          "resource": "ram",
+          "backend": "memory",
+          "fixture": "statvfs/v1"
+        }
+      ]
     }
   ]
 }

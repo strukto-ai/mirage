@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "shuf_tier2_echo_head",
+      "seq": 910041,
+      "targets": ["ram", "disk"],
+      "command": "shuf --echo --head-count=1 solo",
+      "expect": { "exit": 0, "stdout": "/solo\n", "stderr": "" },
+      "flags": ["echo", "head-count"]
+    },
+    {
+      "id": "shuf_tier2_repeat",
+      "seq": 910042,
+      "targets": ["ram", "disk"],
+      "command": "shuf --repeat --head-count=3 --echo x",
+      "expect": { "exit": 0, "stdout": "/x\n/x\n/x\n", "stderr": "" },
+      "flags": ["repeat", "head-count", "echo"]
+    },
+    {
+      "id": "shuf_tier2_range_output",
+      "seq": 910043,
+      "targets": ["ram", "disk"],
+      "command": "shuf --input-range=7-7 --output=/data/t2shuf && cat /data/t2shuf",
+      "expect": { "exit": 0, "stdout": "7\n", "stderr": "" },
+      "flags": ["input-range", "output"]
+    },
+    {
+      "id": "shuf_tier2_zero",
+      "seq": 910044,
+      "targets": ["ram", "disk"],
+      "command": "printf 'z\\0' | shuf --zero-terminated | wc -c",
+      "expect": { "exit": 0, "stdout": "3\n", "stderr": "" },
+      "flags": ["zero-terminated"]
+    }
+  ]
+}

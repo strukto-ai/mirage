@@ -37,7 +37,7 @@ from mirage.core.disk.write import write_bytes
 from mirage.ops.disk import OPS as DISK_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.disk.prompt import PROMPT
-from mirage.types import PathSpec, ResourceName
+from mirage.types import CapacityResult, CapacityState, PathSpec, ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
 
@@ -86,6 +86,22 @@ class DiskResource(BaseResource):
                 if isinstance(p, PathSpec) else p for p in paths
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
+
+    async def statfs(self) -> CapacityResult:
+        # A real filesystem reports real numbers (QUOTA). GNU df: used counts
+        # reserved blocks (f_blocks - f_bfree), available excludes them
+        # (f_bavail); both scaled by the fundamental block size.
+        st = os.statvfs(self.root)
+        frsize = st.f_frsize or st.f_bsize
+        return CapacityResult(
+            state=CapacityState.QUOTA,
+            total=st.f_blocks * frsize,
+            used=(st.f_blocks - st.f_bfree) * frsize,
+            available=st.f_bavail * frsize,
+            inodes=st.f_files,
+            inodes_used=st.f_files - st.f_ffree,
+            inodes_free=st.f_favail,
+        )
 
     def get_state(self) -> dict[str, Any]:
         files: dict[str, bytes] = {}

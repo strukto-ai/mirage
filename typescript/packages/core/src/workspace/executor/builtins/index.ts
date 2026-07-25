@@ -23,8 +23,10 @@ export {
   prepareMv,
   stripLinkOperands,
 } from './links.ts'
+export { handleDf } from './capacity.ts'
 export { handleChgrp, handleChmod, handleChown, handleTouch } from './metadata.ts'
 export {
+  handleEnv,
   handleExit,
   handleExport,
   handleGetopts,

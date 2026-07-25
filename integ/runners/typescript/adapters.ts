@@ -129,7 +129,10 @@ async function openRam(target: Target): Promise<Open> {
     const resource = new RAMResource()
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, {
+    mode: MountMode.WRITE,
+    ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
+  })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 

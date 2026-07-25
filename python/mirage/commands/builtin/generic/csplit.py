@@ -10,6 +10,7 @@ from mirage.types import PathSpec
 def _split_by_patterns(
     lines: list[str],
     patterns: list[str],
+    suppress_matched: bool,
 ) -> list[list[str]]:
     parts: list[list[str]] = []
     current_start = 0
@@ -19,7 +20,7 @@ def _split_by_patterns(
             for idx in range(current_start, len(lines)):
                 if re.search(regex, lines[idx]):
                     parts.append(lines[current_start:idx])
-                    current_start = idx
+                    current_start = idx + 1 if suppress_matched else idx
                     break
         else:
             line_num = int(pat)
@@ -44,6 +45,8 @@ async def csplit(
     suffix_format: str | None = None,
     keep_on_error: bool = False,
     silent: bool = False,
+    suppress_matched: bool = False,
+    elide_empty: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if isinstance(prefix, PathSpec):
         prefix = prefix.mount_path
@@ -55,11 +58,13 @@ async def csplit(
         raw = stdin_raw if stdin_raw is not None else b""
     text = raw.decode(errors="replace")
     lines = split_lines(text)
-    parts = _split_by_patterns(lines, list(patterns))
+    parts = _split_by_patterns(lines, list(patterns), suppress_matched)
     writes: dict[str, ByteSource] = {}
     sizes: list[str] = []
     try:
         for idx, part in enumerate(parts):
+            if elide_empty and not part:
+                continue
             filename = prefix + (suffix_fmt % idx)
             data = ("\n".join(part) + "\n").encode() if part else b""
             await write_bytes(PathSpec.from_str_path(filename), data)

@@ -15,7 +15,8 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 
@@ -30,11 +31,11 @@ function randomSuffix(length: number): string {
   return out
 }
 
-function makePathSpec(virtual: string): PathSpec {
+function makePathSpec(virtual: string, mountPrefix: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: stripSlash(virtual),
+    resourcePath: mountKey(virtual, mountPrefix),
     resolved: true,
   })
 }
@@ -47,13 +48,19 @@ export async function mktempGeneric(
 ): Promise<CommandFnResult> {
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
   const tFlag = opts.flags.t === true
+  const directory = opts.flags.d === true || opts.flags.directory === true
+  const dryRun = opts.flags.u === true || opts.flags.dry_run === true
+  const suffix = typeof opts.flags.suffix === 'string' ? opts.flags.suffix : ''
+  const tmpdirValue: unknown = opts.flags.p ?? opts.flags.tmpdir
   const templateArg = texts[0]
   let template = templateArg !== undefined && templateArg !== '' ? templateArg : 'tmp.XXXXXXXXXX'
   let parent: string
   if (tFlag) {
     parent = '/tmp'
-  } else if (typeof opts.flags.p === 'string') {
-    parent = opts.flags.p
+  } else if (tmpdirValue instanceof PathSpec) {
+    parent = tmpdirValue.virtual
+  } else if (typeof tmpdirValue === 'string') {
+    parent = tmpdirValue
   } else if (template.includes('/')) {
     // An explicit path template names its own directory (GNU); only a bare
     // template with no -p/-t falls back to the temp dir.
@@ -69,16 +76,27 @@ export async function mktempGeneric(
   }
   let name: string
   if (xCount > 0) {
-    name = template.slice(0, template.length - xCount) + randomSuffix(xCount)
+    name = template.slice(0, template.length - xCount) + randomSuffix(xCount) + suffix
   } else {
     name = `${template}.${randomSuffix(8)}`
   }
   const path = `${rstripSlash(parent)}/${name}`
-  await mkdir(makePathSpec(parent), true)
-  if (opts.flags.d === true) {
-    await mkdir(makePathSpec(path))
-  } else {
-    await write(makePathSpec(path), new Uint8Array(0))
+  if (!dryRun) {
+    const mountPrefix = opts.mountPrefix ?? ''
+    const quiet = opts.flags.q === true || opts.flags.quiet === true
+    try {
+      await mkdir(makePathSpec(parent, mountPrefix), true)
+      if (directory) {
+        await mkdir(makePathSpec(path, mountPrefix))
+      } else {
+        await write(makePathSpec(path, mountPrefix), new Uint8Array(0))
+      }
+    } catch (error) {
+      // -q suppresses diagnostics about file/directory creation only
+      // (GNU); usage errors and internal failures still propagate.
+      if (!quiet) throw error
+      return [null, new IOResult({ exitCode: 1 })]
+    }
   }
   const result: ByteSource = ENC.encode(path + '\n')
   return [result, new IOResult()]

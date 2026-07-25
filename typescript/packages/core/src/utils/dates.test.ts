@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { epochToIso, utcDateFolder } from './dates.ts'
+import { epochToIso, isoToEpoch, utcDateFolder } from './dates.ts'
 
 describe('epochToIso', () => {
   it('formats whole seconds as second-precision ISO-Z', () => {
@@ -21,6 +21,24 @@ describe('epochToIso', () => {
   })
   it('truncates sub-second input (parity with the Python converter)', () => {
     expect(epochToIso(1609459200.987)).toBe('2021-01-01T00:00:00Z')
+  })
+})
+
+describe('isoToEpoch', () => {
+  it('inverts epochToIso for a Z stamp', () => {
+    expect(isoToEpoch('2021-01-01T00:00:00Z')).toBe(1609459200)
+    expect(isoToEpoch('2026-01-02T15:30:45Z')).toBe(1767367845)
+  })
+  it('reads an offset-less (naive) stamp as UTC, not local', () => {
+    expect(isoToEpoch('2026-01-02T15:30:45')).toBe(1767367845)
+  })
+  it('honors an explicit offset and truncates sub-seconds', () => {
+    expect(isoToEpoch('2021-01-01T01:00:00+01:00')).toBe(1609459200)
+    expect(isoToEpoch('2026-07-22T06:57:48.064802Z')).toBe(1784703468)
+  })
+  it('floors a negative fractional epoch (parity with Python)', () => {
+    expect(isoToEpoch('1969-12-31T23:59:59.500Z')).toBe(-1)
+    expect(epochToIso(-0.5)).toBe('1969-12-31T23:59:59Z')
   })
 })
 

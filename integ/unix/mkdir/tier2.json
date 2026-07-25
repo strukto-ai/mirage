@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "mkdir_tier2_long_aliases",
+      "seq": 910036,
+      "targets": ["ram", "disk"],
+      "command": "mkdir --parents --verbose --mode=700 --context=ctx /data/t2mkdir/a/b > /dev/null && test -d /data/t2mkdir/a/b && echo ok",
+      "expect": { "exit": 0, "stdout": "ok\n", "stderr": "" },
+      "flags": ["parents", "verbose", "mode", "context"]
+    },
+    {
+      "id": "mkdir_tier2_mode_applied",
+      "seq": 910042,
+      "targets": ["ram"],
+      "command": "mkdir -p /data/t2mkdirmode && mkdir -p -m 700 /data/t2mkdirmode/a/kid && ls -l /data/t2mkdirmode | cut -d' ' -f1 && ls -l /data/t2mkdirmode/a | cut -d' ' -f1",
+      "expect": { "exit": 0, "stdout": "drwxr-xr-x\ndrwx------\n", "stderr": "" },
+      "flags": ["parents", "mode"]
+    },
+    {
+      "id": "mkdir_tier2_mode_invalid",
+      "seq": 910043,
+      "targets": ["ram"],
+      "command": "mkdir -m zz /data/t2mkdirbad 2>&1; echo rc=$?",
+      "expect": { "exit": 0, "stdout": "mkdir: invalid mode 'zz'\nrc=1\n", "stderr": "" },
+      "flags": ["mode"]
+    }
+  ]
+}

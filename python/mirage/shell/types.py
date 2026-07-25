@@ -175,6 +175,7 @@ class ShellBuiltin(StrEnum):
     LOCAL = "local"
     SET = "set"
     PRINTENV = "printenv"
+    ENV = "env"
     WHOAMI = "whoami"
     MAN = "man"
     HISTORY = "history"

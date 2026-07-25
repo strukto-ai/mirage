@@ -17,6 +17,8 @@ export {
   CommandSafeguard,
   type CommandSafeguardInit,
   ConsistencyPolicy,
+  CapacityState,
+  type CapacityResult,
   type CopyFn,
   type CopyStrategy,
   DriftPolicy,
@@ -228,7 +230,12 @@ export { gzipGeneric } from './commands/builtin/generic/gzip.ts'
 export { gunzipGeneric } from './commands/builtin/generic/gunzip.ts'
 export { iconvGeneric } from './commands/builtin/generic/iconv.ts'
 export { sedGeneric } from './commands/builtin/generic/sed.ts'
-export { teeGeneric } from './commands/builtin/generic/tee.ts'
+export {
+  teeGeneric,
+  parseTeeFlags,
+  writeOutput,
+  type TeeOptions,
+} from './commands/builtin/generic/tee.ts'
 export { splitGeneric } from './commands/builtin/generic/split.ts'
 export { csplitGeneric } from './commands/builtin/generic/csplit.ts'
 export { mktempGeneric } from './commands/builtin/generic/mktemp.ts'

@@ -218,6 +218,9 @@ models/
 # Git worktrees
 .worktrees/
 
+# Local pnpm content-addressable store
+/.pnpm-store/
+
 # Local symlink for the TS CLI bin (not committed)
 /mirage-ts
 

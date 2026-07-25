@@ -23,7 +23,7 @@ from mirage.cache.index import (IndexCacheStore, IndexConfig,
 from mirage.commands.config import RegisteredCommand
 from mirage.ops.registry import RegisteredOp
 from mirage.resource.secrets import redacted_config_dump
-from mirage.types import PathSpec
+from mirage.types import CapacityResult, CapacityState, PathSpec
 
 try:
     from mirage.cache.index import RedisIndexCacheStore
@@ -87,6 +87,15 @@ class BaseResource:
                            paths: list[str | PathSpec],
                            prefix: str = "") -> list[PathSpec]:
         raise NotImplementedError
+
+    async def statfs(self) -> CapacityResult:
+        """Capacity of this backend for df. Default: UNKNOWN (rendered as
+        ``-``). Backends that can report truthfully — a real filesystem, or
+        a provider that exposes a storage quota — override this. Never
+        fabricate a number: report QUOTA only with real values, else
+        ELASTIC/NA/UNKNOWN.
+        """
+        return CapacityResult(state=CapacityState.UNKNOWN)
 
     def __getattr__(self, name: str) -> Any:
         fn = type(self)._ops.get(name)

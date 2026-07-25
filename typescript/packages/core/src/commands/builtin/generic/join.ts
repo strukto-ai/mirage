@@ -35,12 +35,14 @@ function buildJoinMap(
   lines: readonly string[],
   fieldIdx: number,
   delimiter: string | null,
+  ignoreCase: boolean,
 ): Map<string, string[][]> {
   const result = new Map<string, string[][]>()
   for (const line of lines) {
     const parts = splitFields(line, delimiter)
     if (fieldIdx < parts.length) {
-      const key = parts[fieldIdx] ?? ''
+      const rawKey = parts[fieldIdx] ?? ''
+      const key = ignoreCase ? rawKey.toLocaleLowerCase() : rawKey
       const list = result.get(key)
       if (list === undefined) result.set(key, [parts])
       else list.push(parts)
@@ -94,8 +96,9 @@ function joinLines(
   vFlag: string | null,
   eFlag: string | null,
   oFlag: string | null,
+  ignoreCase: boolean,
 ): string[] {
-  const map2 = buildJoinMap(lines2, field2, sep)
+  const map2 = buildJoinMap(lines2, field2, sep, ignoreCase)
   const outSep = sep !== null && sep !== '' ? sep : ' '
   const outLines: string[] = []
   const matchedKeys2 = new Set<string>()
@@ -104,9 +107,10 @@ function joinLines(
     const parts = splitFields(line, sep)
     if (field1 >= parts.length) continue
     const key = parts[field1] ?? ''
-    const hit = map2.get(key)
+    const lookupKey = ignoreCase ? key.toLocaleLowerCase() : key
+    const hit = map2.get(lookupKey)
     if (hit !== undefined) {
-      matchedKeys2.add(key)
+      matchedKeys2.add(lookupKey)
       if (vFlag === null) {
         for (const fields2 of hit) {
           outLines.push(formatRow(key, parts, field1, fields2, field2, oFlag, outSep, eFlag))
@@ -122,13 +126,31 @@ function joinLines(
       const parts = splitFields(line, sep)
       if (field2 >= parts.length) continue
       const key = parts[field2] ?? ''
-      if (!matchedKeys2.has(key)) {
+      const lookupKey = ignoreCase ? key.toLocaleLowerCase() : key
+      if (!matchedKeys2.has(lookupKey)) {
         outLines.push(formatRow(key, [], field1, parts, field2, oFlag, outSep, eFlag))
       }
     }
   }
 
   return outLines
+}
+
+function isSorted(
+  lines: readonly string[],
+  field: number,
+  separator: string | null,
+  ignoreCase: boolean,
+): boolean {
+  let previous: string | null = null
+  for (const line of lines) {
+    const fields = splitFields(line, separator)
+    let key = fields[field] ?? ''
+    if (ignoreCase) key = key.toLocaleLowerCase()
+    if (previous !== null && previous > key) return false
+    previous = key
+  }
+  return true
 }
 
 export async function joinGeneric(
@@ -143,10 +165,13 @@ export async function joinGeneric(
   const p1 = paths[0]
   const p2 = paths[1]
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
+  const commonField = typeof opts.flags.j === 'string' ? Number.parseInt(opts.flags.j, 10) : null
   const field1 =
-    (typeof opts.flags.args_1 === 'string' ? Number.parseInt(opts.flags.args_1, 10) : 1) - 1
+    (commonField ??
+      (typeof opts.flags.args_1 === 'string' ? Number.parseInt(opts.flags.args_1, 10) : 1)) - 1
   const field2 =
-    (typeof opts.flags['2'] === 'string' ? Number.parseInt(opts.flags['2'], 10) : 1) - 1
+    (commonField ??
+      (typeof opts.flags['2'] === 'string' ? Number.parseInt(opts.flags['2'], 10) : 1)) - 1
   const sep = typeof opts.flags.t === 'string' ? opts.flags.t : null
   const aFlag = typeof opts.flags.a === 'string' ? opts.flags.a : null
   const vFlag = typeof opts.flags.v === 'string' ? opts.flags.v : null
@@ -154,10 +179,32 @@ export async function joinGeneric(
   const oFlag = typeof opts.flags.o === 'string' ? opts.flags.o : null
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
-  const lines1 = splitLinesNoTrailing(data1)
-  const lines2 = splitLinesNoTrailing(data2)
-  const out = joinLines(lines1, lines2, field1, field2, sep, aFlag, vFlag, eFlag, oFlag)
-  if (out.length === 0) return [null, new IOResult()]
-  const result: ByteSource = ENC.encode(out.join('\n') + '\n')
-  return [result, new IOResult()]
+  const zeroTerminated = opts.flags.z === true || opts.flags.zero_terminated === true
+  const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data1)
+  const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data2)
+  const ignoreCase = opts.flags.i === true || opts.flags.ignore_case === true
+  const headerLines: string[] = []
+  if (opts.flags.header === true && lines1.length > 0 && lines2.length > 0) {
+    const first1 = splitFields(lines1.shift() ?? '', sep)
+    const first2 = splitFields(lines2.shift() ?? '', sep)
+    headerLines.push(
+      formatRow(first1[field1] ?? '', first1, field1, first2, field2, oFlag, sep ?? ' ', eFlag),
+    )
+  }
+  let stderr: Uint8Array | null = null
+  if (opts.flags.check_order === true && opts.flags.nocheck_order !== true) {
+    if (!isSorted(lines1, field1, sep, ignoreCase)) {
+      stderr = ENC.encode('join: file 1 is not in sorted order\n')
+    } else if (!isSorted(lines2, field2, sep, ignoreCase)) {
+      stderr = ENC.encode('join: file 2 is not in sorted order\n')
+    }
+  }
+  const out = headerLines.concat(
+    joinLines(lines1, lines2, field1, field2, sep, aFlag, vFlag, eFlag, oFlag, ignoreCase),
+  )
+  const io = new IOResult({ stderr, exitCode: stderr === null ? 0 : 1 })
+  if (out.length === 0) return [null, io]
+  const recordSeparator = zeroTerminated ? '\0' : '\n'
+  const result: ByteSource = ENC.encode(out.join(recordSeparator) + recordSeparator)
+  return [result, io]
 }

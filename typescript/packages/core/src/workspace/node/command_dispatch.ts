@@ -47,10 +47,12 @@ import {
   handleCommandBuiltin,
   handleType,
   handleEcho,
+  handleEnv,
   handleEval,
   handleExport,
   handleHistory,
   handleChgrp,
+  handleDf,
   handleChmod,
   handleChown,
   handleLn,
@@ -523,6 +525,7 @@ async function runArgv(
   if (name === SB.PRINTENV) {
     return handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, session)
   }
+  if (name === SB.ENV) return handleEnv(executeFn, args, session, stdin)
   if (name === SB.WHOAMI) return handleWhoami(namespace)
   if (name === SB.MAN) return handleMan(args, session, registry)
   if (name === SB.HISTORY) return handleHistory(registry, args, session)
@@ -610,6 +613,29 @@ async function runArgv(
   }
   if (name === 'touch') {
     return handleTouch(namespace, dispatch, session, operands)
+  }
+
+  // Capacity (registry-routed: enumerates mounts, reports per-mount statfs;
+  // never fabricates numbers).
+  if (name === 'df') {
+    if (namespace.nodes.size > 0) {
+      try {
+        operands = followPaths(namespace, operands)
+      } catch (err) {
+        if (err instanceof CycleError) {
+          const errBytes = new TextEncoder().encode(
+            `df: ${err.path}: Too many levels of symbolic links\n`,
+          )
+          return [
+            null,
+            new IOResult({ exitCode: 1, stderr: errBytes }),
+            new ExecutionNode({ command: 'df', exitCode: 1, stderr: errBytes }),
+          ]
+        }
+        throw err
+      }
+    }
+    return handleDf(registry, session, dispatch, operands)
   }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on

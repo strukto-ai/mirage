@@ -29,11 +29,8 @@ async def tr(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    d: bool = False,
-    s: bool = False,
-    c: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_tr(
@@ -41,9 +38,7 @@ async def tr(
         texts,
         read_stream=bound_op(ops.read_stream, accessor, index),
         stdin=stdin,
-        delete=d,
-        squeeze=s,
-        complement=c,
+        flags=flags,
     )
 
 

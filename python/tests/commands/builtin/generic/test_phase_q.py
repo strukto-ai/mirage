@@ -199,7 +199,7 @@ async def test_tee_append_concatenates():
                           read_stream=rs,
                           write_bytes=wb,
                           stdin=b"new",
-                          append=True)
+                          flags={"a": True})
     assert store["/out.txt"] == b"existing\nnew"
     assert output == b"new"
 

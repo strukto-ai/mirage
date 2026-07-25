@@ -93,6 +93,13 @@ def test_grep_dash_f_frees_positional_and_routes_pattern_file():
     assert "/data/pats.txt" in parsed.routing_paths()
 
 
+def test_optional_long_path_value_routes_attached_argument():
+    parsed = parse_command(SPECS["mktemp"], ["--tmpdir=staging", "file.XXXX"],
+                           "/data")
+    assert parsed.flags["--tmpdir"] == "/data/staging"
+    assert parsed.path_flag_values == ["/data/staging"]
+
+
 def test_grep_dash_e_and_dash_f_together():
     parsed = parse_command(SPECS["grep"],
                            ["-e", "foo", "-f", "/p.txt", "/a.txt"], "/")
@@ -274,6 +281,16 @@ def test_value_optional_never_consumes_next_token():
     parsed = parse_command(SPECS["ls"], ["--color", "/data"], "/")
     assert parsed.flags["--color"] is True
     assert parsed.paths() == ["/data"]
+
+
+def test_short_value_optional_uses_only_attached_value():
+    bare = parse_command(SPECS["split"],
+                         ["-d", "-l", "2", "/input", "/prefix"], "/")
+    attached = parse_command(SPECS["split"], ["-d10", "/input"], "/")
+    assert bare.flags["-d"] is True
+    assert bare.flags["-l"] == "2"
+    assert bare.paths() == ["/input", "/prefix"]
+    assert attached.flags["-d"] == "10"
 
 
 def test_overflow_operands_pass_through_like_last_slot():

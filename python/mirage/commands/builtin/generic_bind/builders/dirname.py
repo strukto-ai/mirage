@@ -15,6 +15,8 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.dirname import dirname as generic_dirname
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -25,9 +27,11 @@ async def dirname(
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,
-    **kwargs,
+    z: bool = False,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await generic_dirname(*texts)
+    fl = FlagView(flags, spec=SPECS["dirname"])
+    return await generic_dirname(*texts, zero=z or fl.as_bool("zero"))
 
 
 BUILDER = Builder('dirname', dirname, None, False, None)

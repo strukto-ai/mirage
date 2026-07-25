@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "od_tier2_format_slice",
+      "seq": 910004,
+      "targets": ["ram", "disk"],
+      "command": "printf 'ABCDE' | od --address-radix=n --skip-bytes=1 --read-bytes=3 --format=x1",
+      "expect": { "exit": 0, "stdout": "42 43 44\n", "stderr": "" },
+      "flags": ["address-radix", "skip-bytes", "read-bytes", "format"]
+    },
+    {
+      "id": "od_tier2_multiple_files",
+      "seq": 910044,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2od && printf 'AB' > /data/t2od/one && printf 'CD' > /data/t2od/two && od -A n -t x1 /data/t2od/one /data/t2od/two",
+      "expect": { "exit": 0, "stdout": "41 42 43 44\n", "stderr": "" },
+      "flags": ["address-radix", "format"]
+    }
+  ]
+}

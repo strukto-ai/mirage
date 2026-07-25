@@ -26,13 +26,13 @@ async def _base64_encode_stream(source: AsyncIterator[bytes],
     yield "\n".join(lines).encode() + b"\n"
 
 
-async def _base64_decode_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+async def _base64_decode_stream(source: AsyncIterator[bytes],
+                                ignore_garbage: bool) -> AsyncIterator[bytes]:
     buf = b""
     async for chunk in source:
         buf += chunk
-    text = buf.replace(b"\n", b"").replace(b"\r", b"").replace(b" ", b"")
-    yield b64lib.b64decode(text)
+    text = b"".join(buf.split())
+    yield b64lib.b64decode(text, validate=not ignore_garbage)
 
 
 async def base64_cmd(
@@ -42,6 +42,7 @@ async def base64_cmd(
     stdin: ByteSource | None = None,
     decode: bool = False,
     wrap: int | None = None,
+    ignore_garbage: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:
         raise extra_operand_error(CommandName.BASE64, paths[1].raw_path
@@ -54,7 +55,8 @@ async def base64_cmd(
         source = _resolve_source(stdin)
 
     if decode:
-        return _base64_decode_stream(source), IOResult(cache=cache)
+        return _base64_decode_stream(source,
+                                     ignore_garbage), IOResult(cache=cache)
     return _base64_encode_stream(source, wrap=wrap), IOResult(cache=cache)
 
 

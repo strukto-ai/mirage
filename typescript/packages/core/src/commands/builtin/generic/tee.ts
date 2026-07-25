@@ -19,6 +19,27 @@ import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
 
+const OUTPUT_ERROR_MODES = ['warn', 'warn-nopipe', 'exit', 'exit-nopipe']
+
+export interface TeeOptions {
+  append: boolean
+}
+
+export function parseTeeFlags(
+  flags: Record<string, string | boolean | string[]>,
+): TeeOptions | string {
+  const mode = flags.output_error
+  if (typeof mode === 'string' && !OUTPUT_ERROR_MODES.includes(mode)) {
+    const valid = OUTPUT_ERROR_MODES.map((m) => `  - '${m}'`).join('\n')
+    return (
+      `tee: invalid argument '${mode}' for '--output-error'\n` +
+      `Valid arguments are:\n${valid}\n` +
+      "Try 'tee --help' for more information.\n"
+    )
+  }
+  return { append: flags.a === true || flags.append === true }
+}
+
 export async function teeGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -29,12 +50,16 @@ export async function teeGeneric(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tee: missing operand\n') })]
   }
+  const parsed = parseTeeFlags(opts.flags)
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   const first = paths[0]
   if (first === undefined) return [null, new IOResult()]
   const stdinData = await readStdinAsync(opts.stdin)
   const raw: Uint8Array = stdinData ?? ENC.encode(texts.join(' '))
   let writeData = raw
-  if (opts.flags.a === true) {
+  if (parsed.append) {
     try {
       const existing = await materialize(stream(first))
       writeData = new Uint8Array(existing.byteLength + raw.byteLength)
@@ -44,13 +69,29 @@ export async function teeGeneric(
       if (!(err instanceof Error) || !/not found/i.test(err.message)) throw err
     }
   }
-  await write(first, writeData)
-  const out: ByteSource = raw
+  return writeOutput(write, first, writeData, raw)
+}
+
+export async function writeOutput(
+  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  path: PathSpec,
+  data: Uint8Array,
+  passthrough: ByteSource,
+): Promise<[ByteSource | null, IOResult]> {
+  try {
+    await write(path, data)
+  } catch (err) {
+    // GNU tee still copies stdin to stdout on a write error, prints a
+    // diagnostic, and exits non-zero. With a single output sink the
+    // --output-error modes (warn/exit/*-nopipe) collapse to this.
+    const msg = err instanceof Error ? err.message : String(err)
+    return [
+      passthrough,
+      new IOResult({ exitCode: 1, stderr: ENC.encode(`tee: ${path.mountPath}: ${msg}\n`) }),
+    ]
+  }
   return [
-    out,
-    new IOResult({
-      writes: { [first.mountPath]: writeData },
-      cache: [first.mountPath],
-    }),
+    passthrough,
+    new IOResult({ writes: { [path.mountPath]: data }, cache: [path.mountPath] }),
   ]
 }

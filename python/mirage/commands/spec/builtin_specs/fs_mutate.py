@@ -18,7 +18,15 @@ from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
 SPECS: dict[str, CommandSpec] = {
     'mkdir':
     CommandSpec(
-        options=(Option(short="-p"), Option(short="-v")),
+        options=(
+            Option(short="-p", long="--parents"),
+            Option(short="-v", long="--verbose"),
+            Option(short="-m", long="--mode", value_kind=OperandKind.TEXT),
+            Option(short="-Z",
+                   long="--context",
+                   value_kind=OperandKind.TEXT,
+                   value_optional=True),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'touch':
@@ -105,10 +113,26 @@ SPECS: dict[str, CommandSpec] = {
     ),
     'unlink':
     CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+    'truncate':
+    CommandSpec(
+        options=(Option(short="-s", long="--size",
+                        value_kind=OperandKind.TEXT), ),
+        rest=Operand(kind=OperandKind.PATH),
+    ),
     'basename':
-    CommandSpec(rest=Operand(kind=OperandKind.TEXT)),
+    CommandSpec(
+        options=(
+            Option(short="-a", long="--multiple"),
+            Option(short="-s", long="--suffix", value_kind=OperandKind.TEXT),
+            Option(short="-z", long="--zero"),
+        ),
+        rest=Operand(kind=OperandKind.TEXT),
+    ),
     'dirname':
-    CommandSpec(rest=Operand(kind=OperandKind.TEXT)),
+    CommandSpec(
+        options=(Option(short="-z", long="--zero"), ),
+        rest=Operand(kind=OperandKind.TEXT),
+    ),
     'realpath':
     CommandSpec(
         options=(

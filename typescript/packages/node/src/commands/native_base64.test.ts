@@ -78,4 +78,16 @@ describe.each(NATIVE_BACKENDS)('native base64 (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('supports wrapping and ignore-garbage aliases', async () => {
+    const env = makeEnv(kind)
+    try {
+      expect(await env.mirage('base64 -w 4', ENC.encode('abcdef'))).toBe('YWJj\nZGVm\n')
+      expect(await env.mirage('base64 --decode --ignore-garbage', ENC.encode('YWJj$\n'))).toBe(
+        'abc',
+      )
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

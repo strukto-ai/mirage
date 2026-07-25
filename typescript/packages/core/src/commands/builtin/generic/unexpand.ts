@@ -71,8 +71,10 @@ export async function unexpandGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const tabsize = typeof opts.flags.t === 'string' ? Number.parseInt(opts.flags.t, 10) : 8
-  const allSpaces = opts.flags.a === true
+  const tabsValue = opts.flags.t ?? opts.flags.tabs
+  const tabsize = typeof tabsValue === 'string' ? Number.parseInt(tabsValue, 10) : 8
+  const allSpaces =
+    (opts.flags.a === true || opts.flags.all === true) && opts.flags.first_only !== true
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still unexpand (GNU unexpand).

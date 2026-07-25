@@ -18,7 +18,8 @@ import { gnuDirname } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 
-export const dirnameFn: CommandFn = (_accessor, _paths, texts) => {
+export const dirnameFn: CommandFn = (_accessor, _paths, texts, opts) => {
   const lines = texts.map((t) => gnuDirname(t))
-  return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
+  const separator = opts.flags.z === true || opts.flags.zero === true ? '\0' : '\n'
+  return [ENC.encode(lines.join(separator) + separator), new IOResult()]
 }

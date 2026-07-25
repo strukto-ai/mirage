@@ -58,4 +58,16 @@ describe.each(NATIVE_BACKENDS)('native shuf (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('supports input ranges and output files', async () => {
+    const env = makeEnv(kind)
+    try {
+      const result = await env.mirage('shuf -i 3-5 -n 3')
+      expect(new Set(result.trim().split('\n'))).toEqual(new Set(['3', '4', '5']))
+      await env.mirage('shuf -i 1-1 -o /data/out.txt')
+      expect(await env.mirage('cat /data/out.txt')).toBe('1\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

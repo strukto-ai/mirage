@@ -40,3 +40,9 @@ def test_base64_D(env):
     data = b"aGVsbG8=\n"
     result = env.mirage("base64 -D", stdin=data)
     assert result == "hello"
+
+
+def test_base64_wrap_and_ignore_garbage(env):
+    assert env.mirage("base64 -w 4", stdin=b"abcdef") == "YWJj\nZGVm\n"
+    assert env.mirage("base64 --decode --ignore-garbage",
+                      stdin=b"YWJj$\n") == "abc"

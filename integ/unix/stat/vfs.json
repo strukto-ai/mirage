@@ -1,0 +1,134 @@
+{
+  "cases": [
+    {
+      "id": "vfs_setup",
+      "seq": 202000,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "touch -t 202601021530 /vfs/settings.json && chmod 640 /vfs/settings.json && touch -t 203007041215 /vfs/records/entry.json && chmod 600 /vfs/records/entry.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_name_size_type",
+      "seq": 202001,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%n %s %F\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/vfs/settings.json 49 regular file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_mode",
+      "seq": 202002,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%a %A %f\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "640 -rw-r----- 81a0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_owner_agent",
+      "seq": 202003,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%U:%G\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-agent:mirage-agent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_mtime_epoch",
+      "seq": 202004,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%Y\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1767367800\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_entry_size_mode_mtime",
+      "seq": 202005,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%s %a %Y\" /vfs/records/entry.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "48 600 1909397700\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_directory",
+      "seq": 202006,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%F %a %U\" /vfs/records",
+      "expect": {
+        "exit": 0,
+        "stdout": "directory 755 mirage-agent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_constants_and_birth",
+      "seq": 202007,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%B %r %t %w %W\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "512 0 0 - 0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_unbacked_question_marks",
+      "seq": 202008,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"%i %h %d %o\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "? ? ? ?\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_percent_literal",
+      "seq": 202009,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "stat -c \"size=%s%%\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "size=49%\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

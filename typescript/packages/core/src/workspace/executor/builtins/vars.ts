@@ -19,12 +19,13 @@ import { IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../shell/errors.ts'
+import { shellJoin } from '../../../shell/join.ts'
 import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../command.ts'
-import type { Result } from './scope.ts'
+import type { ExecuteStringFn, Result } from './scope.ts'
 
 export function handleExport(assignments: string[], session: Session): Result {
   for (const assign of assignments) {
@@ -105,6 +106,136 @@ export function handlePrintenv(name: string | null, session: Session): Result {
   lines.sort()
   const out = new TextEncoder().encode(`${lines.join('\n')}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
+}
+
+const ENV_HELP_HINT = "Try 'env --help' for more information.\n"
+
+function envError(message: string): Result {
+  const err = new TextEncoder().encode(`${message}\n${ENV_HELP_HINT}`)
+  return [
+    null,
+    new IOResult({ exitCode: 125, stderr: err }),
+    new ExecutionNode({ command: 'env', exitCode: 125, stderr: err }),
+  ]
+}
+
+export async function handleEnv(
+  executeFn: ExecuteStringFn,
+  args: string[],
+  session: Session,
+  stdin: ByteSource | null = null,
+): Promise<Result> {
+  let ignoreEnv = false
+  let nullSep = false
+  const unset: string[] = []
+  let i = 0
+  while (i < args.length) {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (tok === '-i' || tok === '--ignore-environment') {
+      ignoreEnv = true
+      i += 1
+      continue
+    }
+    if (tok === '-0' || tok === '--null') {
+      nullSep = true
+      i += 1
+      continue
+    }
+    if (tok === '-') {
+      // GNU: "a mere - implies -i".
+      ignoreEnv = true
+      i += 1
+      continue
+    }
+    if (tok === '--unset') {
+      if (i + 1 >= args.length) {
+        return envError("env: option '--unset' requires an argument")
+      }
+      unset.push(args[i + 1] ?? '')
+      i += 2
+      continue
+    }
+    if (tok.startsWith('--unset=')) {
+      unset.push(tok.slice('--unset='.length))
+      i += 1
+      continue
+    }
+    if (tok.startsWith('--')) {
+      return envError(`env: unrecognized option '${tok}'`)
+    }
+    if (tok.startsWith('-') && tok.length > 1) {
+      let j = 1
+      let consumedNext = false
+      let errored: string | null = null
+      while (j < tok.length) {
+        const ch = tok[j]
+        if (ch === 'i') {
+          ignoreEnv = true
+        } else if (ch === '0') {
+          nullSep = true
+        } else if (ch === 'u') {
+          const rest = tok.slice(j + 1)
+          if (rest !== '') {
+            unset.push(rest)
+          } else if (i + 1 < args.length) {
+            unset.push(args[i + 1] ?? '')
+            consumedNext = true
+          } else {
+            errored = "env: option requires an argument -- 'u'"
+          }
+          break
+        } else {
+          errored = `env: invalid option -- '${ch ?? ''}'`
+          break
+        }
+        j += 1
+      }
+      if (errored !== null) return envError(errored)
+      i += consumedNext ? 2 : 1
+      continue
+    }
+    break
+  }
+
+  const dropSet = new Set(unset)
+  const source = ignoreEnv ? {} : session.env
+  const base: Record<string, string> = {}
+  for (const [k, v] of Object.entries(source)) {
+    if (!dropSet.has(k)) base[k] = v
+  }
+  while (i < args.length && (args[i] ?? '').includes('=') && !(args[i] ?? '').startsWith('=')) {
+    const tok = args[i] ?? ''
+    const eq = tok.indexOf('=')
+    base[tok.slice(0, eq)] = tok.slice(eq + 1)
+    i += 1
+  }
+
+  const command = args.slice(i)
+  if (command.length > 0 && nullSep) {
+    return envError('env: cannot specify --null (-0) with command')
+  }
+  if (command.length === 0) {
+    const sep = nullSep ? '\0' : '\n'
+    const out = new TextEncoder().encode(
+      Object.entries(base)
+        .map(([k, v]) => `${k}=${v}${sep}`)
+        .join(''),
+    )
+    return [out, new IOResult(), new ExecutionNode({ command: 'env', exitCode: 0 })]
+  }
+
+  const saved = session.env
+  session.env = base
+  try {
+    const io = await executeFn(shellJoin(command), { sessionId: session.sessionId, stdin })
+    return [io.stdout, io, new ExecutionNode({ command: 'env', exitCode: io.exitCode })]
+  } finally {
+    session.env = saved
+  }
 }
 
 export function handleWhoami(namespace: Namespace): Result {

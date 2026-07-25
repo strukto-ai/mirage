@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "nl_tier2_logical_sections",
+      "seq": 910020,
+      "targets": ["ram", "disk"],
+      "command": "printf '!:!:!:\nhead\n!:!:\nbody\n!:\nfoot\n' | nl --section-delimiter=! --header-numbering=a --body-numbering=a --footer-numbering=a --number-format=rz --number-width=2 --number-separator=:",
+      "expect": { "exit": 0, "stdout": "\n01:head\n\n01:body\n\n01:foot\n", "stderr": "" },
+      "flags": ["section-delimiter", "header-numbering", "body-numbering", "footer-numbering", "number-format", "number-width", "number-separator"]
+    },
+    {
+      "id": "nl_tier2_blank_join_no_renumber",
+      "seq": 910021,
+      "targets": ["ram", "disk"],
+      "command": "printf '!:!:\na\n\n\n!:\nb\n' | nl --section-delimiter=! --body-numbering=a --footer-numbering=a --join-blank-lines=2 --no-renumber --number-width=1 --number-separator=:",
+      "expect": { "exit": 0, "stdout": "\n1:a\n :\n2:\n\n3:b\n", "stderr": "" },
+      "flags": ["section-delimiter", "body-numbering", "footer-numbering", "join-blank-lines", "no-renumber", "number-width", "number-separator"]
+    }
+  ]
+}

@@ -12,6 +12,7 @@ permissions:
       - python/**
       - typescript/**
       - .github/workflows/test_integ.yml
+      - .github/actions/integ-battery-setup/action.yml
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -42,10 +43,12 @@ jobs:
               - 'data/**'
               - 'python/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
             ts:
               - 'integ/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
             database:
               - 'integ/mongodb.py'
               - 'integ/mongodb.ts'
@@ -78,10 +81,12 @@ jobs:
               - 'python/mirage/resource/qdrant/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
             data:
               - 'integ/**'
               - 'python/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
             fuse:
               - 'integ/fuse.py'
               - 'integ/fuse.ts'
@@ -94,6 +99,7 @@ jobs:
               - 'typescript/packages/node/src/workspace/fuse.ts'
               - 'typescript/packages/node/src/workspace.ts'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
 
   integ:
     needs: changes
@@ -147,16 +153,6 @@ jobs:
         run: |
           ./python/.venv/bin/python integ/history.py > /tmp/history.out
           diff integ/truth_history.txt /tmp/history.out
-
-      - name: Run s3 + gcs + minio integ (moto) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/s3.py > /tmp/s3.out
-          diff integ/truth_s3.txt /tmp/s3.out
-
-      - name: Run onedrive integ (fake Graph) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/onedrive.py > /tmp/onedrive.out
-          diff integ/truth_onedrive.txt /tmp/onedrive.out
 
       - name: Run lancedb integ (embedded) and diff against truth
         run: |
@@ -303,12 +299,6 @@ jobs:
           pnpm exec tsx session_modes.ts > /tmp/ts-session-modes.out
           diff truth_session_modes.txt /tmp/ts-session-modes.out
 
-      - name: Run s3-native suite (multi-cloud/MinIO) and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx s3.ts > /tmp/ts-s3-native.out
-          diff truth_s3_ts.txt /tmp/ts-s3-native.out
-
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
@@ -331,7 +321,7 @@ jobs:
           pnpm exec tsx find_arg_errors.ts > /tmp/ts-fae.out
           diff truth_find_arg_errors.txt /tmp/ts-fae.out
 
-  integ-shared:
+  integ-shared-py:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
@@ -372,165 +362,54 @@ jobs:
       MONGODB_URI: mongodb://localhost:27017
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      - uses: ./.github/actions/integ-battery-setup
         with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras --no-extra camel
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.32.1
-
-      - name: Install dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
-
-      - name: Build mirage-core
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core build
-
-      - name: Build mirage-node
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-node build
-
-      - name: Build mirage-browser
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-browser build
-
-      - name: Start moto S3 for the TypeScript host
-        run: |
-          nohup ./python/.venv/bin/moto_server -H 127.0.0.1 -p 5001 > /tmp/moto.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:5001/moto-api/ > /dev/null && break
-            sleep 1
-          done
-          echo "S3_ENDPOINT=http://127.0.0.1:5001" >> "$GITHUB_ENV"
-          echo "S3_REGION=us-east-1" >> "$GITHUB_ENV"
-          echo "AWS_ACCESS_KEY_ID=testing" >> "$GITHUB_ENV"
-          echo "AWS_SECRET_ACCESS_KEY=testing" >> "$GITHUB_ENV"
-
-      - name: Start sftp server shared by both hosts
-        run: |
-          nohup ./python/.venv/bin/python integ/server/ssh_server.py --port 2222 > /tmp/sshsrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "SSH_PORT=" /tmp/sshsrv.log && break
-            sleep 1
-          done
-          cat /tmp/sshsrv.log
-          echo "SSH_HOST=127.0.0.1" >> "$GITHUB_ENV"
-          echo "SSH_PORT=2222" >> "$GITHUB_ENV"
-
-      - name: Start fake Google Workspace server shared by both hosts
-        working-directory: integ
-        run: |
-          nohup pnpm exec tsx server/gws_server.ts --port 19999 > /tmp/gws.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "GWS_URL=" /tmp/gws.log && break
-            sleep 1
-          done
-          cat /tmp/gws.log
-          echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
-
-      - name: Start fake Hugging Face hub shared by both hosts
-        run: |
-          nohup ./python/.venv/bin/python integ/server/hf_server.py --port 5099 > /tmp/hfsrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "HF_ENDPOINT=" /tmp/hfsrv.log && break
-            sleep 1
-          done
-          cat /tmp/hfsrv.log
-          echo "HF_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
-
-      - name: Wait for GreenMail
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf -X POST http://localhost:8080/api/service/reset && break
-            sleep 2
-          done
-
-      - name: Start fake Box API for the typescript host
-        run: |
-          nohup ./python/.venv/bin/python integ/server/box_server.py --port 5096 > /tmp/boxsrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "BOX_ENDPOINT=" /tmp/boxsrv.log && break
-            sleep 1
-          done
-          cat /tmp/boxsrv.log
-          echo "BOX_ENDPOINT=http://127.0.0.1:5096" >> "$GITHUB_ENV"
-
-      - name: Start fake Slack Web API (Prisma) shared by both hosts
-        working-directory: integ
-        env:
-          SLACK_DB_URL: file:/tmp/mirage-slack-ci.db
-        run: |
-          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
-          nohup ./node_modules/.bin/tsx server/slack.ts --port 5097 > /tmp/slacksrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "SLACK_URL=" /tmp/slacksrv.log && break
-            sleep 1
-          done
-          cat /tmp/slacksrv.log
-          echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
-
-      - name: Start fake Trello API for the typescript host
-        run: |
-          nohup ./python/.venv/bin/python integ/server/trello_server.py --port 5095 > /tmp/trellosrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "TRELLO_ENDPOINT=" /tmp/trellosrv.log && break
-            sleep 1
-          done
-          cat /tmp/trellosrv.log
-          echo "TRELLO_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
-
-      - name: Start fake Linear API for the typescript host
-        run: |
-          nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linearsrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "LINEAR_ENDPOINT=" /tmp/linearsrv.log && break
-            sleep 1
-          done
-          cat /tmp/linearsrv.log
-          echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
-
-      - name: Start fake Dify API for the typescript host
-        run: |
-          nohup ./python/.venv/bin/python integ/server/dify_server.py --port 5093 > /tmp/difysrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "DIFY_ENDPOINT=" /tmp/difysrv.log && break
-            sleep 1
-          done
-          cat /tmp/difysrv.log
-          echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
-
-      - name: Start fake Databricks API for the typescript host
-        run: |
-          nohup ./python/.venv/bin/python integ/server/databricks_server.py --port 5092 > /tmp/databrickssrv.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "DATABRICKS_ENDPOINT=" /tmp/databrickssrv.log && break
-            sleep 1
-          done
-          cat /tmp/databrickssrv.log
-          echo "DATABRICKS_ENDPOINT=http://127.0.0.1:5092" >> "$GITHUB_ENV"
-
+          build-packages: "false"
       - name: Run declarative battery (python hosts)
         run: ./python/.venv/bin/python integ/runners/python/main.py
 
+  integ-shared-ts:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      greenmail:
+        image: greenmail/standalone:2.1.3
+        ports:
+          - 3025:3025
+          - 3143:3143
+          - 8080:8080
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.all
+            -Dgreenmail.users=integ:secret@example.com
+            -Dgreenmail.users.login=email
+            -Dgreenmail.hostname=0.0.0.0
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      EMAIL_HOST: localhost
+      MONGODB_URI: mongodb://localhost:27017
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/integ-battery-setup
       - name: Run declarative battery (typescript hosts)
         working-directory: integ
         run: pnpm exec tsx runners/typescript/main.ts
@@ -807,13 +686,6 @@ jobs:
           curl -s http://localhost:8080/status.php || true
           exit 1
 
-      - name: Run Nextcloud backend and check against truth
-        shell: bash
-        run: |
-          set -o pipefail
-          ./python/.venv/bin/python integ/nextcloud.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_nextcloud.txt
-
       - name: Run declarative battery on nextcloud
         run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud
 
@@ -1052,7 +924,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-shared, integ-database, integ-database-ts, integ-data, integ-fuse, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-database, integ-database-ts, integ-data, integ-fuse, runtime-py, runtime-ts]
     if: always()
     steps:
       - name: Check required jobs

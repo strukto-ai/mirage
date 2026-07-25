@@ -12,8 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.config import RegisteredCommand, command, cross_command
-from mirage.commands.spec import CommandSpec, Operand, OperandKind
+import asyncio
+
+from mirage.commands.config import (RegisteredCommand, command, cross_command,
+                                    version_request)
+from mirage.commands.spec import CommandSpec, Operand, OperandKind, Option
+from mirage.version import __version__
+
+_HANDLER_CALLS: list[str] = []
+
+
+async def _noop_handler(backend, paths, *texts, **kw):
+    return None, None
+
+
+async def _recording_handler(backend, paths, *texts, **kw):
+    _HANDLER_CALLS.append("called")
+    return None, None
+
+
+async def _collect(source):
+    if isinstance(source, (bytes, bytearray)):
+        return bytes(source)
+    parts = []
+    async for chunk in source:
+        parts.append(chunk)
+    return b"".join(parts)
 
 
 class TestRegisteredCommand:
@@ -129,3 +153,60 @@ class TestCrossCommandDecorator:
         assert rc.src == "s3"
         assert rc.dst == "disk"
         assert rc.resource == "s3->disk"
+
+
+class TestVersionSupport:
+
+    def test_auto_injects_version_option(self):
+        registered = command("foo", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        longs = [
+            o.long for o in registered._registered_commands[0].spec.options
+        ]
+        assert "--version" in longs
+        assert "--help" in longs
+
+    def test_version_short_circuits_handler(self):
+        _HANDLER_CALLS.clear()
+        registered = command("tsort", resource="disk",
+                             spec=CommandSpec())(_recording_handler)
+        stdout, result = asyncio.run(registered._registered_commands[0].fn(
+            None, [], version=True))
+        assert _HANDLER_CALLS == []
+        assert asyncio.run(
+            _collect(stdout)) == f"tsort (Mirage) {__version__}\n".encode()
+        assert result.exit_code == 0
+
+
+class TestVersionRequest:
+
+    def test_matches_injected_option(self):
+        registered = command("tsort", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        spec = registered._registered_commands[0].spec
+        assert version_request(
+            "tsort", spec,
+            ["--version"]) == f"tsort (Mirage) {__version__}\n".encode()
+
+    def test_none_without_the_flag(self):
+        registered = command("tsort", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        spec = registered._registered_commands[0].spec
+        assert version_request("tsort", spec, ["/data/a.txt"]) is None
+
+    def test_none_after_end_of_options(self):
+        registered = command("grep", resource="disk",
+                             spec=CommandSpec())(_noop_handler)
+        spec = registered._registered_commands[0].spec
+        assert version_request("grep", spec, ["--", "--version"]) is None
+
+    def test_none_for_unregistered_command(self):
+        assert version_request("nope", None, ["--version"]) is None
+
+    def test_none_when_command_declares_its_own_version(self):
+        spec = CommandSpec(options=(Option(long="--version"), ))
+        registered = command("custom", resource="disk",
+                             spec=spec)(_noop_handler)
+        assert version_request("custom",
+                               registered._registered_commands[0].spec,
+                               ["--version"]) is None

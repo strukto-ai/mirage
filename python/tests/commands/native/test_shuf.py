@@ -30,3 +30,10 @@ def test_shuf_z(env):
     data = b"a\x00b\x00c\x00"
     result = env.mirage("shuf -z", stdin=data)
     assert "\x00" in result or len(result) > 0
+
+
+def test_shuf_input_range_and_output(env):
+    result = env.mirage("shuf -i 3-5 -n 3")
+    assert set(result.splitlines()) == {"3", "4", "5"}
+    env.mirage("shuf -i 1-1 -o /data/out.txt")
+    assert env.mirage("cat /data/out.txt") == "1\n"

@@ -63,22 +63,31 @@ function formatComm(
   suppress1: boolean,
   suppress2: boolean,
   suppress3: boolean,
+  delimiter: string,
+  recordSeparator: string,
+  total: boolean,
 ): string {
   const out: string[] = []
+  const counts = [0, 0, 0]
   for (const [col, text] of merged) {
+    counts[col - 1] = (counts[col - 1] ?? 0) + 1
     if (col === 1 && !suppress1) {
       out.push(text)
     } else if (col === 2 && !suppress2) {
-      const prefix = suppress1 ? '' : '\t'
+      const prefix = suppress1 ? '' : delimiter
       out.push(prefix + text)
     } else if (col === 3 && !suppress3) {
       let prefix = ''
-      if (!suppress1) prefix += '\t'
-      if (!suppress2) prefix += '\t'
+      if (!suppress1) prefix += delimiter
+      if (!suppress2) prefix += delimiter
       out.push(prefix + text)
     }
   }
-  return out.length > 0 ? out.join('\n') + '\n' : ''
+  if (total) {
+    const visible = counts.filter((_count, index) => ![suppress1, suppress2, suppress3][index])
+    out.push([...visible.map(String), 'total'].join(delimiter))
+  }
+  return out.length > 0 ? out.join(recordSeparator) + recordSeparator : ''
 }
 
 function isSorted(lines: readonly string[]): boolean {
@@ -102,8 +111,9 @@ export async function commGeneric(
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
-  const lines1 = splitLinesNoTrailing(data1)
-  const lines2 = splitLinesNoTrailing(data2)
+  const zeroTerminated = opts.flags.z === true || opts.flags.zero_terminated === true
+  const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data1)
+  const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data2)
   let stderr = ''
   if (opts.flags.check_order === true) {
     if (!isSorted(lines1)) stderr = 'comm: file 1 is not in sorted order\n'
@@ -113,7 +123,17 @@ export async function commGeneric(
   const suppress2 = opts.flags['2'] === true
   const suppress3 = opts.flags['3'] === true
   const merged = commMerge(lines1, lines2)
-  const output = formatComm(merged, suppress1, suppress2, suppress3)
+  const delimiter =
+    typeof opts.flags.output_delimiter === 'string' ? opts.flags.output_delimiter : '\t'
+  const output = formatComm(
+    merged,
+    suppress1,
+    suppress2,
+    suppress3,
+    delimiter,
+    zeroTerminated ? '\0' : '\n',
+    opts.flags.total === true,
+  )
   const result: ByteSource = ENC.encode(output)
   return [
     result,

@@ -15,11 +15,18 @@
 import { ResourceName, command, specOf, shufGeneric } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
+import { writeBytes as opfsWrite } from '../../../core/opfs/write.ts'
 
 export const OPFS_SHUF = command({
   name: 'shuf',
   resource: ResourceName.OPFS,
   spec: specOf('shuf'),
   fn: (accessor: OPFSAccessor, paths, texts, opts) =>
-    shufGeneric(paths, texts, opts, (p) => opfsStream(accessor, p)),
+    shufGeneric(
+      paths,
+      texts,
+      opts,
+      (p) => opfsStream(accessor, p),
+      (p, data) => opfsWrite(accessor, p, data),
+    ),
 })

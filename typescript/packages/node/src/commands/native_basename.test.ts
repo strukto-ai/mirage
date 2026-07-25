@@ -26,4 +26,13 @@ describe.each(NATIVE_BACKENDS)('native basename (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('supports multiple inputs, suffix stripping, and NUL termination', async () => {
+    const env = makeEnv(kind)
+    try {
+      expect(await env.mirage('basename -a -s .txt -z /a.txt /b.txt')).toBe('a\0b\0')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

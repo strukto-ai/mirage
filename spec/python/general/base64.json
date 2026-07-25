@@ -46,7 +46,7 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--decode",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
@@ -64,11 +64,20 @@
     },
     {
       "description": null,
-      "long": null,
+      "long": "--wrap",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
       "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--ignore-garbage",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-i",
+      "value_kind": "none",
       "value_optional": false
     }
   ],

@@ -52,6 +52,7 @@ def test_s3_write_commands_tagged():
         "tar",
         "patch",
         "iconv",
+        "truncate",
     }
     for fn in COMMANDS:
         for rc in fn._registered_commands:

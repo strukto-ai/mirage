@@ -104,6 +104,46 @@ ReaddirFn: TypeAlias = Callable[..., Awaitable[list[str]]]
 StatFn: TypeAlias = Callable[..., Awaitable["FileStat"]]
 
 
+class CapacityState(StrEnum):
+    """How a mount's capacity relates to a df-style report.
+
+    QUOTA: real total/used/available numbers are known (a real disk, or a
+    provider that exposes a storage quota). ELASTIC: the backend has no
+    fixed size (object stores like S3 grow without a quota). NA: the
+    backend has no filesystem-capacity concept (a message/table surface
+    like Slack or Postgres). UNKNOWN: bounded but not cheaply measurable,
+    or simply not reported yet. df renders real numbers for QUOTA and a
+    literal ``-`` for the rest — never a fabricated total.
+    """
+    QUOTA = "quota"
+    ELASTIC = "elastic"
+    NA = "na"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityResult:
+    """One mount's capacity for df. All byte counts are None unless the
+    state is QUOTA.
+
+    Args:
+        state (CapacityState): how to interpret the numbers.
+        total (int | None): total bytes.
+        used (int | None): used bytes.
+        available (int | None): bytes available to the workspace user.
+        inodes (int | None): total inodes.
+        inodes_used (int | None): used inodes.
+        inodes_free (int | None): free inodes.
+    """
+    state: CapacityState
+    total: int | None = None
+    used: int | None = None
+    available: int | None = None
+    inodes: int | None = None
+    inodes_used: int | None = None
+    inodes_free: int | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class NativeCopy:
     copy: CopyFn

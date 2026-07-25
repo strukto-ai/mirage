@@ -58,6 +58,9 @@ async function runTarget(
     for (const mount of target.mounts) await seedFixture(ws, mount.fixture, mount.path, root)
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue
+      // Consistency scenarios (out-of-band mutate + policy) run on the python
+      // host only for now; the typescript mirror is a follow-up.
+      if (c.consistency !== undefined) continue
       const { exitCode, out, err, elapsed } = await runCase(ws, c)
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: err })

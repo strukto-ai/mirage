@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "fmt_tier2_goal_uniform",
+      "seq": 910013,
+      "targets": ["ram", "disk"],
+      "command": "printf 'one two three four\n' | fmt --width 12 --goal 8 --uniform-spacing",
+      "expect": { "exit": 0, "stdout": "one two\nthree\nfour\n", "stderr": "" },
+      "flags": ["width", "goal", "uniform-spacing"]
+    },
+    {
+      "id": "fmt_tier2_prefix",
+      "seq": 910014,
+      "targets": ["ram", "disk"],
+      "command": "printf '# alpha beta\n# gamma delta\n' | fmt --prefix '# ' --width 14",
+      "expect": { "exit": 0, "stdout": "# alpha beta\n# gamma delta\n", "stderr": "" },
+      "flags": ["prefix", "width"]
+    },
+    {
+      "id": "fmt_tier2_split_only",
+      "seq": 910015,
+      "targets": ["ram", "disk"],
+      "command": "printf 'alpha beta\ngamma delta\n' | fmt --split-only --width 8",
+      "expect": { "exit": 0, "stdout": "alpha\nbeta\ngamma\ndelta\n", "stderr": "" },
+      "flags": ["split-only", "width"]
+    },
+    {
+      "id": "fmt_tier2_tagged_crown",
+      "seq": 910016,
+      "targets": ["ram", "disk"],
+      "command": "printf 'tag alpha beta\n  gamma delta\n' | fmt --tagged-paragraph --crown-margin --width 12",
+      "expect": { "exit": 0, "stdout": "tag alpha\n  beta gamma\n  delta\n", "stderr": "" },
+      "flags": ["tagged-paragraph", "crown-margin", "width"]
+    }
+  ]
+}

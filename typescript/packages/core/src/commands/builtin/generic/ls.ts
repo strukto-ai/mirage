@@ -91,14 +91,21 @@ async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
 }
 
 // GNU ls prints a file operand as given (`ls sub/x.txt` shows sub/x.txt,
-// not x.txt); the row carries the operand spelling.
+// not x.txt); the row carries the operand spelling. Every other field
+// (mode/uid/gid/atime overlay attrs included) is preserved, mirroring the
+// Python `s.model_copy(update={"name": ...})`.
 function asOperand(s: FileStat, path: PathSpec): FileStat {
   return new FileStat({
     name: path.rawPath,
     size: s.size,
     modified: s.modified,
     fingerprint: s.fingerprint,
+    revision: s.revision,
     type: s.type,
+    mode: s.mode,
+    uid: s.uid,
+    gid: s.gid,
+    atime: s.atime,
     extra: s.extra,
   })
 }

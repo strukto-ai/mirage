@@ -524,8 +524,13 @@ class MountEntry:
         revs_token = push_revisions(self.revisions or None)
         prev_manager = push_cache_manager(self.cache_manager)
         try:
+            # --help / --version short-circuit inside the handler wrapper
+            # and never touch the backend, so a read-only mount answers
+            # them like GNU instead of refusing them as writes.
+            info_only = (kw.get("help") is True or kw.get("version") is True)
             for cmd in handlers:
-                if cmd.write and self.effective_mode() == MountMode.READ:
+                if (cmd.write and not info_only
+                        and self.effective_mode() == MountMode.READ):
                     return None, IOResult(
                         exit_code=1,
                         stderr=(f"{cmd_name}: read-only mount "
