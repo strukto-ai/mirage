@@ -15,11 +15,26 @@
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import { FileStat, FileType, PathSpec, type PrimitiveCopy, type ReaddirFn } from '../../../types.ts'
+import {
+  FileStat,
+  FileType,
+  PathSpec,
+  type PrimitiveCopy,
+  type ReaddirFn,
+  type StatFn,
+} from '../../../types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import { eacces, enotsup } from '../../../utils/errors.ts'
+import { eacces, enoent, enotsup } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { cpFlags, cpGeneric, parseCpFlags, type CpFlags } from './cp.ts'
+import {
+  cpFlags,
+  cpGeneric,
+  entryKind,
+  overwriteGate,
+  parseCpFlags,
+  targetDirError,
+  type CpFlags,
+} from './cp.ts'
 
 const DEC = new TextDecoder()
 
@@ -49,7 +64,7 @@ function makeBackend(
       )
     }
     const data = files.get(k)
-    if (data === undefined) return Promise.reject(new Error(`not found: ${k}`))
+    if (data === undefined) return Promise.reject(enoent(k))
     return Promise.resolve(
       new FileStat({
         name: k.split('/').pop() ?? '',
@@ -60,7 +75,7 @@ function makeBackend(
   }
   const copy = (src: PathSpec, dst: PathSpec): Promise<void> => {
     const data = files.get(key(src))
-    if (data === undefined) return Promise.reject(new Error(`not found: ${key(src)}`))
+    if (data === undefined) return Promise.reject(enoent(key(src)))
     files.set(key(dst), data)
     return Promise.resolve()
   }
@@ -240,7 +255,7 @@ describe('cpGeneric guards', () => {
     const { stat } = makeBackend(files, new Set())
     const readBytes = (p: PathSpec): Promise<Uint8Array> => {
       const data = files.get(key(p))
-      if (data === undefined) return Promise.reject(new Error(`not found: ${key(p)}`))
+      if (data === undefined) return Promise.reject(enoent(key(p)))
       return Promise.resolve(data)
     }
     const write = (p: PathSpec, data: Uint8Array): Promise<void> => {
@@ -274,7 +289,7 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
     const err = readErr.get(key(p))
     if (err !== undefined) return Promise.reject(err)
     const data = files.get(key(p))
-    if (data === undefined) return Promise.reject(new Error(`not found: ${key(p)}`))
+    if (data === undefined) return Promise.reject(enoent(key(p)))
     return Promise.resolve(data)
   }
   const write = (p: PathSpec, data: Uint8Array): Promise<void> => {
@@ -782,5 +797,37 @@ describe('backup version scan failures', () => {
     expect(io.exitCode).toBe(1)
     expect(await io.stderrStr()).toContain("cp: cannot backup '/b.txt': Operation not supported")
     expect(files.get('/b.txt')).toEqual(new Uint8Array([79]))
+  })
+})
+
+// The per-operand probes answer "is this path there?". A stat that fails for
+// any other reason is not an answer, and must not be read as one: returning
+// "missing" would let -n overwrite the very target it exists to protect.
+// Python's twins narrow to (FileNotFoundError, ValueError) in all three.
+// Exercised directly, because whichever probe runs first would otherwise
+// mask the others.
+describe('cp probes propagate non-missing stat failures', () => {
+  const boom: StatFn = () => Promise.reject(new Error('401 Unauthorized'))
+  const missing: StatFn = (p) => Promise.reject(enoent(key(p)))
+
+  it('overwriteGate rethrows instead of reporting "safe to overwrite"', async () => {
+    const policy = { cmdName: 'cp', noClobber: true, update: null, backup: null, suffix: '~' }
+    await expect(overwriteGate(policy, boom, spec('/a.txt'), spec('/dst.txt'), [])).rejects.toThrow(
+      '401 Unauthorized',
+    )
+    // A genuinely missing target still means "nothing to clobber".
+    expect(await overwriteGate(policy, missing, spec('/a.txt'), spec('/dst.txt'), [])).toBe(true)
+  })
+
+  it('entryKind rethrows instead of reporting the path as absent', async () => {
+    await expect(entryKind(boom, spec('/a.txt'))).rejects.toThrow('401 Unauthorized')
+    expect(await entryKind(missing, spec('/a.txt'))).toEqual({ exists: false, isDir: false })
+  })
+
+  it('targetDirError rethrows instead of claiming No such file or directory', async () => {
+    await expect(targetDirError('cp', boom, spec('/d'))).rejects.toThrow('401 Unauthorized')
+    expect(await targetDirError('cp', missing, spec('/d'))).toBe(
+      "cp: target directory '/d': No such file or directory",
+    )
   })
 })

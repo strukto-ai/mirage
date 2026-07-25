@@ -10,6 +10,7 @@ permissions:
       - python/**
       - examples/python/**
       - integ/**
+      - conformance/**
       - .github/workflows/test_python.yml
   pull_request:
     branches: [main]
@@ -36,6 +37,7 @@ jobs:
               - 'python/**'
               - 'examples/python/**'
               - 'integ/**'
+              - 'conformance/**'
               - '.github/workflows/test_python.yml'
 
   test:

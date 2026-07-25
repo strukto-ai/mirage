@@ -18,9 +18,12 @@ import {
   eaccesReadOnly,
   enoent,
   enotsup,
+  enotdir,
   formatFsError,
   fsStrerror,
   isFsError,
+  isMissingPath,
+  noMount,
 } from './errors.ts'
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
@@ -93,6 +96,30 @@ describe('eaccesReadOnly', () => {
     expect(err.virtualPath).toBe('/mail/a.txt')
     expect(err.message).toContain('read-only')
     expect(fsStrerror(err)).toBe('Permission denied')
+  })
+})
+
+describe('noMount', () => {
+  it('keeps the Python message text and carries no POSIX code', () => {
+    const err = noMount('/nowhere/x')
+    expect(err.message).toBe('no mount matches path: /nowhere/x')
+    expect(isFsError(err)).toBe(false)
+    expect(fsStrerror(err)).toBeNull()
+  })
+})
+
+describe('isMissingPath', () => {
+  it('accepts the two Python swallows: FileNotFoundError and the no-mount ValueError', () => {
+    expect(isMissingPath(enoent('/x'))).toBe(true)
+    expect(isMissingPath(noMount('/nowhere/x'))).toBe(true)
+  })
+
+  it('rejects every other failure, including other fs errors', () => {
+    expect(isMissingPath(eacces('/x'))).toBe(false)
+    expect(isMissingPath(enotdir('/x'))).toBe(false)
+    expect(isMissingPath(enotsup('email', 'stat', '/mail/a.txt'))).toBe(false)
+    expect(isMissingPath(new Error('401 Unauthorized'))).toBe(false)
+    expect(isMissingPath(undefined)).toBe(false)
   })
 })
 

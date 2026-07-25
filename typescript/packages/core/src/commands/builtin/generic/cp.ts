@@ -38,7 +38,7 @@ import {
   pathExists,
   type BackendKeyFn,
 } from '../utils/copy.ts'
-import { fsStrerror, isFsError } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError, isMissingPath } from '../../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
@@ -237,7 +237,8 @@ export async function targetDirError(
   let info: FileStat
   try {
     info = await stat(target)
-  } catch {
+  } catch (err) {
+    if (!isMissingPath(err)) throw err
     return `${cmdName}: target directory '${target.virtual}': No such file or directory`
   }
   if (info.type !== FileType.DIRECTORY) {
@@ -254,7 +255,8 @@ export async function entryKind(
   let info: FileStat
   try {
     info = await stat(path)
-  } catch {
+  } catch (err) {
+    if (!isMissingPath(err)) throw err
     return { exists: false, isDir: false }
   }
   return { exists: true, isDir: info.type === FileType.DIRECTORY }
@@ -297,7 +299,10 @@ export async function overwriteGate(
   let targetInfo: FileStat
   try {
     targetInfo = await stat(target)
-  } catch {
+  } catch (err) {
+    // A probe failure here is not permission to clobber: returning true on an
+    // auth error or timeout would silently defeat -n / --update=none.
+    if (!isMissingPath(err)) throw err
     return true
   }
   if (policy.noClobber || policy.update === 'none') return false
@@ -309,7 +314,8 @@ export async function overwriteGate(
     let srcInfo: FileStat
     try {
       srcInfo = await stat(src)
-    } catch {
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
       return true
     }
     const srcTs = modifiedTs(srcInfo.modified)

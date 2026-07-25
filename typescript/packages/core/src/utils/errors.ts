@@ -64,6 +64,33 @@ export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
 }
 
+// The registry's refusal for a path that falls outside every mount. Mirrors
+// Python's `ValueError("no mount matches path: ...")`; the stamp exists so
+// the exists-family probes can recognize it without sniffing message text,
+// and the message stays unstamped by a POSIX code so command stderr keeps
+// rendering it verbatim (parity with Python, where ValueError is not an
+// OSError and gets no strerror suffix).
+export interface NoMountError extends Error {
+  noMount: true
+}
+
+export function noMount(path: string): NoMountError {
+  const err = new Error(`no mount matches path: ${path}`) as NoMountError
+  err.noMount = true
+  return err
+}
+
+// True when the error means the path is simply not there: a stamped ENOENT,
+// or a path outside every mount. This is the whole swallow set for the
+// exists-family probes, mirroring Python's `(FileNotFoundError, ValueError)`.
+// Everything else — auth failures, transport errors, timeouts, ENOTDIR,
+// backend bugs — must propagate instead of reading back as "missing".
+export function isMissingPath(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  const stamped = err as { code?: unknown; noMount?: unknown }
+  return stamped.code === 'ENOENT' || stamped.noMount === true
+}
+
 // A missing-op error also names the op the backend did not register, so
 // capability probes (metadata.ts) can test for one specific gap instead of
 // sniffing message text.

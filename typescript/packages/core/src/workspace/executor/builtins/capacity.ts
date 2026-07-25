@@ -16,6 +16,7 @@ import { humanSize } from '../../../commands/builtin/utils/formatting.ts'
 import { IOResult } from '../../../io/types.ts'
 import { CapacityState, FileStat, PathSpec } from '../../../types.ts'
 import type { CapacityResult } from '../../../types.ts'
+import { isMissingPath } from '../../../utils/errors.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { DispatchFn } from '../cross_mount.ts'
@@ -103,8 +104,9 @@ async function pathExists(dispatch: DispatchFn, spec: PathSpec): Promise<boolean
   try {
     const [stat] = await dispatch('stat', spec)
     return stat instanceof FileStat
-  } catch {
-    return false
+  } catch (err) {
+    if (isMissingPath(err)) return false
+    throw err
   }
 }
 

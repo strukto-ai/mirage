@@ -414,6 +414,37 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx runners/typescript/main.ts
 
+  # The two jobs above prove each language passes its own battery. This one
+  # runs both emitters and diffs them case by case, so a change that breaks
+  # the same way in both languages still fails. Shared targets only (ram,
+  # disk, redis) — the credentialed targets stay in their own jobs.
+  integ-shared-parity:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/integ-battery-setup
+      # Targets are pinned: with no arguments parity.py adds the Graph and
+      # Mem0 groups unconditionally, and the setup action exports
+      # S3_ENDPOINT/SSH_HOST/GWS_URL, which would pull in the S3, SSH and
+      # Drive groups too. That would gate every core/TypeScript PR on the
+      # whole credentialed battery, which has its own jobs already.
+      - name: Diff python and typescript battery output
+        run: ./python/.venv/bin/python integ/runners/parity.py ram disk redis
+
   integ-database:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
@@ -924,7 +955,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-database, integ-database-ts, integ-data, integ-fuse, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-database-ts, integ-data, integ-fuse, runtime-py, runtime-ts]
     if: always()
     steps:
       - name: Check required jobs

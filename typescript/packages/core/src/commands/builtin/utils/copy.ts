@@ -15,7 +15,7 @@
 import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, PathSpec, type StatFn } from '../../../types.ts'
-import { enotdir } from '../../../utils/errors.ts'
+import { enotdir, isMissingPath } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 export type BackendKeyFn = (path: PathSpec) => string
@@ -50,8 +50,9 @@ export function copyTargets(
 export async function pathExists(stat: StatFn, path: PathSpec): Promise<boolean> {
   try {
     await stat(path)
-  } catch {
-    return false
+  } catch (err) {
+    if (isMissingPath(err)) return false
+    throw err
   }
   return true
 }
@@ -64,7 +65,8 @@ export async function isDirectory(
   try {
     const info = await stat(path, index)
     return info.type === FileType.DIRECTORY
-  } catch {
-    return false
+  } catch (err) {
+    if (isMissingPath(err)) return false
+    throw err
   }
 }
