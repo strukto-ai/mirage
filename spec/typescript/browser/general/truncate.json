@@ -9,8 +9,10 @@
       "databricks_volume",
       "dropbox",
       "gdrive",
+      "onedrive",
       "ram",
-      "s3"
+      "s3",
+      "sharepoint"
     ]
   },
   "description": null,

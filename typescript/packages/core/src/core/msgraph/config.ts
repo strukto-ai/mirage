@@ -12,7 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
+import { secretSchema } from '../../resource/secrets.ts'
+
 export type AccessTokenProvider = () => string | Promise<string>
+
+// Shared by the OneDrive and SharePoint config schemas, mirroring Python's
+// MsGraphConfig base model. `accessToken` accepts a provider callable as well
+// as a literal, and either way it is marked secret so the redaction machinery
+// keeps it out of snapshot state.
+export const MSGRAPH_CONFIG_SHAPE = {
+  accessToken: secretSchema(
+    z.union([z.string(), z.custom<AccessTokenProvider>((value) => typeof value === 'function')]),
+  ),
+  tenantHost: z.string().optional(),
+  timeout: z.number().optional(),
+  maxRetries: z.number().optional(),
+}
 
 export interface MsGraphConfig {
   accessToken: string | AccessTokenProvider

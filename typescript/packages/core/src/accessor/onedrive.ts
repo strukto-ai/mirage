@@ -12,20 +12,49 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
 import { Accessor } from './base.ts'
 import { GRAPH_API } from '../core/msgraph/client.ts'
 import {
+  MSGRAPH_CONFIG_SHAPE,
   resolveMsGraphConfig,
   type MsGraphConfig,
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
+import { redactConfigWithSchema } from '../resource/secrets.ts'
+import { normalizeFields } from '../utils/normalize.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 export interface OneDriveConfig extends MsGraphConfig {
   driveId?: string
   siteId?: string
   keyPrefix?: string
+}
+
+export interface OneDriveConfigRedacted {
+  accessToken: '<REDACTED>'
+  tenantHost?: string
+  timeout?: number
+  maxRetries?: number
+  driveId?: string
+  siteId?: string
+  keyPrefix?: string
+}
+
+export const OneDriveConfigSchema = z.object({
+  ...MSGRAPH_CONFIG_SHAPE,
+  driveId: z.string().optional(),
+  siteId: z.string().optional(),
+  keyPrefix: z.string().optional(),
+})
+
+export function redactOneDriveConfig(config: OneDriveConfig): OneDriveConfigRedacted {
+  return redactConfigWithSchema(OneDriveConfigSchema, config) as unknown as OneDriveConfigRedacted
+}
+
+export function normalizeOneDriveConfig(input: Record<string, unknown>): OneDriveConfig {
+  return OneDriveConfigSchema.parse(normalizeFields(input)) as OneDriveConfig
 }
 
 export interface OneDriveConfigResolved extends MsGraphConfigResolved {

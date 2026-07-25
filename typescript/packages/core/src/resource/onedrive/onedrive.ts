@@ -1,4 +1,9 @@
-import { OneDriveAccessor, type OneDriveConfig } from '../../accessor/onedrive.ts'
+import {
+  OneDriveAccessor,
+  redactOneDriveConfig,
+  type OneDriveConfig,
+  type OneDriveConfigRedacted,
+} from '../../accessor/onedrive.ts'
 import { ONEDRIVE_COMMANDS } from '../../commands/builtin/onedrive/index.ts'
 import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
 import { read, readdir, stat } from '../../core/onedrive/index.ts'
@@ -18,9 +23,11 @@ export class OneDriveResource extends BaseResource implements Resource {
   override readonly indexTtl: number = 86_400
   readonly prompt: string = ONEDRIVE_PROMPT
   readonly accessor: OneDriveAccessor
+  private readonly config: OneDriveConfig
 
   constructor(config: OneDriveConfig) {
     super()
+    this.config = config
     this.accessor = new OneDriveAccessor(config)
   }
 
@@ -57,19 +64,8 @@ export class OneDriveResource extends BaseResource implements Resource {
   }
 
   getState(): Record<string, unknown> {
-    const config = this.accessor.config
-    return {
-      type: this.kind,
-      config: {
-        accessToken: '<REDACTED>',
-        tenantHost: config.tenantHost,
-        timeout: config.timeout,
-        maxRetries: config.maxRetries,
-        driveId: config.driveId,
-        siteId: config.siteId,
-        keyPrefix: config.keyPrefix,
-      },
-    }
+    const config: OneDriveConfigRedacted = redactOneDriveConfig(this.config)
+    return { type: this.kind, config }
   }
 
   loadState(_state: Record<string, unknown>): Promise<void> {

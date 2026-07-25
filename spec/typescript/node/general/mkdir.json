@@ -15,9 +15,11 @@
       "hf_models",
       "hf_spaces",
       "nextcloud",
+      "onedrive",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "ssh"
     ]
   },

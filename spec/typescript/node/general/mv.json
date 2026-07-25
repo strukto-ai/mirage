@@ -11,9 +11,11 @@
       "dropbox",
       "gdrive",
       "nextcloud",
+      "onedrive",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "ssh"
     ]
   },

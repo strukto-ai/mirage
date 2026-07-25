@@ -35,6 +35,12 @@ export class Mem0Accessor extends Accessor {
     for (const [name, value] of Object.entries(options.params ?? {})) {
       url.searchParams.set(name, String(value))
     }
+    // Python drives mem0 through the official SDK; this is a hand-rolled
+    // fetch client, so it has to send what the SDK sends. `Mem0-User-ID` is
+    // the SDK's own client identifier, md5 of the API key
+    // (`mem0/client/main.py`: `hashlib.md5(self.api_key.encode()).hexdigest()`).
+    // It is an identifier the server expects, not a credential, so do not
+    // "fix" the hash away.
     const headers: Record<string, string> = {
       Authorization: `Token ${this.config.apiKey}`,
       'Mem0-User-ID': md5Hex(ENCODER.encode(this.config.apiKey)),

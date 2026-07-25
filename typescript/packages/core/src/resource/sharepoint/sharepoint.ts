@@ -1,4 +1,9 @@
-import { SharePointAccessor, type SharePointConfig } from '../../accessor/sharepoint.ts'
+import {
+  redactSharePointConfig,
+  SharePointAccessor,
+  type SharePointConfig,
+  type SharePointConfigRedacted,
+} from '../../accessor/sharepoint.ts'
 import { SHAREPOINT_COMMANDS } from '../../commands/builtin/sharepoint/index.ts'
 import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
 import { read, readdir, stat } from '../../core/sharepoint/index.ts'
@@ -18,9 +23,11 @@ export class SharePointResource extends BaseResource implements Resource {
   override readonly indexTtl: number = 86_400
   readonly prompt: string = SHAREPOINT_PROMPT
   readonly accessor: SharePointAccessor
+  private readonly config: SharePointConfig
 
   constructor(config: SharePointConfig) {
     super()
+    this.config = config
     this.accessor = new SharePointAccessor(config)
   }
 
@@ -57,20 +64,8 @@ export class SharePointResource extends BaseResource implements Resource {
   }
 
   getState(): Record<string, unknown> {
-    const config = this.accessor.config
-    return {
-      type: this.kind,
-      config: {
-        accessToken: '<REDACTED>',
-        tenantHost: config.tenantHost,
-        timeout: config.timeout,
-        maxRetries: config.maxRetries,
-        siteFilter: config.siteFilter,
-        site: config.site,
-        drive: config.drive,
-        keyPrefix: config.keyPrefix,
-      },
-    }
+    const config: SharePointConfigRedacted = redactSharePointConfig(this.config)
+    return { type: this.kind, config }
   }
 
   loadState(_state: Record<string, unknown>): Promise<void> {

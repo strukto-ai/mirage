@@ -21,12 +21,15 @@
       "lancedb",
       "langfuse",
       "linear",
+      "mem0",
       "mongodb",
       "notion",
+      "onedrive",
       "postgres",
       "qdrant",
       "ram",
       "s3",
+      "sharepoint",
       "slack",
       "trello"
     ]

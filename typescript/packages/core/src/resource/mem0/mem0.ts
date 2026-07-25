@@ -1,4 +1,5 @@
 import { Mem0Accessor } from '../../accessor/mem0.ts'
+import { redactMem0Config, type Mem0Config, type Mem0ConfigRedacted } from './config.ts'
 import { MEM0_COMMANDS } from '../../commands/builtin/mem0/index.ts'
 import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
 import { read, readdir, stat } from '../../core/mem0/index.ts'
@@ -7,7 +8,6 @@ import type { RegisteredOp } from '../../ops/registry.ts'
 import { ResourceName, type FileStat, type PathSpec } from '../../types.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import { BaseResource, type Resource } from '../base.ts'
-import { type Mem0Config } from './config.ts'
 import { MEM0_PROMPT } from './prompt.ts'
 
 const resolveGlob = makeResolveGlob(readdir)
@@ -19,8 +19,11 @@ export class Mem0Resource extends BaseResource implements Resource {
   readonly prompt: string = MEM0_PROMPT
   readonly accessor: Mem0Accessor
 
+  private readonly config: Mem0Config
+
   constructor(config: Mem0Config) {
     super()
+    this.config = config
     this.accessor = new Mem0Accessor(config)
   }
 
@@ -57,19 +60,8 @@ export class Mem0Resource extends BaseResource implements Resource {
   }
 
   getState(): Record<string, unknown> {
-    const config = this.accessor.config
-    return {
-      type: this.kind,
-      config: {
-        apiKey: '<REDACTED>',
-        host: config.host,
-        userId: config.userId,
-        agentId: config.agentId,
-        runId: config.runId,
-        defaultPageSize: config.defaultPageSize,
-        defaultSearchLimit: config.defaultSearchLimit,
-      },
-    }
+    const config: Mem0ConfigRedacted = redactMem0Config(this.config)
+    return { type: this.kind, config }
   }
 
   loadState(_state: Record<string, unknown>): Promise<void> {

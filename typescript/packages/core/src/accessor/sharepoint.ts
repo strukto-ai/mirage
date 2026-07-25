@@ -12,14 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
 import { Accessor } from './base.ts'
 import { GRAPH_API, graphList } from '../core/msgraph/client.ts'
 import {
+  MSGRAPH_CONFIG_SHAPE,
   resolveMsGraphConfig,
   type MsGraphConfig,
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
+import { redactConfigWithSchema } from '../resource/secrets.ts'
+import { normalizeFields } from '../utils/normalize.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 export interface SharePointConfig extends MsGraphConfig {
@@ -27,6 +31,36 @@ export interface SharePointConfig extends MsGraphConfig {
   site?: string
   drive?: string
   keyPrefix?: string
+}
+
+export interface SharePointConfigRedacted {
+  accessToken: '<REDACTED>'
+  tenantHost?: string
+  timeout?: number
+  maxRetries?: number
+  siteFilter?: string
+  site?: string
+  drive?: string
+  keyPrefix?: string
+}
+
+export const SharePointConfigSchema = z.object({
+  ...MSGRAPH_CONFIG_SHAPE,
+  siteFilter: z.string().optional(),
+  site: z.string().optional(),
+  drive: z.string().optional(),
+  keyPrefix: z.string().optional(),
+})
+
+export function redactSharePointConfig(config: SharePointConfig): SharePointConfigRedacted {
+  return redactConfigWithSchema(
+    SharePointConfigSchema,
+    config,
+  ) as unknown as SharePointConfigRedacted
+}
+
+export function normalizeSharePointConfig(input: Record<string, unknown>): SharePointConfig {
+  return SharePointConfigSchema.parse(normalizeFields(input)) as SharePointConfig
 }
 
 export interface SharePointConfigResolved extends MsGraphConfigResolved {

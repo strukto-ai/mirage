@@ -923,10 +923,14 @@ export { DriveLoc } from './core/msgraph/drive.ts'
 export {
   OneDriveAccessor,
   type OneDriveConfig,
+  type OneDriveConfigRedacted,
   type OneDriveConfigResolved,
+  OneDriveConfigSchema,
+  normalizeOneDriveConfig,
   oneDriveBase,
   oneDriveItemUrl,
   oneDriveRefPath,
+  redactOneDriveConfig,
   resolveOneDriveConfig,
 } from './accessor/onedrive.ts'
 export { ONEDRIVE_COMMANDS } from './commands/builtin/onedrive/index.ts'
@@ -937,8 +941,12 @@ export { ONEDRIVE_PROMPT } from './resource/onedrive/prompt.ts'
 export {
   SharePointAccessor,
   type SharePointConfig,
+  type SharePointConfigRedacted,
   type SharePointConfigResolved,
+  SharePointConfigSchema,
   type ResolvedSharePointPath,
+  normalizeSharePointConfig,
+  redactSharePointConfig,
   resolveSharePointConfig,
   sharePointItemUrl,
   sharePointRefPath,
@@ -954,8 +962,12 @@ export { MEM0_OPS } from './ops/mem0/index.ts'
 export * as mem0 from './core/mem0/index.ts'
 export {
   type Mem0Config,
+  type Mem0ConfigRedacted,
   type Mem0ConfigResolved,
+  Mem0ConfigSchema,
   type Mem0ScopeKind,
+  normalizeMem0Config,
+  redactMem0Config,
   resolveMem0Config,
 } from './resource/mem0/config.ts'
 export { Mem0Resource } from './resource/mem0/mem0.ts'
