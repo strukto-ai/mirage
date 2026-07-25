@@ -129,6 +129,7 @@ export async function handleSource(
   executeFn: ExecuteStringFn,
   path: string | PathSpec,
   session: Session,
+  args: string[] = [],
 ): Promise<Result> {
   const raw = scopePath(path)
   const resolved = resolvePath(raw, session.cwd)
@@ -157,12 +158,18 @@ export async function handleSource(
       new ExecutionNode({ command: `source ${raw}`, exitCode: 1 }),
     ]
   }
+  let savedPositional: string[] | null = null
+  if (args.length > 0) {
+    savedPositional = session.positionalArgs
+    session.positionalArgs = args
+  }
   session.sourceDepth += 1
   try {
     const io = await executeFn(script, { sessionId: session.sessionId })
     return [io.stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]
   } finally {
     session.sourceDepth -= 1
+    if (savedPositional !== null) session.positionalArgs = savedPositional
   }
 }
 

@@ -224,6 +224,40 @@ def test_case_match():
     assert ws.get_session(ws.default_session_id).env["M"] == "yes"
 
 
+def test_case_fallthrough_semi_amp():
+    ws = _ws()
+    io = _exec(ws,
+               "case a in a) echo one;& b) echo two;; c) echo three;; esac")
+    assert _stdout(io) == b"one\ntwo\n"
+
+
+def test_case_continue_match_semi_semi_amp():
+    ws = _ws()
+    io = _exec(ws,
+               "case a in a) echo one;;& a) echo two;;& b) echo three;; esac")
+    assert _stdout(io) == b"one\ntwo\n"
+
+
+def test_case_semi_semi_amp_no_further_match():
+    ws = _ws()
+    io = _exec(ws, "case a in a) echo one;;& z) echo two;; esac")
+    assert _stdout(io) == b"one\n"
+
+
+def test_source_sets_positional_args():
+    ws = _ws()
+    _exec(ws, "printf 'echo argc=$# a1=$1 a2=$2\\n' > /ram/s.sh")
+    io = _exec(ws, "source /ram/s.sh AA BB")
+    assert _stdout(io) == b"argc=2 a1=AA a2=BB\n"
+
+
+def test_source_without_args_keeps_parent_positional():
+    ws = _ws()
+    _exec(ws, "printf 'echo a1=$1\\n' > /ram/s.sh")
+    io = _exec(ws, "set -- P1 P2; source /ram/s.sh; echo after=$1")
+    assert _stdout(io) == b"a1=P1\nafter=P1\n"
+
+
 # ── operators ──────────────────────────────────
 
 

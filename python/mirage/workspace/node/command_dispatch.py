@@ -355,7 +355,8 @@ async def _run_argv(
 
     if name in (SB.SOURCE, SB.DOT):
         path = operands[0] if operands else ""
-        return await handle_source(dispatch, execute_fn, path, session)
+        return await handle_source(dispatch, execute_fn, path, session,
+                                   [word_text(o) for o in operands[1:]])
 
     if name == SB.EVAL:
         return await handle_eval(execute_fn, args, session)
@@ -422,7 +423,7 @@ async def _run_argv(
         return await handle_echo(args)
 
     if name == SB.PRINTF:
-        return await handle_printf(args)
+        return await handle_printf(args, session)
 
     if name == SB.SLEEP:
         return await handle_sleep(args, cancel=cancel)

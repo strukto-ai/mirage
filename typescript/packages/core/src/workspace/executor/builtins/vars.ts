@@ -22,9 +22,11 @@ import { ExitSignal } from '../../../shell/errors.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { arrayIndex } from '../../expand/variable.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../command.ts'
+import { PRINTF_TARGET_RE } from './text.ts'
 import type { ExecuteStringFn, Result } from './scope.ts'
 
 export function handleExport(assignments: string[], session: Session): Result {
@@ -70,8 +72,58 @@ export function handleReadonly(assignments: string[], session: Session): Result 
   return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
 }
 
-export function handleUnset(names: string[], session: Session): Result {
-  for (const name of names) {
+function unsetVariable(session: Session, name: string): void {
+  const match = PRINTF_TARGET_RE.exec(name)
+  if (match?.[2] !== undefined) {
+    const base = match[1] ?? ''
+    const arr = session.arrays[base]
+    if (arr === undefined) return
+    let idx = arrayIndex(match[2], session.env)
+    if (idx < 0) idx += arr.length
+    if (idx >= 0 && idx < arr.length) arr.splice(idx, 1)
+    return
+  }
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.env[name]
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.arrays[name]
+  if (name === 'OPTIND') session.getoptsOptind = null
+}
+
+export function handleUnset(args: string[], session: Session): Result {
+  let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
+  let i = 0
+  while (i < args.length && (args[i] ?? '').startsWith('-') && args[i] !== '-') {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (/^-[vfn]+$/.test(tok)) {
+      if (tok.includes('f')) mode = 'f'
+      else if (tok.includes('n')) mode = 'n'
+      else mode = 'v'
+      i += 1
+      continue
+    }
+    const err = new TextEncoder().encode(`bash: unset: ${tok}: invalid option\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'unset', exitCode: 2, stderr: err }),
+    ]
+  }
+  for (const name of args.slice(i)) {
+    if (mode === 'n') {
+      // No nameref attribute exists, so this leaves the name untouched,
+      // matching bash on a plain variable.
+      continue
+    }
+    if (mode === 'f') {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.functions[name]
+      continue
+    }
     if (session.readonlyVars.has(name)) {
       const err = new TextEncoder().encode(
         `bash: unset: ${name}: cannot unset: readonly variable\n`,
@@ -82,9 +134,14 @@ export function handleUnset(names: string[], session: Session): Result {
         new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
       ]
     }
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete session.env[name]
-    if (name === 'OPTIND') session.getoptsOptind = null
+    const match = PRINTF_TARGET_RE.exec(name)
+    const isElement = match?.[2] !== undefined
+    const existed = isElement || name in session.env || name in session.arrays
+    unsetVariable(session, name)
+    if (mode === 'auto' && !existed && name in session.functions) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.functions[name]
+    }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'unset', exitCode: 0 })]
 }

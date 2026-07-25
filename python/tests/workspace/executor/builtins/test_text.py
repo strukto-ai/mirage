@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.workspace.executor.builtins.text import handle_echo, handle_printf
+from mirage.workspace.session import Session
 
 
 async def echo_bytes(args: list[str]) -> bytes:
@@ -11,7 +12,7 @@ async def echo_bytes(args: list[str]) -> bytes:
 
 
 async def printf_result(args: list[str]) -> tuple[bytes, int]:
-    out, io, node = await handle_printf(args)
+    out, io, node = await handle_printf(args, Session(session_id="s1"))
     assert isinstance(out, bytes)
     assert io.exit_code == node.exit_code
     return out, node.exit_code
@@ -201,3 +202,37 @@ async def test_printf_invalid_number_reports_exit_1():
     out, code = await printf_result(["%d\n", "abc"])
     assert out == b"0\n"
     assert code == 1
+
+
+@pytest.mark.asyncio
+async def test_printf_v_assigns_variable_and_prints_nothing():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "V", "x=%d", "42"], session)
+    assert out is None
+    assert node.exit_code == 0
+    assert session.env["V"] == "x=42"
+
+
+@pytest.mark.asyncio
+async def test_printf_v_targets_array_element():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "arr[2]", "hi"], session)
+    assert out is None
+    assert node.exit_code == 0
+    assert session.arrays["arr"] == ["", "", "hi"]
+
+
+@pytest.mark.asyncio
+async def test_printf_v_invalid_name_errors():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "1bad", "x"], session)
+    assert node.exit_code == 1
+    assert b"not a valid variable name" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_printf_v_keeps_exit_1_on_bad_number_but_still_assigns():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "V", "%d", "notanum"], session)
+    assert node.exit_code == 1
+    assert session.env["V"] == "0"

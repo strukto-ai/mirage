@@ -32,7 +32,7 @@ import {
   getPipelineCommands,
   getRedirects,
   getText,
-  getUnsetNames,
+  getUnsetArgs,
   getWhileParts,
 } from '../../shell/helpers.ts'
 import { JobTable } from '../../shell/job_table.ts'
@@ -524,7 +524,7 @@ export async function executeNode(
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(getUnsetNames(node), session)
+    return handleUnset(getUnsetArgs(node), session)
   }
 
   if (kind === NodeKind.TEST) {

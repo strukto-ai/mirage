@@ -9,7 +9,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.workspace.executor.builtins.vars import (  # yapf: disable
     handle_env, handle_exit, handle_getopts, handle_read, handle_return,
-    handle_shift, handle_whoami)
+    handle_shift, handle_unset, handle_whoami)
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session.session import Session
@@ -51,6 +51,59 @@ async def test_env_unset_removes_variable():
     rendered = await materialize(out)
     assert b"DROP=" not in rendered
     assert b"KEEP=2" in rendered
+
+
+@pytest.mark.asyncio
+async def test_unset_f_removes_function_only():
+    session = make_session()
+    session.functions["fn"] = []
+    session.env["fn"] = "keepvar"
+    await handle_unset(["-f", "fn"], session)
+    assert "fn" not in session.functions
+    assert session.env["fn"] == "keepvar"
+
+
+@pytest.mark.asyncio
+async def test_unset_v_removes_variable_not_function():
+    session = make_session()
+    session.functions["fn"] = []
+    session.env["fn"] = "v"
+    await handle_unset(["-v", "fn"], session)
+    assert "fn" in session.functions
+    assert "fn" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_unset_bare_prefers_variable_then_function():
+    session = make_session()
+    session.functions["a"] = []
+    session.env["a"] = "v"
+    await handle_unset(["a"], session)
+    # The variable existed, so only it is removed.
+    assert "a" not in session.env
+    assert "a" in session.functions
+    # No variable of this name: the function is removed instead.
+    session.functions["b"] = []
+    await handle_unset(["b"], session)
+    assert "b" not in session.functions
+
+
+@pytest.mark.asyncio
+async def test_unset_removes_whole_array_and_one_element():
+    session = make_session()
+    session.arrays["arr"] = ["x", "y", "z"]
+    await handle_unset(["arr[1]"], session)
+    assert session.arrays["arr"] == ["x", "z"]
+    await handle_unset(["arr"], session)
+    assert "arr" not in session.arrays
+
+
+@pytest.mark.asyncio
+async def test_unset_invalid_option_errors():
+    session = make_session()
+    _, io, node = await handle_unset(["-z", "x"], session)
+    assert node.exit_code == 2
+    assert b"invalid option" in (io.stderr or b"")
 
 
 @pytest.mark.asyncio

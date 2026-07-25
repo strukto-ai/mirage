@@ -25,7 +25,9 @@ from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.types import SET_FLAG_TO_OPTION
+from mirage.workspace.executor.builtins.text import _PRINTF_TARGET_RE
 from mirage.workspace.executor.control import ReturnSignal
+from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -76,11 +78,76 @@ async def handle_readonly(
     return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)
 
 
+def _unset_variable(session: Session, name: str) -> None:
+    """Remove a scalar/array variable, or one array element ``name[idx]``.
+
+    Args:
+        session (Session): shell session state.
+        name (str): a variable name or ``name[subscript]``.
+    """
+    match = _PRINTF_TARGET_RE.match(name)
+    if match is not None and match.group(2) is not None:
+        base, subscript = match.group(1), match.group(2)
+        arr = session.arrays.get(base)
+        if arr is None:
+            return
+        idx = _array_index(subscript, session.env)
+        if idx < 0:
+            idx += len(arr)
+        if 0 <= idx < len(arr):
+            del arr[idx]
+        return
+    session.env.pop(name, None)
+    session.arrays.pop(name, None)
+    if name == "OPTIND":
+        session._getopts_optind = None
+
+
 async def handle_unset(
-    names: list[str],
+    args: list[str],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    for name in names:
+    """Unset shell variables, arrays, or functions, with bash's flags.
+
+    ``-v`` targets a variable only, ``-f`` a function only, and a bare
+    name a variable if one exists or else a function. ``-n`` (unset a
+    nameref itself) has no referent here — mirage has no nameref
+    attribute — so it matches bash on a non-nameref name and leaves it
+    untouched.
+
+    Args:
+        args (list[str]): option words followed by names to unset.
+        session (Session): shell session state.
+    """
+    mode = "auto"
+    i = 0
+    while i < len(args) and args[i].startswith("-") and args[i] != "-":
+        tok = args[i]
+        if tok == "--":
+            i += 1
+            break
+        if all(ch in "vfn" for ch in tok[1:]):
+            if "f" in tok[1:]:
+                mode = "f"
+            elif "n" in tok[1:]:
+                mode = "n"
+            else:
+                mode = "v"
+            i += 1
+            continue
+        err = f"bash: unset: {tok}: invalid option\n".encode()
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="unset",
+                                                         exit_code=2,
+                                                         stderr=err)
+    for name in args[i:]:
+        if mode == "n":
+            # No nameref attribute exists, so as in bash on a plain
+            # variable this leaves the name untouched.
+            continue
+        if mode == "f":
+            session.functions.pop(name, None)
+            continue
         if name in session.readonly_vars:
             err = (f"bash: unset: {name}: cannot unset: "
                    f"readonly variable\n").encode()
@@ -88,9 +155,12 @@ async def handle_unset(
                                   stderr=err), ExecutionNode(command="unset",
                                                              exit_code=1,
                                                              stderr=err)
-        session.env.pop(name, None)
-        if name == "OPTIND":
-            session._getopts_optind = None
+        target = _PRINTF_TARGET_RE.match(name)
+        is_element = target is not None and target.group(2) is not None
+        existed = is_element or name in session.env or name in session.arrays
+        _unset_variable(session, name)
+        if mode == "auto" and not existed and name in session.functions:
+            session.functions.pop(name, None)
     return None, IOResult(), ExecutionNode(command="unset", exit_code=0)
 
 

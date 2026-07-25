@@ -102,6 +102,48 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(s.env.B).toBe('2')
   })
 
+  it('unset -f removes a function but not a same-named variable', () => {
+    const s = new Session({ sessionId: 'test', env: { fn: 'v' } })
+    s.functions.fn = []
+    handleUnset(['-f', 'fn'], s)
+    expect('fn' in s.functions).toBe(false)
+    expect(s.env.fn).toBe('v')
+  })
+
+  it('unset -v removes a variable but not a same-named function', () => {
+    const s = new Session({ sessionId: 'test', env: { fn: 'v' } })
+    s.functions.fn = []
+    handleUnset(['-v', 'fn'], s)
+    expect('fn' in s.functions).toBe(true)
+    expect('fn' in s.env).toBe(false)
+  })
+
+  it('unset bare prefers a variable, else the function', () => {
+    const s = new Session({ sessionId: 'test', env: { a: 'v' } })
+    s.functions.a = []
+    handleUnset(['a'], s)
+    expect('a' in s.env).toBe(false)
+    expect('a' in s.functions).toBe(true)
+    s.functions.b = []
+    handleUnset(['b'], s)
+    expect('b' in s.functions).toBe(false)
+  })
+
+  it('unset removes a whole array and a single element', () => {
+    const s = new Session({ sessionId: 'test' })
+    s.arrays.arr = ['x', 'y', 'z']
+    handleUnset(['arr[1]'], s)
+    expect(s.arrays.arr).toEqual(['x', 'z'])
+    handleUnset(['arr'], s)
+    expect('arr' in s.arrays).toBe(false)
+  })
+
+  it('unset -z is an invalid option (exit 2)', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleUnset(['-z', 'x'], s)
+    expect(io.exitCode).toBe(2)
+  })
+
   it('printenv VAR emits value + newline; exit 1 if missing', () => {
     const s = new Session({ sessionId: 'test', env: { X: 'yes' } })
     const [out, io] = handlePrintenv('X', s)
@@ -173,7 +215,7 @@ describe('handleEcho', () => {
 
 describe('handlePrintf', () => {
   const run = (args: string[]): [string, number] => {
-    const [out, io] = handlePrintf(args)
+    const [out, io] = handlePrintf(args, new Session({ sessionId: 'test' }))
     return [decode(out as Uint8Array), io.exitCode]
   }
   const stdout = (args: string[]): string => {
@@ -250,7 +292,7 @@ describe('handlePrintf', () => {
   })
 
   it('empty args → empty output', () => {
-    const [out] = handlePrintf([])
+    const [out] = handlePrintf([], new Session({ sessionId: 'test' }))
     expect((out as Uint8Array).byteLength).toBe(0)
   })
 
@@ -287,6 +329,34 @@ describe('handlePrintf', () => {
     expect(stdout(['%a\n', '0.5'])).toBe('0x1p-1\n')
     expect(stdout(['%a\n', '3.14'])).toBe('0x1.91eb851eb851fp+1\n')
     expect(stdout(['%A\n', '255.5'])).toBe('0X1.FFP+7\n')
+  })
+
+  it('-v assigns to a variable and prints nothing', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [out, io] = handlePrintf(['-v', 'V', 'x=%d', '42'], s)
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(0)
+    expect(s.env.V).toBe('x=42')
+  })
+
+  it('-v targets an array element', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', 'arr[2]', 'hi'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.arrays.arr).toEqual(['', '', 'hi'])
+  })
+
+  it('-v with an invalid name errors', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', '1bad', 'x'], s)
+    expect(io.exitCode).toBe(1)
+  })
+
+  it('-v keeps exit 1 on a bad number but still assigns', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', 'V', '%d', 'notanum'], s)
+    expect(io.exitCode).toBe(1)
+    expect(s.env.V).toBe('0')
   })
 })
 
@@ -856,6 +926,22 @@ describe('handleSource', () => {
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr instanceof Uint8Array ? io.stderr : null)).toMatch(/missing.sh/)
     expect(executeFn).not.toHaveBeenCalled()
+  })
+
+  it('sets positional args for the script and restores them after', async () => {
+    const s = new Session({ sessionId: 'test', cwd: '/', positionalArgs: ['P1', 'P2'] })
+    const dispatch = vi.fn(() => {
+      const data = new TextEncoder().encode('echo hi\n')
+      return Promise.resolve([data, new IOResult()] as [Uint8Array, IOResult])
+    }) as unknown as DispatchFn
+    let seen: string[] = []
+    const executeFn = vi.fn((_script: string, _opts: { sessionId: string }) => {
+      seen = [...s.positionalArgs]
+      return Promise.resolve(new IOResult())
+    })
+    await handleSource(dispatch, executeFn, '/script.sh', s, ['AA', 'BB'])
+    expect(seen).toEqual(['AA', 'BB'])
+    expect(s.positionalArgs).toEqual(['P1', 'P2'])
   })
 })
 

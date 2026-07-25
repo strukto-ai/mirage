@@ -292,7 +292,7 @@ async def provision_node(
     if kind == NodeKind.CASE:
         items = get_case_items(node)
         children = []
-        for _, body in items:
+        for _, body, _ in items:
             if not body:
                 continue
             stmts = [await recurse(stmt, session) for stmt in body]

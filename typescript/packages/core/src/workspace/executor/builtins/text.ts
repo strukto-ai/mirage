@@ -15,8 +15,12 @@
 import { interpretEscapes } from '../../../commands/builtin/utils/escapes.ts'
 import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
+import { arrayIndex } from '../../expand/variable.ts'
+import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
+
+export const PRINTF_TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.*)\])?$/
 
 /**
  * Print arguments, honoring GNU echo's option rules.
@@ -766,18 +770,77 @@ function runPrintf(fmt: string, args: string[]): [string, string[]] {
  * exhausted; a missing argument renders as the empty string / `0`.
  * Integers wrap at 64 bits; `%a` formats at IEEE double precision.
  */
-export function handlePrintf(args: string[]): Result {
+function assignPrintfTarget(session: Session, target: string, value: string): boolean {
+  const match = PRINTF_TARGET_RE.exec(target)
+  if (match === null) return false
+  const name = match[1] ?? ''
+  const subscript = match[2]
+  if (subscript === undefined) {
+    session.env[name] = value
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.arrays[name]
+    return true
+  }
+  let arr = session.arrays[name]
+  if (arr === undefined) {
+    const scalar = session.env[name]
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.env[name]
+    arr = scalar !== undefined ? [scalar] : []
+  }
+  let idx = arrayIndex(subscript, session.env)
+  if (idx < 0) idx += arr.length
+  if (idx < 0) return false
+  while (arr.length <= idx) arr.push('')
+  arr[idx] = value
+  session.arrays[name] = arr
+  return true
+}
+
+export function handlePrintf(args: string[], session: Session): Result {
+  let target: string | null = null
+  if (args.length >= 2 && args[0] === '-v') {
+    target = args[1] ?? ''
+    args = args.slice(2)
+  }
   if (args.length === 0) {
+    if (target !== null) {
+      const err = new TextEncoder().encode('printf: usage: printf [-v var] format [arguments]\n')
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
+      ]
+    }
     return [new Uint8Array(), new IOResult(), new ExecutionNode({ command: 'printf', exitCode: 0 })]
   }
   const [output, errors] = runPrintf(args[0] ?? '', args.slice(1))
+  const errBytes = errors.length > 0 ? new TextEncoder().encode(errors.join('')) : null
+  if (target !== null) {
+    if (!assignPrintfTarget(session, target, output)) {
+      const err = new TextEncoder().encode(`printf: \`${target}': not a valid variable name\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: err }),
+        new ExecutionNode({ command: 'printf', exitCode: 1, stderr: err }),
+      ]
+    }
+    const exitCode = errors.length > 0 ? 1 : 0
+    if (errBytes !== null) {
+      return [
+        null,
+        new IOResult({ exitCode, stderr: errBytes }),
+        new ExecutionNode({ command: 'printf', exitCode, stderr: errBytes }),
+      ]
+    }
+    return [null, new IOResult({ exitCode }), new ExecutionNode({ command: 'printf', exitCode })]
+  }
   const out = new TextEncoder().encode(output)
-  if (errors.length > 0) {
-    const err = new TextEncoder().encode(errors.join(''))
+  if (errBytes !== null) {
     return [
       out,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: 'printf', exitCode: 1, stderr: err }),
+      new IOResult({ exitCode: 1, stderr: errBytes }),
+      new ExecutionNode({ command: 'printf', exitCode: 1, stderr: errBytes }),
     ]
   }
   return [out, new IOResult(), new ExecutionNode({ command: 'printf', exitCode: 0 })]

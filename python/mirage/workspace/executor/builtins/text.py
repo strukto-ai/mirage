@@ -18,7 +18,11 @@ import re
 from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.workspace.expand.variable import _array_index
+from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
+
+_PRINTF_TARGET_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[(.*)\])?\Z")
 
 _SIMPLE_ESCAPES = {
     "\\": "\\",
@@ -635,8 +639,44 @@ def _convert(conv: str, raw: str | None, flags: str, width: int | None,
     return _format_float(value_f, conv, flags, width, precision), err, False
 
 
+def _assign_printf_target(session: Session, target: str, value: str) -> bool:
+    """Assign ``value`` to a ``printf -v`` target (scalar or ``name[idx]``).
+
+    Args:
+        session (Session): shell session whose variables are written.
+        target (str): the ``-v`` operand, a name or ``name[subscript]``.
+        value (str): the formatted text to store.
+
+    Returns:
+        bool: True on success, False when ``target`` is not a valid name.
+    """
+    match = _PRINTF_TARGET_RE.match(target)
+    if match is None:
+        return False
+    name, subscript = match.group(1), match.group(2)
+    if subscript is None:
+        session.env[name] = value
+        session.arrays.pop(name, None)
+        return True
+    arr = session.arrays.get(name)
+    if arr is None:
+        scalar = session.env.pop(name, None)
+        arr = [scalar] if scalar else []
+    idx = _array_index(subscript, session.env)
+    if idx < 0:
+        idx += len(arr)
+    if idx < 0:
+        return False
+    while len(arr) <= idx:
+        arr.append("")
+    arr[idx] = value
+    session.arrays[name] = arr
+    return True
+
+
 async def handle_printf(
-        args: list[str],  # noqa: E125
+    args: list[str],
+    session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -649,17 +689,43 @@ async def handle_printf(
     string / ``0``. Integers wrap at 64 bits; ``%a`` formats at IEEE
     double precision.
 
+    With ``-v NAME`` the formatted text is stored in the shell variable
+    ``NAME`` (or the array element ``NAME[idx]``) instead of written to
+    stdout, matching GNU printf.
+
     Args:
-        args (list[str]): the format followed by its arguments.
+        args (list[str]): the format followed by its arguments, optionally
+            preceded by ``-v NAME``.
+        session (Session): shell session, for the ``-v`` assignment.
     """
+    target: str | None = None
+    if len(args) >= 2 and args[0] == "-v":
+        target = args[1]
+        args = args[2:]
     if not args:
+        if target is not None:
+            # `printf -v x` with no format is a usage error in bash.
+            err = b"printf: usage: printf [-v var] format [arguments]\n"
+            return None, IOResult(exit_code=2,
+                                  stderr=err), ExecutionNode(command="printf",
+                                                             exit_code=2)
         return b"", IOResult(), ExecutionNode(command="printf", exit_code=0)
     output, errors = _run_printf(args[0], args[1:])
+    err_bytes = "".join(errors).encode() if errors else b""
+    if target is not None:
+        if not _assign_printf_target(session, target, output):
+            err = (f"printf: `{target}': not a valid variable name\n").encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command="printf",
+                                                             exit_code=1)
+        exit_code = 1 if errors else 0
+        return None, IOResult(exit_code=exit_code, stderr=err_bytes
+                              or None), ExecutionNode(command="printf",
+                                                      exit_code=exit_code)
     out = output.encode()
     if errors:
-        err = "".join(errors).encode()
         return out, IOResult(exit_code=1,
-                             stderr=err), ExecutionNode(command="printf",
-                                                        exit_code=1,
-                                                        stderr=err)
+                             stderr=err_bytes), ExecutionNode(command="printf",
+                                                              exit_code=1,
+                                                              stderr=err_bytes)
     return out, IOResult(), ExecutionNode(command="printf", exit_code=0)

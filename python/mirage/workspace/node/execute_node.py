@@ -54,7 +54,7 @@ from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_case_word, get_declaration_keyword, get_for_parts,
     get_function_body, get_function_name, get_if_branches, get_list_parts,
     get_negated_command, get_pipeline_commands, get_redirects, get_text,
-    get_unset_names, get_while_parts)
+    get_unset_args, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_local, handle_readonly, handle_test, handle_unset)
 
@@ -457,8 +457,8 @@ async def execute_node(
 
     # ── unset ───────────────────────────────────
     if kind == NodeKind.UNSET:
-        names = get_unset_names(node)
-        return await handle_unset(names, session)
+        args = get_unset_args(node)
+        return await handle_unset(args, session)
 
     # ── test ([ ] or [[ ]]) ─────────────────────
     if kind == NodeKind.TEST:
