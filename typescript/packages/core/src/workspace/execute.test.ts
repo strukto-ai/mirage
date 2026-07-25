@@ -62,12 +62,10 @@ describe('Workspace.execute', () => {
     const { ws } = buildWorkspace()
     const res = await ws.execute('RO=1; readonly RO; RO=2')
     expect(res.exitCode).toBe(1)
-    expect(new TextDecoder().decode(res.stderr ?? new Uint8Array())).toBe(
-      'bash: RO: readonly variable\n',
-    )
+    expect(new TextDecoder().decode(res.stderr)).toBe('bash: RO: readonly variable\n')
     const res2 = await ws.execute("readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
     expect(new TextDecoder().decode(res2.stdout)).toBe('rc=1\n')
-    expect(new TextDecoder().decode(res2.stderr ?? new Uint8Array())).toBe(
+    expect(new TextDecoder().decode(res2.stderr)).toBe(
       'bash: unset: RA: cannot unset: readonly variable\n',
     )
     await ws.close()
