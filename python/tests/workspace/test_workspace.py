@@ -258,6 +258,29 @@ def test_source_without_args_keeps_parent_positional():
     assert _stdout(io) == b"a1=P1\nafter=P1\n"
 
 
+def test_source_positional_args_keep_the_spelling():
+    ws = _ws()
+    _exec(ws, "printf 'echo a1=$1\\n' > /ram/s.sh")
+    # A path-looking argument stays as typed, not resolved.
+    io = _exec(ws, "cd /ram && source /ram/s.sh ./sub/x.txt")
+    assert _stdout(io) == b"a1=./sub/x.txt\n"
+
+
+def test_readonly_bare_name_registers():
+    ws = _ws()
+    io = _exec(ws, "RO=1; readonly RO; RO=2")
+    assert io.exit_code == 1
+    assert io.stderr == b"bash: RO: readonly variable\n"
+
+
+def test_readonly_array_form_registers():
+    ws = _ws()
+    io = _exec(ws, "readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
+    assert _stdout(io) == b"rc=1\n"
+    assert io.stderr == (b"bash: unset: RA: cannot unset: "
+                         b"readonly variable\n")
+
+
 # ── operators ──────────────────────────────────
 
 

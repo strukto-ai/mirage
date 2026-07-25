@@ -95,11 +95,147 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "unset UA; declare -a UA=(1 2 3); unset 'UA[1]'; echo [${UA[@]}]",
+      "command": "unset UA; declare -a UA=(1 2 3); unset 'UA[1]'; echo [${UA[0]}][${UA[1]}][${UA[2]}]",
       "expect": {
         "exit": 0,
-        "stdout": "[1 3]\n",
+        "stdout": "[1][][3]\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "unset_trailing_element_shortens",
+      "seq": 609234,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset UB; declare -a UB=(1 2 3); unset 'UB[2]'; echo [${UB[@]}] n=${#UB[@]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1 2] n=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unset_readonly_array_element",
+      "seq": 609235,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readonly -a UC=(x y); unset 'UC[1]'; echo rc=$?; echo [${UC[@]}]",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n[x y]\n",
+        "stderr": "bash: unset: UC: cannot unset: readonly variable\n"
+      }
+    },
+    {
+      "id": "unset_scalar_element_zero",
+      "seq": 609236,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset UD; UD=sc; unset 'UD[0]'; echo rc=$? [${UD}]",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0 []\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unset_scalar_nonzero_element_errors",
+      "seq": 609237,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset UE; UE=sc; unset 'UE[1]'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "bash: unset: UE: not an array variable\n"
       }
     }
   ]

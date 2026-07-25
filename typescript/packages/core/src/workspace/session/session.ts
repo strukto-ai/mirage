@@ -15,6 +15,32 @@
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { MountMode } from '../../types.ts'
 
+/**
+ * Read one entry of a session record, ignoring anything inherited from
+ * `Object.prototype`. Shell names are script-controlled, so a plain
+ * `record[name]` lookup would hand back `Object.prototype` (or one of
+ * its methods) for a name like `__proto__` or `toString`; Python's dicts
+ * have no such shadow, so this guard is the TypeScript side only.
+ */
+export function sessionEntry<T>(record: Record<string, T>, name: string): T | undefined {
+  return Object.hasOwn(record, name) ? record[name] : undefined
+}
+
+/**
+ * Write one entry of a session record as an own property. A plain
+ * `record[name] = value` on the name `__proto__` runs the inherited
+ * setter instead: it silently drops a string value and rewrites the
+ * record's prototype for an array one.
+ */
+export function setSessionEntry<T>(record: Record<string, T>, name: string, value: T): void {
+  Object.defineProperty(record, name, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
 export interface SessionInit {
   sessionId: string
   cwd?: string

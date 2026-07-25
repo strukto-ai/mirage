@@ -16,6 +16,7 @@ import { interpretEscapes } from '../../../commands/builtin/utils/escapes.ts'
 import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
 import { arrayIndex } from '../../expand/variable.ts'
+import { sessionEntry, setSessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
@@ -760,6 +761,50 @@ function runPrintf(fmt: string, args: string[]): [string, string[]] {
 }
 
 /**
+ * Assign `value` to a `printf -v` target (a scalar or `name[idx]`).
+ *
+ * A bare name assigns element 0 when the name already holds an array,
+ * leaving its other elements alone, as bash does. Nothing is mutated
+ * unless the whole assignment succeeds: a readonly name or an
+ * out-of-range subscript leaves the variable exactly as it was.
+ */
+function assignPrintfTarget(
+  session: Session,
+  name: string,
+  subscript: string | undefined,
+  value: string,
+): 'ok' | 'readonly' | 'subscript' {
+  if (session.readonlyVars.has(name)) return 'readonly'
+  if (subscript === undefined) {
+    const existing = sessionEntry(session.arrays, name)
+    if (existing === undefined) setSessionEntry(session.env, name, value)
+    else if (existing.length > 0) existing[0] = value
+    else existing.push(value)
+    return 'ok'
+  }
+  const existing = sessionEntry(session.arrays, name)
+  const fromScalar = existing === undefined
+  let arr = existing
+  if (arr === undefined) {
+    // An existing scalar becomes element 0, even when empty: bash
+    // resolves `x[-1]` against the length-1 array that produces.
+    const scalar = sessionEntry(session.env, name)
+    arr = scalar === undefined ? [] : [scalar]
+  }
+  let idx = arrayIndex(subscript, session.env)
+  if (idx < 0) idx += arr.length
+  if (idx < 0) return 'subscript'
+  while (arr.length <= idx) arr.push('')
+  arr[idx] = value
+  if (fromScalar) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.env[name]
+  }
+  setSessionEntry(session.arrays, name, arr)
+  return 'ok'
+}
+
+/**
  * Print formatted output, honoring GNU printf's format-reuse rules.
  *
  * Supports `%s %c %b %q`, the integer conversions `%d %i %o %u %x %X`,
@@ -769,39 +814,31 @@ function runPrintf(fmt: string, args: string[]): [string, string[]] {
  * arguments remain after one pass the format is reused until they are
  * exhausted; a missing argument renders as the empty string / `0`.
  * Integers wrap at 64 bits; `%a` formats at IEEE double precision.
+ *
+ * With `-v NAME` the formatted text is stored in the shell variable
+ * `NAME` (or the array element `NAME[idx]`) instead of written to
+ * stdout, matching GNU printf. An unusable `NAME` is rejected before the
+ * format runs (status 2); a readonly name or an out-of-range subscript
+ * still reports the format's own errors first, then fails with status 1
+ * and leaves the variable untouched.
  */
-function assignPrintfTarget(session: Session, target: string, value: string): boolean {
-  const match = PRINTF_TARGET_RE.exec(target)
-  if (match === null) return false
-  const name = match[1] ?? ''
-  const subscript = match[2]
-  if (subscript === undefined) {
-    session.env[name] = value
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete session.arrays[name]
-    return true
-  }
-  let arr = session.arrays[name]
-  if (arr === undefined) {
-    const scalar = session.env[name]
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete session.env[name]
-    arr = scalar !== undefined ? [scalar] : []
-  }
-  let idx = arrayIndex(subscript, session.env)
-  if (idx < 0) idx += arr.length
-  if (idx < 0) return false
-  while (arr.length <= idx) arr.push('')
-  arr[idx] = value
-  session.arrays[name] = arr
-  return true
-}
-
 export function handlePrintf(args: string[], session: Session): Result {
   let target: string | null = null
+  let parsed: RegExpExecArray | null = null
   if (args.length >= 2 && args[0] === '-v') {
     target = args[1] ?? ''
     args = args.slice(2)
+    parsed = PRINTF_TARGET_RE.exec(target)
+    if (parsed === null) {
+      // bash validates the name before formatting, so a bad name
+      // suppresses the conversion errors the format would report.
+      const err = new TextEncoder().encode(`printf: \`${target}': not a valid identifier\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
+      ]
+    }
   }
   if (args.length === 0) {
     if (target !== null) {
@@ -816,9 +853,15 @@ export function handlePrintf(args: string[], session: Session): Result {
   }
   const [output, errors] = runPrintf(args[0] ?? '', args.slice(1))
   const errBytes = errors.length > 0 ? new TextEncoder().encode(errors.join('')) : null
-  if (target !== null) {
-    if (!assignPrintfTarget(session, target, output)) {
-      const err = new TextEncoder().encode(`printf: \`${target}': not a valid variable name\n`)
+  if (target !== null && parsed !== null) {
+    const base = parsed[1] ?? ''
+    const status = assignPrintfTarget(session, base, parsed[2], output)
+    if (status !== 'ok') {
+      const detail =
+        status === 'readonly'
+          ? `bash: ${base}: readonly variable\n`
+          : `bash: ${target}: bad array subscript\n`
+      const err = new TextEncoder().encode(errors.join('') + detail)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),

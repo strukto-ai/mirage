@@ -58,6 +58,30 @@ describe('Workspace.execute', () => {
     await ws.close()
   })
 
+  it('readonly registers a bare name and an array assignment', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('RO=1; readonly RO; RO=2')
+    expect(res.exitCode).toBe(1)
+    expect(new TextDecoder().decode(res.stderr ?? new Uint8Array())).toBe(
+      'bash: RO: readonly variable\n',
+    )
+    const res2 = await ws.execute("readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
+    expect(new TextDecoder().decode(res2.stdout)).toBe('rc=1\n')
+    expect(new TextDecoder().decode(res2.stderr ?? new Uint8Array())).toBe(
+      'bash: unset: RA: cannot unset: readonly variable\n',
+    )
+    await ws.close()
+  })
+
+  it("source positional args keep the operand's spelling", async () => {
+    const { ws } = buildWorkspace()
+    await ws.execute("printf 'echo a1=$1\\n' > /ram/s.sh")
+    // A path-looking argument stays as typed, not resolved.
+    const res = await ws.execute('cd /ram && source /ram/s.sh ./sub/x.txt')
+    expect(new TextDecoder().decode(res.stdout)).toBe('a1=./sub/x.txt\n')
+    await ws.close()
+  })
+
   it('runs `pwd` and prints /', async () => {
     const { ws } = buildWorkspace()
     const res = await ws.execute('pwd')

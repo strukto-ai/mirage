@@ -92,10 +92,52 @@ async def test_unset_bare_prefers_variable_then_function():
 async def test_unset_removes_whole_array_and_one_element():
     session = make_session()
     session.arrays["arr"] = ["x", "y", "z"]
+    # An interior element leaves a hole: the later indices keep their
+    # positions, as bash does.
     await handle_unset(["arr[1]"], session)
-    assert session.arrays["arr"] == ["x", "z"]
+    assert session.arrays["arr"] == ["x", "", "z"]
+    # A trailing element shortens the array instead.
+    await handle_unset(["arr[2]"], session)
+    assert session.arrays["arr"] == ["x", ""]
     await handle_unset(["arr"], session)
     assert "arr" not in session.arrays
+
+
+@pytest.mark.asyncio
+async def test_unset_readonly_array_element_is_rejected():
+    session = make_session()
+    session.arrays["arr"] = ["x", "y"]
+    session.readonly_vars.add("arr")
+    _, io, node = await handle_unset(["arr[1]"], session)
+    assert node.exit_code == 1
+    assert io.stderr == b"bash: unset: arr: cannot unset: readonly variable\n"
+    assert session.arrays["arr"] == ["x", "y"]
+
+
+@pytest.mark.asyncio
+async def test_unset_element_zero_of_a_scalar_removes_it():
+    session = make_session()
+    session.env["Y"] = "sc"
+    _, io, node = await handle_unset(["Y[0]"], session)
+    assert node.exit_code == 0
+    assert "Y" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_unset_nonzero_element_of_a_scalar_errors():
+    session = make_session()
+    session.env["Y"] = "sc"
+    _, io, node = await handle_unset(["Y[1]"], session)
+    assert node.exit_code == 1
+    assert io.stderr == b"bash: unset: Y: not an array variable\n"
+    assert session.env["Y"] == "sc"
+
+
+@pytest.mark.asyncio
+async def test_unset_element_of_an_unset_name_is_a_no_op():
+    session = make_session()
+    _, io, node = await handle_unset(["GONE[3]"], session)
+    assert node.exit_code == 0
 
 
 @pytest.mark.asyncio

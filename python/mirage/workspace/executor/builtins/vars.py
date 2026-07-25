@@ -78,29 +78,54 @@ async def handle_readonly(
     return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)
 
 
-def _unset_variable(session: Session, name: str) -> None:
+def _unset_variable(session: Session, name: str) -> str:
     """Remove a scalar/array variable, or one array element ``name[idx]``.
+
+    Clearing an element keeps the positions of the elements after it, as
+    bash does: only a trailing element shortens the array, an interior
+    one leaves an empty hole. Mirage stores arrays densely, so a hole is
+    an empty string (the same representation ``arr[9]=v`` produces) and
+    still counts toward ``${#arr[@]}`` and ``${arr[@]}``, where bash
+    would skip it.
+
+    A subscript on a scalar names element 0 only: ``x[0]`` unsets the
+    scalar and any other subscript is an error. A subscript on a name
+    that holds nothing at all is a silent no-op.
 
     Args:
         session (Session): shell session state.
         name (str): a variable name or ``name[subscript]``.
+
+    Returns:
+        str: ``"ok"``, or ``"notarray"`` when a non-zero subscript was
+            applied to a scalar.
     """
     match = _PRINTF_TARGET_RE.match(name)
     if match is not None and match.group(2) is not None:
         base, subscript = match.group(1), match.group(2)
         arr = session.arrays.get(base)
         if arr is None:
-            return
+            if base not in session.env:
+                return "ok"
+            if _array_index(subscript, session.env) != 0:
+                return "notarray"
+            session.env.pop(base, None)
+            return "ok"
         idx = _array_index(subscript, session.env)
         if idx < 0:
             idx += len(arr)
-        if 0 <= idx < len(arr):
+        if not 0 <= idx < len(arr):
+            return "ok"
+        if idx == len(arr) - 1:
             del arr[idx]
-        return
+        else:
+            arr[idx] = ""
+        return "ok"
     session.env.pop(name, None)
     session.arrays.pop(name, None)
     if name == "OPTIND":
         session._getopts_optind = None
+    return "ok"
 
 
 async def handle_unset(
@@ -110,10 +135,12 @@ async def handle_unset(
     """Unset shell variables, arrays, or functions, with bash's flags.
 
     ``-v`` targets a variable only, ``-f`` a function only, and a bare
-    name a variable if one exists or else a function. ``-n`` (unset a
-    nameref itself) has no referent here — mirage has no nameref
-    attribute — so it matches bash on a non-nameref name and leaves it
-    untouched.
+    name a variable if one exists or else a function. A ``name[idx]``
+    operand clears one element; the readonly guard resolves it to the
+    base name first, since that is what ``readonly`` records. ``-n``
+    (unset a nameref itself) has no referent here — mirage has no
+    nameref attribute — so it matches bash on a non-nameref name and
+    leaves it untouched.
 
     Args:
         args (list[str]): option words followed by names to unset.
@@ -148,17 +175,26 @@ async def handle_unset(
         if mode == "f":
             session.functions.pop(name, None)
             continue
-        if name in session.readonly_vars:
-            err = (f"bash: unset: {name}: cannot unset: "
+        target = _PRINTF_TARGET_RE.match(name)
+        is_element = target is not None and target.group(2) is not None
+        # `readonly arr` records the base name, so an `arr[i]` operand has
+        # to be resolved before the guard, as bash does (which also names
+        # the base, not the element, in the error).
+        base = target.group(1) if target is not None else name
+        if base in session.readonly_vars:
+            err = (f"bash: unset: {base}: cannot unset: "
                    f"readonly variable\n").encode()
             return None, IOResult(exit_code=1,
                                   stderr=err), ExecutionNode(command="unset",
                                                              exit_code=1,
                                                              stderr=err)
-        target = _PRINTF_TARGET_RE.match(name)
-        is_element = target is not None and target.group(2) is not None
         existed = is_element or name in session.env or name in session.arrays
-        _unset_variable(session, name)
+        if _unset_variable(session, name) == "notarray":
+            err = f"bash: unset: {base}: not an array variable\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command="unset",
+                                                             exit_code=1,
+                                                             stderr=err)
         if mode == "auto" and not existed and name in session.functions:
             session.functions.pop(name, None)
     return None, IOResult(), ExecutionNode(command="unset", exit_code=0)

@@ -423,6 +423,7 @@ async def execute_node(
     if kind == NodeKind.DECLARATION:
         keyword = get_declaration_keyword(node)
         assignments = []
+        array_names: list[str] = []
         flag_chars: set[str] = set()
         for child in node.named_children:
             if child.type == NT.VARIABLE_ASSIGNMENT:
@@ -434,11 +435,14 @@ async def execute_node(
                     key = get_text(child).partition("=")[0]
                     session.arrays[key] = await _expand_array_items(
                         val_nodes[0], session, execute_fn, registry, cs)
+                    array_names.append(key.removesuffix("+"))
                     continue
                 expanded = await expand_node(child, session, execute_fn, cs)
                 assignments.append(expanded)
             elif child.type in (NT.SIMPLE_EXPANSION, NT.EXPANSION,
-                                NT.CONCATENATION, NT.WORD):
+                                NT.CONCATENATION, NT.WORD, NT.VARIABLE_NAME):
+                # A bare `readonly NAME` / `export NAME` operand parses as
+                # a variable_name, not a word.
                 expanded = await expand_node(child, session, execute_fn, cs)
                 if not expanded:
                     continue
@@ -447,7 +451,9 @@ async def execute_node(
                 else:
                     assignments.append(expanded)
         if keyword == "readonly" or "r" in flag_chars:
-            return await handle_readonly(assignments, session)
+            # An array assignment stores itself above, but the name still
+            # has to be marked readonly.
+            return await handle_readonly(assignments + array_names, session)
         # declare/typeset scope like `local` inside a function (bash
         # semantics) and assign globally at top level, which is exactly
         # handle_local's fallback when no function scope is active.

@@ -477,6 +477,7 @@ export async function executeNode(
   if (kind === NodeKind.DECLARATION) {
     const keyword = getDeclarationKeyword(node)
     const assignments: string[] = []
+    const arrayNames: string[] = []
     const flagChars = new Set<string>()
     for (const child of node.namedChildren) {
       if (child.type === NT.VARIABLE_ASSIGNMENT) {
@@ -493,6 +494,7 @@ export async function executeNode(
             registry,
             callStack,
           )
+          arrayNames.push(key.endsWith('+') ? key.slice(0, -1) : key)
           continue
         }
         assignments.push(await expandNode(child, session, executeFn, callStack))
@@ -500,7 +502,10 @@ export async function executeNode(
         child.type === NT.SIMPLE_EXPANSION ||
         child.type === NT.EXPANSION ||
         child.type === NT.CONCATENATION ||
-        child.type === NT.WORD
+        child.type === NT.WORD ||
+        // A bare `readonly NAME` / `export NAME` operand parses as a
+        // variable_name, not a word.
+        child.type === NT.VARIABLE_NAME
       ) {
         const expanded = await expandNode(child, session, executeFn, callStack)
         if (expanded === '') continue
@@ -512,7 +517,9 @@ export async function executeNode(
       }
     }
     if (keyword === 'readonly' || flagChars.has('r')) {
-      return handleReadonly(assignments, session)
+      // An array assignment stores itself above, but the name still has
+      // to be marked readonly.
+      return handleReadonly([...assignments, ...arrayNames], session)
     }
     // declare/typeset scope like `local` inside a function (bash
     // semantics) and assign globally at top level, which is exactly

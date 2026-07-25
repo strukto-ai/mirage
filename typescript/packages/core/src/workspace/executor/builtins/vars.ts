@@ -23,6 +23,7 @@ import { shellJoin } from '../../../shell/join.ts'
 import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { arrayIndex } from '../../expand/variable.ts'
+import { sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../command.ts'
@@ -72,24 +73,56 @@ export function handleReadonly(assignments: string[], session: Session): Result 
   return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
 }
 
-function unsetVariable(session: Session, name: string): void {
+/**
+ * Remove a scalar/array variable, or one array element `name[idx]`.
+ *
+ * Clearing an element keeps the positions of the elements after it, as
+ * bash does: only a trailing element shortens the array, an interior one
+ * leaves an empty hole. Mirage stores arrays densely, so a hole is an
+ * empty string (the same representation `arr[9]=v` produces) and still
+ * counts toward `${#arr[@]}` and `${arr[@]}`, where bash would skip it.
+ *
+ * A subscript on a scalar names element 0 only: `x[0]` unsets the scalar
+ * and any other subscript reports `notarray`. A subscript on a name that
+ * holds nothing at all is a silent no-op.
+ */
+function unsetVariable(session: Session, name: string): 'ok' | 'notarray' {
   const match = PRINTF_TARGET_RE.exec(name)
   if (match?.[2] !== undefined) {
     const base = match[1] ?? ''
-    const arr = session.arrays[base]
-    if (arr === undefined) return
+    const arr = sessionEntry(session.arrays, base)
+    if (arr === undefined) {
+      if (sessionEntry(session.env, base) === undefined) return 'ok'
+      if (arrayIndex(match[2], session.env) !== 0) return 'notarray'
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.env[base]
+      return 'ok'
+    }
     let idx = arrayIndex(match[2], session.env)
     if (idx < 0) idx += arr.length
-    if (idx >= 0 && idx < arr.length) arr.splice(idx, 1)
-    return
+    if (idx < 0 || idx >= arr.length) return 'ok'
+    if (idx === arr.length - 1) arr.pop()
+    else arr[idx] = ''
+    return 'ok'
   }
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.env[name]
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.arrays[name]
   if (name === 'OPTIND') session.getoptsOptind = null
+  return 'ok'
 }
 
+/**
+ * Unset shell variables, arrays, or functions, with bash's flags.
+ *
+ * `-v` targets a variable only, `-f` a function only, and a bare name a
+ * variable if one exists or else a function. A `name[idx]` operand clears
+ * one element; the readonly guard resolves it to the base name first,
+ * since that is what `readonly` records. `-n` (unset a nameref itself)
+ * has no referent here — mirage has no nameref attribute — so it matches
+ * bash on a non-nameref name and leaves it untouched.
+ */
 export function handleUnset(args: string[], session: Session): Result {
   let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
   let i = 0
@@ -124,9 +157,15 @@ export function handleUnset(args: string[], session: Session): Result {
       delete session.functions[name]
       continue
     }
-    if (session.readonlyVars.has(name)) {
+    const match = PRINTF_TARGET_RE.exec(name)
+    const isElement = match?.[2] !== undefined
+    // `readonly arr` records the base name, so an `arr[i]` operand has to
+    // be resolved before the guard, as bash does (which also names the
+    // base, not the element, in the error).
+    const base = match?.[1] ?? name
+    if (session.readonlyVars.has(base)) {
       const err = new TextEncoder().encode(
-        `bash: unset: ${name}: cannot unset: readonly variable\n`,
+        `bash: unset: ${base}: cannot unset: readonly variable\n`,
       )
       return [
         null,
@@ -134,10 +173,15 @@ export function handleUnset(args: string[], session: Session): Result {
         new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
       ]
     }
-    const match = PRINTF_TARGET_RE.exec(name)
-    const isElement = match?.[2] !== undefined
     const existed = isElement || name in session.env || name in session.arrays
-    unsetVariable(session, name)
+    if (unsetVariable(session, name) === 'notarray') {
+      const err = new TextEncoder().encode(`bash: unset: ${base}: not an array variable\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: err }),
+        new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
+      ]
+    }
     if (mode === 'auto' && !existed && name in session.functions) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.functions[name]

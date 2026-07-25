@@ -563,7 +563,9 @@ async function runArgv(
   }
   if (name === SB.SOURCE || name === SB.DOT) {
     const target = operands[0] ?? ''
-    const sourceArgs = operands.slice(1).map((o) => (o instanceof PathSpec ? o.virtual : o))
+    // Positional parameters keep the words as typed, so a path operand
+    // contributes its spelling, not its resolved mount path.
+    const sourceArgs = operands.slice(1).map((o) => wordText(o))
     return handleSource(dispatch, executeFn, target, session, sourceArgs)
   }
   if (name === SB.RETURN) {

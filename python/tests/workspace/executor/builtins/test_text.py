@@ -226,8 +226,70 @@ async def test_printf_v_targets_array_element():
 async def test_printf_v_invalid_name_errors():
     session = Session(session_id="s1")
     out, io, node = await handle_printf(["-v", "1bad", "x"], session)
+    assert node.exit_code == 2
+    assert b"`1bad': not a valid identifier" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_printf_v_invalid_name_suppresses_conversion_errors():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "1bad", "%d", "nope"], session)
+    assert node.exit_code == 2
+    assert io.stderr == b"printf: `1bad': not a valid identifier\n"
+
+
+@pytest.mark.asyncio
+async def test_printf_v_readonly_scalar_is_rejected():
+    session = Session(session_id="s1")
+    session.env["R"] = "orig"
+    session.readonly_vars.add("R")
+    out, io, node = await handle_printf(["-v", "R", "new"], session)
     assert node.exit_code == 1
-    assert b"not a valid variable name" in (io.stderr or b"")
+    assert io.stderr == b"bash: R: readonly variable\n"
+    assert session.env["R"] == "orig"
+
+
+@pytest.mark.asyncio
+async def test_printf_v_readonly_array_element_is_rejected():
+    session = Session(session_id="s1")
+    session.arrays["A"] = ["x", "y"]
+    session.readonly_vars.add("A")
+    out, io, node = await handle_printf(["-v", "A[0]", "%d", "nope"], session)
+    assert node.exit_code == 1
+    assert io.stderr == (b"printf: nope: invalid number\n"
+                         b"bash: A: readonly variable\n")
+    assert session.arrays["A"] == ["x", "y"]
+
+
+@pytest.mark.asyncio
+async def test_printf_v_scalar_target_keeps_other_array_elements():
+    session = Session(session_id="s1")
+    session.arrays["B"] = ["p", "q", "r"]
+    out, io, node = await handle_printf(["-v", "B", "Q"], session)
+    assert node.exit_code == 0
+    assert session.arrays["B"] == ["Q", "q", "r"]
+    assert "B" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_printf_v_bad_subscript_keeps_the_scalar():
+    session = Session(session_id="s1")
+    session.env["V"] = "orig"
+    out, io, node = await handle_printf(["-v", "V[-2]", "hi"], session)
+    assert node.exit_code == 1
+    assert io.stderr == b"bash: V[-2]: bad array subscript\n"
+    assert session.env["V"] == "orig"
+    assert "V" not in session.arrays
+
+
+@pytest.mark.asyncio
+async def test_printf_v_negative_subscript_wraps_over_the_scalar():
+    session = Session(session_id="s1")
+    session.env["W"] = "orig"
+    out, io, node = await handle_printf(["-v", "W[-1]", "hi"], session)
+    assert node.exit_code == 0
+    assert session.arrays["W"] == ["hi"]
+    assert "W" not in session.env
 
 
 @pytest.mark.asyncio
