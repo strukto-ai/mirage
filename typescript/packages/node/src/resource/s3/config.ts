@@ -18,19 +18,23 @@ import {
   S3ConfigSchema as S3CoreConfigSchema,
   type S3Config as S3CoreConfig,
   type S3ConfigRedacted as S3CoreConfigRedacted,
+  secretStr,
   z,
 } from '@struktoai/mirage-core'
 
 export interface S3Config extends S3CoreConfig {
   profile?: string
+  proxy?: string
 }
 
 export interface S3ConfigRedacted extends S3CoreConfigRedacted {
   profile?: string
+  proxy?: string
 }
 
 const S3ConfigSchema = S3CoreConfigSchema.extend({
   profile: z.string().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function redactConfig(config: S3Config): S3ConfigRedacted {
@@ -51,7 +55,7 @@ export function redactConfig(config: S3Config): S3ConfigRedacted {
  *   endpoint_url          ↔ endpoint
  *   path_style            ↔ forcePathStyle
  *   timeout (sec, int)    ↔ timeoutMs (ms, number — converted ×1000)
- *   proxy                 ↔ (dropped — not yet supported in TS)
+ *   proxy                 ↔ proxy
  */
 export function normalizeS3Config(input: Record<string, unknown>): S3Config {
   return normalizeFields(input, {
@@ -68,6 +72,5 @@ export function normalizeS3Config(input: Record<string, unknown>): S3Config {
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as S3Config
 }

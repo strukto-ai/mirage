@@ -624,6 +624,8 @@ export {
   type S3BrowserSignOptions,
   type S3Config,
   type S3ConfigRedacted,
+  type S3HttpAgentProvider,
+  type S3HttpAgents,
 } from './resource/s3/config.ts'
 export { remapCommandsResource, remapOpsResource } from './resource/s3/remap.ts'
 export { S3_PROMPT } from './resource/s3/prompt.ts'

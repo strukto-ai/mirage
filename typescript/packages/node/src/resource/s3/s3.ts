@@ -43,15 +43,22 @@ import {
   truncate as truncateCore,
   type FileStat,
   type FindOptions,
+  type S3HttpAgents,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
   unlink as unlinkCore,
   write as writeCore,
 } from '@struktoai/mirage-core'
+import { HttpProxyAgent } from 'http-proxy-agent'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
 
 const globCore = makeResolveGlob(readdirCore, S3_SCOPE_ERROR)
+
+function createProxyAgents(proxy: string): S3HttpAgents {
+  return { httpAgent: new HttpProxyAgent(proxy), httpsAgent: new HttpsProxyAgent(proxy) }
+}
 
 export interface S3ResourceState {
   type: string
@@ -97,7 +104,13 @@ export class S3Resource extends BaseResource implements Resource {
       delete cfg.keyPrefix
     }
     this.config = cfg
-    this.accessor = new S3Accessor(this.config)
+    const proxy = cfg.proxy
+    this.accessor = new S3Accessor({
+      ...cfg,
+      ...(proxy !== undefined && proxy !== ''
+        ? { httpAgentProvider: () => createProxyAgents(proxy) }
+        : {}),
+    })
   }
 
   open(): Promise<void> {

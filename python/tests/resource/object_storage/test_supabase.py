@@ -67,7 +67,8 @@ def test_supabase_config_to_s3_config():
     assert reveal_secret(s3_config.aws_secret_access_key) == "secret-key"
     assert reveal_secret(s3_config.aws_session_token) == "session-token"
     assert s3_config.path_style is True
-    assert s3_config.proxy == "http://localhost:8080"
+    assert s3_config.proxy is not None
+    assert s3_config.proxy.get_secret_value() == "http://localhost:8080"
 
 
 def test_supabase_config_requires_project_ref_or_endpoint():

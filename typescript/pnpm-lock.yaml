@@ -506,6 +506,12 @@ importers:
       fs-monkey:
         specifier: ^1.1.0
         version: 1.1.0
+      http-proxy-agent:
+        specifier: ^7.0.2
+        version: 7.0.2
+      https-proxy-agent:
+        specifier: ^7.0.6
+        version: 7.0.6
       tree-sitter-bash:
         specifier: ^0.25.1
         version: 0.25.1

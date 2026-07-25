@@ -30,7 +30,7 @@ class S3Config(BaseModel):
     aws_profile: str | None = None
     path_style: bool = False
     timeout: int = 30
-    proxy: str | None = None
+    proxy: SecretStr | None = None
     key_prefix: str | None = None
 
     @field_validator("key_prefix")
