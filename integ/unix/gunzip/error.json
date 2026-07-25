@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "gunzip_no_input",
+      "seq": 562,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "gunzip",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gunzip: (stdin): unexpected end of file"
+      }
+    }
+  ]
+}

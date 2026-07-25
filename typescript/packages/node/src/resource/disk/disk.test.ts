@@ -15,7 +15,7 @@
 import { chmodSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { FileType, ResourceName } from '@struktoai/mirage-core'
+import { CapacityState, FileType, ResourceName } from '@struktoai/mirage-core'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { DiskResource } from './disk.ts'
 
@@ -46,6 +46,14 @@ describe('DiskResource — identity', () => {
 
   it('commands() returns RAM_COMMANDS', () => {
     expect(res.commands().length).toBeGreaterThan(0)
+  })
+
+  it('statfs reports a real quota (df numbers, not fabricated)', async () => {
+    const cap = await res.statfs()
+    expect(cap.state).toBe(CapacityState.QUOTA)
+    expect(cap.total ?? 0).toBeGreaterThan(0)
+    expect(cap.available ?? -1).toBeGreaterThanOrEqual(0)
+    expect(cap.inodes ?? 0).toBeGreaterThan(0)
   })
 })
 

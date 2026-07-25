@@ -59,5 +59,5 @@ async def stat(
               if lookup.entry is not None else None)
     if isinstance(cached, dict):
         return _file_stat(cached)
-    memory = await get_memory(accessor.client, scope.memory_id)
+    memory = await get_memory(accessor.client, scope.memory_id, path)
     return _file_stat(memory)

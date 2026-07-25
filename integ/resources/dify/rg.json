@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "df_rg_l_token",
+      "seq": 580020,
+      "targets": [
+        "dify"
+      ],
+      "command": "rg -l token /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth\n/knowledge/guides/quickstart\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

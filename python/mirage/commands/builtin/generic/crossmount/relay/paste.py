@@ -36,9 +36,10 @@ async def run_paste(scopes: list[PathSpec], flag_kwargs: dict[str, object],
         dispatch (Callable): Workspace operation dispatcher.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["paste"])
-    d = fl.as_str("d")
-    return await generic_paste(flat_scopes(scopes),
-                               read_bytes=functools.partial(
-                                   relay, dispatch, "read"),
-                               delimiter=d if d else "\t",
-                               serial=fl.as_bool("s"))
+    d = fl.as_str("d") or fl.as_str("delimiters")
+    return await generic_paste(
+        flat_scopes(scopes),
+        read_bytes=functools.partial(relay, dispatch, "read"),
+        delimiters=d if d else "\t",
+        serial=fl.as_bool("s") or fl.as_bool("serial"),
+        zero_terminated=(fl.as_bool("z") or fl.as_bool("zero_terminated")))

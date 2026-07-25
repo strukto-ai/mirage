@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xpr_cat",
+      "seq": 759,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat /data/a.txt /data2/xpr_nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": "cat: /data2/xpr_nope.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xpr_cat_first",
+      "seq": 760,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat /data2/xpr_nope.txt /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": "cat: /data2/xpr_nope.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

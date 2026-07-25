@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "df_tail_1",
+      "seq": 580012,
+      "targets": [
+        "dify"
+      ],
+      "command": "tail -n 1 /knowledge/guides/quickstart",
+      "expect": {
+        "exit": 0,
+        "stdout": "Set your token in the ACME_TOKEN environment variable.",
+        "stderr": ""
+      }
+    }
+  ]
+}

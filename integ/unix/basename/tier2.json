@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "basename_tier2_multiple_suffix_zero",
+      "seq": 910007,
+      "targets": ["ram", "disk"],
+      "command": "basename --multiple --suffix=.txt --zero /x/a.txt /y/b.txt",
+      "expect": { "exit": 0, "stdout": "a\u0000b\u0000", "stderr": "" },
+      "flags": ["multiple", "suffix", "zero"]
+    }
+  ]
+}

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import shlex
 from enum import StrEnum
 
 import tree_sitter
@@ -140,6 +141,11 @@ _REDIRECT_NODE_TYPES = frozenset({
     NT.HERESTRING_REDIRECT,
 })
 
+# RAW_STRING (single quotes) belongs here alongside STRING (double
+# quotes): quoting a redirect target is purely syntactic in bash, so
+# `> 'f'`, `> "f"` and `> f` name the same file. Omitting it left
+# target_node None and target "", which silently redirected every
+# single-quoted target to one phantom empty path instead of the file.
 _TARGET_TYPES = frozenset({
     NT.WORD,
     NT.CONCATENATION,
@@ -147,6 +153,7 @@ _TARGET_TYPES = frozenset({
     NT.EXPANSION,
     NT.COMMAND_SUBSTITUTION,
     NT.STRING,
+    NT.RAW_STRING,
     NT.PROCESS_SUBSTITUTION,
 })
 
@@ -352,26 +359,32 @@ def get_case_word(node: tree_sitter.Node) -> tree_sitter.Node:
 
 def get_case_items(
     node: tree_sitter.Node,
-) -> list[tuple[list[str], list[tree_sitter.Node]]]:  # noqa: E125,E501
-    """Get (patterns, body_statements) pairs from case.
+) -> list[tuple[list[str], list[tree_sitter.Node], str]]:  # noqa: E125,E501
+    """Get (patterns, body_statements, terminator) triples from case.
 
-    An arm's body is every statement up to its ;; terminator, so
-    multi-statement arms (x) cmd1; cmd2;;) keep all commands.
+    An arm's body is every statement up to its terminator, so
+    multi-statement arms (x) cmd1; cmd2;;) keep all commands. The
+    terminator is one of ``;;`` (default/last arm), ``;&`` (fall through
+    into the next arm's body unconditionally), or ``;;&`` (keep testing
+    the remaining patterns).
     """
-    items: list[tuple[list[str], list[tree_sitter.Node]]] = []
+    items: list[tuple[list[str], list[tree_sitter.Node], str]] = []
     for c in node.named_children:
         if c.type == NT.CASE_ITEM:
             patterns = []
             body: list[tree_sitter.Node] = []
+            terminator = ";;"
             for child in c.children:
-                if not body and child.type in (NT.EXTGLOB_PATTERN, NT.WORD,
-                                               NT.CONCATENATION, NT.STRING):
+                if child.type in (";;", ";&", ";;&"):
+                    terminator = child.type
+                elif not body and child.type in (NT.EXTGLOB_PATTERN, NT.WORD,
+                                                 NT.CONCATENATION, NT.STRING):
                     patterns.append(get_text(child))
                 elif child.is_named and child.type != "|":
                     body.append(child)
             if not patterns:
                 patterns = [get_text(c.named_children[0])]
-            items.append((patterns, body))
+            items.append((patterns, body, terminator))
     return items
 
 
@@ -385,6 +398,25 @@ def get_unset_names(node: tree_sitter.Node) -> list[str]:
     return [
         get_text(c) for c in node.named_children if c.type == NT.VARIABLE_NAME
     ]
+
+
+def get_unset_args(node: tree_sitter.Node) -> list[str]:
+    """Get every operand word of unset_command, keeping ``-f``/``-v``/``-n``.
+
+    Unlike ``get_unset_names`` this preserves the leading option words so
+    the handler can tell a function unset (``unset -f``) from a variable
+    unset, and splits the operand span the way the shell does so a
+    subscript target (``unset arr[1]``, quoted or not) stays one word.
+    """
+    operands = node.children[1:]
+    if not operands:
+        return []
+    start = operands[0].start_byte - node.start_byte
+    text = (node.text or b"")[start:].decode()
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return [get_text(c) for c in node.named_children]
 
 
 def get_negated_command(node: tree_sitter.Node) -> tree_sitter.Node:

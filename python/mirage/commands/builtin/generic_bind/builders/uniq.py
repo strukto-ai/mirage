@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.uniq import uniq as generic_uniq
@@ -29,28 +31,17 @@ async def uniq(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    c: bool = False,
-    d: bool = False,
-    u: bool = False,
-    f: str | None = None,
-    s: str | None = None,
-    i: bool = False,
-    w: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_uniq(
         paths,
         read_stream=bound_op(ops.read_stream, accessor, index),
+        write_bytes=(partial(ops.write, accessor)
+                     if ops.write is not None else None),
         stdin=stdin,
-        count=c,
-        duplicates_only=d,
-        unique_only=u,
-        skip_fields=f,
-        skip_chars=s,
-        ignore_case=i,
-        check_chars=w,
+        flags=flags,
     )
 
 

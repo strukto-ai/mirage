@@ -1,0 +1,71 @@
+{
+  "cases": [
+    {
+      "id": "grep_R_recursive",
+      "seq": 500215,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -R alpha /data/g4 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:alpha\n/data/g4/sub/inner.txt:alpha inner\n",
+        "stderr": ""
+      },
+      "flags": [
+        "R"
+      ]
+    },
+    {
+      "id": "grep_Rl_recursive",
+      "seq": 500216,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -Rl alpha /data/g4 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt\n/data/g4/sub/inner.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "R",
+        "l"
+      ]
+    }
+  ]
+}

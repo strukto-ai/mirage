@@ -30,7 +30,11 @@ async def realpath(
             prefix = mount_prefix_of(p.virtual, p.resource_path)
             resolved = to_pathspec(resolved_display, prefix)
             if not await _exists(stat_fn, resolved):
-                raise FileNotFoundError(
+                # Fully GNU-formatted (quoted path), emitted verbatim by
+                # format_fs_error. Must NOT be a FileNotFoundError: the fs
+                # branch would re-prefix and re-suffix it (doubling the
+                # message); a plain error matches the TS realpath throw.
+                raise ValueError(
                     f"realpath: '{p.virtual}': No such file or directory")
         lines.append(resolved_display)
     return ("\n".join(lines) + "\n").encode(), IOResult()

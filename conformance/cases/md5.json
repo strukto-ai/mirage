@@ -11,7 +11,9 @@
           "redis"
         ],
         "typescript": [
-          "ram"
+          "ram",
+          "disk",
+          "redis"
         ]
       },
       "expect": {

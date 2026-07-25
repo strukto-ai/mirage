@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_crossmount_cp",
+      "seq": 550016,
+      "targets": [
+        "trello"
+      ],
+      "command": "cp /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/card.json /scratch/card.json && cat /scratch/card.json | jq -r '.card_id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "crd_search\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

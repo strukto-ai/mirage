@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "meta_chown_ids",
+      "seq": 200004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chown 500:dev /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 500 dev 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chown_name",
+      "seq": 200005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chown alice /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chown_enoent",
+      "seq": 200016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chown alice /data/metad/missing.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chown: cannot access '/data/metad/missing.txt': No such file or directory\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

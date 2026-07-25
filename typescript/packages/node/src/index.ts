@@ -264,6 +264,7 @@ export {
 export { NEXTCLOUD_PROMPT } from './resource/nextcloud/prompt.ts'
 export { NEXTCLOUD_COMMANDS } from './commands/builtin/nextcloud/index.ts'
 export { NEXTCLOUD_OPS } from './ops/nextcloud/index.ts'
+export { buildDeltaHook as buildNextcloudDeltaHook, NextcloudWalk } from './core/nextcloud/watch.ts'
 export { DiscordResource, type DiscordResourceState } from './resource/discord/discord.ts'
 export {
   normalizeDiscordConfig,
@@ -335,6 +336,14 @@ export {
   type GSlidesConfigRedacted,
 } from './resource/gslides/config.ts'
 export { GDriveResource, type GDriveResourceState } from './resource/gdrive/gdrive.ts'
+export {
+  Mem0Resource,
+  OneDriveResource,
+  SharePointResource,
+  type Mem0Config,
+  type OneDriveConfig,
+  type SharePointConfig,
+} from '@struktoai/mirage-core'
 export {
   normalizeGDriveConfig,
   redactGDriveConfig,

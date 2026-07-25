@@ -14,7 +14,9 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
+import { cpWalk } from '../../generic/cp.ts'
 import { formatRecords } from '../../utils/output.ts'
+import { removalLines } from '../../utils/verbose.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const RM_BUILDER: Builder = {
@@ -50,6 +52,7 @@ export const RM_BUILDER: Builder = {
         errors.push(`rm: cannot remove '${p.virtual}': No such file or directory`)
         continue
       }
+      let entryLines: string[] = []
       if (isDir) {
         // rmR/rmdir are resolved lazily so object stores without a real
         // directory-remove op still unlink plain files (mirrors Python).
@@ -57,20 +60,36 @@ export const RM_BUILDER: Builder = {
           if (rmR === undefined) {
             throw new Error('rm: recursive remove not supported on this backend')
           }
+          if (verbose) {
+            entryLines = removalLines(
+              await cpWalk(
+                (dir) => ops.readdir(accessor, dir, idx),
+                (spec) => ops.stat(accessor, spec, idx),
+                p,
+                idx,
+              ),
+            )
+          }
           await rmR(accessor, p)
         } else if (dirFlag) {
           if (rmdir === undefined) {
             throw new Error('rm: directory remove not supported on this backend')
           }
+          if ((await ops.readdir(accessor, p, idx)).length > 0) {
+            errors.push(`rm: cannot remove '${p.virtual}': Directory not empty`)
+            continue
+          }
           await rmdir(accessor, p)
+          entryLines = [`removed directory '${p.virtual}'`]
         } else {
           errors.push(`rm: cannot remove '${p.virtual}': Is a directory`)
           continue
         }
       } else {
         await unlink(accessor, p)
+        entryLines = [`removed '${p.virtual}'`]
       }
-      if (verbose) lines.push(`removed '${p.virtual}'`)
+      if (verbose) lines.push(...entryLines)
     }
     const out = lines.length > 0 ? formatRecords(lines) : null
     const stderr =

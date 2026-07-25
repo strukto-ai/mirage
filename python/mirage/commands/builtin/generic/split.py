@@ -20,6 +20,10 @@ def _numeric_suffix(index: int, length: int) -> str:
     return str(index).zfill(length)
 
 
+def _hex_suffix(index: int, length: int) -> str:
+    return f"{index:0{length}x}"
+
+
 async def split(
     paths: list[PathSpec],
     *,
@@ -31,6 +35,10 @@ async def split(
     n_chunks: int = 0,
     suffix_len: int = 2,
     numeric_suffix: bool = False,
+    hex_suffix: bool = False,
+    suffix_start: int = 0,
+    additional_suffix: str = "",
+    separator: bytes = b"\n",
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.SPLIT, paths[2].raw_path
@@ -38,7 +46,8 @@ async def split(
     prefix_name = paths[1].mount_path if len(paths) >= 2 else "x"
     if lines_per_file == 0 and byte_limit == 0 and n_chunks == 0:
         lines_per_file = 1000
-    suffix_fn = _numeric_suffix if numeric_suffix else _alpha_suffix
+    suffix_fn = (_hex_suffix if hex_suffix else
+                 _numeric_suffix if numeric_suffix else _alpha_suffix)
 
     if paths:
         source: AsyncIterator[bytes] = read_stream(paths[0])
@@ -59,7 +68,8 @@ async def split(
             part = bytes(all_data[offset:offset + chunk_size])
             if not part:
                 break
-            out_path = prefix_name + suffix_fn(i, suffix_len)
+            out_path = (prefix_name + suffix_fn(i + suffix_start, suffix_len) +
+                        additional_suffix)
             await write_bytes(PathSpec.from_str_path(out_path), part)
             writes[out_path] = part
             offset += chunk_size
@@ -68,35 +78,60 @@ async def split(
         async for chunk in source:
             buf.extend(chunk)
             while len(buf) >= byte_limit:
-                out_path = prefix_name + suffix_fn(file_idx, suffix_len)
+                out_path = (prefix_name +
+                            suffix_fn(file_idx + suffix_start, suffix_len) +
+                            additional_suffix)
                 data = bytes(buf[:byte_limit])
                 await write_bytes(PathSpec.from_str_path(out_path), data)
                 writes[out_path] = data
                 buf = buf[byte_limit:]
                 file_idx += 1
         if buf:
-            out_path = prefix_name + suffix_fn(file_idx, suffix_len)
+            out_path = (prefix_name +
+                        suffix_fn(file_idx + suffix_start, suffix_len) +
+                        additional_suffix)
             data = bytes(buf)
             await write_bytes(PathSpec.from_str_path(out_path), data)
             writes[out_path] = data
     else:
         line_buf: list[bytes] = []
-        async for line in AsyncLineIterator(source):
+        if separator == b"\n":
+            records: AsyncIterator[bytes] = AsyncLineIterator(source)
+        else:
+            raw = b"".join([chunk async for chunk in source])
+            records = _record_iterator(raw, separator)
+        async for line in records:
             line_buf.append(line)
             if len(line_buf) >= lines_per_file:
-                out_path = prefix_name + suffix_fn(file_idx, suffix_len)
-                data = b"\n".join(line_buf) + b"\n"
+                out_path = (prefix_name +
+                            suffix_fn(file_idx + suffix_start, suffix_len) +
+                            additional_suffix)
+                data = separator.join(line_buf) + separator
                 await write_bytes(PathSpec.from_str_path(out_path), data)
                 writes[out_path] = data
                 line_buf = []
                 file_idx += 1
         if line_buf:
-            out_path = prefix_name + suffix_fn(file_idx, suffix_len)
-            data = b"\n".join(line_buf) + b"\n"
+            out_path = (prefix_name +
+                        suffix_fn(file_idx + suffix_start, suffix_len) +
+                        additional_suffix)
+            data = separator.join(line_buf) + separator
             await write_bytes(PathSpec.from_str_path(out_path), data)
             writes[out_path] = data
 
     return None, IOResult(writes=writes)
+
+
+async def _record_iterator(data: bytes,
+                           separator: bytes) -> AsyncIterator[bytes]:
+    # Every separator terminates a record, so only the final unterminated
+    # remainder is dropped when empty; a second trailing separator still
+    # yields the empty record it terminates (GNU).
+    records = data.split(separator)
+    if records and not records[-1]:
+        records.pop()
+    for record in records:
+        yield record
 
 
 __all__ = ["split"]

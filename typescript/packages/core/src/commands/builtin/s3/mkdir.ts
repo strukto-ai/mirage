@@ -37,10 +37,11 @@ async function mkdirCommand(
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
   const verbose = opts.flags.v === true
+  const parents = opts.flags.p === true
   const lines: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const path of resolved) {
-    await s3Mkdir(accessor, path)
+    await s3Mkdir(accessor, path, parents)
     writes[path.mountPath] = new Uint8Array()
     if (verbose) lines.push(`mkdir: created directory '${path.virtual}'`)
   }

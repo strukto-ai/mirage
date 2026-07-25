@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "tr_delete",
+      "seq": 47,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/a.txt | tr -d aeiou",
+      "expect": {
+        "exit": 0,
+        "stdout": "hll\nwrld\nf\nbr\nbz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "tr_delete_digits",
+      "seq": 236,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo abc123def | tr -d 0-9",
+      "expect": {
+        "exit": 0,
+        "stdout": "abcdef\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    }
+  ]
+}

@@ -50,6 +50,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     }

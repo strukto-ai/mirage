@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_mv_missing_src",
+      "seq": 749,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mv /data/xm2_nope.txt /data2/xm2_dst.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot stat '/data/xm2_nope.txt': No such file or directory\n"
+      }
+    }
+  ]
+}

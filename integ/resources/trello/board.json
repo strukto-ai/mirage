@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "tr_board_children_ls",
+      "seq": 550003,
+      "targets": [
+        "trello"
+      ],
+      "command": "ls /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap",
+      "expect": {
+        "exit": 0,
+        "stdout": "board.json\nlabels\nlists\nmembers\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_board_cat_jq",
+      "seq": 550006,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/board.json | jq -r '.board_name + \" \" + .workspace_id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Roadmap Q3 org_strukto\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

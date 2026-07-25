@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "comm_check_order_unsorted",
+      "seq": 600000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "comm --check-order /data/a.txt /data/sorted_b.txt > /dev/null",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "comm: file 1 is not in sorted order\n"
+      },
+      "flags": [
+        "check-order"
+      ]
+    }
+  ]
+}

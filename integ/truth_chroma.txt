@@ -5,15 +5,6 @@ policies
 === ls_guides ===
 auth.md
 quickstart.md
-=== tree ===
-├── CHANGELOG.md
-├── guides
-│   ├── auth.md
-│   └── quickstart.md
-└── policies
-    ├── archived.md
-    ├── privacy.md
-    └── refunds.md
 === find_md ===
 /knowledge/CHANGELOG.md
 /knowledge/guides/auth.md

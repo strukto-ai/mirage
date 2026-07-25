@@ -7,21 +7,6 @@ small
 === ls_leaf ===
 1.json
 1.txt
-=== tree ===
-├── cat
-│   ├── big
-│   │   ├── 1.json
-│   │   └── 1.txt
-│   └── small
-│       ├── 2.json
-│       └── 2.txt
-└── dog
-    ├── big
-    │   ├── 3.json
-    │   └── 3.txt
-    └── small
-        ├── 4.json
-        └── 4.txt
 === find_txt ===
 /db/cat/big/1.txt
 /db/cat/small/2.txt

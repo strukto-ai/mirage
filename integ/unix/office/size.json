@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "office_size_reflects_enrichment",
+      "seq": 204001,
+      "targets": [
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "wc -c /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "27 /data/office/deck.pptx\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

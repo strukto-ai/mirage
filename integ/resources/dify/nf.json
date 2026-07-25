@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "df_nf_cat",
+      "seq": 580040,
+      "targets": [
+        "dify"
+      ],
+      "command": "cat /knowledge/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /knowledge/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "df_nf_grep",
+      "seq": 580041,
+      "targets": [
+        "dify"
+      ],
+      "command": "grep x /knowledge/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "grep: /knowledge/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "df_nf_stat",
+      "seq": 580042,
+      "targets": [
+        "dify"
+      ],
+      "command": "stat /knowledge/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /knowledge/__nf_missing__.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

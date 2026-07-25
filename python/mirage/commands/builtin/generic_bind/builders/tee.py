@@ -29,9 +29,8 @@ async def tee(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    a: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
@@ -43,7 +42,7 @@ async def tee(
                              write_bytes=partial(ops.require(Operation.WRITE),
                                                  accessor),
                              stdin=stdin,
-                             append=a)
+                             flags=flags)
 
 
 BUILDER = Builder('tee',

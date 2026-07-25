@@ -105,6 +105,50 @@ describe('tr', () => {
     expect(r.out).toBe('ABC\n')
   })
 
+  it('-t truncates set1 to the length of set2', async () => {
+    const resource = new RAMResource()
+    const r = await runTr(resource, [], ['abcde', 'xy'], { t: true }, ENC.encode('abcde'))
+    expect(r.out).toBe('xycde')
+  })
+
+  it('pads set2 by default (no -t)', async () => {
+    const resource = new RAMResource()
+    const r = await runTr(resource, [], ['abcde', 'xy'], {}, ENC.encode('abcde'))
+    expect(r.out).toBe('xyyyy')
+  })
+
+  it('-C complements set1 like -c', async () => {
+    const resource = new RAMResource()
+    const r = await runTr(resource, [], ['0-9', '_'], { C: true }, ENC.encode('abc123'))
+    expect(r.out).toBe('___123')
+  })
+
+  it('--complement long form', async () => {
+    const resource = new RAMResource()
+    const r = await runTr(resource, [], ['0-9', '_'], { complement: true }, ENC.encode('abc123'))
+    expect(r.out).toBe('___123')
+  })
+
+  it('--truncate-set1 long form', async () => {
+    const resource = new RAMResource()
+    const r = await runTr(
+      resource,
+      [],
+      ['abcde', 'xy'],
+      { truncate_set1: true },
+      ENC.encode('abcde'),
+    )
+    expect(r.out).toBe('xycde')
+  })
+
+  it('--delete and --squeeze-repeats long forms', async () => {
+    const resource = new RAMResource()
+    const del = await runTr(resource, [], ['abc'], { delete: true }, ENC.encode('aabbccdd'))
+    expect(del.out).toBe('dd')
+    const sq = await runTr(resource, [], ['a-c'], { squeeze_repeats: true }, ENC.encode('aabbcc'))
+    expect(sq.out).toBe('abc')
+  })
+
   it('missing arguments returns error', async () => {
     const resource = new RAMResource()
     const r = await runTr(resource, [], [])

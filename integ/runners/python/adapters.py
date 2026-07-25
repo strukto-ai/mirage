@@ -12,13 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import base64
+import functools
 import imaplib
 import importlib.util
 import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
@@ -36,13 +39,23 @@ from pymongo import AsyncMongoClient
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
+from mirage.core.databricks_volume.path import configured_root
 from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
+from mirage.resource.aliyun import AliyunConfig, AliyunResource
+from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
 from mirage.resource.box import BoxConfig, BoxResource
+from mirage.resource.ceph import CephConfig, CephResource
+from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
+                                               DatabricksVolumeResource)
+from mirage.resource.dify import DifyConfig, DifyResource
+from mirage.resource.digitalocean import (DigitalOceanConfig,
+                                          DigitalOceanResource)
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
 from mirage.resource.email.config import EmailConfig
 from mirage.resource.email.email import EmailResource
+from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
@@ -56,15 +69,26 @@ from mirage.resource.gslides.config import GSlidesConfig
 from mirage.resource.gslides.gslides import GSlidesResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 from mirage.resource.linear import LinearConfig, LinearResource
+from mirage.resource.mem0 import Mem0Config, Mem0Resource
+from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+from mirage.resource.oci import OCIConfig, OCIResource
 from mirage.resource.onedrive.onedrive import OneDriveResource
+from mirage.resource.qingstor import QingStorConfig, QingStorResource
+from mirage.resource.r2 import R2Config, R2Resource
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.resource.scaleway import ScalewayConfig, ScalewayResource
+from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
 from mirage.resource.sharepoint.sharepoint import SharePointResource
 from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.resource.ssh import SSHConfig, SSHResource
+from mirage.resource.supabase import SupabaseConfig, SupabaseResource
+from mirage.resource.tencent import TencentConfig, TencentResource
 from mirage.resource.trello import TrelloConfig, TrelloResource
+from mirage.resource.wasabi import WasabiConfig, WasabiResource
+from mirage.types import ConsistencyPolicy
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
@@ -77,6 +101,57 @@ S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
 S3_ACCESS = os.environ.get("AWS_ACCESS_KEY_ID", "testing")
 S3_SECRET = os.environ.get("AWS_SECRET_ACCESS_KEY", "testing")
+
+
+def object_storage_resource(name: str, bucket: str, endpoint: str,
+                            key_prefix: str | None) -> S3Resource:
+    common = {
+        "bucket": bucket,
+        "region": S3_REGION,
+        "endpoint_url": endpoint,
+        "access_key_id": S3_ACCESS,
+        "secret_access_key": S3_SECRET,
+        "key_prefix": key_prefix,
+    }
+    if name == "s3":
+        return S3Resource(
+            S3Config(bucket=bucket,
+                     region=S3_REGION,
+                     endpoint_url=endpoint,
+                     aws_access_key_id=S3_ACCESS,
+                     aws_secret_access_key=S3_SECRET,
+                     path_style=True,
+                     key_prefix=key_prefix))
+    if name == "aliyun":
+        return AliyunResource(AliyunConfig(**common, path_style=True))
+    if name == "backblaze":
+        return BackblazeResource(BackblazeConfig(**common, path_style=True))
+    if name == "ceph":
+        return CephResource(CephConfig(**common))
+    if name == "digitalocean":
+        return DigitalOceanResource(
+            DigitalOceanConfig(**common, path_style=True))
+    if name == "gcs":
+        return GCSResource(GCSConfig(**common, path_style=True))
+    if name == "minio":
+        return MinIOResource(MinIOConfig(**common))
+    if name == "oci":
+        return OCIResource(OCIConfig(**common, namespace="integ"))
+    if name == "qingstor":
+        return QingStorResource(QingStorConfig(**common, path_style=True))
+    if name == "r2":
+        return R2Resource(R2Config(**common, path_style=True))
+    if name == "scaleway":
+        return ScalewayResource(ScalewayConfig(**common, path_style=True))
+    if name == "seaweedfs":
+        return SeaweedFSResource(SeaweedFSConfig(**common))
+    if name == "supabase":
+        return SupabaseResource(SupabaseConfig(**common))
+    if name == "tencent":
+        return TencentResource(TencentConfig(**common, path_style=True))
+    if name == "wasabi":
+        return WasabiResource(WasabiConfig(**common, path_style=True))
+    raise ValueError(f"unknown object storage resource: {name}")
 
 
 async def _noop() -> None:
@@ -145,14 +220,9 @@ class S3Service:
         return name
 
     def resource(self, mount: dict) -> S3Resource:
-        return S3Resource(
-            S3Config(bucket=self.bucket_for(mount),
-                     region=S3_REGION,
-                     endpoint_url=self.endpoint,
-                     aws_access_key_id=S3_ACCESS,
-                     aws_secret_access_key=S3_SECRET,
-                     path_style=True,
-                     key_prefix=mount.get("prefix")))
+        return object_storage_resource(mount["resource"],
+                                       self.bucket_for(mount), self.endpoint,
+                                       mount.get("prefix"))
 
     async def teardown(self) -> None:
         for bucket in self.buckets:
@@ -183,6 +253,36 @@ class GridFSService:
             await client.drop_database(self.database)
         finally:
             await client.close()
+
+
+class DatabricksVolumeService:
+
+    def __init__(self, run_id: str, module: ModuleType, store: object,
+                 runner: object, base: str) -> None:
+        self.run_id = run_id
+        self.module = module
+        self.store = store
+        self.runner = runner
+        self.base = base
+
+    @classmethod
+    async def create(cls, run_id: str) -> "DatabricksVolumeService":
+        module = _load_databricks_server()
+        store, runner, base = await module.start_fake_databricks()
+        return cls(run_id, module, store, runner, base)
+
+    def resource(self, mount: dict) -> DatabricksVolumeResource:
+        volume = f"mirage-integ-{self.run_id}-{mount['volume']}"
+        config = DatabricksVolumeConfig(catalog="main",
+                                        schema="default",
+                                        volume=volume,
+                                        root_path=mount.get("prefix") or "/")
+        self.store.make_dir(configured_root(config))
+        client = self.module.HttpFilesClient(self.base, "integ-token")
+        return DatabricksVolumeResource(config, client=client)
+
+    async def teardown(self) -> None:
+        await self.runner.cleanup()
 
 
 def _load_module(path: Path) -> ModuleType:
@@ -218,6 +318,17 @@ def _load_ssh_server() -> ModuleType:
 def _load_box_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "box_server.py")
+
+
+def _load_dify_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" / "dify_server.py")
+
+
+def _load_databricks_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" /
+        "databricks_server.py")
 
 
 def _load_trello_server() -> ModuleType:
@@ -586,6 +697,44 @@ class OneDriveService:
         await self.runner.cleanup()
 
 
+class Mem0Service:
+
+    def __init__(self, endpoint: str,
+                 process: asyncio.subprocess.Process) -> None:
+        self.endpoint = endpoint
+        self.process = process
+
+    @classmethod
+    async def create(cls) -> "Mem0Service":
+        script = (Path(__file__).resolve().parents[2] / "server" /
+                  "mem0_server.py")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        endpoint = (await process.stdout.readline()).decode().strip()
+        if not endpoint:
+            assert process.stderr is not None
+            detail = (await process.stderr.read()).decode().strip()
+            raise RuntimeError(f"mem0 fake failed to start: {detail}")
+        return cls(endpoint, process)
+
+    def resource(self, mount: dict) -> Mem0Resource:
+        return Mem0Resource(
+            Mem0Config(api_key="integ-key",
+                       host=self.endpoint,
+                       user_id="integ-user",
+                       default_page_size=2))
+
+    async def teardown(self) -> None:
+        if self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
+
+
 class DropboxService:
     """Per-account fake Dropbox servers.
 
@@ -732,6 +881,29 @@ class SlackService:
         return None
 
 
+class DifyService:
+
+    def __init__(self, runner, base: str, dataset: str) -> None:
+        self.runner = runner
+        self.base = base
+        self.dataset = dataset
+
+    @classmethod
+    async def create(cls, target: dict) -> "DifyService":
+        module = _load_dify_server()
+        state, _server, runner = await module.start_fake_dify()
+        return cls(runner, state.base, target.get("dataset", "kb-7f3a"))
+
+    def resource(self, mount: dict) -> DifyResource:
+        return DifyResource(
+            DifyConfig(api_key="integ-key",
+                       base_url=self.base,
+                       dataset_id=self.dataset))
+
+    async def teardown(self) -> None:
+        await self.runner.cleanup()
+
+
 class TrelloService:
 
     def __init__(self, state, runner, base: str) -> None:
@@ -797,21 +969,28 @@ class SharePointService:
         return cls(server, runner)
 
     def resource(self, mount: dict) -> SharePointResource:
-        self.server.add_drive(mount["drive"])
+        graph = self.server.drives.get(mount["drive"])
+        if graph is None:
+            graph = self.server.add_drive(mount["drive"])
+        key_prefix = mount.get("prefix")
+        if key_prefix:
+            graph._ensure_parents(f"{key_prefix}/placeholder")
         return SharePointResource(
             SharePointConfig(access_token="integ-token",
                              site="Main",
-                             drive=mount["drive"]))
+                             drive=mount["drive"],
+                             key_prefix=key_prefix))
 
     async def teardown(self) -> None:
         _clear_sharepoint_caches()
         await self.runner.cleanup()
 
 
-Service = (S3Service | OneDriveService | SharePointService | SSHService
+Service = (S3Service | OneDriveService | SharePointService | Mem0Service
+           | SSHService
            | NextcloudService | GwsService | HfService | BoxService
            | DropboxService | GridFSService | SlackService | TrelloService
-           | LinearService)
+           | LinearService | DifyService | DatabricksVolumeService)
 
 
 def build_ram(
@@ -853,6 +1032,13 @@ def build_gridfs(
     return service.resource(mount), _noop
 
 
+def build_databricks_volume(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, DatabricksVolumeService)
+    return service.resource(mount), _noop
+
+
 def build_onedrive(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -864,6 +1050,13 @@ def build_sharepoint(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, SharePointService)
+    return service.resource(mount), _noop
+
+
+def build_mem0(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, Mem0Service)
     return service.resource(mount), _noop
 
 
@@ -885,6 +1078,13 @@ def build_dropbox(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DropboxService)
+    return service.resource(mount), _noop
+
+
+def build_dify(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, DifyService)
     return service.resource(mount), _noop
 
 
@@ -970,9 +1170,25 @@ BUILDERS = {
     "disk": build_disk,
     "redis": build_redis,
     "s3": build_s3,
+    "aliyun": build_s3,
+    "backblaze": build_s3,
+    "ceph": build_s3,
+    "digitalocean": build_s3,
+    "gcs": build_s3,
+    "minio": build_s3,
+    "oci": build_s3,
+    "qingstor": build_s3,
+    "r2": build_s3,
+    "scaleway": build_s3,
+    "seaweedfs": build_s3,
+    "supabase": build_s3,
+    "tencent": build_s3,
+    "wasabi": build_s3,
     "gridfs": build_gridfs,
+    "databricks_volume": build_databricks_volume,
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,
+    "mem0": build_mem0,
     "ssh": build_ssh,
     "nextcloud": build_nextcloud,
     "gdrive": build_gdrive,
@@ -987,41 +1203,51 @@ BUILDERS = {
     "slack": build_slack,
     "trello": build_trello,
     "linear": build_linear,
+    "dify": build_dify,
 }
 
 
-async def open_target(
-        target: dict) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
-    run_id = uuid.uuid4().hex[:8]
-    service: Service | None = None
+async def make_service(target: dict, run_id: str) -> "Service | None":
     if target.get("service") == "s3":
-        service = S3Service(run_id)
-    elif target.get("service") == "gridfs":
-        service = GridFSService(run_id)
-    elif target.get("service") == "onedrive":
-        service = await OneDriveService.create()
-    elif target.get("service") == "sharepoint":
-        service = await SharePointService.create()
-    elif target.get("service") == "ssh":
-        service = await SSHService.create(run_id, target)
-    elif target.get("service") == "nextcloud":
-        service = await NextcloudService.create(run_id, target)
-    elif target.get("service") == "gws":
-        service = await GwsService.create(run_id, target)
-    elif target.get("service") == "email":
-        service = await EmailService.create(run_id, target)
-    elif target.get("service") == "hf":
-        service = await HfService.create(run_id)
-    elif target.get("service") == "box":
-        service = await BoxService.create(run_id)
-    elif target.get("service") == "dropbox":
-        service = await DropboxService.create(target)
-    elif target.get("service") == "slack":
-        service = await SlackService.create()
-    elif target.get("service") == "trello":
-        service = await TrelloService.create()
-    elif target.get("service") == "linear":
-        service = await LinearService.create()
+        return S3Service(run_id)
+    if target.get("service") == "gridfs":
+        return GridFSService(run_id)
+    if target.get("service") == "databricks":
+        return await DatabricksVolumeService.create(run_id)
+    if target.get("service") == "onedrive":
+        return await OneDriveService.create()
+    if target.get("service") == "sharepoint":
+        return await SharePointService.create()
+    if target.get("service") == "mem0":
+        return await Mem0Service.create()
+    if target.get("service") == "ssh":
+        return await SSHService.create(run_id, target)
+    if target.get("service") == "nextcloud":
+        return await NextcloudService.create(run_id, target)
+    if target.get("service") == "gws":
+        return await GwsService.create(run_id, target)
+    if target.get("service") == "email":
+        return await EmailService.create(run_id, target)
+    if target.get("service") == "hf":
+        return await HfService.create(run_id)
+    if target.get("service") == "box":
+        return await BoxService.create(run_id)
+    if target.get("service") == "dropbox":
+        return await DropboxService.create(target)
+    if target.get("service") == "slack":
+        return await SlackService.create()
+    if target.get("service") == "trello":
+        return await TrelloService.create()
+    if target.get("service") == "linear":
+        return await LinearService.create()
+    if target.get("service") == "dify":
+        return await DifyService.create(target)
+    return None
+
+
+def build_mounts(
+    target: dict, run_id: str, service: "Service | None"
+) -> tuple[dict[str, object], list[Callable[[], Awaitable[None]]]]:
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
     for mount in target["mounts"]:
@@ -1032,13 +1258,63 @@ async def open_target(
         else:
             mounts[mount["path"]] = resource
         cleanups.append(cleanup)
-    ws = Workspace(mounts, mode=MountMode.WRITE)
+    return mounts, cleanups
 
-    async def cleanup_all() -> None:
+
+async def mutate_write(shadow_ws: Workspace, path: str,
+                       content: bytes) -> None:
+    await shadow_ws.ops.write(path, content)
+
+
+async def teardown_target(
+    workspaces: list[Workspace],
+    cleanups: list[Callable[[], Awaitable[None]]],
+    service: "Service | None",
+) -> None:
+    for ws in workspaces:
         await ws.close()
-        for cleanup in cleanups:
-            await cleanup()
-        if service is not None:
-            await service.teardown()
+    for cleanup in cleanups:
+        await cleanup()
+    if service is not None:
+        await service.teardown()
 
-    return ws, cleanup_all
+
+async def open_target(
+    target: dict,
+    consistency: ConsistencyPolicy | None = None
+) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
+    run_id = uuid.uuid4().hex[:8]
+    service = await make_service(target, run_id)
+    mounts, cleanups = build_mounts(target, run_id, service)
+    agent_id = target.get("agentId")
+    if consistency is not None:
+        ws = Workspace(mounts,
+                       mode=MountMode.WRITE,
+                       consistency=consistency,
+                       agent_id=agent_id)
+    else:
+        ws = Workspace(mounts, mode=MountMode.WRITE, agent_id=agent_id)
+    return ws, functools.partial(teardown_target, [ws], cleanups, service)
+
+
+async def open_consistency(
+    target: dict, consistency: ConsistencyPolicy
+) -> tuple[
+        Workspace,
+        Callable[[str, bytes], Awaitable[None]],
+        Callable[[], Awaitable[None]],
+]:
+    run_id = uuid.uuid4().hex[:8]
+    service = await make_service(target, run_id)
+    read_mounts, read_cleanups = build_mounts(target, run_id, service)
+    shadow_mounts, shadow_cleanups = build_mounts(target, run_id, service)
+    read_ws = Workspace(read_mounts,
+                        mode=MountMode.WRITE,
+                        consistency=consistency)
+    shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
+    return (
+        read_ws,
+        functools.partial(mutate_write, shadow_ws),
+        functools.partial(teardown_target, [read_ws, shadow_ws],
+                          [*read_cleanups, *shadow_cleanups], service),
+    )

@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "chgrp_group",
+      "seq": 611001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cg && echo alpha > /data/cg/f.txt && chmod 644 /data/cg/f.txt && touch -t 202601021530 /data/cg/f.txt && chgrp staff /data/cg/f.txt && ls -l /data/cg",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 user staff 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chgrp_numeric",
+      "seq": 611002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chgrp 20 /data/cg/f.txt && ls -l /data/cg",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 user 20 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chgrp_keeps_owner",
+      "seq": 611003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chown alice /data/cg/f.txt && chgrp ops /data/cg/f.txt && ls -l /data/cg",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 alice ops 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

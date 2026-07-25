@@ -32,7 +32,7 @@ import {
   getPipelineCommands,
   getRedirects,
   getText,
-  getUnsetNames,
+  getUnsetArgs,
   getWhileParts,
 } from '../../shell/helpers.ts'
 import { JobTable } from '../../shell/job_table.ts'
@@ -41,6 +41,14 @@ import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import {
+  type ShellArray,
+  arrayAppend,
+  arrayExtent,
+  arrayGet,
+  arraySet,
+  makeArray,
+} from '../../shell/array.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
@@ -60,6 +68,7 @@ import {
   handleReadonly,
   handleTest,
   handleUnset,
+  noteLocalArray,
 } from '../executor/builtins/index.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
@@ -477,6 +486,9 @@ export async function executeNode(
   if (kind === NodeKind.DECLARATION) {
     const keyword = getDeclarationKeyword(node)
     const assignments: string[] = []
+    // Array literals are staged, not stored: `readonly -a a=(y)` on an
+    // already-readonly name has to fail with the old value intact.
+    const staged: { name: string; append: boolean; items: string[] }[] = []
     const flagChars = new Set<string>()
     for (const child of node.namedChildren) {
       if (child.type === NT.VARIABLE_ASSIGNMENT) {
@@ -486,13 +498,12 @@ export async function executeNode(
           const text = getText(child)
           const eq = text.indexOf('=')
           const key = eq >= 0 ? text.slice(0, eq) : text
-          session.arrays[key] = await expandArrayItems(
-            firstVal,
-            session,
-            executeFn,
-            registry,
-            callStack,
-          )
+          const append = key.endsWith('+')
+          staged.push({
+            name: append ? key.slice(0, -1) : key,
+            append,
+            items: await expandArrayItems(firstVal, session, executeFn, registry, callStack),
+          })
           continue
         }
         assignments.push(await expandNode(child, session, executeFn, callStack))
@@ -500,7 +511,10 @@ export async function executeNode(
         child.type === NT.SIMPLE_EXPANSION ||
         child.type === NT.EXPANSION ||
         child.type === NT.CONCATENATION ||
-        child.type === NT.WORD
+        child.type === NT.WORD ||
+        // A bare `readonly NAME` / `export NAME` operand parses as a
+        // variable_name, not a word.
+        child.type === NT.VARIABLE_NAME
       ) {
         const expanded = await expandNode(child, session, executeFn, callStack)
         if (expanded === '') continue
@@ -511,8 +525,59 @@ export async function executeNode(
         }
       }
     }
-    if (keyword === 'readonly' || flagChars.has('r')) {
-      return handleReadonly(assignments, session)
+    const arrayNames = staged.map((entry) => entry.name)
+    const isReadonly = keyword === 'readonly' || flagChars.has('r')
+    for (const name of arrayNames) {
+      if (isReadonly && session.readonlyVars.has(name)) {
+        const err = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: err }),
+          new ExecutionNode({ command: keyword, exitCode: 1, stderr: err }),
+        ]
+      }
+    }
+    for (const { name, append, items } of staged) {
+      noteLocalArray(session, name)
+      let base: ShellArray
+      if (append) {
+        const existing = session.arrays[name]
+        if (existing === undefined) {
+          const scalar = session.env[name]
+          base = scalar === undefined ? [] : [scalar]
+        } else {
+          base = existing
+        }
+        arrayAppend(base, items)
+      } else {
+        base = makeArray(items)
+      }
+      session.arrays[name] = base
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.env[name]
+    }
+    if (flagChars.has('a')) {
+      // `declare -a NAME` with no value declares an empty array, so
+      // ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
+      for (const bare of assignments) {
+        if (bare.includes('=')) continue
+        if (noteLocalArray(session, bare)) {
+          // Inside a function this shadows whatever the caller had with a
+          // fresh empty array.
+          session.arrays[bare] = []
+        } else if (!Object.hasOwn(session.arrays, bare)) {
+          // At top level an existing scalar becomes element 0.
+          const scalar = session.env[bare]
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete session.env[bare]
+          session.arrays[bare] = scalar === undefined ? [] : [scalar]
+        }
+      }
+    }
+    if (isReadonly) {
+      // An array assignment stores itself above, but the name still has
+      // to be marked readonly.
+      return handleReadonly([...assignments, ...arrayNames], session)
     }
     // declare/typeset scope like `local` inside a function (bash
     // semantics) and assign globally at top level, which is exactly
@@ -524,7 +589,7 @@ export async function executeNode(
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(getUnsetNames(node), session)
+    return handleUnset(getUnsetArgs(node), session)
   }
 
   if (kind === NodeKind.TEST) {
@@ -583,11 +648,14 @@ export async function executeNode(
           const scalar = session.env[key]
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete session.env[key]
-          base = scalar !== undefined && scalar !== '' ? [scalar] : []
+          base = scalar === undefined ? [] : [scalar]
         }
-        session.arrays[key] = [...base, ...items]
+        // `arr+=(...)` starts at the extent, so it fills the hole a
+        // trailing `unset arr[last]` left but skips interior ones.
+        arrayAppend(base, items)
+        session.arrays[key] = base
       } else {
-        session.arrays[key] = items
+        session.arrays[key] = makeArray(items)
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete session.env[key]
       }
@@ -610,10 +678,10 @@ export async function executeNode(
         const scalar = session.env[key]
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete session.env[key]
-        arr = scalar !== undefined && scalar !== '' ? [scalar] : []
+        arr = scalar === undefined ? [] : [scalar]
       }
       let idx = arrayIndex(idxText, session.env)
-      if (idx < 0) idx += arr.length
+      if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) {
         // bash aborts the whole line on a bad assignment subscript
         // (status 1); containment mirrors ${var:?}.
@@ -625,17 +693,14 @@ export async function executeNode(
           1,
         )
       }
-      while (arr.length <= idx) arr.push('')
-      arr[idx] = append ? (arr[idx] ?? '') + val : val
+      arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
       session.arrays[key] = arr
       return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
     }
     if (append) {
       const arr = session.arrays[key]
-      if (arr !== undefined && arr.length > 0) {
-        arr[0] = (arr[0] ?? '') + val
-      } else if (arr !== undefined) {
-        arr.push(val)
+      if (arr !== undefined) {
+        arraySet(arr, 0, arrayGet(arr, 0) + val)
       } else {
         session.env[key] = (session.env[key] ?? '') + val
       }
@@ -644,6 +709,9 @@ export async function executeNode(
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.arrays[key]
     }
+    // Reassigning OPTIND (even to its current value) restarts the getopts
+    // scan, matching bash's internal char pointer.
+    if (key === 'OPTIND') session.getoptsOptind = null
     const assignIo = new IOResult()
     if (session.shellOptions.xtrace === true) {
       assignIo.stderr = traceAssignment(key, val, append)

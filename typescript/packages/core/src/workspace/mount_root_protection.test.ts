@@ -331,3 +331,49 @@ describe('ls / unchanged after mount-root protection', () => {
     await ws.close()
   })
 })
+
+// ════════════════════════════════════════════════════════════════════
+// rm safety flags: accepted no-ops given mirage's structural protection
+// (non-interactive; mount roots unremovable; recursion never crosses a
+// mount boundary).
+// ════════════════════════════════════════════════════════════════════
+
+describe('rm safety flags', () => {
+  it('-I and -i are accepted no-ops; removal still proceeds', async () => {
+    const ws = await twoMountWs()
+    await ws.execute('touch /r2/a /r2/b')
+    expect((await ws.execute('rm -I /r2/a')).exitCode).toBe(0)
+    expect((await ws.execute('rm -i /r2/b')).exitCode).toBe(0)
+    expect((await ws.execute('ls /r2')).stdoutText.trim()).toBe('')
+    await ws.close()
+  })
+
+  it('--one-file-system is accepted and removes within the mount', async () => {
+    const ws = await twoMountWs()
+    await ws.execute('mkdir -p /r2/d && touch /r2/d/x')
+    const r = await ws.execute('rm --one-file-system -rf /r2/d')
+    expect(r.exitCode).toBe(0)
+    expect((await ws.execute('ls /r2')).stdoutText.trim()).toBe('')
+    await ws.close()
+  })
+
+  it('--preserve-root and --no-preserve-root cannot remove a mount root', async () => {
+    // mirage protection is structural: --no-preserve-root does not disable it.
+    const ws = await twoMountWs()
+    for (const cmd of ['rm --preserve-root -rf /', 'rm --no-preserve-root -rf /r2']) {
+      const r = await ws.execute(cmd)
+      expect(r.exitCode).toBe(1)
+      expect(r.stderrText).toContain('Device or resource busy')
+    }
+    await ws.close()
+  })
+
+  it('rm -I no longer errors as an invalid option', async () => {
+    const ws = await twoMountWs()
+    await ws.execute('touch /r2/a')
+    const r = await ws.execute('rm -rfI /r2/a')
+    expect(r.exitCode).toBe(0)
+    expect(r.stderrText).not.toContain('invalid option')
+    await ws.close()
+  })
+})

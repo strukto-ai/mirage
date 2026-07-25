@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_tee_append",
+      "seq": 781,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo one | tee /data/xta.txt /data2/xta.txt > /dev/null && echo two | tee -a /data/xta.txt /data2/xta.txt > /dev/null && cat /data/xta.txt /data2/xta.txt && rm /data/xta.txt /data2/xta.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\none\ntwo\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

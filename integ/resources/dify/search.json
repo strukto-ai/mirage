@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "df_search_throttle",
+      "seq": 580030,
+      "targets": [
+        "dify"
+      ],
+      "command": "search \"how am I throttled\" /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth:0.92\nRequests are rate limited to 100 calls per minute per token.\n/knowledge/guides/auth:0.88\nIf you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_search_scoped_refund",
+      "seq": 580031,
+      "targets": [
+        "dify"
+      ],
+      "command": "search \"money back\" /knowledge/policies",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/policies/refunds:0.91\nRefunds are available within 30 days of purchase.\n/knowledge/policies/refunds:0.84\nApproved refunds are processed within five business days.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_search_hybrid_encrypted",
+      "seq": 580032,
+      "targets": [
+        "dify"
+      ],
+      "command": "search --method hybrid --top-k 3 encrypted /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/policies/privacy:0.89\nCustomer data is stored encrypted at rest and in transit.\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

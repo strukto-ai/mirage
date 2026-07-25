@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "find_delete_tree",
+      "seq": 500310,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/f4/del3 && printf 'z\\n' > /data/f4/del3/h.txt && find /data/f4/del3 -delete && find /data/f4 -name del3",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "delete"
+      ]
+    }
+  ]
+}

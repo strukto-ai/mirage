@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_diff_differ",
+      "seq": 743,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'same\\nold\\n' | tee /data/xdiff.txt > /dev/null && printf 'same\\nnew\\n' | tee /data2/xdiff.txt > /dev/null && diff /data/xdiff.txt /data2/xdiff.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "2c2\n< old\n---\n> new\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

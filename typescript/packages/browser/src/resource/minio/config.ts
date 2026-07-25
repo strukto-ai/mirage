@@ -21,6 +21,7 @@ export interface MinIOConfig {
   endpoint?: string
   region?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface MinIOConfigRedacted extends Omit<MinIOConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const MinIOConfigSchema = z.object({
   endpoint: z.string().optional(),
   region: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function minioToS3Config(config: MinIOConfig): S3Config {
@@ -46,6 +48,7 @@ export function minioToS3Config(config: MinIOConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

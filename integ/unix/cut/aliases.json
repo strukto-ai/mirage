@@ -1,0 +1,346 @@
+{
+  "cases": [
+    {
+      "id": "cut_bytes",
+      "seq": 610134,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut --bytes=2",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "bytes"
+      ]
+    },
+    {
+      "id": "cut_characters",
+      "seq": 610135,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'éx\\n' | cut --characters=1",
+      "expect": {
+        "exit": 0,
+        "stdout": "é\n",
+        "stderr": ""
+      },
+      "flags": [
+        "characters"
+      ]
+    },
+    {
+      "id": "cut_delimiter",
+      "seq": 610136,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\n' | cut --delimiter=, -f2",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "delimiter",
+        "f"
+      ]
+    },
+    {
+      "id": "cut_fields",
+      "seq": 610137,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\n' | cut -d, --fields=2",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "fields"
+      ]
+    },
+    {
+      "id": "cut_no_partial",
+      "seq": 610138,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'éx\\n' | cut --bytes=1 --no-partial",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n",
+        "stderr": ""
+      },
+      "flags": [
+        "bytes",
+        "no-partial"
+      ]
+    },
+    {
+      "id": "cut_only_delimited",
+      "seq": 610139,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\nplain\\n' | cut -d, -f2 --only-delimited",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "f",
+        "only-delimited"
+      ]
+    },
+    {
+      "id": "cut_output_delimiter",
+      "seq": 610140,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c1,3 --output-delimiter=:",
+      "expect": {
+        "exit": 0,
+        "stdout": "a:c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "output-delimiter"
+      ]
+    },
+    {
+      "id": "cut_whitespace_delimited",
+      "seq": 610141,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '  a   b c  \\n' | cut --whitespace-delimited=trimmed -f1,3",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\tc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "whitespace-delimited",
+        "f"
+      ]
+    },
+    {
+      "id": "cut_zero_terminated",
+      "seq": 610142,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\0c,d\\0' | cut --zero-terminated -d, -f2",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\u0000d\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "zero-terminated",
+        "d",
+        "f"
+      ]
+    }
+  ]
+}

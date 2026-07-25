@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "gsh_seed",
+      "seq": 510000,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "printf 'inside shared drive' | tee /data/note.txt > /dev/null && echo seeded",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "seeded\n"
+      }
+    },
+    {
+      "id": "gsh_ls_root",
+      "seq": 510001,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "ls /data",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "note.txt\n"
+      }
+    },
+    {
+      "id": "gsh_cat",
+      "seq": 510002,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "cat /data/note.txt",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "inside shared drive"
+      }
+    },
+    {
+      "id": "gsh_mkdir_nested",
+      "seq": 510003,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "mkdir -p /data/reports/q1 && printf 'q1 numbers' | tee /data/reports/q1/kpi.txt > /dev/null && find /data -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "/data/note.txt\n/data/reports/q1/kpi.txt\n"
+      }
+    },
+    {
+      "id": "gsh_grep_r",
+      "seq": 510004,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "grep -r numbers /data",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "/data/reports/q1/kpi.txt:q1 numbers\n"
+      }
+    },
+    {
+      "id": "gsh_mv_rm",
+      "seq": 510005,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "mv /data/note.txt /data/reports/note.txt && rm -r /data/reports && ls /data",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    {
+      "id": "gsh_isolation",
+      "seq": 510006,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "printf 'two' | tee /data2/two.txt > /dev/null && ls /data | wc -l && ls /data2",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "0\ntwo.txt\n"
+      }
+    },
+    {
+      "id": "gsh_native_create",
+      "seq": 510007,
+      "targets": [
+        "gdrive-shared"
+      ],
+      "clear_cache": true,
+      "command": "D=$(gws drive files create --json '{\"name\": \"Spec\", \"mimeType\": \"application/vnd.google-apps.document\"}' | jq -r .id) && gws docs +write --document $D --text 'shared doc' | jq -c '.replies | length'",
+      "expect": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "1\n"
+      }
+    }
+  ]
+}

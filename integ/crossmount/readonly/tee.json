@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "xro_tee_refused",
+      "seq": 771,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo x | tee /ro/x.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tee: read-only mount at /ro/\n"
+      }
+    }
+  ]
+}

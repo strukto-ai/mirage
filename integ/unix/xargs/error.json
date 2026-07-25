@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "xargs_invalid_opt",
+      "seq": 421,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo hi | xargs -q echo 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "xargs: invalid option -- 'q'\ncode=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q"
+      ]
+    }
+  ]
+}

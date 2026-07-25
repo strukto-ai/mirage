@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.formatting import format_ls_long
@@ -9,6 +10,59 @@ from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import rebase_one
+
+LS_OK = 0
+LS_MINOR_PROBLEM = 1
+LS_FAILURE = 2
+
+
+@dataclass(frozen=True, slots=True)
+class LsWarning:
+    """One diagnostic plus how serious GNU ls considers it.
+
+    Args:
+        message (str): The rendered `ls: ...` stderr line.
+        serious (bool): True when the failure was on a command-line operand
+            (GNU exit 2); False for problems met while listing or
+            recursing below an operand (GNU exit 1).
+    """
+
+    message: str
+    serious: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WalkResult:
+    """Outcome of listing one directory.
+
+    Args:
+        entries (list[FileStat]): The stats to render for this directory.
+        warnings (list[LsWarning]): Diagnostics collected at or below this
+            directory.
+        listed (bool): False when the directory itself could not be opened, so
+            callers skip emitting a `dir:` header for it.
+    """
+
+    entries: list[FileStat] = field(default_factory=list)
+    warnings: list[LsWarning] = field(default_factory=list)
+    listed: bool = True
+
+
+def exit_status_for(warnings: list[LsWarning]) -> int:
+    """Collapse diagnostics into a GNU ls exit status.
+
+    GNU ratchets the status upward: a serious problem (bad command-line
+    operand) always wins, a minor one only upgrades a clean run.
+
+    Args:
+        warnings (list[LsWarning]): Diagnostics gathered over every operand.
+
+    Returns:
+        0 when clean, 1 for minor problems only, 2 if any was serious.
+    """
+    if any(w.serious for w in warnings):
+        return LS_FAILURE
+    return LS_MINOR_PROBLEM if warnings else LS_OK
 
 
 def format_simple(entries: list[FileStat],
@@ -28,7 +82,7 @@ async def _file_entry(
 ) -> FileStat | None:
     try:
         s = await stat(path, index)
-    except (FileNotFoundError, ValueError):
+    except (OSError, ValueError):
         return None
     if s.type == FileType.DIRECTORY:
         return None
@@ -48,33 +102,39 @@ async def walk(
     reverse: bool = False,
     recursive: bool = False,
     list_dir: bool = False,
+    command_line_arg: bool = True,
     index: IndexCacheStore = NULL_INDEX,
-) -> tuple[list[FileStat], list[str]]:
-    warnings: list[str] = []
+) -> WalkResult:
+    warnings: list[LsWarning] = []
     if list_dir:
         try:
             listed = await stat(path, index)
-        except (FileNotFoundError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             detail = fs_strerror(exc) or exc
-            warnings.append(f"ls: cannot access '{path.raw_path}': {detail}")
-            return [], warnings
+            warnings.append(
+                LsWarning(f"ls: cannot access '{path.raw_path}': {detail}",
+                          command_line_arg))
+            return WalkResult(warnings=warnings, listed=False)
         # GNU ls -d prints the operand as given.
-        return [listed.model_copy(update={"name": path.raw_path})], warnings
+        return WalkResult([listed.model_copy(update={"name": path.raw_path})],
+                          warnings)
 
     try:
         entries = await readdir(path, index)
-    except (FileNotFoundError, ValueError, NotADirectoryError) as exc:
+    except (OSError, ValueError) as exc:
         file_entry = await _file_entry(path, stat, index)
         if file_entry is not None:
-            return [file_entry], warnings
+            return WalkResult([file_entry], warnings)
         warnings.append(
-            f"ls: cannot access '{path.raw_path}': {fs_strerror(exc) or exc}")
-        return [], warnings
+            LsWarning(
+                f"ls: cannot access '{path.raw_path}': "
+                f"{fs_strerror(exc) or exc}", command_line_arg))
+        return WalkResult(warnings=warnings, listed=False)
 
     if not entries:
         file_entry = await _file_entry(path, stat, index)
         if file_entry is not None:
-            return [file_entry], warnings
+            return WalkResult([file_entry], warnings)
 
     stats: list[FileStat] = []
     for entry in entries:
@@ -85,9 +145,13 @@ async def walk(
                                                   path.resource_path, entry))
         try:
             s = await stat(entry_spec, index)
-        except (FileNotFoundError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
+            # An entry below an operand is never a command-line arg, so
+            # GNU treats it as a minor problem (exit 1).
             warnings.append(
-                f"ls: cannot access '{entry}': {fs_strerror(exc) or exc}")
+                LsWarning(
+                    f"ls: cannot access '{entry}': {fs_strerror(exc) or exc}",
+                    False))
             continue
         if not all_files and s.name.startswith("."):
             continue
@@ -112,20 +176,21 @@ async def walk(
                                       resource_path=rekey(
                                           path.virtual, path.resource_path,
                                           child_path))
-                sub, sub_ws = await walk(child_spec,
-                                         readdir=readdir,
-                                         stat=stat,
-                                         all_files=all_files,
-                                         sort_by=sort_by,
-                                         reverse=reverse,
-                                         recursive=True,
-                                         list_dir=False,
-                                         index=index)
-                nested.extend(sub)
-                warnings.extend(sub_ws)
+                sub = await walk(child_spec,
+                                 readdir=readdir,
+                                 stat=stat,
+                                 all_files=all_files,
+                                 sort_by=sort_by,
+                                 reverse=reverse,
+                                 recursive=True,
+                                 list_dir=False,
+                                 command_line_arg=False,
+                                 index=index)
+                nested.extend(sub.entries)
+                warnings.extend(sub.warnings)
         stats = nested
 
-    return stats, warnings
+    return WalkResult(stats, warnings)
 
 
 async def walk_grouped(
@@ -137,23 +202,29 @@ async def walk_grouped(
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
+    command_line_arg: bool = True,
     index: IndexCacheStore = NULL_INDEX,
-) -> tuple[list[tuple[PathSpec, list[FileStat]]], list[str]]:
+) -> tuple[list[tuple[PathSpec, list[FileStat]]], list[LsWarning]]:
     """Recursive walk that returns one (dir, entries) group per directory
     visited, in pre-order. Mirrors GNU `ls -R` output structure.
     """
     groups: list[tuple[PathSpec, list[FileStat]]] = []
-    warnings: list[str] = []
-    here, sub_ws = await walk(path,
-                              readdir=readdir,
-                              stat=stat,
-                              all_files=all_files,
-                              sort_by=sort_by,
-                              reverse=reverse,
-                              recursive=False,
-                              list_dir=False,
-                              index=index)
-    warnings.extend(sub_ws)
+    warnings: list[LsWarning] = []
+    result = await walk(path,
+                        readdir=readdir,
+                        stat=stat,
+                        all_files=all_files,
+                        sort_by=sort_by,
+                        reverse=reverse,
+                        recursive=False,
+                        list_dir=False,
+                        command_line_arg=command_line_arg,
+                        index=index)
+    here = result.entries
+    warnings.extend(result.warnings)
+    # GNU prints no `dir:` header for a directory it could not open.
+    if not result.listed:
+        return groups, warnings
     groups.append((path, here))
     for s in here:
         if s.type == FileType.DIRECTORY:
@@ -170,6 +241,7 @@ async def walk_grouped(
                                                      all_files=all_files,
                                                      sort_by=sort_by,
                                                      reverse=reverse,
+                                                     command_line_arg=False,
                                                      index=index)
             groups.extend(sub_groups)
             warnings.extend(sub_ws2)
@@ -209,10 +281,10 @@ async def ls(
     index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
-    warnings: list[str] = []
+    warnings: list[LsWarning] = []
 
     if recursive and not list_dir:
-        for p_idx, p in enumerate(paths):
+        for p in paths:
             groups, sub_ws = await walk_grouped(p,
                                                 readdir=readdir,
                                                 stat=stat,
@@ -221,8 +293,10 @@ async def ls(
                                                 reverse=reverse,
                                                 index=index)
             warnings.extend(sub_ws)
-            for g_idx, (dir_spec, entries) in enumerate(groups):
-                if p_idx > 0 or g_idx > 0:
+            for dir_spec, entries in groups:
+                # An operand that could not be opened renders no group, so
+                # the separator keys off what was actually emitted.
+                if results:
                     results.append("")
                 header = rebase_one(dir_spec.virtual, p.virtual, p.raw_path)
                 results.append(f"{header}:")
@@ -234,30 +308,35 @@ async def ls(
                               classify=classify)
     else:
         for p in paths:
-            entries, sub_ws = await walk(p,
-                                         readdir=readdir,
-                                         stat=stat,
-                                         all_files=all_files,
-                                         sort_by=sort_by,
-                                         reverse=reverse,
-                                         recursive=False,
-                                         list_dir=list_dir,
-                                         index=index)
-            warnings.extend(sub_ws)
+            result = await walk(p,
+                                readdir=readdir,
+                                stat=stat,
+                                all_files=all_files,
+                                sort_by=sort_by,
+                                reverse=reverse,
+                                recursive=False,
+                                list_dir=list_dir,
+                                index=index)
+            warnings.extend(result.warnings)
             _render_group(results,
-                          entries,
+                          result.entries,
                           long=long,
                           one_per_line=one_per_line,
                           human=human,
                           classify=classify)
 
     output = format_records(results)
-    stderr = format_optional_records(warnings)
-    exit_code = 1 if warnings and not results else 0
-    return output, IOResult(stderr=stderr, exit_code=exit_code)
+    stderr = format_optional_records([w.message for w in warnings])
+    return output, IOResult(stderr=stderr, exit_code=exit_status_for(warnings))
 
 
 __all__ = [
+    "LS_FAILURE",
+    "LS_MINOR_PROBLEM",
+    "LS_OK",
+    "LsWarning",
+    "WalkResult",
+    "exit_status_for",
     "format_simple",
     "ls",
     "walk",

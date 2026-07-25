@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { scoreFromDistance } from './score.ts'
+import { formatScore, scoreFromDistance } from './score.ts'
 
 describe('scoreFromDistance', () => {
   it('converts distances to clamped similarities', () => {
@@ -30,5 +30,21 @@ describe('scoreFromDistance', () => {
     expect(scoreFromDistance(true)).toBe('0.00')
     expect(scoreFromDistance('0.5')).toBe('0.00')
     expect(scoreFromDistance(Number.NaN)).toBe('0.00')
+  })
+})
+
+describe('formatScore', () => {
+  it('formats a provider score to two decimals', () => {
+    expect(formatScore(0.92)).toBe('0.92')
+    expect(formatScore(0.8)).toBe('0.80')
+    expect(formatScore(1)).toBe('1.00')
+  })
+
+  it('returns null for non-numeric values', () => {
+    expect(formatScore(null)).toBeNull()
+    expect(formatScore(undefined)).toBeNull()
+    expect(formatScore(true)).toBeNull()
+    expect(formatScore('0.5')).toBeNull()
+    expect(formatScore(Number.NaN)).toBeNull()
   })
 })

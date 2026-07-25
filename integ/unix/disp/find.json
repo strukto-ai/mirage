@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "disp_find_subdir",
+      "seq": 523,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && find sub -name nested.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/nested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "disp_find_root",
+      "seq": 529,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && find disptree)",
+      "expect": {
+        "exit": 0,
+        "stdout": "disptree\ndisptree/d\ndisptree/d/y.txt\ndisptree/x.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "touch_d_mtime",
+      "seq": 601090,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/ptch1 && printf 'x' > /data/ptch1/a.txt && touch -d '2021-06-15T12:00:00' /data/ptch1/a.txt",
+      "check": {
+        "stat": "/data/ptch1/a.txt",
+        "fields": [
+          "mtime"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mtime=2021-06-15T12:00:00\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "touch_r_ref",
+      "seq": 601091,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/ptch2 && printf 'x' > /data/ptch2/ref.txt && touch -d '2020-01-02T03:04:05' /data/ptch2/ref.txt && printf 'y' > /data/ptch2/b.txt && touch -r /data/ptch2/ref.txt /data/ptch2/b.txt",
+      "check": {
+        "stat": "/data/ptch2/b.txt",
+        "fields": [
+          "mtime"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mtime=2020-01-02T03:04:05\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    }
+  ]
+}

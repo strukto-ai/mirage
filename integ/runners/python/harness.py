@@ -34,7 +34,7 @@ def load_targets(root: Path) -> dict:
 def discover_case_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for name in CASE_DIRS:
-        files.extend(sorted((root / name).glob("*.json")))
+        files.extend(sorted((root / name).rglob("*.json")))
     return files
 
 
@@ -116,6 +116,20 @@ async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
     if case.get("check") is not None:
         out = await stat_check(ws, case["check"])
     return result.exit_code, out, err, elapsed
+
+
+async def run_scenario(read_ws, mutate, steps: list[dict]) -> tuple[int, str]:
+    outs: list[str] = []
+    exit_code = 0
+    for step in steps:
+        if "mutate" in step:
+            spec = step["mutate"]
+            await mutate(spec["path"], spec["content"].encode())
+            continue
+        result = await read_ws.execute(step["command"])
+        outs.append(await result.stdout_str())
+        exit_code = result.exit_code
+    return exit_code, "".join(outs)
 
 
 def compare(case: dict, exit_code: int, out: str, err: str,

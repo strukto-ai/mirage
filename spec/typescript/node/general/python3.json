@@ -15,6 +15,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     }

@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "split_a",
+      "seq": 601072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/psp3 && printf 'a\\nb\\nc\\nd\\ne\\nf\\n' > /data/psp3/in.txt && split -a 1 -l 2 /data/psp3/in.txt /data/psp3/s. && ls /data/psp3 | grep '^s\\.' | tr '\\n' ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "s.a s.b s.c ",
+        "stderr": ""
+      },
+      "flags": [
+        "a",
+        "l"
+      ]
+    }
+  ]
+}

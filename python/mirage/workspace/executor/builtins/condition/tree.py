@@ -15,6 +15,7 @@
 import re
 
 from mirage.shell.arith import ArithError, evaluate_arith
+from mirage.shell.array import make_array
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS)
@@ -73,7 +74,8 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         if match is None:
             return False
         groups = [g if g is not None else "" for g in match.groups()]
-        ctx.session.arrays["BASH_REMATCH"] = [match.group(0), *groups]
+        ctx.session.arrays["BASH_REMATCH"] = make_array(
+            [match.group(0), *groups])
         return True
     if node.op == "<":
         return node.left < node.right

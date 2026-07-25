@@ -1,0 +1,120 @@
+{
+  "cases": [
+    {
+      "id": "rmdir_nonempty",
+      "seq": 601302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qrmd_ne/sub && rmdir /data/qrmd_ne",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rmdir: failed to remove '/data/qrmd_ne': Directory not empty\n"
+      }
+    },
+    {
+      "id": "rmdir_missing_path",
+      "seq": 601303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rmdir /data/qrmd_absent",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rmdir: failed to remove '/data/qrmd_absent': No such file or directory\n"
+      }
+    },
+    {
+      "id": "rmdir_not_dir",
+      "seq": 601304,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/qrmd_f && rmdir /data/qrmd_f",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rmdir: failed to remove '/data/qrmd_f': Not a directory\n"
+      }
+    },
+    {
+      "id": "rmdir_no_operand",
+      "seq": 601305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rmdir",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rmdir: missing operand\nTry 'rmdir --help' for more information.\n"
+      }
+    }
+  ]
+}

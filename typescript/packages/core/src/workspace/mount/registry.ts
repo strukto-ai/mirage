@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { noMount } from '../../utils/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { Runtime } from '../executor/runtime.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -291,7 +292,7 @@ export class MountRegistry {
   resolve(path: string): [Resource, PathSpec, MountMode] {
     const m = this.mountFor(path)
     if (m === null) {
-      throw new Error(`no mount matches path: ${path}`)
+      throw noMount(path)
     }
     const hadTrailing = path.endsWith('/')
     const norm = `/${stripSlash(path)}`

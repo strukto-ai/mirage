@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_o_only_matching",
+      "seq": 500511,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "zgrep -o \"err[a-z]*\" /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "error\nerror\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    }
+  ]
+}

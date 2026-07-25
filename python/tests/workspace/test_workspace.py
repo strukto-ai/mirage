@@ -224,6 +224,63 @@ def test_case_match():
     assert ws.get_session(ws.default_session_id).env["M"] == "yes"
 
 
+def test_case_fallthrough_semi_amp():
+    ws = _ws()
+    io = _exec(ws,
+               "case a in a) echo one;& b) echo two;; c) echo three;; esac")
+    assert _stdout(io) == b"one\ntwo\n"
+
+
+def test_case_continue_match_semi_semi_amp():
+    ws = _ws()
+    io = _exec(ws,
+               "case a in a) echo one;;& a) echo two;;& b) echo three;; esac")
+    assert _stdout(io) == b"one\ntwo\n"
+
+
+def test_case_semi_semi_amp_no_further_match():
+    ws = _ws()
+    io = _exec(ws, "case a in a) echo one;;& z) echo two;; esac")
+    assert _stdout(io) == b"one\n"
+
+
+def test_source_sets_positional_args():
+    ws = _ws()
+    _exec(ws, "printf 'echo argc=$# a1=$1 a2=$2\\n' > /ram/s.sh")
+    io = _exec(ws, "source /ram/s.sh AA BB")
+    assert _stdout(io) == b"argc=2 a1=AA a2=BB\n"
+
+
+def test_source_without_args_keeps_parent_positional():
+    ws = _ws()
+    _exec(ws, "printf 'echo a1=$1\\n' > /ram/s.sh")
+    io = _exec(ws, "set -- P1 P2; source /ram/s.sh; echo after=$1")
+    assert _stdout(io) == b"a1=P1\nafter=P1\n"
+
+
+def test_source_positional_args_keep_the_spelling():
+    ws = _ws()
+    _exec(ws, "printf 'echo a1=$1\\n' > /ram/s.sh")
+    # A path-looking argument stays as typed, not resolved.
+    io = _exec(ws, "cd /ram && source /ram/s.sh ./sub/x.txt")
+    assert _stdout(io) == b"a1=./sub/x.txt\n"
+
+
+def test_readonly_bare_name_registers():
+    ws = _ws()
+    io = _exec(ws, "RO=1; readonly RO; RO=2")
+    assert io.exit_code == 1
+    assert io.stderr == b"bash: RO: readonly variable\n"
+
+
+def test_readonly_array_form_registers():
+    ws = _ws()
+    io = _exec(ws, "readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
+    assert _stdout(io) == b"rc=1\n"
+    assert io.stderr == (b"bash: unset: RA: cannot unset: "
+                         b"readonly variable\n")
+
+
 # ── operators ──────────────────────────────────
 
 

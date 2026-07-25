@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../../../../types.ts'
-import { mvGeneric } from '../../mv.ts'
+import { mvGeneric, parseMvFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
 
@@ -29,8 +29,6 @@ export async function runMv(
   const stat = statOp(dispatch)
   const readBytes = readBytesOp(dispatch)
   const readdir = readdirOp(dispatch)
-  const noClobber = flagKwargs.n === true
-  const verbose = flagKwargs.v === true
   const write = async (p: PathSpec, data: Uint8Array): Promise<void> => {
     await dispatch('write', p, [data])
   }
@@ -43,19 +41,10 @@ export async function runMv(
   const rmdir = async (p: PathSpec): Promise<void> => {
     await dispatch('rmdir', p)
   }
-  const [out, io] = await mvGeneric(
+  return mvGeneric(
     flat,
     stat,
-    {
-      readBytes,
-      write,
-      mkdir,
-      readdir,
-      unlink,
-      rmdir,
-    },
-    noClobber,
-    verbose,
+    { readBytes, write, mkdir, readdir, unlink, rmdir },
+    parseMvFlags(flagKwargs),
   )
-  return [out, io]
 }

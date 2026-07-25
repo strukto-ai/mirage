@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../types.ts'
+import { PathSpec } from '../types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 
 /**
@@ -70,5 +70,22 @@ export async function invalidateAfterUnlink(path: string | PathSpec): Promise<vo
   const manager = storage.getStore()?.manager
   if (manager !== null && manager !== undefined) {
     await manager.invalidateAfterUnlink(path)
+  }
+}
+
+/**
+ * Evict every ancestor directory listing of `path`.
+ *
+ * A single invalidateAfterWrite only refreshes the immediate parent
+ * listing. When an op materializes several missing levels at once
+ * (`mkdir -p a/b/c`, a bucket write that creates parents), the higher
+ * ancestors' cached listings stay stale and hide the new entries until
+ * the index TTL expires. Walking the chain refreshes each one.
+ */
+export async function invalidateAncestors(path: PathSpec): Promise<void> {
+  let parent = path.mountPath.slice(0, path.mountPath.lastIndexOf('/'))
+  while (parent !== '') {
+    await invalidateAfterWrite(PathSpec.fromStrPath(parent))
+    parent = parent.slice(0, parent.lastIndexOf('/'))
   }
 }

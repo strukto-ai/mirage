@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "sym_cat_follow",
+      "seq": 625,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/symd/l.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

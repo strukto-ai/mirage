@@ -26,46 +26,81 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--prefix",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
+      "short_value": true,
       "value_kind": "path",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--digits",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--suffix-format",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-b",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--keep-files",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-k",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--quiet",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--silent",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--suppress-matched",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--elide-empty-files",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

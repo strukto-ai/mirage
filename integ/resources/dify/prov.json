@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "df_prov_cat",
+      "seq": 580090,
+      "targets": [
+        "dify"
+      ],
+      "provision": true,
+      "command": "cat /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=190 ops=1 hits=1 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_prov_grep",
+      "seq": 580091,
+      "targets": [
+        "dify"
+      ],
+      "provision": true,
+      "command": "grep x /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=190 ops=1 hits=1 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_prov_ls",
+      "seq": 580092,
+      "targets": [
+        "dify"
+      ],
+      "provision": true,
+      "command": "ls /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

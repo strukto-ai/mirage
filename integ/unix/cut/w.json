@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "cut_w",
+      "seq": 610130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a   b c\\n' | cut -w -f1,3",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\tc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w",
+        "f"
+      ]
+    }
+  ]
+}

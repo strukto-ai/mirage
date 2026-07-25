@@ -1,0 +1,115 @@
+{
+  "cases": [
+    {
+      "id": "sort_g",
+      "seq": 610146,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '1e2\\n20\\n' | sort -g",
+      "expect": {
+        "exit": 0,
+        "stdout": "20\n1e2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g"
+      ]
+    },
+    {
+      "id": "sort_g_infinity",
+      "seq": 610188,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'inf\\n5\\n-3\\nnan\\nabc\\n' | sort -g",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc\nnan\n-3\n5\ninf\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g"
+      ]
+    },
+    {
+      "id": "sort_g_hex_not_numeric",
+      "seq": 610189,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '0x10\\n5\\n' | sort -g",
+      "expect": {
+        "exit": 0,
+        "stdout": "0x10\n5\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g"
+      ]
+    }
+  ]
+}

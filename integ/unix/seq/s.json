@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "seq_s_sep",
+      "seq": 601220,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq -s , 1 5",
+      "expect": {
+        "exit": 0,
+        "stdout": "1,2,3,4,5\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    }
+  ]
+}

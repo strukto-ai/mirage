@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "gzip_d_no_input",
+      "seq": 564,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "gzip -d",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gzip: (stdin): unexpected end of file"
+      },
+      "flags": [
+        "d"
+      ]
+    }
+  ]
+}

@@ -29,13 +29,8 @@ async def cut(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    f: str | None = None,
-    d: str | None = None,
-    c: str | None = None,
-    complement: bool = False,
-    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths, err = await resolve_readable(ops, accessor, paths, index, "cut")
     if err and not paths:
@@ -45,11 +40,7 @@ async def cut(
                           read_stream=bound_op(ops.read_stream, accessor,
                                                index),
                           stdin=stdin,
-                          f=f,
-                          d=d,
-                          c=c,
-                          complement=complement,
-                          z=z), err)
+                          flags=flags), err)
 
 
 BUILDER = Builder('cut', cut, None, False, None, read=True)

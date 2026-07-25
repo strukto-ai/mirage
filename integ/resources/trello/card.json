@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "tr_card_cat_jq",
+      "seq": 550007,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/card.json | jq -r '.card_name + \" | \" + .desc'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add full-text search | Index every mounted document and expose a search command.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_card_members_jq",
+      "seq": 550008,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/card.json | jq -c '.member_ids'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"mem_alex\"]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

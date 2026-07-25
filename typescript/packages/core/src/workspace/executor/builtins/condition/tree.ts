@@ -14,6 +14,7 @@
 
 import { evaluateArith } from '../../../../shell/arith.ts'
 import { ArithError } from '../../../../shell/errors.ts'
+import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS } from './constants.ts'
 import { applyUnary } from './operators.ts'
@@ -59,10 +60,10 @@ function evalCondBinary(ctx: CondContext, node: Extract<CondNode, { kind: 'binar
       throw new CondError('mirage: syntax error in conditional expression')
     }
     if (match === null) return false
-    ctx.session.arrays.BASH_REMATCH = [
+    ctx.session.arrays.BASH_REMATCH = makeArray([
       match[0],
       ...match.slice(1).map((g: string | undefined) => g ?? ''),
-    ]
+    ])
     return true
   }
   if (node.op === '<') return node.left < node.right

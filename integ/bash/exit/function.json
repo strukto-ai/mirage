@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "id": "exit_function_exits_shell",
+      "seq": 500110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "f(){ exit 5; echo infn; }; f; echo no",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

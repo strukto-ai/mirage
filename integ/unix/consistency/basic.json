@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "id": "consistency_lazy_serves_stale",
+      "seq": 310000,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "hf",
+        "dropbox",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "consistency": "lazy",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/cons.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/cons.txt"
+        },
+        {
+          "mutate": {
+            "path": "/data/cons.txt",
+            "content": "v2\n"
+          }
+        },
+        {
+          "command": "cat /data/cons.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\nv1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "consistency_always_revalidates",
+      "seq": 310001,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "consistency": "always",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/cons.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/cons.txt"
+        },
+        {
+          "mutate": {
+            "path": "/data/cons.txt",
+            "content": "v2\n"
+          }
+        },
+        {
+          "command": "cat /data/cons.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\nv2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

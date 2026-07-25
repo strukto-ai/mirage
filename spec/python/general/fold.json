@@ -46,19 +46,41 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--width",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--spaces",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--bytes",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-b",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--characters",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-c",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

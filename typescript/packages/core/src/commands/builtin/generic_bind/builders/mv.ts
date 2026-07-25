@@ -12,32 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { mvGeneric } from '../../generic/mv.ts'
+import { mvGeneric, parseMvFlags } from '../../generic/mv.ts'
 import type { Builder } from '../adapter.ts'
+import { overlayableStat } from './cp.ts'
 
 export const MV_BUILDER: Builder = {
   name: 'mv',
   write: true,
   fn: (ops, accessor, paths, _texts, opts) => {
-    if (paths.length < 2) {
-      return Promise.resolve([
-        null,
-        new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('mv: missing operand\n') }),
-      ])
-    }
     const { rename } = ops
     if (rename === undefined) {
       throw new Error('mv: backend provides no rename op')
     }
+    const idx = opts.index ?? undefined
+    const parsed = parseMvFlags(opts.flags)
     return mvGeneric(
       paths,
-      (p: PathSpec) => ops.stat(accessor, p, opts.index ?? undefined),
+      overlayableStat(ops, accessor, idx, opts.statOverlay),
       { rename: (src: PathSpec, target: PathSpec) => rename(accessor, src, target) },
-      opts.flags.n === true,
-      opts.flags.v === true,
-      opts.index ?? undefined,
+      parsed,
+      idx,
+      undefined,
+      (p: PathSpec) => ops.readdir(accessor, p, idx),
     )
   },
 }

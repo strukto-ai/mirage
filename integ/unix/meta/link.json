@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "meta_link_chmod_follows",
+      "seq": 200011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw----r-- 1 user user 6 Jan  2 15:30 g.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\nl\t-\t-\tln.txt -> /data/metad/g.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

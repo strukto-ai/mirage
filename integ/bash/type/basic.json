@@ -1,0 +1,159 @@
+{
+  "cases": [
+    {
+      "id": "type_builtin",
+      "seq": 503202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "type cd",
+      "expect": {
+        "exit": 0,
+        "stdout": "cd is a shell builtin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "type_keyword",
+      "seq": 503203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "type if",
+      "expect": {
+        "exit": 0,
+        "stdout": "if is a shell keyword\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "type_command",
+      "seq": 503204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "type ls",
+      "expect": {
+        "exit": 0,
+        "stdout": "ls is a shell builtin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "type_multi",
+      "seq": 503205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "type cd pwd",
+      "expect": {
+        "exit": 0,
+        "stdout": "cd is a shell builtin\npwd is a shell builtin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "type_not_found",
+      "seq": 503206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "type nope_zzz 2>&1; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "type: nope_zzz: not found\nrc=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

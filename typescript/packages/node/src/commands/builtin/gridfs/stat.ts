@@ -16,6 +16,7 @@ import {
   ResourceName,
   command,
   metadataProvision,
+  overlaidStat,
   resolveGlobOf,
   specOf,
   statGeneric,
@@ -37,7 +38,11 @@ async function statCommand(
 ): Promise<CommandFnResult> {
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return statGeneric(resolved, opts, (p) => gridfsStat(accessor, p, opts.index ?? undefined))
+  return statGeneric(
+    resolved,
+    opts,
+    overlaidStat((p) => gridfsStat(accessor, p, opts.index ?? undefined), opts.statOverlay),
+  )
 }
 
 export const GRIDFS_STAT = command({

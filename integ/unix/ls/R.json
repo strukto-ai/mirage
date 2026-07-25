@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "ls_R",
+      "seq": 351,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -R /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub:\ndeep\nnested.txt\n\n/data/sub/deep:\ndeeper.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "R"
+      ]
+    }
+  ]
+}

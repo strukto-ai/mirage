@@ -165,7 +165,7 @@ async def test_tr_delete():
     output, _ = await tr([], ("aeiou", ""),
                          read_stream=rs,
                          stdin=b"hello world",
-                         delete=True)
+                         flags={"d": True})
     assert (await _drain(output)) == b"hll wrld"
 
 
@@ -175,7 +175,7 @@ async def test_tr_squeeze():
     output, _ = await tr([], (" ", " "),
                          read_stream=rs,
                          stdin=b"a   b   c",
-                         squeeze=True)
+                         flags={"s": True})
     assert (await _drain(output)) == b"a b c"
 
 

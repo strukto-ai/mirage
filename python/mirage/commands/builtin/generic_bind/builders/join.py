@@ -17,6 +17,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.join import join_cmd as generic_join
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,22 +34,32 @@ async def join(
     v: str | None = None,
     e: str | None = None,
     o: str | None = None,
+    i: bool = False,
+    j: str | None = None,
+    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["join"])
     if not ops.is_mounted(accessor) or len(paths) < 2:
         raise ValueError("join: requires two paths")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_join(paths,
                               read_bytes=bound_op(ops.read_bytes, accessor,
                                                   index),
-                              field1=int(kwargs.get("args_1", 1)) - 1,
-                              field2=int(kwargs.get("2", 1)) - 1,
+                              field1=int(j or fl.as_str("args_1") or "1") - 1,
+                              field2=int(j or fl.as_str("2") or "1") - 1,
                               separator=t,
                               also_unpairable=a,
                               only_unpairable=v,
                               empty_value=e,
-                              output_format=o)
+                              output_format=o,
+                              ignore_case=i or fl.as_bool("ignore_case"),
+                              zero_terminated=z
+                              or fl.as_bool("zero_terminated"),
+                              check_order=fl.as_bool("check_order")
+                              and not fl.as_bool("nocheck_order"),
+                              header=fl.as_bool("header"))
 
 
 BUILDER = Builder('join', join, None, False, None, read=True)

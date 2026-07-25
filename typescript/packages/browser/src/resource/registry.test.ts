@@ -37,7 +37,23 @@ describe('browser resource registry', () => {
     expect(names).toContain('aliyun')
     expect(names).toContain('scaleway')
     expect(names).toContain('qingstor')
+    expect(names).toContain('onedrive')
+    expect(names).toContain('sharepoint')
+    expect(names).toContain('mem0')
     expect(names).toEqual([...names].sort())
+  })
+
+  it('builds Microsoft Graph and Mem0 resources from snake_case config', async () => {
+    const oneDrive = await buildResource('onedrive', {
+      access_token: 'token',
+      drive_id: 'drive',
+    })
+    const sharePoint = await buildResource('sharepoint', { access_token: 'token' })
+    const mem0 = await buildResource('mem0', { api_key: 'key', agent_id: 'agent' })
+
+    expect(oneDrive.kind).toBe('onedrive')
+    expect(sharePoint.kind).toBe('sharepoint')
+    expect(mem0.kind).toBe('mem0')
   })
 
   it('builds each S3-compatible alias with bucket and presignedUrlProvider', async () => {

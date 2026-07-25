@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "slack_get_users",
+      "seq": 520026,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-get-users --query priya /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_get_users_deleted",
+      "seq": 520027,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-get-users --query iris /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_get_user_profile",
+      "seq": 520028,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-get-user-profile --user_id U8 /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":\"U8\",\"name\":\"marcus\",\"real_name\":\"Marcus Webb\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Marcus Webb\",\"display_name\":\"marcus\",\"email\":\"marcus@kestrel.example.com\"}}",
+        "stderr": ""
+      }
+    }
+  ]
+}

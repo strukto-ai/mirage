@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rg_m_max_count",
+      "seq": 500409,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -m1 error /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    }
+  ]
+}

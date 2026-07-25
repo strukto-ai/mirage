@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "midglob_prep",
+      "seq": 411,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/g15/sub /data/g15/sea && cd /data/g15 && printf 'hi\n' | tee sub/x.txt > /dev/null && printf 'yo\n' | tee sea/x.txt > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

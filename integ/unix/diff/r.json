@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "diff_recursive",
+      "seq": 317,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/dr/x/sub /data/dr/y/sub && echo aaa | tee /data/dr/x/a.txt > /dev/null && echo AAA | tee /data/dr/y/a.txt > /dev/null && echo keep | tee /data/dr/x/c.txt > /dev/null && echo keep | tee /data/dr/y/c.txt > /dev/null && echo deep1 | tee /data/dr/x/sub/d.txt > /dev/null && echo deep2 | tee /data/dr/y/sub/d.txt > /dev/null && echo L | tee /data/dr/x/leftonly.txt > /dev/null && echo R | tee /data/dr/y/rightonly.txt > /dev/null && diff -r /data/dr/x /data/dr/y",
+      "expect": {
+        "exit": 1,
+        "stdout": "diff -r /data/dr/x/a.txt /data/dr/y/a.txt\n1c1\n< aaa\n---\n> AAA\nOnly in /data/dr/x: leftonly.txt\nOnly in /data/dr/y: rightonly.txt\ndiff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt\n1c1\n< deep1\n---\n> deep2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    }
+  ]
+}

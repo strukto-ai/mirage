@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_join",
+      "seq": 721,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '1 alpha\\n2 beta\\n' | tee /data/xj1.txt > /dev/null && printf '1 one\\n3 three\\n' | tee /data2/xj2.txt > /dev/null && join /data/xj1.txt /data2/xj2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 alpha one\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

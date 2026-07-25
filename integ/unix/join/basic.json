@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "id": "join",
+      "seq": 84,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "join /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "banana\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_o",
+      "seq": 332,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "join /data/sorted_a.txt /data/sorted_c.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\ncherry\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_default",
+      "seq": 601180,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qjoin && printf '1 a\\n2 b\\n3 c\\n' > /data/qjoin/j1 && printf '1 x\\n3 z\\n' > /data/qjoin/j2 && join /data/qjoin/j1 /data/qjoin/j2",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 a x\n3 c z\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

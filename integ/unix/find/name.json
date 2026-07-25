@@ -1,0 +1,501 @@
+{
+  "cases": [
+    {
+      "id": "find_name",
+      "seq": 70,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_multi_name",
+      "seq": 100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name \"*.txt\" -o -name \"*.json\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "o"
+      ]
+    },
+    {
+      "id": "find_pipe_wc",
+      "seq": 111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name \"*.txt\" | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "30\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_sort_head",
+      "seq": 119,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name \"*.txt\" | sort | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_recurse",
+      "seq": 140,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_name_start",
+      "seq": 296,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_print_trailing",
+      "seq": 500301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "print"
+      ]
+    },
+    {
+      "id": "find_print0_name",
+      "seq": 500303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -print0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\u0000/data/f4/sub1/skipme/deep.txt\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "print0"
+      ]
+    },
+    {
+      "id": "find_a_alias",
+      "seq": 500304,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -a -name \"inner*\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "a"
+      ]
+    },
+    {
+      "id": "find_and_alias",
+      "seq": 500305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/sub1 -name inner.txt -and -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "and"
+      ]
+    },
+    {
+      "id": "find_ls_paths",
+      "seq": 500307,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/sub1 -name \"*.txt\" -ls | awk '{print $NF}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "ls"
+      ]
+    },
+    {
+      "id": "find_delete_by_name",
+      "seq": 500308,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/del -name \"*.tmp\" -delete && ls /data/f4/del",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "delete"
+      ]
+    },
+    {
+      "id": "find_delete_with_print",
+      "seq": 500309,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/f4/del2 && printf 'x\\n' > /data/f4/del2/g.tmp && find /data/f4/del2 -name \"*.tmp\" -delete -print && ls /data/f4/del2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/del2/g.tmp\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "delete",
+        "print"
+      ]
+    },
+    {
+      "id": "find_name_caret_class",
+      "seq": 500312,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "find /data -name 'sorted_[^b]*' | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sorted_a.txt\n/data/sorted_c.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name"
+      ]
+    }
+  ]
+}

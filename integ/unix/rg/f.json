@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "rg_f_multi",
+      "seq": 284,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "rg_f_file",
+      "seq": 288,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -f /data/patterns.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

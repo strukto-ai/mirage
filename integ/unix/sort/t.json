@@ -1,0 +1,81 @@
+{
+  "cases": [
+    {
+      "id": "sort_t_comma",
+      "seq": 242,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort -t , -k 1 /data/abc.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,1\nb,2\nc,3\nd,4\ne,5\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "k"
+      ]
+    },
+    {
+      "id": "sort_k2n",
+      "seq": 243,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort -t ' ' -k 2 -n /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "bob 25 designer\nalice 30 engineer\ncarol 40 manager\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "k",
+        "n"
+      ]
+    }
+  ]
+}

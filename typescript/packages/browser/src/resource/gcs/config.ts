@@ -21,6 +21,7 @@ export interface GCSConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface GCSConfigRedacted extends Omit<GCSConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const GCSConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function gcsToS3Config(config: GCSConfig): S3Config {
@@ -48,6 +50,7 @@ export function gcsToS3Config(config: GCSConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

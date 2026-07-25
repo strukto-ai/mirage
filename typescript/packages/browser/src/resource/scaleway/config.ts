@@ -21,6 +21,7 @@ export interface ScalewayConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface ScalewayConfigRedacted extends Omit<ScalewayConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const ScalewayConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedScalewayEndpoint(config: ScalewayConfig): string | undefined {
@@ -56,6 +58,7 @@ export function scalewayToS3Config(config: ScalewayConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

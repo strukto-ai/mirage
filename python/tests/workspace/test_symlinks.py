@@ -65,6 +65,38 @@ async def test_ln_no_force_refuses_existing_link():
 
 
 @pytest.mark.asyncio
+async def test_ln_sr_stores_relative_target():
+    ws = _ws()
+    await ws.execute("mkdir -p /data/a /data/b")
+    await ws.execute("echo hi > /data/a/f.txt")
+    r = await ws.execute("ln -sr /data/a/f.txt /data/b/link")
+    assert r.exit_code == 0
+    assert (await ws.execute("readlink /data/b/link")).stdout.decode() == \
+        "../a/f.txt\n"
+    # the relative link resolves back to the file
+    assert (await ws.execute("cat /data/b/link")).stdout.decode() == "hi\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_srv_reports_relative_link():
+    ws = _ws()
+    await ws.execute("mkdir -p /data/a /data/b")
+    await ws.execute("echo hi > /data/a/f.txt")
+    r = await ws.execute("ln -srv /data/a/f.txt /data/b/link")
+    assert r.stdout.decode() == "'/data/b/link' -> '../a/f.txt'\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_sn_and_sT_are_accepted_noops():
+    ws = _ws()
+    await ws.execute("echo hi > /data/a.txt")
+    assert (await ws.execute("ln -sn /data/a.txt /data/l1")).exit_code == 0
+    assert (await ws.execute("ln -sT /data/a.txt /data/l2")).exit_code == 0
+    assert (await ws.execute("readlink /data/l1")).stdout.decode() == \
+        "/data/a.txt\n"
+
+
+@pytest.mark.asyncio
 async def test_cd_through_symlink():
     ws = _ws()
     await ws.execute("mkdir -p /data/real")

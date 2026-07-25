@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "col_ls",
+      "seq": 100000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls /res",
+      "expect": {
+        "exit": 0,
+        "stdout": "example.feather\nexample.h5\nexample.parquet\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_ls_file_operand",
+      "seq": 100023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "/res/example.parquet\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_ls_glob_operand",
+      "seq": 100024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls /res/*.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "/res/example.parquet\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

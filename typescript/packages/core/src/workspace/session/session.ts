@@ -13,7 +13,34 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import type { ShellArray } from '../../shell/array.ts'
 import type { MountMode } from '../../types.ts'
+
+/**
+ * Read one entry of a session record, ignoring anything inherited from
+ * `Object.prototype`. Shell names are script-controlled, so a plain
+ * `record[name]` lookup would hand back `Object.prototype` (or one of
+ * its methods) for a name like `__proto__` or `toString`; Python's dicts
+ * have no such shadow, so this guard is the TypeScript side only.
+ */
+export function sessionEntry<T>(record: Record<string, T>, name: string): T | undefined {
+  return Object.hasOwn(record, name) ? record[name] : undefined
+}
+
+/**
+ * Write one entry of a session record as an own property. A plain
+ * `record[name] = value` on the name `__proto__` runs the inherited
+ * setter instead: it silently drops a string value and rewrites the
+ * record's prototype for an array one.
+ */
+export function setSessionEntry<T>(record: Record<string, T>, name: string, value: T): void {
+  Object.defineProperty(record, name, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  })
+}
 
 export interface SessionInit {
   sessionId: string
@@ -25,7 +52,7 @@ export interface SessionInit {
   positionalArgs?: string[]
   shellOptions?: Record<string, boolean>
   readonlyVars?: Set<string>
-  arrays?: Record<string, string[]>
+  arrays?: Record<string, ShellArray>
   /**
    * Per-mount mode caps for this session. `null` (the default) means
    * no restriction: every mount in the workspace is reachable at its own
@@ -51,7 +78,7 @@ export class Session {
   positionalArgs: string[]
   shellOptions: Record<string, boolean>
   readonlyVars: Set<string>
-  arrays: Record<string, string[]>
+  arrays: Record<string, ShellArray>
   // Transient `set -e` marker: true when the failure just returned
   // came from a short-circuited &&/|| branch or a `!`-negated command,
   // which bash exempts from errexit. Reset on every node execution.
@@ -62,6 +89,15 @@ export class Session {
   stdinBuffer: AsyncLineIterator | null = null
   stdinSource: unknown = null
   localVars: Map<string, string | null> | null = null
+  // Arrays shadowed by `local -a` / `declare -a` in the running
+  // function; null means the caller had no array of that name.
+  localArrays: Map<string, ShellArray | null> | null = null
+  // Hidden `getopts` state: the char offset within the word being
+  // scanned (0 = positioned at the word's leading dash), plus the OPTIND
+  // that offset belongs to. A caller resetting OPTIND makes the seen
+  // value stale, restarting the scan, matching bash's char pointer.
+  getoptsPos = 0
+  getoptsOptind: number | null = null
   mountModes: ReadonlyMap<string, MountMode> | null
   generation: number
   pipelineTimeoutSeconds: number | null
@@ -94,7 +130,7 @@ export class Session {
    * forget one when adding new fields.
    */
   fork(overrides: Partial<SessionInit> = {}): Session {
-    return new Session({
+    const forked = new Session({
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
       env: overrides.env ?? { ...this.env },
@@ -112,6 +148,9 @@ export class Session {
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    forked.getoptsPos = this.getoptsPos
+    forked.getoptsOptind = this.getoptsOptind
+    return forked
   }
 
   /**

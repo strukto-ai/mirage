@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "id": "tree",
+      "seq": 323,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tree /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n\n2 directories, 2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tree_basic",
+      "seq": 601370,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptree/a/deep /data/ptree/b && printf x>/data/ptree/a/f.txt && printf y>/data/ptree/a/deep/g.txt && printf z>/data/ptree/top.txt && tree /data/ptree",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/ptree\n|-- a\n|   |-- deep\n|   |   `-- g.txt\n|   `-- f.txt\n|-- b\n`-- top.txt\n\n4 directories, 3 files\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

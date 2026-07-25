@@ -1,0 +1,111 @@
+{
+  "cases": [
+    {
+      "id": "grep_color_auto",
+      "seq": 276,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep --color=auto world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      },
+      "flags": [
+        "color"
+      ]
+    },
+    {
+      "id": "grep_color_bare",
+      "seq": 277,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep --color world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      },
+      "flags": [
+        "color"
+      ]
+    },
+    {
+      "id": "grep_color_never_noop",
+      "seq": 500218,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep --color=never alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      },
+      "flags": [
+        "color"
+      ]
+    }
+  ]
+}

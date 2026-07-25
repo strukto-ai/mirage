@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "object_storage_prefix_write",
+      "seq": 900,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "printf 'outside\\n' > /raw/outside.txt; printf 's3\\n' > /s3/identity.txt; printf 'aliyun\\n' > /aliyun/identity.txt; printf 'backblaze\\n' > /backblaze/identity.txt; printf 'ceph\\n' > /ceph/identity.txt; printf 'digitalocean\\n' > /digitalocean/identity.txt; printf 'gcs\\n' > /gcs/identity.txt; printf 'minio\\n' > /minio/identity.txt; printf 'oci\\n' > /oci/identity.txt; printf 'qingstor\\n' > /qingstor/identity.txt; printf 'r2\\n' > /r2/identity.txt; printf 'scaleway\\n' > /scaleway/identity.txt; printf 'seaweedfs\\n' > /seaweedfs/identity.txt; printf 'supabase\\n' > /supabase/identity.txt; printf 'tencent\\n' > /tencent/identity.txt; printf 'wasabi\\n' > /wasabi/identity.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

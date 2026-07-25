@@ -19,12 +19,17 @@ import { IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../shell/errors.ts'
+import { shellJoin } from '../../../shell/join.ts'
 import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
+import { arrayIndex } from '../../expand/variable.ts'
+import { sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../command.ts'
-import type { Result } from './scope.ts'
+import { PRINTF_TARGET_RE } from './text.ts'
+import type { ExecuteStringFn, Result } from './scope.ts'
 
 export function handleExport(assignments: string[], session: Session): Result {
   for (const assign of assignments) {
@@ -69,11 +74,102 @@ export function handleReadonly(assignments: string[], session: Session): Result 
   return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
 }
 
-export function handleUnset(names: string[], session: Session): Result {
-  for (const name of names) {
-    if (session.readonlyVars.has(name)) {
+/**
+ * Remove a scalar/array variable, or one array element `name[idx]`.
+ *
+ * Clearing an element keeps the indices of the elements after it, as bash
+ * does: it leaves a hole, which neither expands in `${arr[@]}` nor counts
+ * toward `${#arr[@]}` but keeps `${arr[i]}` addressing the same values.
+ * Trailing holes are dropped, so `arr+=(x)` refills the slot a trailing
+ * unset freed.
+ *
+ * A subscript on a scalar names element 0 only: `x[0]` unsets the scalar
+ * and any other subscript reports `notarray`. A subscript on a name that
+ * holds nothing at all is a silent no-op, but on an existing array a
+ * negative subscript still below zero after the extent is added reports
+ * `subscript`.
+ */
+function unsetVariable(session: Session, name: string): 'ok' | 'notarray' | 'subscript' {
+  const match = PRINTF_TARGET_RE.exec(name)
+  if (match?.[2] !== undefined) {
+    const base = match[1] ?? ''
+    const arr = sessionEntry(session.arrays, base)
+    if (arr === undefined) {
+      if (sessionEntry(session.env, base) === undefined) return 'ok'
+      if (arrayIndex(match[2], session.env) !== 0) return 'notarray'
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.env[base]
+      return 'ok'
+    }
+    let idx = arrayIndex(match[2], session.env)
+    if (idx < 0) {
+      idx += arrayExtent(arr)
+      if (idx < 0) return 'subscript'
+    }
+    arrayUnset(arr, idx)
+    return 'ok'
+  }
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.env[name]
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.arrays[name]
+  if (name === 'OPTIND') session.getoptsOptind = null
+  return 'ok'
+}
+
+/**
+ * Unset shell variables, arrays, or functions, with bash's flags.
+ *
+ * `-v` targets a variable only, `-f` a function only, and a bare name a
+ * variable if one exists or else a function. A `name[idx]` operand clears
+ * one element; the readonly guard resolves it to the base name first,
+ * since that is what `readonly` records. `-n` (unset a nameref itself)
+ * has no referent here — mirage has no nameref attribute — so it matches
+ * bash on a non-nameref name and leaves it untouched.
+ */
+export function handleUnset(args: string[], session: Session): Result {
+  let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
+  let i = 0
+  while (i < args.length && (args[i] ?? '').startsWith('-') && args[i] !== '-') {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (/^-[vfn]+$/.test(tok)) {
+      if (tok.includes('f')) mode = 'f'
+      else if (tok.includes('n')) mode = 'n'
+      else mode = 'v'
+      i += 1
+      continue
+    }
+    const err = new TextEncoder().encode(`bash: unset: ${tok}: invalid option\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'unset', exitCode: 2, stderr: err }),
+    ]
+  }
+  for (const name of args.slice(i)) {
+    if (mode === 'n') {
+      // No nameref attribute exists, so this leaves the name untouched,
+      // matching bash on a plain variable.
+      continue
+    }
+    if (mode === 'f') {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.functions[name]
+      continue
+    }
+    const match = PRINTF_TARGET_RE.exec(name)
+    const isElement = match?.[2] !== undefined
+    // `readonly arr` records the base name, so an `arr[i]` operand has to
+    // be resolved before the guard, as bash does (which also names the
+    // base, not the element, in the error).
+    const base = match?.[1] ?? name
+    if (session.readonlyVars.has(base)) {
       const err = new TextEncoder().encode(
-        `bash: unset: ${name}: cannot unset: readonly variable\n`,
+        `bash: unset: ${base}: cannot unset: readonly variable\n`,
       )
       return [
         null,
@@ -81,8 +177,26 @@ export function handleUnset(names: string[], session: Session): Result {
         new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
       ]
     }
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete session.env[name]
+    const existed = isElement || name in session.env || name in session.arrays
+    const status = unsetVariable(session, name)
+    if (status !== 'ok') {
+      // bash names the base for "not an array variable" but prints only
+      // the bracketed part for a bad subscript.
+      const detail =
+        status === 'notarray'
+          ? `unset: ${base}: not an array variable`
+          : `unset: ${name.slice(base.length)}: bad array subscript`
+      const err = new TextEncoder().encode(`bash: ${detail}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: err }),
+        new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
+      ]
+    }
+    if (mode === 'auto' && !existed && name in session.functions) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.functions[name]
+    }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'unset', exitCode: 0 })]
 }
@@ -106,6 +220,136 @@ export function handlePrintenv(name: string | null, session: Session): Result {
   return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
 }
 
+const ENV_HELP_HINT = "Try 'env --help' for more information.\n"
+
+function envError(message: string): Result {
+  const err = new TextEncoder().encode(`${message}\n${ENV_HELP_HINT}`)
+  return [
+    null,
+    new IOResult({ exitCode: 125, stderr: err }),
+    new ExecutionNode({ command: 'env', exitCode: 125, stderr: err }),
+  ]
+}
+
+export async function handleEnv(
+  executeFn: ExecuteStringFn,
+  args: string[],
+  session: Session,
+  stdin: ByteSource | null = null,
+): Promise<Result> {
+  let ignoreEnv = false
+  let nullSep = false
+  const unset: string[] = []
+  let i = 0
+  while (i < args.length) {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (tok === '-i' || tok === '--ignore-environment') {
+      ignoreEnv = true
+      i += 1
+      continue
+    }
+    if (tok === '-0' || tok === '--null') {
+      nullSep = true
+      i += 1
+      continue
+    }
+    if (tok === '-') {
+      // GNU: "a mere - implies -i".
+      ignoreEnv = true
+      i += 1
+      continue
+    }
+    if (tok === '--unset') {
+      if (i + 1 >= args.length) {
+        return envError("env: option '--unset' requires an argument")
+      }
+      unset.push(args[i + 1] ?? '')
+      i += 2
+      continue
+    }
+    if (tok.startsWith('--unset=')) {
+      unset.push(tok.slice('--unset='.length))
+      i += 1
+      continue
+    }
+    if (tok.startsWith('--')) {
+      return envError(`env: unrecognized option '${tok}'`)
+    }
+    if (tok.startsWith('-') && tok.length > 1) {
+      let j = 1
+      let consumedNext = false
+      let errored: string | null = null
+      while (j < tok.length) {
+        const ch = tok[j]
+        if (ch === 'i') {
+          ignoreEnv = true
+        } else if (ch === '0') {
+          nullSep = true
+        } else if (ch === 'u') {
+          const rest = tok.slice(j + 1)
+          if (rest !== '') {
+            unset.push(rest)
+          } else if (i + 1 < args.length) {
+            unset.push(args[i + 1] ?? '')
+            consumedNext = true
+          } else {
+            errored = "env: option requires an argument -- 'u'"
+          }
+          break
+        } else {
+          errored = `env: invalid option -- '${ch ?? ''}'`
+          break
+        }
+        j += 1
+      }
+      if (errored !== null) return envError(errored)
+      i += consumedNext ? 2 : 1
+      continue
+    }
+    break
+  }
+
+  const dropSet = new Set(unset)
+  const source = ignoreEnv ? {} : session.env
+  const base: Record<string, string> = {}
+  for (const [k, v] of Object.entries(source)) {
+    if (!dropSet.has(k)) base[k] = v
+  }
+  while (i < args.length && (args[i] ?? '').includes('=') && !(args[i] ?? '').startsWith('=')) {
+    const tok = args[i] ?? ''
+    const eq = tok.indexOf('=')
+    base[tok.slice(0, eq)] = tok.slice(eq + 1)
+    i += 1
+  }
+
+  const command = args.slice(i)
+  if (command.length > 0 && nullSep) {
+    return envError('env: cannot specify --null (-0) with command')
+  }
+  if (command.length === 0) {
+    const sep = nullSep ? '\0' : '\n'
+    const out = new TextEncoder().encode(
+      Object.entries(base)
+        .map(([k, v]) => `${k}=${v}${sep}`)
+        .join(''),
+    )
+    return [out, new IOResult(), new ExecutionNode({ command: 'env', exitCode: 0 })]
+  }
+
+  const saved = session.env
+  session.env = base
+  try {
+    const io = await executeFn(shellJoin(command), { sessionId: session.sessionId, stdin })
+    return [io.stdout, io, new ExecutionNode({ command: 'env', exitCode: io.exitCode })]
+  } finally {
+    session.env = saved
+  }
+}
+
 export function handleWhoami(namespace: Namespace): Result {
   // GNU whoami reports the effective user and never consults $USER; the
   // workspace user (launch agentId, shared via the namespace store) is
@@ -121,6 +365,24 @@ export function handleWhoami(namespace: Namespace): Result {
   }
   const out = new TextEncoder().encode(`${namespace.user}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
+}
+
+/**
+ * Record the caller's array before a function shadows `name`.
+ *
+ * `local -a` / `declare -a` inside a function shadow the caller's array,
+ * so the old value (or its absence) has to be remembered for the teardown
+ * in `executeCommand`. Returns true when a function scope is active, so
+ * the caller should shadow rather than reuse whatever is already there.
+ */
+export function noteLocalArray(session: Session, name: string): boolean {
+  const localArrays = session.localArrays
+  if (localArrays === null) return false
+  if (!localArrays.has(name)) {
+    const existing = sessionEntry(session.arrays, name)
+    localArrays.set(name, existing === undefined ? null : [...existing])
+  }
+  return true
 }
 
 export function handleLocal(assignments: string[], session: Session): Result {
@@ -224,6 +486,121 @@ export function handleSet(
     break
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
+}
+
+const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+function isValidName(name: string): boolean {
+  return IDENTIFIER_RE.test(name)
+}
+
+function getoptsFinish(
+  session: Session,
+  name: string,
+  optValue: string,
+  optarg: string | null,
+  newOptind: number,
+  newPos: number,
+  exitCode: number,
+  stderr: Uint8Array | null = null,
+): Result {
+  // The name is assigned last, exactly as bash does: OPTIND/OPTARG and
+  // the hidden cursor still advance, but a bad destination fails the
+  // write and turns the call into a status-1 error.
+  if (!isValidName(name)) {
+    stderr = new TextEncoder().encode(`bash: getopts: \`${name}': not a valid identifier\n`)
+    exitCode = 1
+  } else if (session.readonlyVars.has(name)) {
+    stderr = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+    exitCode = 1
+  } else {
+    session.env[name] = optValue
+  }
+  if (optarg === null) delete session.env.OPTARG
+  else session.env.OPTARG = optarg
+  session.env.OPTIND = String(newOptind)
+  session.getoptsPos = newPos
+  session.getoptsOptind = newOptind
+  const io = new IOResult(stderr === null ? { exitCode } : { exitCode, stderr })
+  const node =
+    stderr === null
+      ? new ExecutionNode({ command: 'getopts', exitCode })
+      : new ExecutionNode({ command: 'getopts', exitCode, stderr })
+  return [null, io, node]
+}
+
+/** Parse one option per call, with bash's getopts semantics. */
+export function handleGetopts(
+  args: readonly string[],
+  session: Session,
+  callStack: CallStack | null = null,
+): Result {
+  if (args.length < 2) {
+    const err = new TextEncoder().encode('getopts: usage: getopts optstring name [arg]\n')
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'getopts', exitCode: 2, stderr: err }),
+    ]
+  }
+  const optstring = args[0] ?? ''
+  const name = args[1] ?? ''
+  let params: readonly string[]
+  if (args.length > 2) params = args.slice(2)
+  else if (callStack !== null && callStack.getAllPositional().length > 0)
+    params = callStack.getAllPositional()
+  else params = session.positionalArgs
+  const silent = optstring.startsWith(':')
+  const verbose = !silent && (session.env.OPTERR ?? '1') !== '0'
+  const parsed = Number.parseInt(session.env.OPTIND ?? '1', 10)
+  let optind = Number.isNaN(parsed) ? 1 : parsed
+  // Bash treats a nonpositive OPTIND as a restart at argument 1.
+  const restart = optind < 1
+  if (restart) optind = 1
+  if (restart || session.getoptsOptind !== optind) session.getoptsPos = 0
+  let pos = session.getoptsPos
+
+  if (optind > params.length) {
+    return getoptsFinish(session, name, '?', null, optind, 0, 1)
+  }
+  const word = params[optind - 1] ?? ''
+  // A stale cursor left past the end of the current word (a shorter or
+  // reused argument) restarts the scan rather than reading undefined.
+  if (pos >= word.length) pos = 0
+  if (pos === 0) {
+    if (!word.startsWith('-') || word === '-') {
+      return getoptsFinish(session, name, '?', null, optind, 0, 1)
+    }
+    if (word === '--') return getoptsFinish(session, name, '?', null, optind + 1, 0, 1)
+    pos = 1
+  }
+
+  const letter = word[pos] ?? ''
+  const rest = word.slice(pos + 1)
+  const idx = optstring.indexOf(letter)
+  const isValid = letter !== ':' && idx !== -1
+  const takesArg = isValid && idx + 1 < optstring.length && optstring[idx + 1] === ':'
+  const enc = new TextEncoder()
+
+  if (!isValid) {
+    const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
+    if (silent) return getoptsFinish(session, name, '?', letter, afterOptind, afterPos, 0)
+    const err = verbose ? enc.encode(`bash: illegal option -- ${letter}\n`) : null
+    return getoptsFinish(session, name, '?', null, afterOptind, afterPos, 0, err)
+  }
+
+  if (!takesArg) {
+    const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
+    return getoptsFinish(session, name, letter, null, afterOptind, afterPos, 0)
+  }
+
+  if (rest) return getoptsFinish(session, name, letter, rest, optind + 1, 0, 0)
+  if (optind < params.length) {
+    return getoptsFinish(session, name, letter, params[optind] ?? '', optind + 2, 0, 0)
+  }
+  if (silent) return getoptsFinish(session, name, ':', letter, optind + 1, 0, 0)
+  const err = verbose ? enc.encode(`bash: option requires an argument -- ${letter}\n`) : null
+  return getoptsFinish(session, name, '?', null, optind + 1, 0, 0, err)
 }
 
 export function handleTrap(_session: Session): Result {

@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_i_ignore_case",
+      "seq": 500501,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "zgrep -i ALPHA /data/z4/notes.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\nALPHA\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    }
+  ]
+}

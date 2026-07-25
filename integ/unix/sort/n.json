@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "sort_n",
+      "seq": 33,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort -n /data/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n4\n5\n10\n30\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "sort_n_r",
+      "seq": 132,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort -n -r /data/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "30\n10\n5\n4\n2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "r"
+      ]
+    }
+  ]
+}

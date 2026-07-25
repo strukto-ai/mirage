@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "join_v1_unpairable",
+      "seq": 601361,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pjv && printf '1 a\\n2 b\\n3 c\\n' > /data/pjv/c && printf '1 x\\n3 z\\n' > /data/pjv/d && join -v 1 /data/pjv/c /data/pjv/d",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    }
+  ]
+}

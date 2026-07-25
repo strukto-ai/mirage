@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "ls_1",
+      "seq": 73,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -1 /data/",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nabc.csv\nanchors.txt\nb.txt\nbinary.bin\nc.txt\nchat.jsonl\ncsv.csv\ndata.jsonl\ndisptree\ndup.txt\nempty.txt\nfields.txt\nguard\nmixed.txt\nmulti.txt\nno_nl.txt\nnumbers.txt\none_byte.txt\noooo.txt\npatterns.txt\npatterns2.txt\npoem.diff\npoem.txt\nprefix_dup.txt\nrepeats.txt\nsections.txt\nsorted_a.txt\nsorted_b.txt\nsorted_c.txt\nspaced.txt\nsub\ntabbed.txt\nuser.json\nusers.json\n",
+        "stderr": ""
+      },
+      "flags": [
+        "1"
+      ]
+    }
+  ]
+}

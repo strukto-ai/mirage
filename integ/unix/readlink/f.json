@@ -1,0 +1,141 @@
+{
+  "cases": [
+    {
+      "id": "readlink_f",
+      "seq": 601380,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prl && printf x>/data/prl/t.txt && ln -s /data/prl/t.txt /data/prl/lk && readlink -f /data/prl/lk",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prl/t.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "readlink_f_chain",
+      "seq": 601381,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prl2 && printf x>/data/prl2/t.txt && ln -s /data/prl2/t.txt /data/prl2/a && ln -s /data/prl2/a /data/prl2/b && readlink -f /data/prl2/b",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prl2/t.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "readlink_f_relative",
+      "seq": 601382,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prl3 && printf x>/data/prl3/t.txt && ln -s t.txt /data/prl3/rel && readlink -f /data/prl3/rel",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prl3/t.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "readlink_f_n",
+      "seq": 601385,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prl6 && printf x>/data/prl6/t.txt && ln -s /data/prl6/t.txt /data/prl6/lk && readlink -f -n /data/prl6/lk; printf END",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prl6/t.txtEND",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "n"
+      ]
+    }
+  ]
+}

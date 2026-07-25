@@ -1,0 +1,270 @@
+{
+  "cases": [
+    {
+      "id": "grep_n",
+      "seq": 15,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -n bar /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "4:bar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "grep_n_v_combo",
+      "seq": 135,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -n -v foo /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:hello\n2:world\n4:bar\n5:baz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "grep_e_n",
+      "seq": 261,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -n -e bar /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "4:bar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "e"
+      ]
+    },
+    {
+      "id": "grep_e_multi_pattern_n",
+      "seq": 264,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -n -e hello -e baz /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:hello\n5:baz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "e"
+      ]
+    },
+    {
+      "id": "grep_cluster_ne",
+      "seq": 269,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -ne world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:world\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "e"
+      ]
+    },
+    {
+      "id": "grep_cluster_attached",
+      "seq": 282,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -neworld /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:world\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "e",
+        "w",
+        "o",
+        "r",
+        "l",
+        "d"
+      ]
+    },
+    {
+      "id": "grep_nC1_dash_context",
+      "seq": 500214,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -nC1 warning /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "1-error: disk full\n2:warning: low memory\n3-info: all good\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "C"
+      ]
+    }
+  ]
+}

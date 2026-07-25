@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "tree_L1_depth",
+      "seq": 601371,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptl/a/deep /data/ptl/b && printf x>/data/ptl/a/f.txt && printf z>/data/ptl/top.txt && tree -L 1 /data/ptl",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/ptl\n|-- a\n|-- b\n`-- top.txt\n\n3 directories, 1 file\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    }
+  ]
+}

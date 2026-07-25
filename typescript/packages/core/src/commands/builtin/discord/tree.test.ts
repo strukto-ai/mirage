@@ -65,9 +65,9 @@ describe('discord tree', () => {
       { index: idx },
     )
     const lines = out.trimEnd().split('\n')
-    expect(lines).toHaveLength(2)
-    expect(lines[0]).toContain('channels')
-    expect(lines[1]).toContain('members')
+    expect(lines[0]).toBe('/mnt/discord/My Server__G1')
+    expect(out).toContain('channels')
+    expect(out).toContain('members')
   })
 
   it('descends into channels subtree from cached index', async () => {

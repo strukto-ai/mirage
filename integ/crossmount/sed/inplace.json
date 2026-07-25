@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_sed_inplace",
+      "seq": 738,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo abc | tee /data/xi.txt /data2/xi.txt > /dev/null && sed -i s/b/B/ /data/xi.txt /data2/xi.txt && cat /data/xi.txt /data2/xi.txt && rm /data/xi.txt /data2/xi.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "aBc\naBc\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

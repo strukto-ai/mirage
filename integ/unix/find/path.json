@@ -1,0 +1,154 @@
+{
+  "cases": [
+    {
+      "id": "find_path_pattern",
+      "seq": 141,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -path \"*sub*\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/guard/sub\n/data/guard/sub/s.txt\n/data/sub\n/data/sub/deep\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path"
+      ]
+    },
+    {
+      "id": "find_path_glob",
+      "seq": 308,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/fs -path '*data/fs/sub*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub\n/data/fs/sub/big.bin\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path"
+      ]
+    },
+    {
+      "id": "find_path_exact",
+      "seq": 309,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/fs -path '/data/fs/sub'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path"
+      ]
+    },
+    {
+      "id": "find_path_or_name",
+      "seq": 310,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/fs -path '*sub*' -o -name small.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/small.bin\n/data/fs/sub\n/data/fs/sub/big.bin\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "o",
+        "name"
+      ]
+    }
+  ]
+}

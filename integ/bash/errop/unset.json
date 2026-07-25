@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "errop_unset_default_msg",
+      "seq": 500000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "echo ${ERRQ1:?}; echo after",
+      "expect": {
+        "exit": 127,
+        "stdout": "",
+        "stderr": "bash: ERRQ1: parameter null or not set\n"
+      }
+    },
+    {
+      "id": "errop_unset_only_default_msg",
+      "seq": 500002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "echo ${ERRQ3?}",
+      "expect": {
+        "exit": 127,
+        "stdout": "",
+        "stderr": "bash: ERRQ3: parameter not set\n"
+      }
+    }
+  ]
+}

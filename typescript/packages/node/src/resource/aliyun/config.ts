@@ -21,7 +21,10 @@ export interface AliyunConfig {
   secretAccessKey: string
   region: string
   endpoint?: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface AliyunConfigRedacted {
@@ -30,7 +33,10 @@ export interface AliyunConfigRedacted {
   secretAccessKey: string
   region: string
   endpoint: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const AliyunConfigSchema = z.object({
@@ -39,7 +45,10 @@ const AliyunConfigSchema = z.object({
   secretAccessKey: secretStr(),
   region: z.string(),
   endpoint: z.string(),
+  forcePathStyle: z.boolean().optional(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function resolvedAliyunEndpoint(config: AliyunConfig): string {
@@ -55,7 +64,10 @@ export function aliyunToS3Config(config: AliyunConfig): S3Config {
     endpoint: resolvedAliyunEndpoint(config),
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
+    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -72,11 +84,12 @@ export function normalizeAliyunConfig(input: Record<string, unknown>): AliyunCon
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
       endpoint_url: 'endpoint',
+      path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as AliyunConfig
 }

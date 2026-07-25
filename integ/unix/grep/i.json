@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "grep_i",
+      "seq": 17,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -i HELLO /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello World\nHELLO world\nhello WORLD\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "grep_cluster_count",
+      "seq": 283,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -im1 l /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello World\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i",
+        "m"
+      ]
+    }
+  ]
+}

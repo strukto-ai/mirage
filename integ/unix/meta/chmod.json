@@ -1,0 +1,174 @@
+{
+  "cases": [
+    {
+      "id": "meta_chmod_octal",
+      "seq": 200002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod 601 /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw------x 1 user user 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_symbolic",
+      "seq": 200003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 user user 6 Jan  2 15:30 f.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_bad_mode",
+      "seq": 200013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod 999 /data/metad/g.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chmod: invalid mode: '999'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_bad_symbolic",
+      "seq": 200014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod u+q /data/metad/g.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chmod: invalid mode: 'u+q'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "meta_chmod_enoent",
+      "seq": 200015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod 644 /data/metad/missing.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chmod: cannot access '/data/metad/missing.txt': No such file or directory\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -17,6 +17,7 @@ export {
   type BuilderFn,
   type CommandIO,
   makeResolveGlob,
+  overlaidStat,
   resolveGlobOf,
 } from './adapter.ts'
 export { type MakeGenericCommandsOptions, makeGenericCommands } from './factory.ts'

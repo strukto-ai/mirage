@@ -17,9 +17,18 @@ export {
   CommandSafeguard,
   type CommandSafeguardInit,
   ConsistencyPolicy,
+  CapacityState,
+  type CapacityResult,
   type CopyFn,
   type CopyStrategy,
   DriftPolicy,
+  Delta,
+  type DeltaInit,
+  FileChangeKind,
+  FileEvent,
+  type FileEventInit,
+  FileMetadata,
+  type FileMetadataInit,
   FileStat,
   type FileStatInit,
   FileType,
@@ -30,6 +39,7 @@ export {
   type NativeCopy,
   type NativeMove,
   OnExceed,
+  OverflowPolicy,
   PathSpec,
   type PathSpecInit,
   type PolymorphicReadFn,
@@ -41,7 +51,27 @@ export {
   type ReadStreamFn,
   ResourceName,
   type StatFn,
+  type WalkEntry,
+  type WalkFn,
 } from './types.ts'
+export {
+  type DeltaHook,
+  ListingDeltaHook,
+  type QueueFactory,
+  QueueClosed,
+  QueueOverflowError,
+  RAMWatchQueue,
+  type RAMWatchQueueOptions,
+  specFor,
+  statFingerprint,
+  type SupportsChanges,
+  type WatchMount,
+  type WatchOptions,
+  type WatchQueue,
+  type WatchRegistry,
+  type WatchRuntime,
+  Watcher,
+} from './watch/index.ts'
 export {
   captureFingerprints,
   checkDrift,
@@ -186,6 +216,7 @@ export {
   makeSedProvision,
   makeTransformProvision,
   metadataProvision,
+  overlaidStat,
   pureProvision,
   resolveGlobOf,
   withDefaultProvisions,
@@ -228,7 +259,12 @@ export { gzipGeneric } from './commands/builtin/generic/gzip.ts'
 export { gunzipGeneric } from './commands/builtin/generic/gunzip.ts'
 export { iconvGeneric } from './commands/builtin/generic/iconv.ts'
 export { sedGeneric } from './commands/builtin/generic/sed.ts'
-export { teeGeneric } from './commands/builtin/generic/tee.ts'
+export {
+  teeGeneric,
+  parseTeeFlags,
+  writeOutput,
+  type TeeOptions,
+} from './commands/builtin/generic/tee.ts'
 export { splitGeneric } from './commands/builtin/generic/split.ts'
 export { csplitGeneric } from './commands/builtin/generic/csplit.ts'
 export { mktempGeneric } from './commands/builtin/generic/mktemp.ts'
@@ -246,11 +282,21 @@ export { treeGeneric } from './commands/builtin/generic/tree.ts'
 export { lsGeneric } from './commands/builtin/generic/ls.ts'
 export { fileGeneric } from './commands/builtin/generic/file.ts'
 export { sha256sumGeneric } from './commands/builtin/generic/sha256sum.ts'
+export { md5sumGeneric } from './commands/builtin/generic/md5sum.ts'
+export { sha1sumGeneric } from './commands/builtin/generic/sha1sum.ts'
+export { sha384sumGeneric } from './commands/builtin/generic/sha384sum.ts'
+export { sha512sumGeneric } from './commands/builtin/generic/sha512sum.ts'
 export { jqGeneric } from './commands/builtin/generic/jq.ts'
 export { grepGeneric } from './commands/builtin/generic/grep.ts'
 export { rgGeneric } from './commands/builtin/generic/rg.ts'
-export { cpGeneric } from './commands/builtin/generic/cp.ts'
-export { mvGeneric } from './commands/builtin/generic/mv.ts'
+export {
+  cpFlags,
+  cpGeneric,
+  cpWalk,
+  parseCpFlags,
+  type CpFlags,
+} from './commands/builtin/generic/cp.ts'
+export { mvFlags, mvGeneric, parseMvFlags, type MvFlags } from './commands/builtin/generic/mv.ts'
 export { awkGeneric } from './commands/builtin/generic/awk.ts'
 export { catGeneric } from './commands/builtin/generic/cat.ts'
 export { headGeneric } from './commands/builtin/generic/head.ts'
@@ -303,12 +349,16 @@ export type {
   AsyncStatFn,
 } from './commands/builtin/utils/types.ts'
 export {
-  compareKeys,
-  parseKeyOptions,
-  sortAndDedupe,
-  sortKey,
+  buildConfig as buildSortConfig,
+  computeFields as computeSortFields,
+  extract as extractSortKey,
+  type Key as SortKey,
+  type KeyMods as SortKeyMods,
+  parseKeydef as parseSortKeydef,
+  type SortConfig,
+  SortKeyError,
+  sortLines,
   splitSortLines,
-  type SortKeyOptions,
 } from './commands/builtin/sort_helper.ts'
 export { countNewlines, parseN, tailBytes } from './commands/builtin/tail_helper.ts'
 export { AsyncLineIterator } from './io/async_line_iterator.ts'
@@ -319,6 +369,7 @@ export {
   formatRecordText,
   formatRecords,
 } from './commands/builtin/utils/output.ts'
+export { removalLines } from './commands/builtin/utils/verbose.ts'
 export { grepFilesOnly, grepRecursive } from './commands/builtin/grep_helper.ts'
 export { interpretEscapes } from './commands/builtin/utils/escapes.ts'
 export {
@@ -408,6 +459,7 @@ export {
   activeCacheManager,
   invalidateAfterUnlink,
   invalidateAfterWrite,
+  invalidateAncestors,
   runWithCacheManager,
   type CacheInvalidator,
 } from './cache/context.ts'
@@ -602,6 +654,8 @@ export {
   type S3BrowserSignOptions,
   type S3Config,
   type S3ConfigRedacted,
+  type S3HttpAgentProvider,
+  type S3HttpAgents,
 } from './resource/s3/config.ts'
 export { remapCommandsResource, remapOpsResource } from './resource/s3/remap.ts'
 export { S3_PROMPT } from './resource/s3/prompt.ts'
@@ -889,6 +943,83 @@ export { readdir as gdriveReaddir } from './core/gdrive/readdir.ts'
 export { stat as gdriveStat } from './core/gdrive/stat.ts'
 export { GDRIVE_PROMPT } from './resource/gdrive/prompt.ts'
 export {
+  type AccessTokenProvider,
+  type MsGraphConfig,
+  type MsGraphConfigResolved,
+  resolveMsGraphConfig,
+} from './core/msgraph/config.ts'
+export {
+  GRAPH_API,
+  MAX_BACKOFF as MSGRAPH_MAX_BACKOFF,
+  RETRY_STATUSES as MSGRAPH_RETRY_STATUSES,
+  GraphError,
+  graphDelete,
+  graphGet,
+  graphGetBytes,
+  graphHeaders,
+  graphList,
+  graphPatch,
+  graphPost,
+  graphPostMonitor,
+  graphPutBytes,
+  graphStream,
+  pollMonitor,
+  uploadChunk,
+} from './core/msgraph/client.ts'
+export { DriveLoc } from './core/msgraph/drive.ts'
+export {
+  OneDriveAccessor,
+  type OneDriveConfig,
+  type OneDriveConfigRedacted,
+  type OneDriveConfigResolved,
+  OneDriveConfigSchema,
+  normalizeOneDriveConfig,
+  oneDriveBase,
+  oneDriveItemUrl,
+  oneDriveRefPath,
+  redactOneDriveConfig,
+  resolveOneDriveConfig,
+} from './accessor/onedrive.ts'
+export { ONEDRIVE_COMMANDS } from './commands/builtin/onedrive/index.ts'
+export { ONEDRIVE_OPS } from './ops/onedrive/index.ts'
+export * as onedrive from './core/onedrive/index.ts'
+export { OneDriveResource } from './resource/onedrive/onedrive.ts'
+export { ONEDRIVE_PROMPT } from './resource/onedrive/prompt.ts'
+export {
+  SharePointAccessor,
+  type SharePointConfig,
+  type SharePointConfigRedacted,
+  type SharePointConfigResolved,
+  SharePointConfigSchema,
+  type ResolvedSharePointPath,
+  normalizeSharePointConfig,
+  redactSharePointConfig,
+  resolveSharePointConfig,
+  sharePointItemUrl,
+  sharePointRefPath,
+} from './accessor/sharepoint.ts'
+export { SHAREPOINT_COMMANDS } from './commands/builtin/sharepoint/index.ts'
+export { SHAREPOINT_OPS } from './ops/sharepoint/index.ts'
+export * as sharepoint from './core/sharepoint/index.ts'
+export { SharePointResource } from './resource/sharepoint/sharepoint.ts'
+export { SHAREPOINT_PROMPT } from './resource/sharepoint/prompt.ts'
+export { Mem0Accessor } from './accessor/mem0.ts'
+export { MEM0_COMMANDS } from './commands/builtin/mem0/index.ts'
+export { MEM0_OPS } from './ops/mem0/index.ts'
+export * as mem0 from './core/mem0/index.ts'
+export {
+  type Mem0Config,
+  type Mem0ConfigRedacted,
+  type Mem0ConfigResolved,
+  Mem0ConfigSchema,
+  type Mem0ScopeKind,
+  normalizeMem0Config,
+  redactMem0Config,
+  resolveMem0Config,
+} from './resource/mem0/config.ts'
+export { Mem0Resource } from './resource/mem0/mem0.ts'
+export { MEM0_PROMPT } from './resource/mem0/prompt.ts'
+export {
   DROPBOX_API_BASE,
   DROPBOX_CONTENT_BASE,
   DROPBOX_TOKEN_URL,
@@ -1077,6 +1208,20 @@ export { readBytes as chromaRead, readStream as chromaReadStream } from './core/
 export { readdir as chromaReaddir } from './core/chroma/readdir.ts'
 export { stat as chromaStat } from './core/chroma/stat.ts'
 export { searchSegments as chromaSearch } from './core/chroma/search.ts'
+export { DifyAccessor } from './accessor/dify.ts'
+export {
+  resolveDifyConfig,
+  type DifyConfig,
+  type DifyConfigResolved,
+} from './resource/dify/config.ts'
+export { DIFY_PROMPT } from './resource/dify/prompt.ts'
+export { DIFY_OPS } from './ops/dify/index.ts'
+export { DIFY_COMMANDS } from './commands/builtin/dify/index.ts'
+export { DifyResource, type DifyResourceOptions } from './resource/dify/dify.ts'
+export { readBytes as difyRead, readStream as difyReadStream } from './core/dify/read.ts'
+export { readdir as difyReaddir } from './core/dify/readdir.ts'
+export { stat as difyStat } from './core/dify/stat.ts'
+export { searchSegments as difySearch } from './core/dify/search.ts'
 export type { QdrantPoint, QdrantRow } from './core/qdrant/_client.ts'
 export { QdrantAccessor } from './accessor/qdrant.ts'
 export {
@@ -1139,7 +1284,10 @@ export {
   type FsError,
   gnuStrerror,
   isMissingOp,
+  isMissingPath,
   type MissingOpError,
+  noMount,
+  type NoMountError,
 } from './utils/errors.ts'
 
 export {

@@ -22,6 +22,7 @@ export interface OCIConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface OCIConfigRedacted extends Omit<OCIConfig, 'presignedUrlProvider'> {
@@ -37,6 +38,7 @@ const OCIConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedOciEndpoint(config: OCIConfig): string | undefined {
@@ -62,6 +64,7 @@ export function ociToS3Config(config: OCIConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

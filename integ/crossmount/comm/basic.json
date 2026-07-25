@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_comm",
+      "seq": 719,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\nc\\n' | tee /data/xc1.txt > /dev/null && printf 'b\\nc\\nd\\n' | tee /data2/xc2.txt > /dev/null && comm /data/xc1.txt /data2/xc2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n\t\tb\n\t\tc\n\td\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "id": "office_cleanup",
+      "seq": 204007,
+      "targets": [
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "rm -r /data/office && echo cleaned",
+      "expect": {
+        "exit": 0,
+        "stdout": "cleaned\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

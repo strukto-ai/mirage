@@ -34,8 +34,20 @@ async def handle_source(
     execute_fn: Callable[..., Any],
     path: str | PathSpec,
     session: Session,
+    args: list[str] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Read a script file and execute it."""
+    """Read a script file and execute it.
+
+    Args:
+        dispatch (Callable): op dispatcher, used to read the file.
+        execute_fn (Callable): runs the script text in this session.
+        path (str | PathSpec): the script to source.
+        session (Session): shell session state.
+        args (list[str] | None): positional parameters to expose to the
+            script. When given they replace ``$1..$#`` for the duration
+            of the source and are restored afterwards, matching bash;
+            when omitted the parent's positional parameters are kept.
+    """
     raw = _scope_path(path)
     resolved = resolve_path(raw, session.cwd)
     scope = _to_scope(resolved)
@@ -44,11 +56,17 @@ async def handle_source(
         script = data.decode(errors="replace")
     else:
         script = ""
+    saved_positional: list[str] | None = None
+    if args:
+        saved_positional = session.positional_args
+        session.positional_args = args
     session.source_depth += 1
     try:
         io = await execute_fn(script, session_id=session.session_id)
     finally:
         session.source_depth -= 1
+        if saved_positional is not None:
+            session.positional_args = saved_positional
     return io.stdout, io, ExecutionNode(command=f"source {raw}",
                                         exit_code=io.exit_code)
 

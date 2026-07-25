@@ -150,6 +150,8 @@ export const ResourceName = Object.freeze({
   GSHEETS: 'gsheets',
   GSLIDES: 'gslides',
   GDRIVE: 'gdrive',
+  ONEDRIVE: 'onedrive',
+  SHAREPOINT: 'sharepoint',
   DROPBOX: 'dropbox',
   BOX: 'box',
   SLACK: 'slack',
@@ -172,6 +174,8 @@ export const ResourceName = Object.freeze({
   POSTGRES: 'postgres',
   LANCEDB: 'lancedb',
   CHROMA: 'chroma',
+  DIFY: 'dify',
+  MEM0: 'mem0',
   QDRANT: 'qdrant',
   HF_BUCKETS: 'hf_buckets',
   HF_DATASETS: 'hf_datasets',
@@ -257,6 +261,121 @@ export class FileStat {
   }
 }
 
+export const FileChangeKind = Object.freeze({
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+  MOVE: 'move',
+  UNKNOWN: 'unknown',
+} as const)
+
+export type FileChangeKind = (typeof FileChangeKind)[keyof typeof FileChangeKind]
+
+export interface FileMetadataInit {
+  fingerprint?: string | null
+  size?: number | null
+  modified?: string | null
+}
+
+export class FileMetadata {
+  readonly fingerprint: string | null
+  readonly size: number | null
+  readonly modified: string | null
+
+  constructor(init: FileMetadataInit = {}) {
+    this.fingerprint = init.fingerprint ?? null
+    this.size = init.size ?? null
+    this.modified = init.modified ?? null
+    Object.freeze(this)
+  }
+}
+
+export interface FileEventInit {
+  kind: FileChangeKind
+  path: PathSpec
+  timestamp: Date
+  previousPath?: PathSpec | null
+  metadata?: FileMetadata | null
+}
+
+export class FileEvent {
+  readonly kind: FileChangeKind
+  readonly path: PathSpec
+  readonly timestamp: Date
+  readonly previousPath: PathSpec | null
+  readonly metadata: FileMetadata | null
+
+  constructor(init: FileEventInit) {
+    this.kind = init.kind
+    this.path = init.path
+    this.timestamp = init.timestamp
+    this.previousPath = init.previousPath ?? null
+    this.metadata = init.metadata ?? null
+    Object.freeze(this)
+  }
+}
+
+export interface DeltaInit {
+  changes: readonly FileEvent[]
+  checkpoint: string | null
+}
+
+export class Delta {
+  readonly changes: readonly FileEvent[]
+  readonly checkpoint: string | null
+
+  constructor(init: DeltaInit) {
+    this.changes = Object.freeze([...init.changes])
+    this.checkpoint = init.checkpoint
+    Object.freeze(this)
+  }
+}
+
+export interface WalkEntry {
+  virtual: string
+  isDir: boolean
+  fingerprint: string | null
+  size?: number | null
+  modified?: string | null
+}
+
+export type WalkFn = (root: PathSpec) => AsyncIterable<WalkEntry>
+
+export const OverflowPolicy = Object.freeze({
+  COLLAPSE: 'collapse',
+  DROP_OLDEST: 'drop_oldest',
+  ERROR: 'error',
+} as const)
+
+export type OverflowPolicy = (typeof OverflowPolicy)[keyof typeof OverflowPolicy]
+
+// How a mount's capacity relates to a df-style report. QUOTA: real
+// total/used/available are known (a real filesystem, or a provider that
+// exposes a storage quota). ELASTIC: no fixed size (object stores that grow
+// without a quota). NA: no filesystem-capacity concept (message/table
+// surfaces). UNKNOWN: bounded but not cheaply measurable / not reported yet.
+// df renders real numbers for QUOTA and a literal `-` for the rest — never a
+// fabricated total.
+export const CapacityState = {
+  QUOTA: 'quota',
+  ELASTIC: 'elastic',
+  NA: 'na',
+  UNKNOWN: 'unknown',
+} as const
+export type CapacityState = (typeof CapacityState)[keyof typeof CapacityState]
+
+// One mount's capacity for df. Byte counts are null/undefined unless the
+// state is QUOTA.
+export interface CapacityResult {
+  state: CapacityState
+  total?: number | null
+  used?: number | null
+  available?: number | null
+  inodes?: number | null
+  inodesUsed?: number | null
+  inodesFree?: number | null
+}
+
 export type ReadBytesFn<Args extends unknown[] = [path: PathSpec]> = (
   ...args: Args
 ) => Promise<Uint8Array>
@@ -298,6 +417,11 @@ export interface NativeCopy {
   copy: CopyFn
   find: FindFn
   dirCopy?: CopyFn
+  /**
+   * Lets the per-entry policy path (--update/--backup, which cannot use a
+   * whole-tree dirCopy) still materialize directories that hold no files.
+   */
+  mkdir?: CopyFn<[path: PathSpec]>
 }
 
 export interface PrimitiveCopy {

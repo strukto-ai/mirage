@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "mtime_dir_not_epoch",
+      "seq": 400003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "clear_cache": true,
+      "command": "ls -l /data | grep mtimecheck | grep -c \"Jan  1 00:00\"",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

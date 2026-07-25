@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './_client.ts'
 import { deletePath, getMetadata, movePath } from './api.ts'
-import { invalidateAncestors } from './invalidate.ts'
+import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 
 // move_v2 rejects an existing destination; GNU mv silently replaces a

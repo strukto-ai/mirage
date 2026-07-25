@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_root_ls",
+      "seq": 550000,
+      "targets": [
+        "trello"
+      ],
+      "command": "ls /board",
+      "expect": {
+        "exit": 0,
+        "stdout": "workspaces\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

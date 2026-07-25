@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "slack_add_reaction",
+      "seq": 520037,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-add-reaction --channel_id C1 --ts 1766165985.000426 --reaction eyes /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_add_reaction_missing",
+      "seq": 520038,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-add-reaction --channel_id C1 --ts 9999.9999 --reaction shrug /slack/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "slack-add-reaction: Slack API error (reactions.add): message_not_found\n"
+      }
+    }
+  ]
+}

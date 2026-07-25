@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "ometa_rm_drops",
+      "seq": 201010,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "rm /data/metao/g.txt && echo fresh > /data/metao/g.txt",
+      "check": {
+        "stat": "/data/metao/g.txt",
+        "fields": [
+          "mode",
+          "uid",
+          "gid"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mode=- uid=- gid=-\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

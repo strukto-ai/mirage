@@ -1,15 +1,15 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
+from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
-from mirage.workspace.executor.builtins.vars import (handle_exit, handle_read,
-                                                     handle_return,
-                                                     handle_shift,
-                                                     handle_whoami)
+from mirage.workspace.executor.builtins.vars import (  # yapf: disable
+    handle_env, handle_exit, handle_getopts, handle_read, handle_return,
+    handle_shift, handle_unset, handle_whoami)
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session.session import Session
@@ -17,6 +17,209 @@ from mirage.workspace.session.session import Session
 
 def make_session() -> Session:
     return Session(session_id="s1")
+
+
+def _unused_execute_fn():
+    raise AssertionError("execute_fn should not be called")
+
+
+@pytest.mark.asyncio
+async def test_env_prints_environment_in_insertion_order():
+    session = make_session()
+    session.env["ZZZ"] = "1"
+    session.env["AAA"] = "2"
+    out, io, _ = await handle_env(_unused_execute_fn, [], session)
+    assert io.exit_code == 0
+    assert await materialize(out) == b"ZZZ=1\nAAA=2\n"
+
+
+@pytest.mark.asyncio
+async def test_env_ignore_environment_and_null_terminator():
+    session = make_session()
+    session.env["KEEP"] = "x"
+    out, _, _ = await handle_env(_unused_execute_fn,
+                                 ["-i", "-0", "A=1", "B=2"], session)
+    assert await materialize(out) == b"A=1\x00B=2\x00"
+
+
+@pytest.mark.asyncio
+async def test_env_unset_removes_variable():
+    session = make_session()
+    session.env["DROP"] = "1"
+    session.env["KEEP"] = "2"
+    out, _, _ = await handle_env(_unused_execute_fn, ["-u", "DROP"], session)
+    rendered = await materialize(out)
+    assert b"DROP=" not in rendered
+    assert b"KEEP=2" in rendered
+
+
+@pytest.mark.asyncio
+async def test_unset_f_removes_function_only():
+    session = make_session()
+    session.functions["fn"] = []
+    session.env["fn"] = "keepvar"
+    await handle_unset(["-f", "fn"], session)
+    assert "fn" not in session.functions
+    assert session.env["fn"] == "keepvar"
+
+
+@pytest.mark.asyncio
+async def test_unset_v_removes_variable_not_function():
+    session = make_session()
+    session.functions["fn"] = []
+    session.env["fn"] = "v"
+    await handle_unset(["-v", "fn"], session)
+    assert "fn" in session.functions
+    assert "fn" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_unset_bare_prefers_variable_then_function():
+    session = make_session()
+    session.functions["a"] = []
+    session.env["a"] = "v"
+    await handle_unset(["a"], session)
+    # The variable existed, so only it is removed.
+    assert "a" not in session.env
+    assert "a" in session.functions
+    # No variable of this name: the function is removed instead.
+    session.functions["b"] = []
+    await handle_unset(["b"], session)
+    assert "b" not in session.functions
+
+
+@pytest.mark.asyncio
+async def test_unset_removes_whole_array_and_one_element():
+    session = make_session()
+    session.arrays["arr"] = ["x", "y", "z"]
+    # An interior element leaves a hole: the later indices keep their
+    # positions, as bash does.
+    await handle_unset(["arr[1]"], session)
+    assert session.arrays["arr"] == ["x", None, "z"]
+    # A trailing element drops off, so the extent shrinks with it.
+    await handle_unset(["arr[2]"], session)
+    assert session.arrays["arr"] == ["x"]
+    await handle_unset(["arr"], session)
+    assert "arr" not in session.arrays
+
+
+@pytest.mark.asyncio
+async def test_unset_readonly_array_element_is_rejected():
+    session = make_session()
+    session.arrays["arr"] = ["x", "y"]
+    session.readonly_vars.add("arr")
+    _, io, node = await handle_unset(["arr[1]"], session)
+    assert node.exit_code == 1
+    assert io.stderr == b"bash: unset: arr: cannot unset: readonly variable\n"
+    assert session.arrays["arr"] == ["x", "y"]
+
+
+@pytest.mark.asyncio
+async def test_unset_element_zero_of_a_scalar_removes_it():
+    session = make_session()
+    session.env["Y"] = "sc"
+    _, io, node = await handle_unset(["Y[0]"], session)
+    assert node.exit_code == 0
+    assert "Y" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_unset_nonzero_element_of_a_scalar_errors():
+    session = make_session()
+    session.env["Y"] = "sc"
+    _, io, node = await handle_unset(["Y[1]"], session)
+    assert node.exit_code == 1
+    assert io.stderr == b"bash: unset: Y: not an array variable\n"
+    assert session.env["Y"] == "sc"
+
+
+@pytest.mark.asyncio
+async def test_unset_negative_element_outside_the_extent_errors():
+    session = make_session()
+    session.arrays["arr"] = ["x"]
+    _, io, node = await handle_unset(["arr[-2]"], session)
+    assert node.exit_code == 1
+    # bash prints only the bracketed part here, not the base name.
+    assert io.stderr == b"bash: unset: [-2]: bad array subscript\n"
+    assert session.arrays["arr"] == ["x"]
+
+
+@pytest.mark.asyncio
+async def test_unset_negative_element_inside_the_extent_works():
+    session = make_session()
+    session.arrays["arr"] = ["x", "y"]
+    _, io, node = await handle_unset(["arr[-2]"], session)
+    assert node.exit_code == 0
+    assert session.arrays["arr"] == [None, "y"]
+
+
+@pytest.mark.asyncio
+async def test_unset_element_of_an_unset_name_is_a_no_op():
+    session = make_session()
+    _, io, node = await handle_unset(["GONE[3]"], session)
+    assert node.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_unset_invalid_option_errors():
+    session = make_session()
+    _, io, node = await handle_unset(["-z", "x"], session)
+    assert node.exit_code == 2
+    assert b"invalid option" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_env_run_form_forwards_stdin_and_restores_env():
+    session = make_session()
+    session.env["FOO"] = "original"
+    execute_fn = AsyncMock(return_value=IOResult(exit_code=0))
+    await handle_env(execute_fn, ["-i", "FOO=temp", "printenv", "FOO"],
+                     session,
+                     stdin=b"piped\n")
+    execute_fn.assert_awaited_once()
+    args, kwargs = execute_fn.call_args
+    assert args[0] == "printenv FOO"
+    assert kwargs["stdin"] == b"piped\n"
+    # The session environment is restored after the inner command runs.
+    assert session.env == {"FOO": "original"}
+
+
+@pytest.mark.asyncio
+async def test_env_lone_dash_implies_ignore_environment():
+    session = make_session()
+    session.env["KEEP"] = "x"
+    out, io, _ = await handle_env(_unused_execute_fn, ["-", "A=1"], session)
+    assert io.exit_code == 0
+    assert await materialize(out) == b"A=1\n"
+
+
+@pytest.mark.asyncio
+async def test_env_null_with_command_rejected():
+    _, io, _ = await handle_env(_unused_execute_fn, ["-0", "echo", "hi"],
+                                make_session())
+    assert io.exit_code == 125
+    assert await materialize(
+        io.stderr) == (b"env: cannot specify --null (-0) with command\n"
+                       b"Try 'env --help' for more information.\n")
+
+
+@pytest.mark.asyncio
+async def test_env_invalid_option_exits_125():
+    _, io, _ = await handle_env(_unused_execute_fn, ["-Z"], make_session())
+    assert io.exit_code == 125
+    assert await materialize(io.stderr
+                             ) == (b"env: invalid option -- 'Z'\n"
+                                   b"Try 'env --help' for more information.\n")
+
+
+@pytest.mark.asyncio
+async def test_env_unrecognized_long_option_exits_125():
+    _, io, _ = await handle_env(_unused_execute_fn, ["--bogus"],
+                                make_session())
+    assert io.exit_code == 125
+    assert await materialize(io.stderr
+                             ) == (b"env: unrecognized option '--bogus'\n"
+                                   b"Try 'env --help' for more information.\n")
 
 
 @pytest.mark.asyncio
@@ -203,3 +406,256 @@ async def test_read_scalar_replaces_array():
     await ws.execute("a=(x y z)")
     io = await ws.execute('read -r a b <<< "one two"\necho "a=$a b=$b"')
     assert (io.stdout or b"") == b"a=one b=two\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_single_flag_sets_var_and_advances_optind():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_iterates_two_flags_then_stops():
+    session = make_session()
+    args = ["ab", "o", "-a", "-b"]
+    _, io1, _ = await handle_getopts(args, session)
+    assert (io1.exit_code, session.env["o"], session.env["OPTIND"]) == (0, "a",
+                                                                        "2")
+    _, io2, _ = await handle_getopts(args, session)
+    assert (io2.exit_code, session.env["o"], session.env["OPTIND"]) == (0, "b",
+                                                                        "3")
+    _, io3, _ = await handle_getopts(args, session)
+    assert io3.exit_code == 1
+    assert session.env["o"] == "?"
+
+
+@pytest.mark.asyncio
+async def test_getopts_separate_optarg():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a:b", "o", "-a", "foo", "-b"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTARG"] == "foo"
+    assert session.env["OPTIND"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_getopts_attached_optarg():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a:", "o", "-afoo"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTARG"] == "foo"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_combined_flags_share_optind_until_word_done():
+    session = make_session()
+    args = ["abc", "o", "-abc"]
+    _, _, _ = await handle_getopts(args, session)
+    assert (session.env["o"], session.env["OPTIND"]) == ("a", "1")
+    _, _, _ = await handle_getopts(args, session)
+    assert (session.env["o"], session.env["OPTIND"]) == ("b", "1")
+    _, _, _ = await handle_getopts(args, session)
+    assert (session.env["o"], session.env["OPTIND"]) == ("c", "2")
+
+
+@pytest.mark.asyncio
+async def test_getopts_invalid_option_non_silent():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "-x"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "?"
+    assert await materialize(io.stderr) == b"bash: illegal option -- x\n"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_invalid_option_silent_sets_optarg_no_stderr():
+    session = make_session()
+    _, io, _ = await handle_getopts([":ab", "o", "-x"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "?"
+    assert session.env["OPTARG"] == "x"
+    assert await materialize(io.stderr) == b""
+
+
+@pytest.mark.asyncio
+async def test_getopts_missing_arg_non_silent():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a:", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "?"
+    assert (await materialize(io.stderr
+                              )) == b"bash: option requires an argument -- a\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_missing_arg_silent_sets_colon_and_optarg():
+    session = make_session()
+    _, io, _ = await handle_getopts([":a:", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == ":"
+    assert session.env["OPTARG"] == "a"
+    assert await materialize(io.stderr) == b""
+
+
+@pytest.mark.asyncio
+async def test_getopts_nonoption_stops_without_advancing():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "foo", "-a"], session)
+    assert io.exit_code == 1
+    assert session.env["OPTIND"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_getopts_double_dash_consumed_then_stops():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o", "--", "-a"], session)
+    assert io.exit_code == 1
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_no_args_stops():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 1
+    assert session.env["OPTIND"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_getopts_reads_positional_args_when_no_explicit():
+    session = make_session()
+    session.positional_args = ["-a", "-b"]
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_getopts_usage_error_too_few_operands():
+    session = make_session()
+    _, io, _ = await handle_getopts(["ab"], session)
+    assert io.exit_code == 2
+    assert (await
+            materialize(io.stderr
+                        )) == b"getopts: usage: getopts optstring name [arg]\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_optind_reset_reparses():
+    session = make_session()
+    session.positional_args = ["-a", "-b"]
+    await handle_getopts(["ab", "o"], session)
+    await handle_getopts(["ab", "o"], session)
+    _, stop, _ = await handle_getopts(["ab", "o"], session)
+    assert stop.exit_code == 1
+    session.env["OPTIND"] = "1"
+    session.positional_args = ["-b", "-a"]
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_getopts_end_to_end_loop_with_case():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('set -- -a val -b\n'
+                          'while getopts "a:b" opt; do\n'
+                          '  case $opt in\n'
+                          '    a) echo "a=$OPTARG" ;;\n'
+                          '    b) echo "b-set" ;;\n'
+                          '  esac\n'
+                          'done')
+    assert (io.stdout or b"") == b"a=val\nb-set\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_stale_offset_shorter_word_no_crash():
+    session = make_session()
+    await handle_getopts(["ab", "o", "-ab"], session)
+    _, io, _ = await handle_getopts(["ab", "o", "-a"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_nonpositive_optind_restarts_at_one():
+    session = make_session()
+    session.positional_args = ["-a", "-b"]
+    session.env["OPTIND"] = "0"
+    _, io, _ = await handle_getopts(["ab", "o"], session)
+    assert io.exit_code == 0
+    assert session.env["o"] == "a"
+    assert session.env["OPTIND"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_getopts_invalid_identifier_destination():
+    session = make_session()
+    _, io, _ = await handle_getopts(["a", "bad-name", "-a"], session)
+    assert io.exit_code == 1
+    assert b"not a valid identifier" in (await materialize(io.stderr))
+    assert "bad-name" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_getopts_readonly_destination_is_not_overwritten():
+    session = make_session()
+    session.env["o"] = "orig"
+    session.readonly_vars.add("o")
+    _, io, _ = await handle_getopts(["a", "o", "-a"], session)
+    assert io.exit_code == 1
+    assert session.env["o"] == "orig"
+    assert b"readonly variable" in (await materialize(io.stderr))
+
+
+@pytest.mark.asyncio
+async def test_getopts_opterr_zero_suppresses_stderr():
+    session = make_session()
+    session.env["OPTERR"] = "0"
+    _, io, _ = await handle_getopts(["ab", "o", "-x"], session)
+    assert session.env["o"] == "?"
+    assert (await materialize(io.stderr)) == b""
+
+
+@pytest.mark.asyncio
+async def test_getopts_scans_function_frame_positional():
+    session = make_session()
+    cs = CallStack()
+    cs.push(["-a", "-b"], function_name="f")
+    await handle_getopts(["ab", "o"], session, cs)
+    assert session.env["o"] == "a"
+    await handle_getopts(["ab", "o"], session, cs)
+    assert session.env["o"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_getopts_fork_preserves_cursor():
+    session = make_session()
+    await handle_getopts(["ab", "o", "-ab"], session)
+    forked = session.fork()
+    assert forked._getopts_pos == session._getopts_pos
+    assert forked._getopts_optind == session._getopts_optind
+
+
+@pytest.mark.asyncio
+async def test_getopts_reassign_optind_same_value_reparses():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('set -- -ab; getopts ab o; echo "1:$o"; '
+                          'OPTIND=1; getopts ab o; echo "2:$o"')
+    assert (io.stdout or b"") == b"1:a\n2:a\n"
+
+
+@pytest.mark.asyncio
+async def test_getopts_subshell_does_not_corrupt_parent_cursor():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('set -- -ab; OPTIND=1; getopts ab o; '
+                          '(getopts ab o); getopts ab o; echo "$o"')
+    assert (io.stdout or b"") == b"b\n"

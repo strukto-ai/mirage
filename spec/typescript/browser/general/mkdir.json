@@ -9,9 +9,11 @@
       "databricks_volume",
       "dropbox",
       "gdrive",
+      "onedrive",
       "opfs",
       "ram",
-      "s3"
+      "s3",
+      "sharepoint"
     ]
   },
   "description": null,
@@ -19,21 +21,43 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--parents",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-p",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--verbose",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--mode",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-m",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--context",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-Z",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": true
     }
   ],
   "positional": [],

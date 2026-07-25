@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "procsub_and_or",
+      "seq": 501313,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <(false || echo recovered)",
+      "expect": {
+        "exit": 0,
+        "stdout": "recovered\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

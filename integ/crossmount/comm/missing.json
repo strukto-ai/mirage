@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_comm_missing",
+      "seq": 777,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf 'a\\n' | tee /data/xrl_c.txt > /dev/null && comm /data/xrl_c.txt /data2/xrl_nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "comm: /data2/xrl_nope.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

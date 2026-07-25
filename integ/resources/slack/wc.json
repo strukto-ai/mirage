@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "slack_wc_chat",
+      "seq": 520020,
+      "targets": [
+        "slack"
+      ],
+      "command": "wc -l /slack/channels/general__C1/2026-02-20/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 /slack/channels/general__C1/2026-02-20/chat.jsonl\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

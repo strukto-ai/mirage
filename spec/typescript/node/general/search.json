@@ -5,7 +5,9 @@
     "has_provision": false,
     "has_write": false,
     "resources": [
+      "dify",
       "lancedb",
+      "mem0",
       "qdrant"
     ]
   },
@@ -18,6 +20,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
@@ -27,6 +30,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
@@ -36,6 +40,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     }

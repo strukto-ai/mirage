@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "sort_f",
+      "seq": 131,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort -f /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO world\nHello World\nhello WORLD\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "sort_V_version",
+      "seq": 601111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qsort && printf 'v1.10\\nv1.9\\nv1.2\\n' > /data/qsort/vs.txt && sort -V /data/qsort/vs.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1.2\nv1.9\nv1.10\n",
+        "stderr": ""
+      },
+      "flags": [
+        "V"
+      ]
+    }
+  ]
+}

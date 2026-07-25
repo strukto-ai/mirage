@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "base64_w_wrap",
+      "seq": 601210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qb64 && printf 'abcdefghij' > /data/qb64/b.txt && base64 -w 4 /data/qb64/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "YWJj\nZGVm\nZ2hp\nag==\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    }
+  ]
+}

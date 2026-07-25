@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "tr_find_type_f_count",
+      "seq": 550012,
+      "targets": [
+        "trello"
+      ],
+      "command": "find /board -type f | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "24\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_find_cards",
+      "seq": 550013,
+      "targets": [
+        "trello"
+      ],
+      "command": "find /board -name 'card.json' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

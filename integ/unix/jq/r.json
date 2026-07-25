@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "jq_raw",
+      "seq": 25,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "jq -r \".name\" /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "jq_jsonl_chain_raw",
+      "seq": 29,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "jq -r \".[].msg\" /data/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    }
+  ]
+}

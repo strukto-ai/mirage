@@ -46,7 +46,7 @@ def _make_backend(tree_map: dict[str, FileStat]):
 
 @pytest.mark.asyncio
 async def test_tree_flat_dir():
-    """Two siblings: the last gets `└──`, the others get `├──`."""
+    """Two siblings: the last gets ``-- ``, the others get ``|-- ``."""
     tree_map = {
         "/r": _dir("r"),
         "/r/a.txt": _file("a.txt"),
@@ -55,13 +55,15 @@ async def test_tree_flat_dir():
     readdir, stat = _make_backend(tree_map)
     output, io = await tree(_spec("/r"), readdir=readdir, stat=stat)
     lines = output.decode().splitlines()
-    assert lines == ["├── a.txt", "└── b.txt"]
+    assert lines == [
+        "/r", "|-- a.txt", "`-- b.txt", "", "1 directory, 2 files"
+    ]
     assert io.exit_code == 0
 
 
 @pytest.mark.asyncio
 async def test_tree_nested_dir_uses_vertical_continuation():
-    """A non-last directory should continue its children with `│   `."""
+    """A non-last directory should continue its children with ``|   ``."""
     tree_map = {
         "/r": _dir("r"),
         "/r/d1": _dir("d1"),
@@ -71,7 +73,10 @@ async def test_tree_nested_dir_uses_vertical_continuation():
     readdir, stat = _make_backend(tree_map)
     output, _ = await tree(_spec("/r"), readdir=readdir, stat=stat)
     lines = output.decode().splitlines()
-    assert lines == ["├── d1", "│   └── x.txt", "└── z.txt"]
+    assert lines == [
+        "/r", "|-- d1", "|   `-- x.txt", "`-- z.txt", "",
+        "2 directories, 2 files"
+    ]
 
 
 @pytest.mark.asyncio
@@ -85,7 +90,9 @@ async def test_tree_last_dir_uses_indent_continuation():
     readdir, stat = _make_backend(tree_map)
     output, _ = await tree(_spec("/r"), readdir=readdir, stat=stat)
     lines = output.decode().splitlines()
-    assert lines == ["└── d1", "    └── x.txt"]
+    assert lines == [
+        "/r", "`-- d1", "    `-- x.txt", "", "2 directories, 1 file"
+    ]
 
 
 @pytest.mark.asyncio
@@ -103,7 +110,7 @@ async def test_tree_max_depth_limits_recursion():
                            max_depth=1)
     decoded = output.decode()
     assert "d1" in decoded
-    assert "d2" in decoded
+    assert "d2" not in decoded
     assert "deep.txt" not in decoded
 
 
@@ -193,17 +200,21 @@ async def test_tree_match_pattern_only_applies_to_files():
 
 
 @pytest.mark.asyncio
-async def test_tree_missing_path_emits_warning_not_crash():
+async def test_tree_missing_path_marks_error_and_exits_2():
     readdir, stat = _make_backend({})
     output, io = await tree(_spec("/nowhere"), readdir=readdir, stat=stat)
-    assert output == b""
+    lines = output.decode().splitlines()
+    assert lines == [
+        "/nowhere  [error opening dir]", "", "0 directories, 0 files"
+    ]
+    assert io.exit_code == 2
     assert b"nowhere" in (io.stderr or b"")
 
 
 @pytest.mark.asyncio
-async def test_tree_empty_dir_emits_nothing():
+async def test_tree_empty_dir_reports_zero_counts():
     tree_map = {"/r": _dir("r")}
     readdir, stat = _make_backend(tree_map)
     output, io = await tree(_spec("/r"), readdir=readdir, stat=stat)
-    assert output == b""
+    assert output.decode().splitlines() == ["/r", "", "0 directories, 0 files"]
     assert io.exit_code == 0

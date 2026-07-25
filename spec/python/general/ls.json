@@ -51,6 +51,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-l",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -60,6 +61,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-a",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -69,6 +71,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-A",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -78,6 +81,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-h",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -87,6 +91,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-t",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -96,6 +101,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-S",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -105,6 +111,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -114,6 +121,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-1",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -123,6 +131,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-R",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -132,6 +141,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -141,6 +151,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-F",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -150,6 +161,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
+      "short_value": true,
       "value_kind": "text",
       "value_optional": true
     }

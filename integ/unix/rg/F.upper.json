@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rg_F_fixed",
+      "seq": 500405,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -F \"main()\" /data/r4/code.py",
+      "expect": {
+        "exit": 0,
+        "stdout": "def main():\n",
+        "stderr": ""
+      },
+      "flags": [
+        "F"
+      ]
+    }
+  ]
+}

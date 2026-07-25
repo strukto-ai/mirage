@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "cut_complement",
+      "seq": 601170,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcut && printf 'a,b,c,d\\n' > /data/qcut/c.txt && cut --complement -d, -f2,3 /data/qcut/c.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,d\n",
+        "stderr": ""
+      },
+      "flags": [
+        "complement",
+        "d,",
+        "f"
+      ]
+    }
+  ]
+}

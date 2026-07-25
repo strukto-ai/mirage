@@ -1,0 +1,285 @@
+{
+  "cases": [
+    {
+      "id": "grep_unknown_long_flag",
+      "seq": 271,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep --bogus world /data/a.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "bogus"
+      ]
+    },
+    {
+      "id": "grep_unknown_short_flag",
+      "seq": 272,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -Y world /data/a.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep: invalid option -- 'Y'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Y"
+      ]
+    },
+    {
+      "id": "grep_missing_flag_value",
+      "seq": 274,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -m 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep: option requires an argument -- 'm'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "grep_usage_exit",
+      "seq": 576,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: usage: grep [flags] pattern [path]\n"
+      }
+    },
+    {
+      "id": "grep_usage_no_input",
+      "seq": 581,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep foo",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: usage: grep [flags] pattern [path]\n"
+      }
+    },
+    {
+      "id": "grep_usage_stdin_only",
+      "seq": 583,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo hi | grep",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: usage: grep [flags] pattern [path]\n"
+      }
+    },
+    {
+      "id": "grep_dir_operand",
+      "seq": 609,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep hello /data/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "grep: /data/sub: Is a directory\n"
+      }
+    },
+    {
+      "id": "grep_dir_among_files",
+      "seq": 610,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep hello /data/a.txt /data/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data/a.txt:hello\n",
+        "stderr": "grep: /data/sub: Is a directory\n"
+      }
+    }
+  ]
+}

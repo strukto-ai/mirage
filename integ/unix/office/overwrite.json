@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "office_overwrite_enriches_once",
+      "seq": 204005,
+      "targets": [
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "printf v2 | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "v2<odsp-metadata/>",
+        "stderr": ""
+      }
+    }
+  ]
+}

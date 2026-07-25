@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
@@ -46,6 +46,8 @@ export async function mkdir(
   const remotePath = backendPath(accessor.config, p)
   if (parents) {
     await createDirectory(accessor, remotePath, p.virtual)
+    await invalidateAfterWrite(p)
+    await invalidateAncestors(p)
     return
   }
   if (await exists(accessor, p)) {

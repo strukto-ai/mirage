@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "df_find_md",
+      "seq": 580003,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge -name '*.md'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_find_type_f",
+      "seq": 580004,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md\n/knowledge/guides/auth\n/knowledge/guides/quickstart\n/knowledge/policies/privacy\n/knowledge/policies/refunds\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_find_root_maxdepth0",
+      "seq": 580005,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge -maxdepth 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_find_root_name",
+      "seq": 580006,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge -name knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_find_size_plus_1c",
+      "seq": 580008,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge -type f -size +1c",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_find_size_under_1k",
+      "seq": 580009,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge -type f -size -1k | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md\n/knowledge/guides/auth\n/knowledge/guides/quickstart\n/knowledge/policies/privacy\n/knowledge/policies/refunds\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

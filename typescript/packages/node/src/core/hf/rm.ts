@@ -14,7 +14,7 @@
 
 import { invalidateAfterUnlink, record, stripSlash, type PathSpec } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
-import { invalidateAncestors } from './invalidate.ts'
+import { invalidateAncestors } from '@struktoai/mirage-core'
 import { rawPathOf } from './util.ts'
 
 export async function rmR(accessor: HfAccessor, path: PathSpec): Promise<void> {

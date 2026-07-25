@@ -68,6 +68,13 @@ export interface OptionInit {
    * detached next token is never consumed. Requires a long form.
    */
   valueOptional?: boolean
+  /**
+   * Whether the short spelling of a value flag may carry an attached value
+   * (`split -d10`). False for GNU pairs whose short is a plain boolean
+   * while only the long accepts a value (`cp -b` vs `--backup[=CONTROL]`),
+   * so the short clusters (`-bv`) instead of eating the rest as a value.
+   */
+  shortValue?: boolean
   description?: string
 }
 
@@ -78,6 +85,7 @@ export class Option {
   readonly numericShorthand: boolean
   readonly repeatable: boolean
   readonly valueOptional: boolean
+  readonly shortValue: boolean
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -87,6 +95,7 @@ export class Option {
     this.numericShorthand = init.numericShorthand ?? false
     this.repeatable = init.repeatable ?? false
     this.valueOptional = init.valueOptional ?? false
+    this.shortValue = init.shortValue ?? true
     this.description = init.description ?? null
     Object.freeze(this)
   }

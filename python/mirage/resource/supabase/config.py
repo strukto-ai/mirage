@@ -27,8 +27,9 @@ class SupabaseConfig(BaseModel):
     access_key_id: SecretStr
     secret_access_key: SecretStr
     session_token: SecretStr | None = None
+    key_prefix: str | None = None
     timeout: int = 30
-    proxy: str | None = None
+    proxy: SecretStr | None = None
 
     def resolved_endpoint_url(self) -> str:
         if self.endpoint_url:
@@ -48,6 +49,7 @@ class SupabaseConfig(BaseModel):
             aws_secret_access_key=self.secret_access_key,
             aws_session_token=self.session_token,
             path_style=True,
+            key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
         )

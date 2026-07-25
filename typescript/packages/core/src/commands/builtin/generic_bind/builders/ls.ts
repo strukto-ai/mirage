@@ -12,23 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
 import { lsGeneric } from '../../generic/ls.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
 
 export const LS_BUILDER: Builder = {
   name: 'ls',
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    const overlay = opts.statOverlay
-    // ls renders stat rows the backend produces, which never see the
-    // namespace attr overlay (chmod/chown/touch on overlay backends);
-    // merge it in so ls -l matches the ops facade.
-    const stat =
-      overlay !== undefined
-        ? async (p: PathSpec) => overlay(p.virtual, await ops.stat(accessor, p, idx))
-        : (p: PathSpec) => ops.stat(accessor, p, idx)
-    return lsGeneric(resolved, opts, (p) => ops.readdir(accessor, p, idx), stat)
+    return lsGeneric(
+      resolved,
+      opts,
+      (p) => ops.readdir(accessor, p, idx),
+      overlaidStat((p) => ops.stat(accessor, p, idx), opts.statOverlay),
+    )
   },
 }

@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "readlink_e",
+      "seq": 601383,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prl4 && printf x>/data/prl4/t.txt && ln -s /data/prl4/t.txt /data/prl4/lk && readlink -e /data/prl4/lk",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prl4/t.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    }
+  ]
+}

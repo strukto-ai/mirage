@@ -15,13 +15,39 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.resource.s3 import S3Config
+from mirage.core.s3._client import _client_kwargs
+from mirage.resource.s3 import S3Config, S3Resource
 
 
 def test_s3config_defaults():
     c = S3Config(bucket="my-bucket")
     assert c.region is None
     assert c.timeout == 30
+    assert c.proxy is None
+
+
+def test_s3_client_kwargs_route_through_proxy():
+    config = S3Config(bucket="b",
+                      proxy="http://proxy-user:proxy-secret@localhost:8080")
+    proxies = _client_kwargs(config)["config"].proxies
+    assert proxies == {
+        "http": "http://proxy-user:proxy-secret@localhost:8080",
+        "https": "http://proxy-user:proxy-secret@localhost:8080",
+    }
+
+
+def test_s3_client_kwargs_treat_empty_proxy_as_disabled():
+    config = S3Config(bucket="b", proxy="")
+    assert _client_kwargs(config)["config"].proxies is None
+
+
+def test_s3_state_redacts_proxy_credentials():
+    resource = S3Resource(
+        S3Config(bucket="b", proxy="http://proxy-user:proxy-secret@host:8080"))
+    blob = repr(resource.get_state())
+    assert "proxy-user" not in blob
+    assert "proxy-secret" not in blob
+    assert "<REDACTED>" in blob
 
 
 def test_s3config_immutable():
@@ -34,6 +60,8 @@ def test_s3_write_commands_tagged():
     from mirage.commands.builtin.s3 import COMMANDS
     write_names = {
         "rm",
+        "rmdir",
+        "unlink",
         "mkdir",
         "touch",
         "cp",
@@ -50,6 +78,7 @@ def test_s3_write_commands_tagged():
         "tar",
         "patch",
         "iconv",
+        "truncate",
     }
     for fn in COMMANDS:
         for rc in fn._registered_commands:

@@ -1,11 +1,32 @@
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.escapes import interpret_escapes
 from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.spec.types import CommandName
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandName, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+
+@dataclass(frozen=True, slots=True)
+class TrFlags:
+    delete: bool = False
+    squeeze: bool = False
+    complement: bool = False
+    truncate_set1: bool = False
+
+
+def parse_flags(flags: Mapping[str, object]) -> TrFlags:
+    fl = FlagView(flags, spec=SPECS["tr"])
+    return TrFlags(
+        delete=fl.as_bool("d") or fl.as_bool("delete"),
+        squeeze=fl.as_bool("s") or fl.as_bool("squeeze_repeats"),
+        complement=(fl.as_bool("c") or fl.as_bool("C")
+                    or fl.as_bool("complement")),
+        truncate_set1=fl.as_bool("t") or fl.as_bool("truncate_set1"),
+    )
 
 
 def _expand_ranges(s: str) -> str:
@@ -60,28 +81,29 @@ async def tr(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    delete: bool = False,
-    squeeze: bool = False,
-    complement: bool = False,
+    flags: Mapping[str, object] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(texts) > 2:
         raise extra_operand_error(CommandName.TR, texts[2])
     if not texts:
         raise ValueError("tr: usage: tr [-d] [-s] [-c] set1 [set2] [path]")
+    parsed = parse_flags(flags or {})
     set1 = _expand_ranges(interpret_escapes(texts[0]))
-    if complement:
+    if parsed.complement:
         all_chars = "".join(chr(i) for i in range(128))
         set1 = "".join(ch for ch in all_chars if ch not in set1)
     set2 = _expand_ranges(interpret_escapes(
         texts[1])) if len(texts) >= 2 else ""
 
-    if set2 and len(set2) < len(set1):
+    if set2 and parsed.truncate_set1:
+        set1 = set1[:len(set2)]
+    elif set2 and len(set2) < len(set1):
         set2 = set2 + set2[-1] * (len(set1) - len(set2))
 
     table: dict[int, int] | None = None
-    if not delete and set2:
+    if not parsed.delete and set2:
         table = str.maketrans(set1, set2)
-    elif not delete and not set2 and not squeeze:
+    elif not parsed.delete and not set2 and not parsed.squeeze:
         raise ValueError("tr: usage: tr set1 set2")
 
     cache: list[str] = []
@@ -94,8 +116,8 @@ async def tr(
     return _tr_stream(source,
                       set1,
                       set2,
-                      delete=delete,
-                      squeeze=squeeze,
+                      delete=parsed.delete,
+                      squeeze=parsed.squeeze,
                       table=table), IOResult(cache=cache)
 
 

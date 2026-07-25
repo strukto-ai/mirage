@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "cp_f_over",
+      "seq": 601003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp4 && printf 'A' > /data/pcp4/s.txt && printf 'B' > /data/pcp4/d.txt && cp -f /data/pcp4/s.txt /data/pcp4/d.txt && cat /data/pcp4/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "A",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

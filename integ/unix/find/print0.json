@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "find_print0",
+      "seq": 500302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/sub1 -print0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1\u0000/data/f4/sub1/inner.txt\u0000/data/f4/sub1/skipme\u0000/data/f4/sub1/skipme/deep.txt\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "print0"
+      ]
+    }
+  ]
+}

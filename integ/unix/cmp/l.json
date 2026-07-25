@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "cmp_l_list",
+      "seq": 601130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcmp && printf 'abc' > /data/qcmp/l1 && printf 'aXc' > /data/qcmp/l2 && cmp -l /data/qcmp/l1 /data/qcmp/l2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 142 130\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

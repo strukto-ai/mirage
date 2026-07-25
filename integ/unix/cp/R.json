@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "cp_R_tree",
+      "seq": 601001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp2/tree/sub && printf 'a' > /data/pcp2/tree/f.txt && printf 'b' > /data/pcp2/tree/sub/g.txt && cp -R /data/pcp2/tree /data/pcp2/tcopy && cat /data/pcp2/tcopy/f.txt /data/pcp2/tcopy/sub/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      },
+      "flags": [
+        "R"
+      ]
+    }
+  ]
+}

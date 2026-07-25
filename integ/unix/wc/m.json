@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "wc_m",
+      "seq": 142,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -m /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24 /data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    }
+  ]
+}

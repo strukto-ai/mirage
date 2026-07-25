@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "ctl_until_counts_up",
+      "seq": 502104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cn=0; until [ $cn -ge 3 ]; do echo $cn; cn=$((cn+1)); done",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_until_true_never_runs",
+      "seq": 502105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "until true; do echo x; done; echo done",
+      "expect": {
+        "exit": 0,
+        "stdout": "done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_until_break_ends",
+      "seq": 502106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cb=0; until false; do cb=$((cb+1)); echo $cb; if [ $cb = 2 ]; then break; fi; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

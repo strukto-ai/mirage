@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "ow_mv_onto_existing_file",
+      "seq": 203003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt && ls /data/ow",
+      "expect": {
+        "exit": 0,
+        "stdout": "newdst.txt\ns\nt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

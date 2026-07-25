@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "xargs_wc_initial_args",
+      "seq": 375,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo /data/a.txt | xargs wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

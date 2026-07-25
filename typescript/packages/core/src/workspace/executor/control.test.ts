@@ -208,10 +208,10 @@ describe('handleCase', () => {
       which = n.text
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    const items: [string[], TSNodeLike[]][] = [
-      [['a*'], [node('A')]],
-      [['b*'], [node('B')]],
-      [['*'], [node('catchall')]],
+    const items: [string[], TSNodeLike[], string][] = [
+      [['a*'], [node('A')], ';;'],
+      [['b*'], [node('B')], ';;'],
+      [['*'], [node('catchall')], ';;'],
     ]
     await handleCase(execute, 'banana', items, new Session({ sessionId: 'test' }))
     expect(which).toBe('B')
@@ -223,9 +223,9 @@ describe('handleCase', () => {
       which = n.text
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    const items: [string[], TSNodeLike[]][] = [
-      [['a*'], [node('A')]],
-      [['*'], [node('catchall')]],
+    const items: [string[], TSNodeLike[], string][] = [
+      [['a*'], [node('A')], ';;'],
+      [['*'], [node('catchall')], ';;'],
     ]
     await handleCase(execute, 'xyz', items, new Session({ sessionId: 'test' }))
     expect(which).toBe('catchall')
@@ -234,8 +234,38 @@ describe('handleCase', () => {
   it('matches nothing when no pattern fits', async () => {
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    const items: [string[], TSNodeLike[]][] = [[['z*'], [node('body')]]]
+    const items: [string[], TSNodeLike[], string][] = [[['z*'], [node('body')], ';;']]
     const [, io] = await handleCase(execute, 'abc', items, new Session({ sessionId: 'test' }))
     expect(io.exitCode).toBe(0)
+  })
+
+  it('runs the next arm body on ;& (fallthrough)', async () => {
+    const ran: string[] = []
+    const execute: ExecuteNodeFn = (n) => {
+      ran.push(n.text)
+      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
+    }
+    const items: [string[], TSNodeLike[], string][] = [
+      [['a'], [node('A')], ';&'],
+      [['b'], [node('B')], ';;'],
+      [['c'], [node('C')], ';;'],
+    ]
+    await handleCase(execute, 'a', items, new Session({ sessionId: 'test' }))
+    expect(ran).toEqual(['A', 'B'])
+  })
+
+  it('keeps testing later patterns on ;;&', async () => {
+    const ran: string[] = []
+    const execute: ExecuteNodeFn = (n) => {
+      ran.push(n.text)
+      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
+    }
+    const items: [string[], TSNodeLike[], string][] = [
+      [['a'], [node('A')], ';;&'],
+      [['a'], [node('A2')], ';;&'],
+      [['b'], [node('B')], ';;'],
+    ]
+    await handleCase(execute, 'a', items, new Session({ sessionId: 'test' }))
+    expect(ran).toEqual(['A', 'A2'])
   })
 })

@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "grep_l",
+      "seq": 88,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -l hello /data/mixed.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mixed.txt\n/data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

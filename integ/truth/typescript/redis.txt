@@ -3,7 +3,7 @@ hello world
 revenue,100\nexpense,80
 name=hello.txt size=12
 "alice"
-└── user.json
+`-- user.json
 /data/hello.txt
 HELLO WORLD
 goodbye world

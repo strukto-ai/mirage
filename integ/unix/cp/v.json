@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "cp_v_single",
+      "seq": 601000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp1 && printf 'x' > /data/pcp1/s.txt && cp -v /data/pcp1/s.txt /data/pcp1/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/pcp1/s.txt' -> '/data/pcp1/d.txt'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    }
+  ]
+}

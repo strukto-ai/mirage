@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "diff_q_brief",
+      "seq": 601122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qdiff && printf 'x\\n' > /data/qdiff/q1 && printf 'y\\n' > /data/qdiff/q2 && diff -q /data/qdiff/q1 /data/qdiff/q2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Files /data/qdiff/q1 and /data/qdiff/q2 differ\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q"
+      ]
+    }
+  ]
+}

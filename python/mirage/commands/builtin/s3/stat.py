@@ -12,16 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import (bound_op,
+                                                          overlaid_stat)
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.s3.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.config import StatOverlay
 from mirage.types import PathSpec
 
 
@@ -37,12 +41,16 @@ async def stat(
     c: str | None = None,
     f: str | None = None,
     index: IndexCacheStore,
+    stat_overlay: StatOverlay | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    return await generic_stat(paths,
-                              stat_fn=bound_op(stat_core, accessor, index),
-                              c=c,
-                              f=f)
+    stat_fn = bound_op(stat_core, accessor, index)
+    if stat_overlay is not None:
+        stat_fn = partial(overlaid_stat,
+                          partial(stat_core, accessor),
+                          stat_overlay,
+                          index=index)
+    return await generic_stat(paths, stat_fn=stat_fn, c=c, f=f)

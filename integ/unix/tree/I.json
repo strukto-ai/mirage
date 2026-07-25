@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "tree_I_ignore",
+      "seq": 601374,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pti/keep /data/pti/skip && printf x>/data/pti/top.txt && tree -I 'skip' /data/pti",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/pti\n|-- keep\n`-- top.txt\n\n2 directories, 1 file\n",
+        "stderr": ""
+      },
+      "flags": [
+        "I"
+      ]
+    }
+  ]
+}

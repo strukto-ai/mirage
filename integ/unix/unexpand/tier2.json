@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "unexpand_tier2_first_only",
+      "seq": 910018,
+      "targets": ["ram", "disk"],
+      "command": "printf '        a        b\n' | unexpand --first-only --tabs 4 | cat -A",
+      "expect": { "exit": 0, "stdout": "^I^Ia        b$\n", "stderr": "" },
+      "flags": ["first-only", "tabs"]
+    },
+    {
+      "id": "unexpand_tier2_all_alias",
+      "seq": 910019,
+      "targets": ["ram", "disk"],
+      "command": "printf '        a        b\n' | unexpand --all --tabs 4 | cat -A",
+      "expect": { "exit": 0, "stdout": "^I^Ia^I^Ib$\n", "stderr": "" },
+      "flags": ["all", "tabs"]
+    }
+  ]
+}

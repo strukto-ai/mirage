@@ -54,29 +54,62 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--fields",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
       "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-F",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--delimiter",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--characters",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
+      "short_value": true,
       "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--bytes",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-b",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--no-partial",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-n",
+      "short_value": true,
+      "value_kind": "none",
       "value_optional": false
     },
     {
@@ -85,6 +118,17 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--only-delimited",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-s",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -93,7 +137,48 @@
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
+      "short": "-O",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--output-delimiter",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-w",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--whitespace-delimited",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--zero-terminated",
+      "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-z",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

@@ -41,7 +41,7 @@ async def _resolve_memory(
               if lookup.entry is not None else None)
     if isinstance(cached, dict):
         return cached
-    return await get_memory(accessor.client, scope.memory_id)
+    return await get_memory(accessor.client, scope.memory_id, path)
 
 
 async def read(

@@ -42,10 +42,13 @@ import { LN_BUILDER } from './ln.ts'
 import { LOOK_BUILDER } from './look.ts'
 import { LS_BUILDER } from './ls.ts'
 import { MD5_BUILDER } from './md5.ts'
+import { MD5SUM_BUILDER } from './md5sum.ts'
 import { MKDIR_BUILDER } from './mkdir.ts'
 import { MKTEMP_BUILDER } from './mktemp.ts'
 import { MV_BUILDER } from './mv.ts'
 import { NL_BUILDER } from './nl.ts'
+import { NUMFMT_BUILDER } from './numfmt.ts'
+import { OD_BUILDER } from './od.ts'
 import { PASTE_BUILDER } from './paste.ts'
 import { PATCH_BUILDER } from './patch.ts'
 import { READLINK_BUILDER } from './readlink.ts'
@@ -53,8 +56,12 @@ import { REALPATH_BUILDER } from './realpath.ts'
 import { REV_BUILDER } from './rev.ts'
 import { RG_BUILDER } from './rg.ts'
 import { RM_BUILDER } from './rm.ts'
+import { RMDIR_BUILDER } from './rmdir.ts'
 import { SED_BUILDER } from './sed.ts'
+import { SHA1SUM_BUILDER } from './sha1sum.ts'
 import { SHA256SUM_BUILDER } from './sha256sum.ts'
+import { SHA384SUM_BUILDER } from './sha384sum.ts'
+import { SHA512SUM_BUILDER } from './sha512sum.ts'
 import { SHUF_BUILDER } from './shuf.ts'
 import { SORT_BUILDER } from './sort.ts'
 import { SPLIT_BUILDER } from './split.ts'
@@ -65,11 +72,13 @@ import { TAIL_BUILDER } from './tail.ts'
 import { TAR_BUILDER } from './tar.ts'
 import { TEE_BUILDER } from './tee.ts'
 import { TOUCH_BUILDER } from './touch.ts'
+import { TRUNCATE_BUILDER } from './truncate.ts'
 import { TR_BUILDER } from './tr.ts'
 import { TREE_BUILDER } from './tree.ts'
 import { TSORT_BUILDER } from './tsort.ts'
 import { UNEXPAND_BUILDER } from './unexpand.ts'
 import { UNIQ_BUILDER } from './uniq.ts'
+import { UNLINK_BUILDER } from './unlink.ts'
 import { UNZIP_BUILDER } from './unzip.ts'
 import { WC_BUILDER } from './wc.ts'
 import { XXD_BUILDER } from './xxd.ts'
@@ -107,10 +116,13 @@ export const BUILDERS: readonly Builder[] = [
   LOOK_BUILDER,
   LS_BUILDER,
   MD5_BUILDER,
+  MD5SUM_BUILDER,
   MKDIR_BUILDER,
   MKTEMP_BUILDER,
   MV_BUILDER,
   NL_BUILDER,
+  NUMFMT_BUILDER,
+  OD_BUILDER,
   PASTE_BUILDER,
   PATCH_BUILDER,
   READLINK_BUILDER,
@@ -118,8 +130,12 @@ export const BUILDERS: readonly Builder[] = [
   REV_BUILDER,
   RG_BUILDER,
   RM_BUILDER,
+  RMDIR_BUILDER,
   SED_BUILDER,
+  SHA1SUM_BUILDER,
   SHA256SUM_BUILDER,
+  SHA384SUM_BUILDER,
+  SHA512SUM_BUILDER,
   SHUF_BUILDER,
   SORT_BUILDER,
   SPLIT_BUILDER,
@@ -130,11 +146,13 @@ export const BUILDERS: readonly Builder[] = [
   TAR_BUILDER,
   TEE_BUILDER,
   TOUCH_BUILDER,
+  TRUNCATE_BUILDER,
   TR_BUILDER,
   TREE_BUILDER,
   TSORT_BUILDER,
   UNEXPAND_BUILDER,
   UNIQ_BUILDER,
+  UNLINK_BUILDER,
   UNZIP_BUILDER,
   WC_BUILDER,
   XXD_BUILDER,

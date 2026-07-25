@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "sym_dangle_cat",
+      "seq": 634,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s /data/symd/none /data/symd/dangle && cat /data/symd/dangle 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cat: /data/symd/dangle: No such file or directory\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

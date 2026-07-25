@@ -1,0 +1,76 @@
+{
+  "cases": [
+    {
+      "id": "rg_i",
+      "seq": 21,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -i WORLD /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello World\nHELLO world\nhello WORLD\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "rg_multi_dir",
+      "seq": 463,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -i hello /data/rgm/d1 /data/rgm/d2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgm/d1/f1.txt:hello\n/data/rgm/d2/f2.txt:Hello World\n/data/rgm/d2/f2.txt:HELLO world\n/data/rgm/d2/f2.txt:hello WORLD\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    }
+  ]
+}

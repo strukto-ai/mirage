@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "xro_ls_empty",
+      "seq": 770,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "ls /ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

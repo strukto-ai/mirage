@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "csplit_tier2_format_suppress_elide",
+      "seq": 910031,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2csplit1 && printf 'a\nMARK\nb\n' > /data/t2csplit1/in && csplit --quiet --prefix /data/t2csplit1/p --digits 2 --suffix-format='-%02d.out' --suppress-matched --elide-empty-files /data/t2csplit1/in /MARK/ && cat /data/t2csplit1/p-00.out && cat /data/t2csplit1/p-01.out",
+      "expect": { "exit": 0, "stdout": "a\nb\n", "stderr": "" },
+      "flags": ["quiet", "prefix", "digits", "suffix-format", "suppress-matched", "elide-empty-files"]
+    },
+    {
+      "id": "csplit_tier2_silent_keep",
+      "seq": 910032,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2csplit2 && printf 'a\nb\n' > /data/t2csplit2/in && csplit --silent --keep-files --prefix /data/t2csplit2/p /data/t2csplit2/in 2 && cat /data/t2csplit2/p00 && cat /data/t2csplit2/p01",
+      "expect": { "exit": 0, "stdout": "a\nb\n", "stderr": "" },
+      "flags": ["silent", "keep-files", "prefix"]
+    }
+  ]
+}

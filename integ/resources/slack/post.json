@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "slack_post_message",
+      "seq": 520035,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-post-message --channel_id C1 --text shipping /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000001\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"shipping\",\"ts\":\"1775000000.000001\"}}",
+        "stderr": ""
+      }
+    }
+  ]
+}

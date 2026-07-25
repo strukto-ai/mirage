@@ -1,0 +1,80 @@
+{
+  "cases": [
+    {
+      "id": "fold_s",
+      "seq": 334,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fold -s -w 6 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "w"
+      ]
+    },
+    {
+      "id": "fold_s_spaces",
+      "seq": 338,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fold -s -w 8 /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello \nWorld\nHELLO \nworld\nhello \nWORLD\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "w"
+      ]
+    }
+  ]
+}

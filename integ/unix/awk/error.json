@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "id": "awk_usage_exit",
+      "seq": 579,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]\n"
+      }
+    },
+    {
+      "id": "awk_f_missing_exit",
+      "seq": 580,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk -f /data/nope.awk /data/a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: /data/nope.awk: No such file or directory\n"
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

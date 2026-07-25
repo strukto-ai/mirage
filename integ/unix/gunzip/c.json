@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "gunzip_c_stdout",
+      "seq": 601312,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgu && printf 'tostdout\\n' > /data/pgu/c.txt && gzip /data/pgu/c.txt && gunzip -c /data/pgu/c.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "tostdout\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    }
+  ]
+}

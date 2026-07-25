@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "df_ls",
+      "seq": 580000,
+      "targets": [
+        "dify"
+      ],
+      "command": "ls /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "CHANGELOG.md\nguides\npolicies\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_ls_guides",
+      "seq": 580001,
+      "targets": [
+        "dify"
+      ],
+      "command": "ls /knowledge/guides",
+      "expect": {
+        "exit": 0,
+        "stdout": "auth\nquickstart\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

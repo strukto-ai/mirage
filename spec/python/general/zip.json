@@ -30,6 +30,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -39,6 +40,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-j",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -48,6 +50,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-q",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "nf_grep",
+      "seq": 642,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep x /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "grep: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_grep_r_rel",
+      "seq": 647,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && grep -r x missing)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "grep: missing: No such file or directory\n"
+      }
+    }
+  ]
+}

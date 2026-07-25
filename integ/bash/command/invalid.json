@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "cmd_invalid_option_rc2",
+      "seq": 503013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "command -x cd 2>&1; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "command: -x: invalid option\ncommand: usage: command [-pVv] command [arg ...]\nrc=2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

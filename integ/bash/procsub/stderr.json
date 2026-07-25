@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "procsub_stderr",
+      "seq": 501314,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <({ echo out; echo err >&2; })",
+      "expect": {
+        "exit": 0,
+        "stdout": "out\n",
+        "stderr": "err\n"
+      }
+    }
+  ]
+}

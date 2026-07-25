@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "meta_rm_drops",
+      "seq": 200010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 user user 6 Jan  2 15:30 g.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

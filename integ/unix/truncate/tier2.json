@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "truncate_tier2_size",
+      "seq": 910001,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2truncate && printf 'abcdef' > /data/t2truncate/f && truncate --size 3 /data/t2truncate/f && cat /data/t2truncate/f && truncate -s +2 /data/t2truncate/f && wc -c < /data/t2truncate/f",
+      "expect": { "exit": 0, "stdout": "abc5\n", "stderr": "" },
+      "flags": ["size", "s"]
+    }
+  ]
+}

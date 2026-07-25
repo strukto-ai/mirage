@@ -1,0 +1,152 @@
+{
+  "cases": [
+    {
+      "id": "sed_anchor_sub_E",
+      "seq": 185,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/anchors.txt | sed -E 's/^#[0-9]+$/#TS/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "#TS\nls\n#TS\nfoo bar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "E"
+      ]
+    },
+    {
+      "id": "sed_ere_group",
+      "seq": 199,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo foo | sed -E 's/(foo)/[\\1]/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[foo]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "E"
+      ]
+    },
+    {
+      "id": "sed_ere_plus",
+      "seq": 200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo aaab | sed -E 's/a+/X/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Xb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "E"
+      ]
+    },
+    {
+      "id": "sed_backref_E",
+      "seq": 223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed -E 's/(section)([0-9])/\\2\\1/' /data/sections.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1section\nbody1\n2section\nbody2\n3section\nbody3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "E"
+      ]
+    }
+  ]
+}

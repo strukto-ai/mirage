@@ -20,6 +20,8 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.runtime.route import RoutingDecision
 from mirage.shell.arith import evaluate_arith
+from mirage.shell.array import (array_append, array_extent, array_get,
+                                array_set, make_array)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.job_table import JobTable
@@ -54,9 +56,10 @@ from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_case_word, get_declaration_keyword, get_for_parts,
     get_function_body, get_function_name, get_if_branches, get_list_parts,
     get_negated_command, get_pipeline_commands, get_redirects, get_text,
-    get_unset_names, get_while_parts)
+    get_unset_args, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    handle_export, handle_local, handle_readonly, handle_test, handle_unset)
+    handle_export, handle_local, handle_readonly, handle_test, handle_unset,
+    note_local_array)
 
 
 async def _expand_array_items(
@@ -423,6 +426,9 @@ async def execute_node(
     if kind == NodeKind.DECLARATION:
         keyword = get_declaration_keyword(node)
         assignments = []
+        # Array literals are staged, not stored: `readonly -a a=(y)` on an
+        # already-readonly name has to fail with the old value intact.
+        staged: list[tuple[str, bool, list[str]]] = []
         flag_chars: set[str] = set()
         for child in node.named_children:
             if child.type == NT.VARIABLE_ASSIGNMENT:
@@ -432,13 +438,17 @@ async def execute_node(
                 ]
                 if val_nodes and val_nodes[0].type == NT.ARRAY:
                     key = get_text(child).partition("=")[0]
-                    session.arrays[key] = await _expand_array_items(
-                        val_nodes[0], session, execute_fn, registry, cs)
+                    items = await _expand_array_items(val_nodes[0], session,
+                                                      execute_fn, registry, cs)
+                    staged.append(
+                        (key.removesuffix("+"), key.endswith("+"), items))
                     continue
                 expanded = await expand_node(child, session, execute_fn, cs)
                 assignments.append(expanded)
             elif child.type in (NT.SIMPLE_EXPANSION, NT.EXPANSION,
-                                NT.CONCATENATION, NT.WORD):
+                                NT.CONCATENATION, NT.WORD, NT.VARIABLE_NAME):
+                # A bare `readonly NAME` / `export NAME` operand parses as
+                # a variable_name, not a word.
                 expanded = await expand_node(child, session, execute_fn, cs)
                 if not expanded:
                     continue
@@ -446,8 +456,43 @@ async def execute_node(
                     flag_chars.update(expanded[1:])
                 else:
                     assignments.append(expanded)
-        if keyword == "readonly" or "r" in flag_chars:
-            return await handle_readonly(assignments, session)
+        array_names = [name for name, _, _ in staged]
+        is_readonly = keyword == "readonly" or "r" in flag_chars
+        for name in array_names:
+            if is_readonly and name in session.readonly_vars:
+                err = f"bash: {name}: readonly variable\n".encode()
+                return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
+                    command=keyword, exit_code=1, stderr=err)
+        for name, append, items in staged:
+            note_local_array(session, name)
+            if append:
+                base = session.arrays.get(name)
+                if base is None:
+                    scalar = session.env.get(name)
+                    base = [] if scalar is None else [scalar]
+                array_append(base, items)
+            else:
+                base = make_array(items)
+            session.arrays[name] = base
+            session.env.pop(name, None)
+        if "a" in flag_chars:
+            # `declare -a NAME` with no value declares an empty array, so
+            # ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
+            for bare in assignments:
+                if "=" in bare:
+                    continue
+                if note_local_array(session, bare):
+                    # Inside a function this shadows whatever the caller
+                    # had with a fresh empty array.
+                    session.arrays[bare] = []
+                elif bare not in session.arrays:
+                    # At top level an existing scalar becomes element 0.
+                    scalar = session.env.pop(bare, None)
+                    session.arrays[bare] = [] if scalar is None else [scalar]
+        if is_readonly:
+            # An array assignment stores itself above, but the name still
+            # has to be marked readonly.
+            return await handle_readonly(assignments + array_names, session)
         # declare/typeset scope like `local` inside a function (bash
         # semantics) and assign globally at top level, which is exactly
         # handle_local's fallback when no function scope is active.
@@ -457,8 +502,8 @@ async def execute_node(
 
     # ── unset ───────────────────────────────────
     if kind == NodeKind.UNSET:
-        names = get_unset_names(node)
-        return await handle_unset(names, session)
+        args = get_unset_args(node)
+        return await handle_unset(args, session)
 
     # ── test ([ ] or [[ ]]) ─────────────────────
     if kind == NodeKind.TEST:
@@ -523,10 +568,13 @@ async def execute_node(
                 base = session.arrays.get(key)
                 if base is None:
                     scalar = session.env.pop(key, None)
-                    base = [scalar] if scalar else []
-                session.arrays[key] = base + items
+                    base = [] if scalar is None else [scalar]
+                # `arr+=(...)` starts at the extent, so it fills the hole
+                # a trailing `unset arr[last]` left but skips interior ones.
+                array_append(base, items)
+                session.arrays[key] = base
             else:
-                session.arrays[key] = items
+                session.arrays[key] = make_array(items)
                 session.env.pop(key, None)
             return None, IOResult(), ExecutionNode(command=text, exit_code=0)
         if val_nodes:
@@ -542,10 +590,10 @@ async def execute_node(
             arr = session.arrays.get(key)
             if arr is None:
                 scalar = session.env.pop(key, None)
-                arr = [scalar] if scalar else []
+                arr = [] if scalar is None else [scalar]
             idx = _array_index(idx_text, session.env)
             if idx < 0:
-                idx += len(arr)
+                idx += array_extent(arr)
             if idx < 0:
                 # bash aborts the whole line on a bad assignment
                 # subscript (status 1); containment mirrors ${var:?}.
@@ -554,22 +602,22 @@ async def execute_node(
                                  stderr=(f"bash: {name_text}: "
                                          "bad array subscript\n").encode(),
                                  contained_code=1)
-            while len(arr) <= idx:
-                arr.append("")
-            arr[idx] = arr[idx] + val if append else val
+            array_set(arr, idx, array_get(arr, idx) + val if append else val)
             session.arrays[key] = arr
             return None, IOResult(), ExecutionNode(command=text, exit_code=0)
         if append:
             arr = session.arrays.get(key)
-            if arr:
-                arr[0] = arr[0] + val
-            elif arr is not None:
-                arr.append(val)
+            if arr is not None:
+                array_set(arr, 0, array_get(arr, 0) + val)
             else:
                 session.env[key] = session.env.get(key, "") + val
         else:
             session.env[key] = val
             session.arrays.pop(key, None)
+        # Reassigning OPTIND (even to its current value) restarts the
+        # getopts scan, matching bash's internal char pointer.
+        if key == "OPTIND":
+            session._getopts_optind = None
         io = IOResult()
         if session.shell_options.get("xtrace"):
             io.stderr = trace_assignment(key, val, append)

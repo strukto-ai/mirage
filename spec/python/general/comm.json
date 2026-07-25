@@ -50,6 +50,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-1",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -59,6 +60,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-2",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -68,6 +70,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-3",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -77,6 +80,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -86,6 +90,37 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--output-delimiter",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--total",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--zero-terminated",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

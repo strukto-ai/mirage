@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "bash_history_format",
+      "seq": 535,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /.bash_history | sed 's/^#[0-9]*$/#TS/' | tail -n 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "#TS\nfind /.bash_history -type d\n#TS\ngrep -v '^#' /.bash_history | tail -n 1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

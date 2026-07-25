@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "paste_d_comma",
+      "seq": 291,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "paste -d , /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello,1\nworld,2\nfoo,3\nbar,\nbaz,\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    }
+  ]
+}

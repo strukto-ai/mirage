@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "awk_f_program",
+      "seq": 173,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo '{print $3, $1}' | tee /data/prog.awk > /dev/null && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk",
+      "expect": {
+        "exit": 0,
+        "stdout": "engineer alice\ndesigner bob\nmanager carol\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "awk_f_repeat",
+      "seq": 176,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo '{sum += $1}' | tee /data/pa.awk > /dev/null && echo 'END {print sum}' | tee /data/pb.awk > /dev/null && awk -f /data/pa.awk -f /data/pb.awk /data/numbers.txt && rm /data/pa.awk /data/pb.awk",
+      "expect": {
+        "exit": 0,
+        "stdout": "51\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

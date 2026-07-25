@@ -313,28 +313,42 @@ async def handle_until(
 async def handle_case(
     execute_node: Callable[..., Any],
     word: str,
-    items: list[tuple[list[str], list[tree_sitter.Node]]],
+    items: list[tuple[list[str], list[tree_sitter.Node], str]],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    for patterns, body in items:
-        if any(fnmatch(word, p.strip()) for p in patterns):
-            all_stdout: list[ByteSource] = []
-            merged_io = IOResult()
-            last_exec = ExecutionNode(command="case", exit_code=0)
-            for stmt in body:
-                stdout, io, last_exec = await execute_node(
-                    stmt, session, stdin, call_stack)
-                stdin = None
-                if stdout is not None:
-                    all_stdout.append(stdout)
-                merged_io = await merged_io.merge(io)
-            if len(all_stdout) == 1:
-                return all_stdout[0], merged_io, last_exec
-            combined = async_chain(*all_stdout) if all_stdout else None
-            return combined, merged_io, last_exec
-    return None, IOResult(), ExecutionNode(command="case", exit_code=0)
+    all_stdout: list[ByteSource] = []
+    merged_io = IOResult()
+    last_exec = ExecutionNode(command="case", exit_code=0)
+    ran = False
+    fallthrough = False
+    for patterns, body, terminator in items:
+        if not (fallthrough or any(fnmatch(word, p.strip())
+                                   for p in patterns)):
+            continue
+        ran = True
+        for stmt in body:
+            stdout, io, last_exec = await execute_node(stmt, session, stdin,
+                                                       call_stack)
+            stdin = None
+            if stdout is not None:
+                all_stdout.append(stdout)
+            merged_io = await merged_io.merge(io)
+        if terminator == ";&":
+            # Fall through: run the next arm's body without testing it.
+            fallthrough = True
+            continue
+        # ;;& keeps testing remaining patterns; ;; stops here.
+        fallthrough = False
+        if terminator != ";;&":
+            break
+    if not ran:
+        return None, IOResult(), ExecutionNode(command="case", exit_code=0)
+    if len(all_stdout) == 1:
+        return all_stdout[0], merged_io, last_exec
+    combined = async_chain(*all_stdout) if all_stdout else None
+    return combined, merged_io, last_exec
 
 
 async def handle_select(

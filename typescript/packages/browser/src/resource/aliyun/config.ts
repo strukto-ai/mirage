@@ -21,6 +21,7 @@ export interface AliyunConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface AliyunConfigRedacted extends Omit<AliyunConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const AliyunConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedAliyunEndpoint(config: AliyunConfig): string | undefined {
@@ -56,6 +58,7 @@ export function aliyunToS3Config(config: AliyunConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

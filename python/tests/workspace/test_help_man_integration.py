@@ -29,8 +29,28 @@ def _ws():
     return Workspace(resources={"/ram/": (ram, MountMode.EXEC)}, )
 
 
+def _multi_ws():
+    ram = RAMResource()
+    ram._store.files["/a.txt"] = b"a\n"
+    other = RAMResource()
+    other._store.files["/b.txt"] = b"b\n"
+    ro = RAMResource()
+    ro._store.files["/c.txt"] = b"c\n"
+    return Workspace(
+        resources={
+            "/ram/": (ram, MountMode.EXEC),
+            "/other/": (other, MountMode.EXEC),
+            "/ro/": (ro, MountMode.READ),
+        })
+
+
 def _exec(ws, cmd):
     return _run(ws.execute(cmd))
+
+
+def _out(io):
+    return io.stdout.decode() if isinstance(io.stdout, bytes) else _run(
+        _materialize(io.stdout))
 
 
 def test_help_flag_renders_help_through_executor():
@@ -41,6 +61,52 @@ def test_help_flag_renders_help_through_executor():
         _materialize(io.stdout))
     assert "Usage: cat" in out
     assert "--help" in out
+    assert "--version" in out
+
+
+def test_version_flag_prints_mirage_package_version():
+    ws = _ws()
+    io = _exec(ws, "tsort --version")
+    assert io.exit_code == 0
+    out = io.stdout.decode() if isinstance(io.stdout, bytes) else _run(
+        _materialize(io.stdout))
+    assert out.startswith("tsort (Mirage) ")
+    assert out.endswith("\n")
+
+
+def test_version_beats_the_read_only_mount_refusal():
+    ws = _multi_ws()
+    io = _exec(ws, "rm --version /ro/c.txt")
+    assert io.exit_code == 0
+    assert _out(io).startswith("rm (Mirage) ")
+
+
+def test_help_beats_the_read_only_mount_refusal():
+    ws = _multi_ws()
+    io = _exec(ws, "rm --help /ro/c.txt")
+    assert io.exit_code == 0
+    assert "Usage: rm" in _out(io)
+
+
+def test_version_beats_cross_mount_routing():
+    ws = _multi_ws()
+    io = _exec(ws, "cat --version /ram/a.txt /other/b.txt")
+    assert io.exit_code == 0
+    assert _out(io).startswith("cat (Mirage) ")
+
+
+def test_version_does_not_run_a_write_command():
+    ws = _multi_ws()
+    io = _exec(ws, "rm --version /ram/a.txt")
+    assert io.exit_code == 0
+    assert _out(_exec(ws, "cat /ram/a.txt")) == "a\n"
+
+
+def test_version_after_end_of_options_stays_an_operand():
+    ws = _multi_ws()
+    io = _exec(ws, "grep -- --version /ram/a.txt")
+    assert io.exit_code == 1
+    assert _out(io) == ""
 
 
 def test_man_renders_help_for_known_command():

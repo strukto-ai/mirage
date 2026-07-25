@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "patch_apply",
+      "seq": 537,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "patch -p1 /data/poem.diff > /dev/null && cat /data/poem.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "roses are red\nviolets are dark\nsugar is sweet\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    }
+  ]
+}

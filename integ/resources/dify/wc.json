@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "df_wc_l",
+      "seq": 580013,
+      "targets": [
+        "dify"
+      ],
+      "command": "wc -l /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 /knowledge/guides/auth\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_wc_c",
+      "seq": 580014,
+      "targets": [
+        "dify"
+      ],
+      "command": "wc -c /knowledge/policies/refunds",
+      "expect": {
+        "exit": 0,
+        "stdout": "159 /knowledge/policies/refunds\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

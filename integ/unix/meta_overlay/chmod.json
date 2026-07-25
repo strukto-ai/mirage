@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "ometa_chmod_octal",
+      "seq": 201001,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "chmod 601 /data/metao/f.txt",
+      "check": {
+        "stat": "/data/metao/f.txt",
+        "fields": [
+          "mode",
+          "mtime"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mode=601 mtime=2026-01-02T15:30:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_chmod_symbolic",
+      "seq": 201002,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "chmod u+x,go-r /data/metao/f.txt",
+      "check": {
+        "stat": "/data/metao/f.txt",
+        "fields": [
+          "mode"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mode=701\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_chmod_enoent",
+      "seq": 201013,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "chmod 644 /data/metao/missing.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "chmod: cannot access '/data/metao/missing.txt': No such file or directory\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

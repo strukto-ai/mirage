@@ -446,8 +446,12 @@ export class MountEntry {
         runWithRevisions(
           this.revisions.size > 0 ? this.revisions : null,
           async (): Promise<[ByteSource | null, IOResult]> => {
+            // --help / --version short-circuit inside the handler
+            // wrapper and never touch the backend, so a read-only mount
+            // answers them like GNU instead of refusing them as writes.
+            const infoOnly = flags.help === true || flags.version === true
             for (const cmd of handlers) {
-              if (cmd.write && this.effectiveMode() === MountMode.READ) {
+              if (cmd.write && !infoOnly && this.effectiveMode() === MountMode.READ) {
                 return [
                   null,
                   new IOResult({

@@ -10,6 +10,7 @@ permissions:
       - typescript/**
       - examples/typescript/**
       - integ/**
+      - conformance/**
       - .github/workflows/test_typescript.yml
   pull_request:
     branches: [main]
@@ -36,6 +37,7 @@ jobs:
               - 'typescript/**'
               - 'examples/typescript/**'
               - 'integ/**'
+              - 'conformance/**'
               - '.github/workflows/test_typescript.yml'
 
   test:
@@ -62,7 +64,7 @@ jobs:
           version: 10.32.1
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: pnpm
@@ -123,7 +125,7 @@ jobs:
           version: 10.32.1
 
       - name: Set up Node 24 (for --experimental-wasm-jspi)
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm

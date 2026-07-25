@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "nl_s_v_i",
+      "seq": 601160,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qnl && printf 'x\\ny\\n' > /data/qnl/nl.txt && nl -s ':: ' -v 10 -i 5 /data/qnl/nl.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "    10:: x\n    15:: y\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

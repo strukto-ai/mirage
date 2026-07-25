@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_cards_ls",
+      "seq": 550005,
+      "targets": [
+        "trello"
+      ],
+      "command": "ls /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add_full-text_search__crd_search\nCSV_export_for_reports__crd_export\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

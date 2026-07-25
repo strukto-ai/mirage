@@ -41,7 +41,7 @@ import { readFileBytes } from './snapshot/fs.ts'
 import { applyStateDict, buildMountArgs, toStateDict } from './snapshot/state.ts'
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
-import type { FileStat } from '../types.ts'
+import type { FileEvent, FileStat } from '../types.ts'
 import {
   type CommandSafeguard,
   ConsistencyPolicy,
@@ -100,6 +100,8 @@ import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
+import type { WatchRuntime } from '../watch/base.ts'
+import { Watcher } from '../watch/watcher.ts'
 
 /**
  * One mount entry: a bare resource takes the workspace default mode, a
@@ -261,6 +263,7 @@ export class Workspace {
   readonly fs: WorkspaceFS
   private closed = false
   private readonly closers: (() => Promise<void>)[] = []
+  private watchRuntime: WatchRuntime | null = null
   private readonly runtimeEntries: Runtime[]
   private runtimeBindings: Record<string, Runtime>
   private readonly route: RouteFn | null
@@ -819,6 +822,38 @@ export class Workspace {
     return this.registry.mountFor(prefix)
   }
 
+  attachWatchRuntime(runtime: WatchRuntime): void {
+    if (this.closed) throw new Error('Workspace is closed')
+    if (this.watchRuntime !== null) {
+      throw new Error(
+        'watch runtime already attached: detachWatchRuntime first, or attach before the first watch()/notify()',
+      )
+    }
+    this.watchRuntime = runtime
+  }
+
+  async detachWatchRuntime(): Promise<void> {
+    if (this.watchRuntime === null) return
+    await this.watchRuntime.close()
+    this.watchRuntime = null
+  }
+
+  private watchDelegate(): WatchRuntime {
+    if (this.closed) throw new Error('Workspace is closed')
+    this.watchRuntime ??= new Watcher(this.registry)
+    return this.watchRuntime
+  }
+
+  watch(path: string | PathSpec | readonly (string | PathSpec)[]): AsyncIterable<FileEvent> {
+    const raw = typeof path === 'string' || path instanceof PathSpec ? [path] : [...path]
+    const specs = raw.map((item) => (item instanceof PathSpec ? item : PathSpec.fromStrPath(item)))
+    return this.watchDelegate().watch(specs)
+  }
+
+  async notify(change: FileEvent): Promise<void> {
+    await this.watchDelegate().notify(change)
+  }
+
   /**
    * Add a mount to a running workspace. Registers the resource's ops globally
    * on this workspace's OpsRegistry so dispatch can find them.
@@ -1141,7 +1176,7 @@ export class Workspace {
 
     const dispatch: DispatchFn = this.dispatcher.dispatch
 
-    const executeFn: ExecuteFn = async (cmd) => {
+    const executeFn: ExecuteFn = async (cmd, opts) => {
       // The executor's internal evals ($(), eval, source, xargs) are
       // never a typed line: they must not record a history entry or open
       // their own recording context, so their ops flow into this line's
@@ -1151,6 +1186,10 @@ export class Workspace {
       // Nested lines never re-route: the evaluator's inner lines keep
       // the typed line's decision (runtime argument, route, or scripts).
       if (routingDecision !== null) innerOpts.routingDecision = routingDecision
+      // `command NAME` re-runs the inner line and must forward the pipe
+      // stdin so `... | command cat` filters the upstream output; the same
+      // path carries `echo hi | bash -c 'cat'` into the inner line.
+      if (opts.stdin !== undefined && opts.stdin !== null) innerOpts.stdin = opts.stdin
       const res = await this.execute(cmd, innerOpts)
       return new IOResult({
         exitCode: res.exitCode,
@@ -1426,6 +1465,10 @@ export class Workspace {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    if (this.watchRuntime !== null) {
+      await this.watchRuntime.close()
+      this.watchRuntime = null
+    }
     const drainTasks = [...(this.cache.drainTasks?.values() ?? [])]
     for (const task of drainTasks) {
       await task

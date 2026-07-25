@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "arity_tr",
+      "seq": 448,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tr a b /data/a.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "tr: extra operand '/data/a.txt'\nTry 'tr --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

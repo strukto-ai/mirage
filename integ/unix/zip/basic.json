@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "zip_create",
+      "seq": 598,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "zip /data/sub/arch.zip /data/sub/nested.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: data/sub/nested.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "opt_xtrace_traces_command",
+      "seq": 502212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "set -x; echo hi; set +x",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": "+ echo hi\n+ set +x\n"
+      }
+    },
+    {
+      "id": "opt_xtrace_expands_words",
+      "seq": 502213,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "set -x; xvt=5; echo $xvt; set +x",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": "+ xvt=5\n+ echo 5\n+ set +x\n"
+      }
+    }
+  ]
+}

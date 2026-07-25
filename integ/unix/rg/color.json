@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rg_color_noop",
+      "seq": 500419,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg --color=never alpha /data/r4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      },
+      "flags": [
+        "color"
+      ]
+    }
+  ]
+}

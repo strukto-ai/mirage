@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "id": "substr_dollar_offset_bad_subst",
+      "seq": 603100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "pv1=hello; po1=2; echo \"X${pv1:$po1}Y\"",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bash: ${pv1}: bad substitution\n"
+      }
+    },
+    {
+      "id": "substr_dollar_offset_len_bad_subst",
+      "seq": 603101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "pw1=hello; pn1=1; echo \"${pw1:$pn1:2}\"",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bash: ${pw1}: bad substitution\n"
+      }
+    },
+    {
+      "id": "substr_offset_arith_alternatives_ok",
+      "seq": 603102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "pz1=hello; pk1=2; echo \"${pz1:pk1}:${pz1:$((pk1))}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "llo:llo\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

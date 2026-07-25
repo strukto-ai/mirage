@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "object_storage_prefix_read",
+      "seq": 901,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "cat /s3/identity.txt /aliyun/identity.txt /backblaze/identity.txt /ceph/identity.txt /digitalocean/identity.txt /gcs/identity.txt /minio/identity.txt /oci/identity.txt /qingstor/identity.txt /r2/identity.txt /scaleway/identity.txt /seaweedfs/identity.txt /supabase/identity.txt /tencent/identity.txt /wasabi/identity.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "s3\naliyun\nbackblaze\nceph\ndigitalocean\ngcs\nminio\noci\nqingstor\nr2\nscaleway\nseaweedfs\nsupabase\ntencent\nwasabi\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

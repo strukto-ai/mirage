@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "xargs_delim",
+      "seq": 423,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c' | xargs -d, echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d,"
+      ]
+    }
+  ]
+}

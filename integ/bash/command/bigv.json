@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "id": "cmd_bigv_builtin",
+      "seq": 503008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "command -V cd",
+      "expect": {
+        "exit": 0,
+        "stdout": "cd is a shell builtin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_bigv_keyword",
+      "seq": 503009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "command -V if",
+      "expect": {
+        "exit": 0,
+        "stdout": "if is a shell keyword\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_bigv_not_found",
+      "seq": 503010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "command -V nope_zzz 2>&1; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "command: nope_zzz: not found\nrc=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

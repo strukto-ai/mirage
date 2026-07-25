@@ -17,7 +17,7 @@ import { invalidateAfterWrite } from '../../cache/context.ts'
 import { record } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { dropboxUpload } from './_client.ts'
-import { invalidateAncestors } from './invalidate.ts'
+import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 
 // Single-call upload; Dropbox caps it at ~150 MB (larger files need

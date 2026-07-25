@@ -1,6 +1,42 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.utils.stream import ensure_stream
+
+
+@dataclass(frozen=True, slots=True)
+class CatFlags:
+    number_lines: bool = False
+    number_nonblank: bool = False
+    show_ends: bool = False
+    squeeze_blank: bool = False
+    show_tabs: bool = False
+    show_nonprinting: bool = False
+
+
+def parse_flags(flags: Mapping[str, object]) -> CatFlags:
+    fl = FlagView(flags, spec=SPECS["cat"])
+    show_all = fl.as_bool("A") or fl.as_bool("show_all")
+    return CatFlags(
+        number_lines=fl.as_bool("n") or fl.as_bool("number"),
+        number_nonblank=(fl.as_bool("b") or fl.as_bool("number_nonblank")),
+        show_ends=(fl.as_bool("E") or fl.as_bool("show_ends")
+                   or fl.as_bool("e") or show_all),
+        squeeze_blank=fl.as_bool("s") or fl.as_bool("squeeze_blank"),
+        show_tabs=(fl.as_bool("T") or fl.as_bool("show_tabs")
+                   or fl.as_bool("t") or show_all),
+        show_nonprinting=(fl.as_bool("v") or fl.as_bool("show_nonprinting")
+                          or fl.as_bool("e") or fl.as_bool("t") or show_all),
+    )
+
+
+def needs_display(flags: Mapping[str, object]) -> bool:
+    parsed = parse_flags(flags)
+    return any(
+        (parsed.number_lines, parsed.number_nonblank, parsed.show_ends,
+         parsed.squeeze_blank, parsed.show_tabs, parsed.show_nonprinting))
 
 
 def _visible(line: bytes, show_tabs: bool, show_nonprinting: bool) -> bytes:
@@ -43,14 +79,27 @@ def _visible(line: bytes, show_tabs: bool, show_nonprinting: bool) -> bytes:
 async def cat(
     src: bytes | AsyncIterator[bytes],
     *,
+    flags: Mapping[str, object] | None = None,
     number_lines: bool = False,
+    number_nonblank: bool = False,
     show_ends: bool = False,
     squeeze_blank: bool = False,
     show_tabs: bool = False,
     show_nonprinting: bool = False,
 ) -> AsyncIterator[bytes]:
+    if flags is not None:
+        parsed = parse_flags(flags)
+        number_lines = parsed.number_lines
+        number_nonblank = parsed.number_nonblank
+        show_ends = parsed.show_ends
+        squeeze_blank = parsed.squeeze_blank
+        show_tabs = parsed.show_tabs
+        show_nonprinting = parsed.show_nonprinting
+    if number_nonblank:
+        number_lines = False
     needs_line_processing = (number_lines or show_ends or squeeze_blank
-                             or show_tabs or show_nonprinting)
+                             or show_tabs or show_nonprinting
+                             or number_nonblank)
 
     if not needs_line_processing:
         async for chunk in ensure_stream(src):
@@ -67,16 +116,20 @@ async def cat(
             if squeeze_blank and not line and prev_blank:
                 prev_blank = True
                 continue
-            line_no += 1
-            prefix = f"{line_no:6d}\t".encode() if number_lines else b""
+            should_number = number_lines or (number_nonblank and bool(line))
+            if should_number:
+                line_no += 1
+            prefix = f"{line_no:6d}\t".encode() if should_number else b""
             suffix = b"$\n" if show_ends else b"\n"
             if show_tabs or show_nonprinting:
                 line = _visible(line, show_tabs, show_nonprinting)
             yield prefix + line + suffix
             prev_blank = not line
     if buf:
-        line_no += 1
-        prefix = f"{line_no:6d}\t".encode() if number_lines else b""
+        should_number = number_lines or number_nonblank
+        if should_number:
+            line_no += 1
+        prefix = f"{line_no:6d}\t".encode() if should_number else b""
         if show_tabs or show_nonprinting:
             buf = _visible(buf, show_tabs, show_nonprinting)
         yield prefix + buf

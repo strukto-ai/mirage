@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "id": "ometa_cleanup",
+      "seq": 201018,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "rm /data/metao/ln.txt && rm -r /data/metao",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

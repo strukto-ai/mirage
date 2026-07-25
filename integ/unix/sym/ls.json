@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "sym_ls_f",
+      "seq": 628,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -F /data/symd",
+      "expect": {
+        "exit": 0,
+        "stdout": "t.txt\nl.txt@\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_ls_long_arrow",
+      "seq": 629,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -l /data/symd | grep -- '->'",
+      "expect": {
+        "exit": 0,
+        "stdout": "l\t-\t-\tl.txt -> /data/symd/t.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

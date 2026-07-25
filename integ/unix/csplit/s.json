@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "id": "csplit_n",
+      "seq": 601080,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcs1 && printf 'a\\nb\\nc\\n' > /data/pcs1/in.txt && csplit -s -f /data/pcs1/xx -n 3 /data/pcs1/in.txt 2 && cat /data/pcs1/xx000 && printf '|' && cat /data/pcs1/xx001",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n|b\nc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "f",
+        "n"
+      ]
+    },
+    {
+      "id": "csplit_s_silent",
+      "seq": 601081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcs2 && printf 'a\\nb\\nc\\n' > /data/pcs2/in.txt && csplit -s -f /data/pcs2/xx /data/pcs2/in.txt 2 && cat /data/pcs2/xx00 && printf '|' && cat /data/pcs2/xx01",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n|b\nc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "f"
+      ]
+    }
+  ]
+}

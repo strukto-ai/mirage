@@ -14,6 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { StatOverlay } from '../../../ops/config.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import {
   FileType,
@@ -201,6 +202,20 @@ export function dirAwareStat<A extends Accessor>(
     if (st.type === FileType.DIRECTORY) throw eisdir(p)
     return st
   }
+}
+
+// Stat through the backend, then merge the namespace attr overlay, so the
+// stat-rendering commands (ls -l, stat -c) show the chmod/chown/touch state a
+// backend without an attribute slot cannot hold itself. Returns the plain stat
+// unchanged when the executor injected no overlay. Mirrors the Python
+// `overlaid_stat`; every stat-rendering command binds through here so no
+// backend can quietly skip the merge and disagree with the ops facade.
+export function overlaidStat(
+  stat: (p: PathSpec) => Promise<FileStat>,
+  overlay: StatOverlay | undefined,
+): (p: PathSpec) => Promise<FileStat> {
+  if (overlay === undefined) return stat
+  return async (p) => overlay(p.virtual, await stat(p))
 }
 
 async function* streamRefusingDirs<A extends Accessor>(

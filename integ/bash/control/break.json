@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "ctl_break_inner_loop_only",
+      "seq": 502107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for i in 1 2; do for j in a b; do echo $i$j; break; done; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "1a\n2a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_break_two_levels",
+      "seq": 502108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for i in 1 2; do for j in a b; do echo $i$j; break 2; done; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "1a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_break_beyond_depth",
+      "seq": 502109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for i in 1 2; do for j in a b; do echo $i$j; break 9; done; done; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "1a\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_break_two_from_while",
+      "seq": 502112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for i in 1 2; do wn=0; while [ $wn -lt 3 ]; do wn=$((wn+1)); echo $i:$wn; break 2; done; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

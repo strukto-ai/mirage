@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_cp_r_tree",
+      "seq": 755,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/xm2ctree/sub && echo ca | tee /data/xm2ctree/ca.txt > /dev/null && echo cb | tee /data/xm2ctree/sub/cb.txt > /dev/null && cp -r /data/xm2ctree /data2/xm2ccopy && cat /data2/xm2ccopy/ca.txt /data2/xm2ccopy/sub/cb.txt && cat /data/xm2ctree/ca.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "ca\ncb\nca\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

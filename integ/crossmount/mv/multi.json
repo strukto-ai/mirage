@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_mv_multi",
+      "seq": 747,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo one | tee /data/xm2_m1.txt > /dev/null && echo two | tee /data/xm2_m2.txt > /dev/null && mkdir -p /data2/xm2dir && echo d | tee /data2/xm2dir/seed.txt > /dev/null && mv /data/xm2_m1.txt /data/xm2_m2.txt /data2/xm2dir/ && cat /data2/xm2dir/xm2_m1.txt /data2/xm2dir/xm2_m2.txt && find /data -name 'xm2_m*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -130,6 +130,42 @@ find: invalid argument 'abc' to '-size'
 === linear:mtime ===
 exit=1
 find: invalid argument 'abc' to '-mtime'
+=== mem0:maxdepth ===
+exit=1
+find: invalid argument 'abc' to '-maxdepth'
+=== mem0:mindepth ===
+exit=1
+find: invalid argument 'xx' to '-mindepth'
+=== mem0:size ===
+exit=1
+find: invalid argument 'abc' to '-size'
+=== mem0:mtime ===
+exit=1
+find: invalid argument 'abc' to '-mtime'
+=== onedrive:maxdepth ===
+exit=1
+find: invalid argument 'abc' to '-maxdepth'
+=== onedrive:mindepth ===
+exit=1
+find: invalid argument 'xx' to '-mindepth'
+=== onedrive:size ===
+exit=1
+find: invalid argument 'abc' to '-size'
+=== onedrive:mtime ===
+exit=1
+find: invalid argument 'abc' to '-mtime'
+=== sharepoint:maxdepth ===
+exit=1
+find: invalid argument 'abc' to '-maxdepth'
+=== sharepoint:mindepth ===
+exit=1
+find: invalid argument 'xx' to '-mindepth'
+=== sharepoint:size ===
+exit=1
+find: invalid argument 'abc' to '-size'
+=== sharepoint:mtime ===
+exit=1
+find: invalid argument 'abc' to '-mtime'
 === slack:maxdepth ===
 exit=1
 find: invalid argument 'abc' to '-maxdepth'

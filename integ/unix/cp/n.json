@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "cp_n_noclobber",
+      "seq": 601004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp5 && printf 'N' > /data/pcp5/s.txt && printf 'O' > /data/pcp5/d.txt && cp -n /data/pcp5/s.txt /data/pcp5/d.txt && cat /data/pcp5/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "O",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    }
+  ]
+}

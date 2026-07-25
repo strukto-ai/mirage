@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "nf_wc",
+      "seq": 640,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: /data/missing.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "disp_head_multi",
+      "seq": 524,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && head -n 1 a.txt b.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> a.txt <==\nhello\n\n==> b.txt <==\n1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

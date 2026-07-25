@@ -12,18 +12,6 @@ Q1_Goals__cccc1111-2222-3333-4444-555566667777
 page.json
 === stat_dir_a ===
 /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777 2026-01-02T00:00:00.000Z
-=== tree ===
-├── databases
-│   └── Tasks__eeee1111-2222-3333-4444-555566667777
-│       ├── Ship_beta__ffff2222-3333-4444-5555-666677778888
-│       ├── Write_spec__ffff1111-2222-3333-4444-555566667777
-│       └── database.json
-└── pages
-    ├── Notes__bbbb2222-3333-4444-5555-666677778888
-    │   └── page.json
-    └── Project_Roadmap__aaaa1111-2222-3333-4444-555566667777
-        ├── Q1_Goals__cccc1111-2222-3333-4444-555566667777
-        └── page.json
 === cat_page_a ===
 {
   "page_id": "aaaa1111-2222-3333-4444-555566667777",

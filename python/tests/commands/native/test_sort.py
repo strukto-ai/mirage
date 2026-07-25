@@ -98,3 +98,34 @@ def test_sort_f(env):
     env.create_file("f.txt", b"B\na\nC\nb\n")
     result = env.mirage("sort -f /data/f.txt")
     assert "a" in result and "B" in result
+
+
+# KEYDEF grammar cases pinned to GNU coreutils 9.7 output (BSD sort on
+# macOS diverges on these, so they use hardcoded expectations rather than
+# env.native).
+def test_sort_multi_key_with_per_key_modifiers(env):
+    env.create_file("f.txt", b"a 2 z\nb 2 a\nc 1 m\n")
+    assert env.mirage("sort -k2,2n -k1,1r /data/f.txt") == \
+        "c 1 m\nb 2 a\na 2 z\n"
+
+
+def test_sort_combined_global_reverse_and_key(env):
+    env.create_file("f.txt", b"z 2\nm 2\na 2\n")
+    assert env.mirage("sort -rk2,2n /data/f.txt") == "z 2\nm 2\na 2\n"
+
+
+def test_sort_field_to_eol_differs_from_range(env):
+    env.create_file("f.txt", b"a 2 z\nb 2 a\nc 1 m\n")
+    assert env.mirage("sort -k2 /data/f.txt") == "c 1 m\nb 2 a\na 2 z\n"
+    assert env.mirage("sort -k2,2 /data/f.txt") == "c 1 m\na 2 z\nb 2 a\n"
+
+
+def test_sort_char_offset_with_sep(env):
+    env.create_file("f.txt", b"apple:12\nbee:3\ncat:100\n")
+    assert env.mirage("sort -t: -k1.2,1.3 /data/f.txt") == \
+        "cat:100\nbee:3\napple:12\n"
+
+
+def test_sort_stable_keeps_input_order_on_ties(env):
+    env.create_file("f.txt", b"z 2\nm 2\na 2\n")
+    assert env.mirage("sort -s -k2,2n /data/f.txt") == "z 2\nm 2\na 2\n"

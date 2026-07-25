@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "id": "expand_t4",
+      "seq": 339,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expand -t 4 /data/tabbed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a   1\nb   2\nc   3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_t_tabs",
+      "seq": 601250,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qex && printf 'a\\tb\\n' > /data/qex/ex.txt && expand -t 4 /data/qex/ex.txt | cat -A",
+      "expect": {
+        "exit": 0,
+        "stdout": "a   b$\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    }
+  ]
+}

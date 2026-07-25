@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "rm_v_file",
+      "seq": 601030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prm1 && printf 'x' > /data/prm1/f.txt && rm -v /data/prm1/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "removed '/data/prm1/f.txt'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    }
+  ]
+}

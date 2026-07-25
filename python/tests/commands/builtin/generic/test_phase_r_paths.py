@@ -78,7 +78,10 @@ async def test_realpath_exists_check_fails():
     async def stat_fn(path):
         raise FileNotFoundError
 
-    with pytest.raises(FileNotFoundError, match="realpath"):
+    # A plain (non-fs) error carrying the fully GNU-formatted message, so
+    # format_fs_error emits it verbatim; a FileNotFoundError would be
+    # re-wrapped into a doubled message (and diverge from the TS throw).
+    with pytest.raises(ValueError, match="realpath"):
         await realpath([_spec("/missing")], stat_fn=stat_fn, e=True)
 
 

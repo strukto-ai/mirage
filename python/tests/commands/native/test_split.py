@@ -40,3 +40,10 @@ def test_split_n(env):
     r1 = env.mirage("cat /data/chunkaa")
     r2 = env.mirage("cat /data/chunkab")
     assert len(r1) > 0 and len(r2) > 0
+
+
+def test_split_separator_and_additional_suffix(env):
+    env.create_file("f.txt", b"a,b,c,d,")
+    env.mirage("split -t, -l 2 --additional-suffix=.part /data/f.txt /data/p")
+    assert env.mirage("cat /data/paa.part") == "a,b,"
+    assert env.mirage("cat /data/pab.part") == "c,d,"

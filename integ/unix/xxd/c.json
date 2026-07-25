@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "xxd_c4",
+      "seq": 311,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -c 12 /data/a.txt | xxd -c 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 6865 6c6c  hell\n00000004: 6f0a 776f  o.wo\n00000008: 726c 640a  rld.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    }
+  ]
+}

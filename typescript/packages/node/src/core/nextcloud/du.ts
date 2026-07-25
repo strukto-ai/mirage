@@ -1,4 +1,10 @@
-import { FileType, type FileStat, type PathSpec } from '@struktoai/mirage-core'
+import {
+  FileType,
+  lstripSlash,
+  stripSlash,
+  type FileStat,
+  type PathSpec,
+} from '@struktoai/mirage-core'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { stat } from './stat.ts'
 import { isNotFound, rawPathOf } from './util.ts'
@@ -15,7 +21,7 @@ async function statOrNull(accessor: NextcloudAccessor, path: PathSpec): Promise<
 export async function du(accessor: NextcloudAccessor, path: PathSpec): Promise<number> {
   const info = await statOrNull(accessor, path)
   if (info !== null && info.type !== FileType.DIRECTORY) return info.size ?? 0
-  const prefix = rawPathOf(path).replace(/^\/+|\/+$/g, '')
+  const prefix = stripSlash(rawPathOf(path))
   const scanPath = prefix !== '' ? `${prefix}/` : '/'
   const op = await accessor.operator()
   let total = 0
@@ -39,7 +45,7 @@ export async function duAll(
   const info = await statOrNull(accessor, path)
   if (info !== null && info.type !== FileType.DIRECTORY) return [[], info.size ?? 0]
   const raw = rawPathOf(path)
-  const prefix = raw.replace(/^\/+|\/+$/g, '')
+  const prefix = stripSlash(raw)
   const scanPath = prefix !== '' ? `${prefix}/` : '/'
   const op = await accessor.operator()
   const entries: [string, number][] = []
@@ -50,7 +56,7 @@ export async function duAll(
       const metadata = entry.metadata()
       if (key === '' || key.endsWith('/') || metadata.isDirectory()) continue
       const size = metadata.contentLength !== null ? Number(metadata.contentLength) : 0
-      entries.push([`/${key.replace(/^\/+/, '')}`, size])
+      entries.push([`/${lstripSlash(key)}`, size])
       total += size
     }
   } catch (error) {

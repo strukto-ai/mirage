@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "ometa_chown_ids",
+      "seq": 201003,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "chown 500:dev /data/metao/f.txt",
+      "check": {
+        "stat": "/data/metao/f.txt",
+        "fields": [
+          "uid",
+          "gid"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "uid=500 gid=dev\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_chown_name",
+      "seq": 201004,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "chown alice /data/metao/f.txt",
+      "check": {
+        "stat": "/data/metao/f.txt",
+        "fields": [
+          "uid",
+          "gid"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "uid=alice gid=dev\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

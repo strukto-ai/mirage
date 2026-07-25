@@ -44,10 +44,15 @@ import {
   followPaths,
   handleBash,
   handleCd,
+  handleCommandBuiltin,
+  handleType,
   handleEcho,
+  handleEnv,
   handleEval,
   handleExport,
   handleHistory,
+  handleChgrp,
+  handleDf,
   handleChmod,
   handleChown,
   handleLn,
@@ -59,6 +64,7 @@ import {
   handleReadlink,
   handleTouch,
   handleExit,
+  handleGetopts,
   handleReturn,
   handleSet,
   handleShift,
@@ -497,6 +503,10 @@ async function runArgv(
     return [null, new IOResult(), new ExecutionNode({ command: 'true', exitCode: 0 })]
   }
 
+  if (name === SB.COLON) {
+    return [null, new IOResult(), new ExecutionNode({ command: ':', exitCode: 0 })]
+  }
+
   if (name === SB.FALSE) {
     return [
       null,
@@ -515,6 +525,7 @@ async function runArgv(
   if (name === SB.PRINTENV) {
     return handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, session)
   }
+  if (name === SB.ENV) return handleEnv(executeFn, args, session, stdin)
   if (name === SB.WHOAMI) return handleWhoami(namespace)
   if (name === SB.MAN) return handleMan(args, session, registry)
   if (name === SB.HISTORY) return handleHistory(registry, args, session)
@@ -522,6 +533,7 @@ async function runArgv(
   if (name === SB.SHIFT) {
     return handleShift(args, callStack, session)
   }
+  if (name === SB.GETOPTS) return handleGetopts(args, session, callStack)
   if (name === SB.TRAP) return handleTrap(session)
   if (name === SB.TEST || name === SB.BRACKET || name === SB.DOUBLE_BRACKET) {
     let testArgs = [...operands]
@@ -544,14 +556,17 @@ async function runArgv(
   if (name === SB.ECHO) {
     return handleEcho(args)
   }
-  if (name === SB.PRINTF) return handlePrintf(args)
+  if (name === SB.PRINTF) return handlePrintf(args, session)
   if (name === SB.SLEEP) return handleSleep(args, signal)
   if (name === SB.READ) {
     return handleRead(args, session, stdin)
   }
   if (name === SB.SOURCE || name === SB.DOT) {
     const target = operands[0] ?? ''
-    return handleSource(dispatch, executeFn, target, session)
+    // Positional parameters keep the words as typed, so a path operand
+    // contributes its spelling, not its resolved mount path.
+    const sourceArgs = operands.slice(1).map((o) => wordText(o))
+    return handleSource(dispatch, executeFn, target, session, sourceArgs)
   }
   if (name === SB.RETURN) {
     return handleReturn(args, session, callStack)
@@ -561,6 +576,14 @@ async function runArgv(
   }
   if (name === SB.BREAK) throw new BreakSignal(null, new IOResult(), loopLevels(args))
   if (name === SB.CONTINUE) throw new ContinueSignal(null, new IOResult(), loopLevels(args))
+
+  if (name === SB.COMMAND) {
+    return handleCommandBuiltin(executeFn, args, session, registry, stdin)
+  }
+
+  if (name === SB.TYPE) {
+    return handleType(args, session, registry)
+  }
 
   if (name === SB.XARGS) {
     return handleXargs(executeFn, args, session, stdin)
@@ -573,14 +596,11 @@ async function runArgv(
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
-  if (name === 'ln' && linkFlags(operands, 'sfnv').has('s')) {
+  if (name === 'ln' && linkFlags(operands, 'sfnvrT').has('s')) {
     return await handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
-    const flags = linkFlags(operands, 'fenm')
-    if (!(flags.has('f') || flags.has('e') || flags.has('m'))) {
-      return handleReadlink(namespace, session, operands)
-    }
+    return handleReadlink(namespace, session, operands)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with
@@ -591,8 +611,34 @@ async function runArgv(
   if (name === 'chown') {
     return handleChown(namespace, dispatch, operands)
   }
+  if (name === 'chgrp') {
+    return handleChgrp(namespace, dispatch, operands)
+  }
   if (name === 'touch') {
     return handleTouch(namespace, dispatch, session, operands)
+  }
+
+  // Capacity (registry-routed: enumerates mounts, reports per-mount statfs;
+  // never fabricates numbers).
+  if (name === 'df') {
+    if (namespace.nodes.size > 0) {
+      try {
+        operands = followPaths(namespace, operands)
+      } catch (err) {
+        if (err instanceof CycleError) {
+          const errBytes = new TextEncoder().encode(
+            `df: ${err.path}: Too many levels of symbolic links\n`,
+          )
+          return [
+            null,
+            new IOResult({ exitCode: 1, stderr: errBytes }),
+            new ExecutionNode({ command: 'df', exitCode: 1, stderr: errBytes }),
+          ]
+        }
+        throw err
+      }
+    }
+    return handleDf(registry, session, dispatch, operands)
   }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on

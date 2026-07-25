@@ -3,32 +3,17 @@
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
-    "has_write": false,
+    "has_write": true,
     "resources": [
       "box",
-      "chroma",
       "databricks_volume",
-      "discord",
       "dropbox",
-      "gdocs",
       "gdrive",
-      "github",
-      "github_ci",
-      "gmail",
-      "gsheets",
-      "gslides",
-      "lancedb",
-      "langfuse",
-      "linear",
-      "mongodb",
-      "notion",
+      "onedrive",
       "opfs",
-      "postgres",
-      "qdrant",
       "ram",
       "s3",
-      "slack",
-      "trello"
+      "sharepoint"
     ]
   },
   "description": null,
@@ -36,38 +21,62 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--head-count",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--echo",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-e",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--zero-terminated",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-z",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--repeat",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
+      "short_value": true,
       "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--input-range",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-i",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--output",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-o",
+      "short_value": true,
+      "value_kind": "path",
       "value_optional": false
     }
   ],

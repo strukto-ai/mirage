@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.gridfs._client import _prefix, bucket
 from mirage.types import PathSpec
 
@@ -29,3 +29,5 @@ async def mkdir(accessor: GridFSAccessor,
     if pfx:
         await bucket(accessor).upload_from_stream(pfx, b"")
         await invalidate_after_write(path_spec)
+        if parents:
+            await invalidate_ancestors(path_spec)

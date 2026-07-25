@@ -31,6 +31,7 @@ export interface Mount {
   seed?: string
   folder?: string
   bucket?: string
+  volume?: string
   prefix?: string
   root?: string
   drive?: string
@@ -43,6 +44,8 @@ export interface Target {
   epoch?: string
   apps?: string
   mail?: string
+  dataset?: string
+  agentId?: string
   mounts: Mount[]
 }
 
@@ -67,9 +70,15 @@ export interface Case {
   check?: StatCheck
   provision?: boolean
   clear_cache?: boolean
+  consistency?: 'always' | 'lazy'
+  scenario?: ScenarioStep[]
   expect: Expect
   _source?: string
 }
+
+export type ScenarioStep =
+  | { mutate: { path: string; content: string } }
+  | { command: string }
 
 export interface ProvisionInfo {
   networkRead: number | string
@@ -120,15 +129,15 @@ export function loadCases(root: string): Case[] {
   const cases: Case[] = []
   for (const name of CASE_DIRS) {
     const dir = join(root, name)
-    let entries: string[]
+    let files: string[]
     try {
-      entries = readdirSync(dir).filter((f) => f.endsWith('.json')).sort()
+      files = walkFiles(dir).filter((f) => f.endsWith('.json')).sort()
     } catch {
       continue
     }
-    for (const file of entries) {
-      const rel = join(name, file)
-      const data = JSON.parse(readFileSync(join(dir, file), 'utf8')) as { cases: Case[] }
+    for (const file of files) {
+      const rel = relative(root, file)
+      const data = JSON.parse(readFileSync(file, 'utf8')) as { cases: Case[] }
       for (const c of data.cases) {
         c._source = rel
         cases.push(c)
@@ -164,6 +173,25 @@ export async function seedFixture(
     await ws.execute(`mkdir -p ${parent}`)
     await ws.execute(`tee ${dest} > /dev/null`, { stdin: new Uint8Array(readFileSync(file)) })
   }
+}
+
+export async function runScenario(
+  ws: ExecWorkspace,
+  mutate: (path: string, content: Uint8Array) => Promise<void>,
+  steps: ScenarioStep[],
+): Promise<{ exitCode: number; out: string }> {
+  const outputs: string[] = []
+  let exitCode = 0
+  for (const step of steps) {
+    if ('mutate' in step) {
+      await mutate(step.mutate.path, ENC.encode(step.mutate.content))
+      continue
+    }
+    const result = await ws.execute(step.command)
+    outputs.push(DEC.decode(result.stdout))
+    exitCode = result.exitCode
+  }
+  return { exitCode, out: outputs.join('') }
 }
 
 function checkField(st: HarnessStat, name: string): string {

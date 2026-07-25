@@ -70,7 +70,7 @@ async function run(
 }
 
 describe('databricks_volume commands registry', () => {
-  it('registers the filesystem and bespoke commands', () => {
+  it('registers the generic filesystem and filetype commands', () => {
     const names = new Set(DATABRICKS_VOLUME_COMMANDS.map((c) => c.name))
     for (const name of [
       'awk',
@@ -103,20 +103,6 @@ describe('databricks_volume commands registry', () => {
   })
 })
 
-describe('cat', () => {
-  it('streams file contents', async () => {
-    const { fetch } = routedFetch((call: FetchCall) => {
-      if (call.method === 'HEAD') {
-        return new Response(null, { status: 200, headers: { 'Content-Length': '5' } })
-      }
-      return new Response('hello', { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const { stdout } = await run('cat', [pathOf('/volume/a.txt')])
-    expect(stdout).toBe('hello')
-  })
-})
-
 describe('ls', () => {
   it('lists directory entries', async () => {
     const { fetch } = routedFetch((call: FetchCall) => {
@@ -140,48 +126,6 @@ describe('ls', () => {
       }),
     ])
     expect(stdout.split('\n').filter(Boolean)).toEqual(['a', 'b.txt'])
-  })
-})
-
-describe('grep', () => {
-  it('matches lines in a file', async () => {
-    const { fetch } = routedFetch((call: FetchCall) => {
-      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) {
-        return new Response(null, { status: 200, headers: { 'Content-Length': '20' } })
-      }
-      if (call.method === 'HEAD') return notFoundResponse()
-      return new Response('alpha\nTODO: beta\ngamma', { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const { stdout, exitCode } = await run('grep', [pathOf('/volume/notes.md')], ['TODO'])
-    expect(exitCode).toBe(0)
-    expect(stdout.trim()).toBe('TODO: beta')
-  })
-})
-
-describe('touch', () => {
-  it('records mount-relative write keys, not the mount-prefixed path', async () => {
-    const { fetch } = routedFetch((call: FetchCall) => {
-      if (call.method === 'HEAD' && call.url.includes('a.txt')) return notFoundResponse()
-      if (call.method === 'HEAD') return new Response(null, { status: 200 })
-      return new Response(null, { status: 204 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const { writes } = await run('touch', [pathOf('/volume/a.txt')])
-    expect(writes).toEqual(['/a.txt'])
-  })
-})
-
-describe('mkdir', () => {
-  it('records mount-relative write keys, not the mount-prefixed path', async () => {
-    const { fetch } = routedFetch((call: FetchCall) => {
-      if (call.method === 'PUT') return new Response(null, { status: 200 })
-      if (call.url.includes('newdir')) return notFoundResponse()
-      return new Response(null, { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const { writes } = await run('mkdir', [pathOf('/volume/newdir')])
-    expect(writes).toEqual(['/newdir'])
   })
 })
 

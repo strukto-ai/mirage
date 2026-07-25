@@ -1,0 +1,71 @@
+{
+  "cases": [
+    {
+      "id": "rg_n_line_numbers",
+      "seq": 500402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -n alpha /data/r4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:alpha\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "rg_nA1_dash_context",
+      "seq": 500414,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -nA1 warning /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:warning: low memory\n3-info: all good\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "A"
+      ]
+    }
+  ]
+}

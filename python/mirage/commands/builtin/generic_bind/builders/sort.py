@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.sort import sort as generic_sort
@@ -29,35 +31,17 @@ async def sort(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    r: bool = False,
-    n: bool = False,
-    u: bool = False,
-    f: bool = False,
-    k: str | None = None,
-    t: str | None = None,
-    h: bool = False,
-    V: bool = False,
-    s: bool = False,
-    M: bool = False,
-    b: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_sort(
         paths,
         read_bytes=bound_op(ops.read_bytes, accessor, index),
+        write_bytes=(partial(ops.write, accessor)
+                     if ops.write is not None else None),
         stdin=stdin,
-        reverse=r,
-        numeric=n,
-        unique=u,
-        fold_case=f,
-        key_field=int(k) if k is not None else None,
-        field_separator=t,
-        human_numeric=h,
-        version_sort=V,
-        month_sort=M,
-        ignore_blanks=b,
+        flags=flags,
     )
 
 

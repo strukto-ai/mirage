@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_cp_glob",
+      "seq": 780,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo pa | tee /data/xm2_p1.txt > /dev/null && echo pb | tee /data/xm2_p2.txt > /dev/null && cp /data/xm2_p*.txt /data2/ && cat /data2/xm2_p1.txt /data2/xm2_p2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "pa\npb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

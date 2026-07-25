@@ -25,28 +25,121 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--force",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--interactive",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-i",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--no-clobber",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--verbose",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--update",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-u",
+      "short_value": false,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--backup",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-b",
+      "short_value": false,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--suffix",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-S",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--target-directory",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-t",
+      "short_value": true,
+      "value_kind": "path",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--no-target-directory",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-T",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--exchange",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--no-copy",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--strip-trailing-slashes",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

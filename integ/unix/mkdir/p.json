@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "id": "mkdir_v",
+      "seq": 601060,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmkd1 && mkdir -v /data/pmkd1/single",
+      "expect": {
+        "exit": 0,
+        "stdout": "mkdir: created directory '/data/pmkd1/single'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "mkdir_p_nested",
+      "seq": 601061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmkd2/a/b/c && test -d /data/pmkd2/a/b/c && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "mkdir_p_existing",
+      "seq": 601062,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmkd3/e && mkdir -p /data/pmkd3/e && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    }
+  ]
+}

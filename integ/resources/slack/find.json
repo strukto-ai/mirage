@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "slack_find_subtree",
+      "seq": 520009,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/eng-agents__C8/2026-02-06/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/eng-agents__C8/2026-02-06\n/slack/channels/eng-agents__C8/2026-02-06/chat.jsonl\n/slack/channels/eng-agents__C8/2026-02-06/files\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_find_pptx",
+      "seq": 520010,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -name '*.pptx'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/general__C1/2026-01-09/files/all_hands_2026-01__F12.pptx\n/slack/channels/product-runtime__C7/2026-03-11/files/runtime_launch__F13.pptx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_find_pdf",
+      "seq": 520011,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -name '*.pdf'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_find_csv",
+      "seq": 520012,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -name '*.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/design-partners__C10/2026-02-12/files/design_partner_pipeline__F8.csv\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

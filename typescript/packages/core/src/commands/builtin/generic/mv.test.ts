@@ -15,10 +15,12 @@
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import { FileStat, FileType, PathSpec, type PrimitiveMove } from '../../../types.ts'
-import { eacces, enotsup } from '../../../utils/errors.ts'
+import { FileStat, FileType, PathSpec, type PrimitiveMove, type ReaddirFn } from '../../../types.ts'
+import { eacces, enoent, enotsup } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { mvGeneric } from './mv.ts'
+import { mvFlags, mvGeneric, parseMvFlags, type MvFlags } from './mv.ts'
+
+const DEC = new TextDecoder()
 
 function key(p: PathSpec | string): string {
   return rstripSlash(typeof p === 'string' ? p : p.virtual)
@@ -33,7 +35,11 @@ function spec(path: string): PathSpec {
   })
 }
 
-function makeBackend(files: Map<string, Uint8Array>, dirs: Set<string>) {
+function makeBackend(
+  files: Map<string, Uint8Array>,
+  dirs: Set<string>,
+  mtimes?: Map<string, string>,
+) {
   const stat = (p: PathSpec): Promise<FileStat> => {
     const k = key(p)
     if (dirs.has(k)) {
@@ -42,12 +48,18 @@ function makeBackend(files: Map<string, Uint8Array>, dirs: Set<string>) {
       )
     }
     const data = files.get(k)
-    if (data === undefined) return Promise.reject(new Error(`not found: ${k}`))
-    return Promise.resolve(new FileStat({ name: k.split('/').pop() ?? '', type: FileType.TEXT }))
+    if (data === undefined) return Promise.reject(enoent(k))
+    return Promise.resolve(
+      new FileStat({
+        name: k.split('/').pop() ?? '',
+        type: FileType.TEXT,
+        modified: mtimes?.get(k) ?? null,
+      }),
+    )
   }
   const rename = (src: PathSpec, dst: PathSpec): Promise<void> => {
     const data = files.get(key(src))
-    if (data === undefined) return Promise.reject(new Error(`not found: ${key(src)}`))
+    if (data === undefined) return Promise.reject(enoent(key(src)))
     files.delete(key(src))
     files.set(key(dst), data)
     return Promise.resolve()
@@ -55,14 +67,23 @@ function makeBackend(files: Map<string, Uint8Array>, dirs: Set<string>) {
   return { stat, rename }
 }
 
+interface RunOpts {
+  n?: boolean
+  v?: boolean
+  flags?: MvFlags
+  mtimes?: Map<string, string>
+  readdir?: ReaddirFn
+}
+
 async function run(
   files: Map<string, Uint8Array>,
   dirs: Set<string>,
   paths: string[],
-  flags: { n?: boolean; v?: boolean } = {},
+  opts: RunOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { stat, rename } = makeBackend(files, dirs)
-  return mvGeneric(paths.map(spec), stat, { rename }, flags.n === true, flags.v === true)
+  const { stat, rename } = makeBackend(files, dirs, opts.mtimes)
+  const flags = opts.flags ?? mvFlags({ noClobber: opts.n === true, verbose: opts.v === true })
+  return mvGeneric(paths.map(spec), stat, { rename }, flags, undefined, undefined, opts.readdir)
 }
 
 describe('mvGeneric guards', () => {
@@ -175,7 +196,7 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
     const err = readErr.get(key(p))
     if (err !== undefined) return Promise.reject(err)
     const data = files.get(key(p))
-    if (data === undefined) return Promise.reject(new Error(`not found: ${key(p)}`))
+    if (data === undefined) return Promise.reject(enoent(key(p)))
     return Promise.resolve(data)
   }
   const write = (p: PathSpec, data: Uint8Array): Promise<void> => {
@@ -217,10 +238,10 @@ async function runPrimitive(
   dirs: Set<string>,
   paths: string[],
   fails: PrimitiveFails = {},
-  flags: { v?: boolean } = {},
+  flags: MvFlags = mvFlags(),
 ): Promise<[ByteSource | null, IOResult]> {
   const { stat, strategy } = makePrimitive(files, dirs, fails)
-  return mvGeneric(paths.map(spec), stat, strategy, false, flags.v === true)
+  return mvGeneric(paths.map(spec), stat, strategy, flags)
 }
 
 describe('mvGeneric primitive transfer errors', () => {
@@ -381,8 +402,415 @@ describe('mvGeneric primitive transfer errors', () => {
       new Set(['/src', '/d']),
       ['/src/a.txt', '/src/b.txt', '/d'],
       { unlinkFails: new Map([['/src/a.txt', eacces('/src/a.txt')]]) },
-      { v: true },
+      mvFlags({ verbose: true }),
     )
-    expect(new TextDecoder().decode(out as Uint8Array)).toBe("'/src/b.txt' -> '/d/b.txt'\n")
+    expect(DEC.decode(out as Uint8Array)).toBe("renamed '/src/b.txt' -> '/d/b.txt'\n")
+  })
+})
+
+const OLD = '2020-01-01T00:00:00+00:00'
+const NEW = '2024-01-01T00:00:00+00:00'
+
+function dirReaddir(files: Map<string, Uint8Array>, dirs: Set<string>): ReaddirFn {
+  return (p: PathSpec) => {
+    const base = key(p) !== '/' ? key(p) + '/' : '/'
+    const children = new Set<string>()
+    for (const k of [...files.keys(), ...dirs]) {
+      if (k.startsWith(base) && k !== key(p)) {
+        children.add(base + (k.slice(base.length).split('/')[0] ?? ''))
+      }
+    }
+    return Promise.resolve([...children].sort())
+  }
+}
+
+describe('mvGeneric --update and --backup', () => {
+  it('older skips a newer destination and keeps the source', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const mtimes = new Map([
+      ['/a.txt', OLD],
+      ['/b.txt', NEW],
+    ])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      mtimes,
+      flags: mvFlags({ update: 'older' }),
+    })
+    expect(io.exitCode).toBe(0)
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([1]))
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([2]))
+  })
+
+  it('older replaces an older destination', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const mtimes = new Map([
+      ['/a.txt', NEW],
+      ['/b.txt', OLD],
+    ])
+    await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      mtimes,
+      flags: mvFlags({ update: 'older' }),
+    })
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([1]))
+    expect(files.has('/a.txt')).toBe(false)
+  })
+
+  it('none-fail reports not replacing', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ update: 'none-fail' }),
+    })
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("mv: not replacing '/b.txt'\n")
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([1]))
+  })
+
+  it('backup renames the destination away', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ backup: 'simple' }),
+    })
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([1]))
+    expect(files.get('/b.txt~')).toEqual(new Uint8Array([2]))
+    expect(files.has('/a.txt')).toBe(false)
+    expect(Object.keys(io.writes)).toContain('/b.txt~')
+  })
+
+  it('annotates the verbose line with the backup', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const [out] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ verbose: true, backup: 'simple' }),
+    })
+    expect(DEC.decode(out as Uint8Array)).toBe("renamed '/a.txt' -> '/b.txt' (backup: '/b.txt~')\n")
+  })
+})
+
+describe('mvGeneric --exchange and --no-copy', () => {
+  it('exchange swaps contents', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ exchange: true }),
+    })
+    expect(io.exitCode).toBe(0)
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([2]))
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([1]))
+    expect(new Set(Object.keys(io.writes))).toEqual(new Set(['/a.txt', '/b.txt']))
+  })
+
+  it('exchange emits its own verbose line', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const [out] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ exchange: true, verbose: true }),
+    })
+    expect(DEC.decode(out as Uint8Array)).toBe("exchanged '/a.txt' <-> '/b.txt'\n")
+  })
+
+  it('exchange with a missing side errors honestly', async () => {
+    // Deliberate divergence: GNU's renameat2 probe reports the unhelpful
+    // 'Unknown error -1' here; the honest errno text is used instead.
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ exchange: true }),
+    })
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot exchange '/a.txt' and '/b.txt': No such file or directory\n",
+    )
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([1]))
+  })
+
+  it('exchange across mounts is a cross-device refusal', async () => {
+    const files = new Map([
+      ['/src/a.txt', new Uint8Array([1])],
+      ['/d/b.txt', new Uint8Array([2])],
+    ])
+    const [, io] = await runPrimitive(
+      files,
+      new Set(['/src', '/d']),
+      ['/src/a.txt', '/d/b.txt'],
+      {},
+      mvFlags({ exchange: true }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot exchange '/src/a.txt' and '/d/b.txt': Invalid cross-device link\n",
+    )
+    expect(files.get('/src/a.txt')).toEqual(new Uint8Array([1]))
+  })
+
+  it('no-copy refuses a cross-mount move', async () => {
+    const files = new Map([
+      ['/src/a.txt', new Uint8Array([1])],
+      ['/d/keep', new Uint8Array([9])],
+    ])
+    const [, io] = await runPrimitive(
+      files,
+      new Set(['/src', '/d']),
+      ['/src/a.txt', '/d'],
+      {},
+      mvFlags({ noCopy: true }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot move '/src/a.txt' to '/d/a.txt': Invalid cross-device link\n",
+    )
+    expect(files.get('/src/a.txt')).toEqual(new Uint8Array([1]))
+    expect(files.has('/d/a.txt')).toBe(false)
+  })
+
+  it('no-copy leaves a native rename unaffected', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ noCopy: true }),
+    })
+    expect(io.exitCode).toBe(0)
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([1]))
+  })
+})
+
+describe('mvGeneric -t/-T', () => {
+  it('-T refuses a nonempty directory destination', async () => {
+    const files = new Map([
+      ['/d1/x.txt', new Uint8Array([1])],
+      ['/d2/y.txt', new Uint8Array([2])],
+    ])
+    const dirs = new Set(['/d1', '/d2'])
+    const [, io] = await run(files, dirs, ['/d1', '/d2'], {
+      readdir: dirReaddir(files, dirs),
+      flags: mvFlags({ noTargetDir: true }),
+    })
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("mv: cannot overwrite '/d2': Directory not empty\n")
+  })
+
+  it('refuses to overwrite a non-directory with a directory', async () => {
+    const files = new Map([
+      ['/f.txt', new Uint8Array([1])],
+      ['/d/x.txt', new Uint8Array([2])],
+    ])
+    const [, io] = await run(files, new Set(['/d']), ['/d', '/f.txt'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot overwrite non-directory '/f.txt' with directory '/d'\n",
+    )
+  })
+
+  it('-T refuses a directory destination for a file', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/d/keep', new Uint8Array([9])],
+    ])
+    const [, io] = await run(files, new Set(['/d']), ['/a.txt', '/d'], {
+      flags: mvFlags({ noTargetDir: true }),
+    })
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot overwrite directory '/d' with non-directory '/a.txt'\n",
+    )
+  })
+
+  it('-t moves into the target directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/d/keep', new Uint8Array([9])],
+    ])
+    const [, io] = await run(files, new Set(['/d']), ['/a.txt'], {
+      flags: mvFlags({ targetDir: '/d' }),
+    })
+    expect(io.exitCode).toBe(0)
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
+    expect(files.has('/a.txt')).toBe(false)
+  })
+
+  it('a missing target directory fails the whole command', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(), ['/a.txt'], {
+      flags: mvFlags({ targetDir: '/nosuch' }),
+    })
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("mv: target directory '/nosuch': No such file or directory\n")
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([1]))
+  })
+})
+
+describe('parseMvFlags', () => {
+  it('rejects conflicting combinations', () => {
+    expect(() => parseMvFlags({ b: true, exchange: true })).toThrow(
+      'mv: cannot combine --backup with --exchange, -n, or --update=none-fail',
+    )
+    expect(() => parseMvFlags({ backup: true, n: true })).toThrow('cannot combine --backup')
+    expect(() => parseMvFlags({ t: '/d', T: true })).toThrow('cannot combine --target-directory')
+  })
+
+  it('resolves the update and exchange grammars', () => {
+    const parsed = parseMvFlags({ u: true, exchange: true })
+    expect(parsed.update).toBe('older')
+    expect(parsed.exchange).toBe(true)
+    expect(parseMvFlags({ no_copy: true }).noCopy).toBe(true)
+  })
+})
+
+// A rename that carries a whole subtree, like a real backend rename.
+function treeRename(files: Map<string, Uint8Array>, dirs: Set<string>) {
+  return (src: PathSpec, dst: PathSpec): Promise<void> => {
+    const s = key(src)
+    const d = key(dst)
+    if (dirs.has(s)) {
+      dirs.delete(s)
+      dirs.add(d)
+      for (const k of [...files.keys()].filter((k) => k.startsWith(s + '/'))) {
+        const data = files.get(k)
+        if (data !== undefined) files.set(d + k.slice(s.length), data)
+        files.delete(k)
+      }
+      for (const k of [...dirs].filter((k) => k.startsWith(s + '/'))) {
+        dirs.delete(k)
+        dirs.add(d + k.slice(s.length))
+      }
+      return Promise.resolve()
+    }
+    const data = files.get(s)
+    if (data === undefined) return Promise.reject(enoent(s))
+    files.delete(s)
+    files.set(d, data)
+    return Promise.resolve()
+  }
+}
+
+describe('mv --exchange staging safety', () => {
+  it('never clobbers a real file sitting at the staging name', async () => {
+    // GNU's renameat2(RENAME_EXCHANGE) is atomic and touches nothing else.
+    const files = new Map([
+      ['/a.txt', new Uint8Array([65])],
+      ['/b.txt', new Uint8Array([66])],
+      ['/b.txt.~xchg~', new Uint8Array([80])],
+    ])
+    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
+      flags: mvFlags({ exchange: true }),
+    })
+    expect(io.exitCode).toBe(0)
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([66]))
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([65]))
+    expect(files.get('/b.txt.~xchg~')).toEqual(new Uint8Array([80]))
+  })
+
+  it('rolls the operands back when a later rename fails', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([65])],
+      ['/b.txt', new Uint8Array([66])],
+    ])
+    const { stat, rename } = makeBackend(files, new Set())
+    let calls = 0
+    const flaky = (src: PathSpec, dst: PathSpec): Promise<void> => {
+      calls += 1
+      if (calls === 2) return Promise.reject(eacces(dst.virtual))
+      return rename(src, dst)
+    }
+    const [, io] = await mvGeneric(
+      ['/a.txt', '/b.txt'].map(spec),
+      stat,
+      { rename: flaky },
+      mvFlags({ exchange: true }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toContain('cannot exchange')
+    expect(files.get('/a.txt')).toEqual(new Uint8Array([65]))
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([66]))
+    expect(files.has('/b.txt.~xchg~')).toBe(false)
+  })
+
+  it('reports the leftover staging path when the rollback also fails', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([65])],
+      ['/b.txt', new Uint8Array([66])],
+    ])
+    const { stat, rename } = makeBackend(files, new Set())
+    let calls = 0
+    const flaky = (src: PathSpec, dst: PathSpec): Promise<void> => {
+      calls += 1
+      if (calls >= 2) return Promise.reject(eacces(dst.virtual))
+      return rename(src, dst)
+    }
+    const [, io] = await mvGeneric(
+      ['/a.txt', '/b.txt'].map(spec),
+      stat,
+      { rename: flaky },
+      mvFlags({ exchange: true }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toContain("'/a.txt' left at '/b.txt.~xchg~'")
+  })
+})
+
+describe('mv -b -T over a nonempty directory', () => {
+  it('lets the backup displace the target instead of refusing', async () => {
+    // GNU 9.7 renames the nonempty target aside, then installs the source.
+    const files = new Map([
+      ['/d1/x.txt', new Uint8Array([88])],
+      ['/d2/y.txt', new Uint8Array([89])],
+    ])
+    const dirs = new Set(['/d1', '/d2'])
+    const { stat } = makeBackend(files, dirs)
+    const [, io] = await mvGeneric(
+      ['/d1', '/d2'].map(spec),
+      stat,
+      { rename: treeRename(files, dirs) },
+      mvFlags({ noTargetDir: true, backup: 'simple' }),
+      undefined,
+      undefined,
+      dirReaddir(files, dirs),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(files.get('/d2/x.txt')).toEqual(new Uint8Array([88]))
+    expect(files.get('/d2~/y.txt')).toEqual(new Uint8Array([89]))
+  })
+
+  it('still refuses when --backup=none displaces nothing', async () => {
+    const files = new Map([
+      ['/d1/x.txt', new Uint8Array([88])],
+      ['/d2/y.txt', new Uint8Array([89])],
+    ])
+    const dirs = new Set(['/d1', '/d2'])
+    const [, io] = await run(files, dirs, ['/d1', '/d2'], {
+      flags: mvFlags({ noTargetDir: true, backup: 'none' }),
+      readdir: dirReaddir(files, dirs),
+    })
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toContain("mv: cannot overwrite '/d2': Directory not empty")
+  })
+
+  it('reports a failed emptiness probe instead of assuming empty', async () => {
+    const files = new Map([
+      ['/d1/x.txt', new Uint8Array([88])],
+      ['/d2/y.txt', new Uint8Array([89])],
+    ])
+    const dirs = new Set(['/d1', '/d2'])
+    const [, io] = await run(files, dirs, ['/d1', '/d2'], {
+      flags: mvFlags({ noTargetDir: true }),
+      readdir: () => Promise.reject(enotsup('ram', 'readdir', '/d2')),
+    })
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toContain("mv: cannot overwrite '/d2': Operation not supported")
+    expect(files.get('/d2/y.txt')).toEqual(new Uint8Array([89]))
   })
 })

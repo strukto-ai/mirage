@@ -110,11 +110,14 @@ export async function createS3Client(config: S3Config): Promise<S3Client> {
       ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     }
   }
-  if (config.timeoutMs !== undefined) {
-    options.requestHandler = {
-      connectionTimeout: config.timeoutMs,
-      requestTimeout: config.timeoutMs,
-    }
+  const requestHandler: Record<string, unknown> = {
+    ...(config.timeoutMs !== undefined
+      ? { connectionTimeout: config.timeoutMs, requestTimeout: config.timeoutMs }
+      : {}),
+    ...(config.httpAgentProvider !== undefined ? config.httpAgentProvider() : {}),
+  }
+  if (Object.keys(requestHandler).length > 0) {
+    options.requestHandler = requestHandler
   }
   return new mod.S3Client(options)
 }

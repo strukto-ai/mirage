@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_join_missing",
+      "seq": 778,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "join /data/xrl_c.txt /data2/xrl_nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "join: /data2/xrl_nope.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

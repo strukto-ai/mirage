@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "id": "df_grep_429",
+      "seq": 580015,
+      "targets": [
+        "dify"
+      ],
+      "command": "grep 429 /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "If you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_grep_c_rate",
+      "seq": 580016,
+      "targets": [
+        "dify"
+      ],
+      "command": "grep -c rate /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_grep_e_multi",
+      "seq": 580017,
+      "targets": [
+        "dify"
+      ],
+      "command": "grep -e 429 -e rate /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "Requests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_grep_r_refund",
+      "seq": 580018,
+      "targets": [
+        "dify"
+      ],
+      "command": "grep -r refund /knowledge/policies",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/policies/refunds:Email support to start a refund with your order id.\n/knowledge/policies/refunds:Approved refunds are processed within five business days.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_grep_rl_encrypted",
+      "seq": 580019,
+      "targets": [
+        "dify"
+      ],
+      "command": "grep -rl encrypted /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md\n/knowledge/policies/privacy\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_cp_partial_missing",
+      "seq": 757,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo cs | tee /data/xm2_creal.txt > /dev/null && mkdir -p /data2/xm2cdir && echo d | tee /data2/xm2cdir/seed.txt > /dev/null && cp /data/xm2_cnope.txt /data/xm2_creal.txt /data2/xm2cdir/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot stat '/data/xm2_cnope.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "xm_cp_partial_check",
+      "seq": 758,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat /data2/xm2cdir/xm2_creal.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "cs\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

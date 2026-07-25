@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_head",
+      "seq": 726,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -n 2 /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/a.txt <==\nhello\nworld\n\n==> /data2/xm.txt <==\ncross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

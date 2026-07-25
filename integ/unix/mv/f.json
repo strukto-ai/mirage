@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "mv_f_over",
+      "seq": 601011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmv2 && printf '1' > /data/pmv2/s.txt && printf '2' > /data/pmv2/d.txt && mv -f /data/pmv2/s.txt /data/pmv2/d.txt && cat /data/pmv2/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

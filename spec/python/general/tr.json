@@ -46,19 +46,31 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--delete",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--squeeze-repeats",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--complement",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-c",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -67,7 +79,18 @@
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
-      "short": "-c",
+      "short": "-C",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--truncate-set1",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-t",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

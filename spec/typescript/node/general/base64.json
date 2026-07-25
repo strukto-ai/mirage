@@ -8,6 +8,7 @@
       "box",
       "chroma",
       "databricks_volume",
+      "dify",
       "discord",
       "disk",
       "dropbox",
@@ -26,14 +27,17 @@
       "lancedb",
       "langfuse",
       "linear",
+      "mem0",
       "mongodb",
       "nextcloud",
       "notion",
+      "onedrive",
       "postgres",
       "qdrant",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "slack",
       "ssh",
       "trello"
@@ -44,10 +48,11 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--decode",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -57,16 +62,28 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-D",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--wrap",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
+      "short_value": true,
       "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--ignore-garbage",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-i",
+      "short_value": true,
+      "value_kind": "none",
       "value_optional": false
     }
   ],

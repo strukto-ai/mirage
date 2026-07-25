@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "gunzip_t_test",
+      "seq": 601311,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgu && printf 'testme\\n' > /data/pgu/t.txt && gzip /data/pgu/t.txt && gunzip -t /data/pgu/t.txt.gz && echo ok=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    }
+  ]
+}

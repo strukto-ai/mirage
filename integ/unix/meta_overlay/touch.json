@@ -1,0 +1,164 @@
+{
+  "cases": [
+    {
+      "id": "ometa_touch_create",
+      "seq": 201005,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "touch -t 202601021530 /data/metao/new.txt",
+      "check": {
+        "stat": "/data/metao/new.txt",
+        "fields": [
+          "mode",
+          "mtime"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mode=- mtime=2026-01-02T15:30:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_touch_nocreate",
+      "seq": 201006,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "touch -c /data/metao/ghost.txt",
+      "check": {
+        "stat": "/data/metao/ghost.txt",
+        "fields": [
+          "mode"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "absent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_touch_restamp",
+      "seq": 201007,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "touch -t 202603041200 /data/metao/f.txt",
+      "check": {
+        "stat": "/data/metao/f.txt",
+        "fields": [
+          "mtime"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mtime=2026-03-04T12:00:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_touch_h_link",
+      "seq": 201012,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "touch -t 202601021530 /data/metao/g.txt && touch -h -t 202603041200 /data/metao/ln.txt",
+      "check": {
+        "stat": "/data/metao/g.txt",
+        "fields": [
+          "mtime"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mtime=2026-01-02T15:30:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_touch_bad_stamp",
+      "seq": 201014,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "touch -t 99 /data/metao/g.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "touch: invalid date format '99'\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

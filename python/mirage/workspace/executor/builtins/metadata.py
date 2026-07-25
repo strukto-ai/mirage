@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_mode
 from mirage.utils.path import CycleError, resolve_path
 from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
                                                        fail, finish,
@@ -27,57 +28,8 @@ from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 
-_MODE_CLASS_BITS = {"u": 0o700, "g": 0o070, "o": 0o007, "a": 0o777}
-_MODE_PERM_BITS = {"r": 0o444, "w": 0o222, "x": 0o111}
-_MODE_CLAUSE_RE = re.compile(r"([ugoa]*)([+\-=])([rwx]*)")
 _TOUCH_STAMP_RE = re.compile(r"(\d{8}|\d{10}|\d{12})(\.\d{2})?")
 _TOUCH_STAMP_FMT = {10: "%y%m%d%H%M", 12: "%Y%m%d%H%M"}
-
-
-def parse_mode(text: str, current: int) -> int | None:
-    """Parse a chmod MODE argument (octal or symbolic).
-
-    Symbolic supports the common grammar: ``[ugoa...][+-=][rwx...]``
-    clauses joined by commas (``u+x``, ``go-w``, ``a=r``, ``+x``).
-    Special bits (s, t, X) are not supported.
-
-    Args:
-        text (str): the MODE operand as typed.
-        current (int): current permission bits the clauses apply to.
-
-    Returns:
-        int | None: the new mode, or None when the text does not parse.
-
-    Example::
-
-        parse_mode("644", 0)          -> 0o644
-        parse_mode("u+x", 0o644)      -> 0o744
-        parse_mode("a=r", 0o777)      -> 0o444
-    """
-    if text and all(c in "01234567" for c in text):
-        value = int(text, 8)
-        return value if value <= 0o7777 else None
-
-    mode = current
-    for clause in text.split(","):
-        match = _MODE_CLAUSE_RE.fullmatch(clause)
-        if match is None:
-            return None
-        classes, action, perms = match.groups()
-        class_mask = 0
-        for c in classes or "a":
-            class_mask |= _MODE_CLASS_BITS[c]
-        perm_mask = 0
-        for c in perms:
-            perm_mask |= _MODE_PERM_BITS[c]
-        bits = class_mask & perm_mask
-        if action == "+":
-            mode |= bits
-        elif action == "-":
-            mode &= ~bits
-        else:
-            mode = (mode & ~class_mask) | bits
-    return mode
 
 
 def parse_owner(text: str) -> tuple[int | str | None, int | str | None]:
@@ -102,6 +54,28 @@ def parse_owner(text: str) -> tuple[int | str | None, int | str | None]:
     uid = (int(owner) if owner.isdigit() else owner) if owner else None
     gid = (int(group) if group.isdigit() else group) if sep and group else None
     return uid, gid
+
+
+def parse_group(text: str) -> int | str | None:
+    """Parse a chgrp GROUP argument.
+
+    Numeric ids become ints; names are kept as strings (mirage has no
+    group database; ownership is stored, not enforced). Empty is invalid.
+
+    Args:
+        text (str): the GROUP operand as typed.
+
+    Returns:
+        int | str | None: the gid, or None when the text is empty.
+
+    Example::
+
+        parse_group("staff")  -> "staff"
+        parse_group("20")     -> 20
+    """
+    if not text:
+        return None
+    return int(text) if text.isdigit() else text
 
 
 def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
@@ -358,7 +332,8 @@ async def handle_chmod(
         if stat.mode is not None:
             current = stat.mode
         else:
-            current = 0o755 if stat.type == FileType.DIRECTORY else 0o644
+            current = (DEFAULT_DIR_MODE if stat.type == FileType.DIRECTORY else
+                       DEFAULT_FILE_MODE)
         new_mode = parse_mode(mode_text, current)
         if new_mode is None:
             return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
@@ -417,6 +392,55 @@ async def handle_chown(
                            uid=uid,
                            gid=gid)
     return finish("chown", errors)
+
+
+async def handle_chgrp(
+    namespace: Namespace,
+    dispatch: Callable[..., Any],
+    args: list[str | PathSpec],
+) -> Result:
+    """chgrp GROUP FILE...: set group ownership via setattr.
+
+    The group half of chown: writes gid and leaves uid untouched. Group is
+    stored, not enforced (mirage has no group model); a name is kept
+    verbatim, a numeric id becomes an int. ``-h`` writes the link node's
+    own group.
+
+    Args:
+        namespace (Namespace): addressing authority.
+        dispatch (Callable): op dispatcher.
+        args (list[str | PathSpec]): args after the command name.
+    """
+    flags, _values, operands, bad = split_value_flags(args, "Rvfh", "")
+    if bad is not None:
+        return fail("chgrp", f"chgrp: invalid option -- '{bad}'\n", 2)
+    if len(operands) < 2:
+        return fail("chgrp", "chgrp: missing operand\n", 2)
+    if "R" in flags:
+        return fail("chgrp", "chgrp: -R is not supported\n", 2)
+    group_text = operand_text(operands[0])
+    gid = parse_group(group_text)
+    if gid is None:
+        return fail("chgrp", f"chgrp: invalid group: '{group_text}'\n", 1)
+
+    no_deref = "h" in flags
+    errors: list[str] = []
+    for target in await expand_operands(namespace, operands[1:]):
+        if no_deref and namespace.is_link(target.virtual):
+            await namespace.set_attrs(target.virtual, gid=gid)
+            continue
+        found = await _resolve_operand(namespace, dispatch, "chgrp", target,
+                                       errors)
+        if found is None:
+            continue
+        resolved, _stat = found
+        await _apply_attrs(namespace,
+                           dispatch,
+                           "chgrp",
+                           resolved,
+                           errors,
+                           gid=gid)
+    return finish("chgrp", errors)
 
 
 async def handle_touch(
@@ -502,10 +526,11 @@ async def handle_touch(
 
 
 __all__ = [
+    "handle_chgrp",
     "handle_chmod",
     "handle_chown",
     "handle_touch",
-    "parse_mode",
+    "parse_group",
     "parse_owner",
     "parse_touch_stamp",
 ]

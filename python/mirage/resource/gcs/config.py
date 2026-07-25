@@ -27,8 +27,10 @@ class GCSConfig(BaseModel):
     secret_access_key: SecretStr
     endpoint_url: str = GCS_ENDPOINT
     region: str = "auto"
+    path_style: bool = False
+    key_prefix: str | None = None
     timeout: int = 30
-    proxy: str | None = None
+    proxy: SecretStr | None = None
 
     def to_s3_config(self) -> S3Config:
         return S3Config(
@@ -37,6 +39,8 @@ class GCSConfig(BaseModel):
             endpoint_url=self.endpoint_url,
             aws_access_key_id=self.access_key_id,
             aws_secret_access_key=self.secret_access_key,
+            path_style=self.path_style,
+            key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
         )

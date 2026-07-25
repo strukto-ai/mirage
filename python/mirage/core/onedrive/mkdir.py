@@ -15,7 +15,7 @@
 import posixpath
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.msgraph.drive_ops import create_child_folder
 from mirage.core.onedrive._client import item_url, split_path
 from mirage.types import PathSpec
@@ -43,3 +43,5 @@ async def mkdir(accessor: OneDriveAccessor,
     else:
         await _create_dir(accessor, stripped)
     await invalidate_after_write(path)
+    if parents:
+        await invalidate_ancestors(path)

@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-node",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
@@ -54,6 +54,8 @@
     "fast-xml-parser": "^5.9.0",
     "fast-xml-validator": "^1.4.0",
     "fs-monkey": "^1.1.0",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.6",
     "tree-sitter-bash": "^0.25.1",
     "web-tree-sitter": "^0.26.8"
   },

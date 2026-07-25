@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "id": "guard_cp_same_file",
+      "seq": 611,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp /data/guard/g.txt /data/guard/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: '/data/guard/g.txt' and '/data/guard/g.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "guard_cp_dir_into_itself",
+      "seq": 615,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp -r /data/guard/sub /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot copy a directory, '/data/guard/sub', into itself, '/data/guard/sub/sub'\n"
+      }
+    },
+    {
+      "id": "guard_cp_missing_source_continues",
+      "seq": 617,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp /data/missing.txt /data/guard/g.txt /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot stat '/data/missing.txt': No such file or directory\n"
+      }
+    }
+  ]
+}

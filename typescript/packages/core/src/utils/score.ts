@@ -16,3 +16,8 @@ export function scoreFromDistance(value: unknown): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '0.00'
   return Math.max(0, 1 - value).toFixed(2)
 }
+
+export function formatScore(value: unknown): string | null {
+  if (typeof value !== 'number' || Number.isNaN(value)) return null
+  return value.toFixed(2)
+}

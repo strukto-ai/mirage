@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "ctl_continue_skips_iteration",
+      "seq": 502110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for i in 1 2 3; do if [ $i = 2 ]; then continue; fi; echo $i; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_continue_two_levels",
+      "seq": 502111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for i in 1 2; do for j in a b; do if [ $j = a ]; then continue 2; fi; echo $i$j; done; echo inner:$i; done; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

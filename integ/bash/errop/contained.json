@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "errop_contained_by_subshell",
+      "seq": 500004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(echo ${ERRQ5:?}); echo after code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after code=1\n",
+        "stderr": "bash: ERRQ5: parameter null or not set\n"
+      }
+    },
+    {
+      "id": "errop_contained_by_pipeline",
+      "seq": 500005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "echo ${ERRQ6:?} | cat; echo after code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after code=0\n",
+        "stderr": "bash: ERRQ6: parameter null or not set\n"
+      }
+    }
+  ]
+}

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type PathSpec, invalidateAfterWrite } from '@struktoai/mirage-core'
+import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm, nowIso, parent } from './utils.ts'
 import { stripSlash } from '@struktoai/mirage-core'
@@ -36,6 +36,8 @@ export async function mkdir(
         await store.setModified(current, now)
       }
     }
+    await invalidateAfterWrite(p)
+    await invalidateAncestors(path)
     return
   }
   const par = parent(p)

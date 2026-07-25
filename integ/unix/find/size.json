@@ -1,0 +1,302 @@
+{
+  "cases": [
+    {
+      "id": "find_size_gt",
+      "seq": 139,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -size +10c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree/x.txt\n/data/fields.txt\n/data/mixed.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size"
+      ]
+    },
+    {
+      "id": "find_size_lt",
+      "seq": 299,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -size -5c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/disptree\n/data/disptree/d\n/data/empty.txt\n/data/guard\n/data/guard/sub\n/data/one_byte.txt\n/data/patterns2.txt\n/data/sub\n/data/sub/deep\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size",
+        "5c"
+      ]
+    },
+    {
+      "id": "find_size_gt_dirs",
+      "seq": 302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin && printf x > /data/fs/small.bin && find /data/fs -size +4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub/big.bin\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size"
+      ]
+    },
+    {
+      "id": "find_size_lt_dirs",
+      "seq": 303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/fs -size -4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs\n/data/fs/small.bin\n/data/fs/sub\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size",
+        "4c"
+      ]
+    },
+    {
+      "id": "find_size_gt_boundary",
+      "seq": 304,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub/big.bin\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size"
+      ]
+    },
+    {
+      "id": "find_size_lt_boundary",
+      "seq": 305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/fs -size -4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs\n/data/fs/small.bin\n/data/fs/sub\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size",
+        "4c"
+      ]
+    },
+    {
+      "id": "find_size_eq_boundary",
+      "seq": 306,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/fs -size 4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/four.bin\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size"
+      ]
+    },
+    {
+      "id": "find_size_round_k",
+      "seq": 307,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/fs -size -1k",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs\n/data/fs/sub\n",
+        "stderr": ""
+      },
+      "flags": [
+        "size",
+        "1k"
+      ]
+    }
+  ]
+}

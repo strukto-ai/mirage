@@ -1,0 +1,251 @@
+{
+  "cases": [
+    {
+      "id": "mem0_ls_paginated",
+      "seq": 590000,
+      "targets": [
+        "mem0"
+      ],
+      "command": "ls /memories",
+      "expect": {
+        "exit": 0,
+        "stdout": "mem-alpha.json\nmem-beta.json\nmem-gamma.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_read_memory",
+      "seq": 590001,
+      "targets": [
+        "mem0"
+      ],
+      "command": "jq -r '.memory' /memories/mem-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "Quarterly planning happens on Tuesday.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_read_metadata",
+      "seq": 590002,
+      "targets": [
+        "mem0"
+      ],
+      "command": "jq -r '.metadata.topic' /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "preferences\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_find_json",
+      "seq": 590003,
+      "targets": [
+        "mem0"
+      ],
+      "command": "find /memories -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/memories/mem-alpha.json\n/memories/mem-beta.json\n/memories/mem-gamma.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_search",
+      "seq": 590004,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search --top-k 2 planning /memories",
+      "expect": {
+        "exit": 0,
+        "stdout": "/memories/mem-alpha.json:0.97\nQuarterly planning happens on Tuesday.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_search_scoped",
+      "seq": 590005,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search planning /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_search_threshold",
+      "seq": 590006,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search --threshold 0.98 planning /memories",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_cat_missing",
+      "seq": 590007,
+      "targets": [
+        "mem0"
+      ],
+      "command": "cat /memories/missing.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /memories/missing.json: No such file or directory\n"
+      }
+    },
+    {
+      "id": "mem0_test_missing",
+      "seq": 590008,
+      "targets": [
+        "mem0"
+      ],
+      "command": "test -e /memories/missing.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_test_present",
+      "seq": 590009,
+      "targets": [
+        "mem0"
+      ],
+      "command": "test -e /memories/mem-beta.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_stat_missing",
+      "seq": 590010,
+      "targets": [
+        "mem0"
+      ],
+      "command": "stat /memories/missing.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /memories/missing.json: No such file or directory\n"
+      }
+    },
+    {
+      "id": "mem0_wc_bytes",
+      "seq": 590011,
+      "targets": [
+        "mem0"
+      ],
+      "command": "wc -c /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "193 /memories/mem-beta.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_grep_memory",
+      "seq": 590012,
+      "targets": [
+        "mem0"
+      ],
+      "command": "grep -o 'dark mode' /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "dark mode\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_head_json",
+      "seq": 590013,
+      "targets": [
+        "mem0"
+      ],
+      "command": "head -n 2 /memories/mem-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"id\": \"mem-alpha\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_find_name_glob",
+      "seq": 590014,
+      "targets": [
+        "mem0"
+      ],
+      "command": "find /memories -name 'mem-b*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/memories/mem-beta.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_find_maxdepth_zero",
+      "seq": 590015,
+      "targets": [
+        "mem0"
+      ],
+      "command": "find /memories -maxdepth 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/memories\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_ls_long_marks_files",
+      "seq": 590016,
+      "targets": [
+        "mem0"
+      ],
+      "command": "ls -1 /memories | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mem0_readdir_of_file_enotdir",
+      "seq": 590017,
+      "targets": [
+        "mem0"
+      ],
+      "command": "ls /memories/mem-beta.json/inner",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/memories/mem-beta.json/inner': No such file or directory\n"
+      }
+    },
+    {
+      "id": "mem0_write_rejected",
+      "seq": 590018,
+      "targets": [
+        "mem0"
+      ],
+      "command": "echo hi > /memories/mem-beta.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "echo: /memories/mem-beta.json: Operation not supported\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,278 @@
+{
+  "cases": [
+    {
+      "id": "gapp_docs_root",
+      "seq": 520000,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "ls /docs",
+      "expect": {
+        "exit": 0,
+        "stdout": "owned\nshared\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_docs_ls",
+      "seq": 520001,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "ls /docs/owned",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-01_Q1_Plan__doc0001.gdoc.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_docs_cat",
+      "seq": 520002,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/2026-01-01_Q1_Plan__doc0001.gdoc.json | jq -c '{documentId, title}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"documentId\":\"doc0001\",\"title\":\"Q1 Plan\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_docs_update",
+      "seq": 520003,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "D=$(cat /docs/owned/*.gdoc.json | jq -r .documentId) && gws docs documents batchUpdate --params \"{\\\"documentId\\\": \\\"$D\\\"}\" --json '{\"requests\": [{\"replaceAllText\": {\"containsText\": {\"text\": \"hello\"}, \"replaceText\": \"HELLO\"}}]}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{\"replaceAllText\":{\"occurrencesChanged\":1}}]}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_docs_readback",
+      "seq": 520004,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -r '.body.content[1].paragraph.elements[0].textRun.content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO gdoc\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_ls",
+      "seq": 520005,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "ls /sheets/owned",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-01_Metrics__sheet0001.gsheet.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_cat",
+      "seq": 520006,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '{spreadsheetId, title: .properties.title}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"title\":\"Metrics\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_read",
+      "seq": 520007,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets +read --spreadsheet $S --range 'Sheet1!A1:B2'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"range\":\"Sheet1!A1:B2\",\"majorDimension\":\"ROWS\",\"values\":[[\"region\",\"revenue\"],[\"emea\",\"120\"]]}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_append",
+      "seq": 520008,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets +append --spreadsheet $S --range Sheet1 --values 'apac,90' > /dev/null && gws sheets +read --spreadsheet $S --range 'Sheet1!A3:B3'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"range\":\"Sheet1!A3:B3\",\"majorDimension\":\"ROWS\",\"values\":[[\"apac\",\"90\"]]}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_slides_ls",
+      "seq": 520009,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "ls /slides/owned",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-01_Launch_Deck__pres0001.gslide.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_slides_cat",
+      "seq": 520010,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "cat /slides/owned/*.gslide.json | jq -c '{presentationId, title, slides: (.slides | length)}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"presentationId\":\"pres0001\",\"title\":\"Launch Deck\",\"slides\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_slides_update",
+      "seq": 520011,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "P=$(cat /slides/owned/*.gslide.json | jq -r .presentationId) && gws slides presentations batchUpdate --params \"{\\\"presentationId\\\": \\\"$P\\\"}\" --json '{\"requests\": [{\"createSlide\": {}}]}' | jq -c .replies",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"createSlide\":{\"objectId\":\"slide0002\"}}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_rm",
+      "seq": 520013,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "rm /slides/owned/*.gslide.json && ls /slides/owned | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_slides_readback",
+      "seq": 520012,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "command": "cat /slides/owned/*.gslide.json | jq -c '.slides | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_x_cp_out",
+      "seq": 520014,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cp /docs/owned/*.gdoc.json /scratch/doc.json && head -c 1 /scratch/doc.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_x_mv_out_rejected",
+      "seq": 520015,
+      "targets": [
+        "gapps"
+      ],
+      "command": "mv /docs/owned/*.gdoc.json /scratch/moved.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot remove '/docs/owned/2026-01-01_Q1_Plan__doc0001.gdoc.json': Operation not supported\n"
+      }
+    },
+    {
+      "id": "gapp_x_mv_out_kept",
+      "seq": 520016,
+      "targets": [
+        "gapps"
+      ],
+      "command": "ls /scratch && ls /docs/owned | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "doc.json\nmoved.json\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_x_mv_in_rejected",
+      "seq": 520017,
+      "targets": [
+        "gapps"
+      ],
+      "command": "echo hi | tee /scratch/in.txt > /dev/null && mv /scratch/in.txt /docs/owned/in.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot create regular file '/docs/owned/in.txt': Operation not supported\n"
+      }
+    },
+    {
+      "id": "gapp_x_mv_in_src_kept",
+      "seq": 520018,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /scratch/in.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_x_cp_in_rejected",
+      "seq": 520019,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cp /scratch/in.txt /docs/owned/in2.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot create regular file '/docs/owned/in2.txt': Operation not supported\n"
+      }
+    }
+  ]
+}

@@ -25,5 +25,14 @@
   },
   "/data/sub/deep/deeper.txt": {
     "text": "deep\n"
+  },
+  "/data/sk_fields.txt": {
+    "text": "a 2 z\nb 2 a\nc 1 m\n"
+  },
+  "/data/sk_ties.txt": {
+    "text": "z 2\nm 2\na 2\n"
+  },
+  "/data/sk_colon.txt": {
+    "text": "apple:12\nbee:3\ncat:100\n"
   }
 }

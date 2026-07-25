@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "arch_csplit",
+      "seq": 474,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/a.txt | tee /data/arch/c.txt > /dev/null && csplit -s -f /data/arch/cs_ /data/arch/c.txt /foo/ && cat /data/arch/cs_00",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

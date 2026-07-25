@@ -1,0 +1,118 @@
+{
+  "cases": [
+    {
+      "id": "sleep_zero",
+      "seq": 202000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sleep 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed": {
+          "min": 0,
+          "max": 2.0
+        }
+      }
+    },
+    {
+      "id": "sleep_fraction",
+      "seq": 202001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sleep 0.2",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed": {
+          "min": 0.15,
+          "max": 2.2
+        }
+      }
+    },
+    {
+      "id": "sleep_one",
+      "seq": 202002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sleep 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed": {
+          "min": 0.95,
+          "max": 3.0
+        }
+      }
+    }
+  ]
+}

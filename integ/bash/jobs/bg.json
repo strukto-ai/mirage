@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "id": "job_bg_then_wait",
+      "seq": 502400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(sleep 0.2 & wait) 2>/dev/null; echo done",
+      "expect": {
+        "exit": 0,
+        "stdout": "done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "job_bg_write_visible_after_wait",
+      "seq": 502402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(echo bgdata > /data/zjb.txt & wait) 2>/dev/null; cat /data/zjb.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "bgdata\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

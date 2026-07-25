@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "ometa_dir_chmod",
+      "seq": 201008,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "chmod 750 /data/metao",
+      "check": {
+        "stat": "/data/metao",
+        "fields": [
+          "mode"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "mode=750\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

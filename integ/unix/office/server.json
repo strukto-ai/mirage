@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "office_server_copy_no_reenrich",
+      "seq": 204003,
+      "targets": [
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "cp /data/office/deck.pptx /data/office/copy.pptx && wc -c /data/office/copy.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "27 /data/office/copy.pptx\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

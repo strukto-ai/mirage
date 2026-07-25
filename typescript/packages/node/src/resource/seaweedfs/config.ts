@@ -22,7 +22,9 @@ export interface SeaweedFSConfig {
   secretAccessKey: string
   region?: string
   forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface SeaweedFSConfigRedacted {
@@ -32,7 +34,9 @@ export interface SeaweedFSConfigRedacted {
   secretAccessKey: string
   region: string
   forcePathStyle: boolean
+  keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const SeaweedFSConfigSchema = z.object({
@@ -42,7 +46,9 @@ const SeaweedFSConfigSchema = z.object({
   secretAccessKey: secretStr(),
   region: z.string(),
   forcePathStyle: z.boolean(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function seaweedfsToS3Config(config: SeaweedFSConfig): S3Config {
@@ -53,7 +59,9 @@ export function seaweedfsToS3Config(config: SeaweedFSConfig): S3Config {
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
     forcePathStyle: config.forcePathStyle ?? true,
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -72,11 +80,11 @@ export function normalizeSeaweedFSConfig(input: Record<string, unknown>): Seawee
       secret_access_key: 'secretAccessKey',
       endpoint_url: 'endpoint',
       path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as SeaweedFSConfig
 }

@@ -22,6 +22,7 @@ from mirage.commands.spec.help import render_help
 from mirage.commands.spec.types import OperandKind, Option
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult
+from mirage.version import __version__
 
 _HELP_OPTION = Option(
     long="--help",
@@ -29,19 +30,68 @@ _HELP_OPTION = Option(
     description="Show this help and exit",
 )
 
+_VERSION_OPTION = Option(
+    long="--version",
+    value_kind=OperandKind.NONE,
+    description="Show version information and exit",
+)
+
+
+def _version_line(name: str) -> bytes:
+    """Render the GNU-style version line for a command.
+
+    Args:
+        name (str): command name as invoked.
+    """
+    return f"{name} (Mirage) {__version__}\n".encode()
+
+
+def version_request(name: str, spec: CommandSpec | None,
+                    argv: list[str]) -> bytes | None:
+    """Version output when argv asks a command for the injected --version.
+
+    None when the command declares its own --version, when the flag is
+    absent, or when it sits after the `--` end-of-options marker.
+
+    Args:
+        name (str): command name as invoked.
+        spec (CommandSpec | None): the command's registered spec.
+        argv (list[str]): the words after the command name.
+    """
+    if spec is None or not any(o is _VERSION_OPTION for o in spec.options):
+        return None
+    for arg in argv:
+        if arg == "--":
+            return None
+        if arg == "--version":
+            return _version_line(name)
+    return None
+
 
 def _with_help_support(
         name: str, spec: CommandSpec,
         fn: Callable[..., Any]) -> tuple[CommandSpec, Callable[..., Any]]:
-    has_help = any(o.long == "--help" for o in spec.options)
-    new_spec = spec if has_help else replace(
-        spec, options=spec.options + (_HELP_OPTION, ))
+    """Inject --help / --version and short-circuit them before the handler.
+
+    Mirrors GNU coreutils: every registered command accepts both flags,
+    prints to stdout, and exits 0 without running the command body.
+    """
+    extras: list[Option] = []
+    if not any(o.long == "--help" for o in spec.options):
+        extras.append(_HELP_OPTION)
+    if not any(o.long == "--version" for o in spec.options):
+        extras.append(_VERSION_OPTION)
+    new_spec = (spec if not extras else replace(
+        spec, options=spec.options + tuple(extras)))
     help_text = render_help(name, new_spec).encode()
+    version_text = _version_line(name)
 
     @functools.wraps(fn)
     async def wrapper(accessor, paths, *texts, **kwargs):
         if kwargs.get("help") is True:
             return yield_bytes(help_text), IOResult()
+        if kwargs.get("version") is True:
+            return yield_bytes(version_text), IOResult()
         return await fn(accessor, paths, *texts, **kwargs)
 
     return new_spec, wrapper

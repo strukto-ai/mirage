@@ -20,11 +20,13 @@ import { rmR as s3RmR } from '../../../core/s3/rm.ts'
 import { rmdir as s3Rmdir } from '../../../core/s3/rmdir.ts'
 import { stat as s3Stat } from '../../../core/s3/stat.ts'
 import { unlink as s3Unlink } from '../../../core/s3/unlink.ts'
+import { cpWalk } from '../generic/cp.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
+import { removalLines } from '../utils/verbose.ts'
 import { writeMetadataProvision } from '../generic_bind/provision.ts'
 
 const resolveGlob = resolveGlobOf(S3_IO)
@@ -35,41 +37,53 @@ interface RmOpts {
   recursive: boolean
   force: boolean
   removeDir: boolean
+  verbose: boolean
 }
 
 // Remove one operand, returning a GNU stderr line on failure (null when
-// removed, or skipped under -f).
+// removed, or skipped under -f) alongside the verbose lines.
 async function rmOne(
   accessor: S3Accessor,
   path: PathSpec,
   opts: RmOpts,
   index: CommandOpts['index'],
-): Promise<string | null> {
+): Promise<[string | null, string[]]> {
   const label = path.virtual
   let isDir = false
   try {
     const st = await s3Stat(accessor, path, index ?? undefined)
     isDir = st.type === FileType.DIRECTORY
   } catch {
-    if (opts.force) return null
-    return `rm: cannot remove '${label}': No such file or directory`
+    if (opts.force) return [null, []]
+    return [`rm: cannot remove '${label}': No such file or directory`, []]
   }
   if (isDir) {
     if (opts.recursive) {
+      const lines = opts.verbose
+        ? removalLines(
+            await cpWalk(
+              (dir) => s3Readdir(accessor, dir, index ?? undefined),
+              (spec) => s3Stat(accessor, spec, index ?? undefined),
+              path,
+              index ?? undefined,
+            ),
+          )
+        : []
       await s3RmR(accessor, path)
-    } else if (opts.removeDir) {
+      return [null, lines]
+    }
+    if (opts.removeDir) {
       const children = await s3Readdir(accessor, path, index ?? undefined)
       if (children.length > 0) {
-        return `rm: cannot remove '${label}': Directory not empty`
+        return [`rm: cannot remove '${label}': Directory not empty`, []]
       }
       await s3Rmdir(accessor, path)
-    } else {
-      return `rm: cannot remove '${label}': Is a directory`
+      return [null, opts.verbose ? [`removed directory '${label}'`] : []]
     }
-  } else {
-    await s3Unlink(accessor, path)
+    return [`rm: cannot remove '${label}': Is a directory`, []]
   }
-  return null
+  await s3Unlink(accessor, path)
+  return [null, opts.verbose ? [`removed '${label}'`] : []]
 }
 
 async function rmCommand(
@@ -91,13 +105,18 @@ async function rmCommand(
   const writes: Record<string, Uint8Array> = {}
   for (const p of resolved) {
     // GNU rm reports the operand and keeps removing the rest.
-    const error = await rmOne(accessor, p, { recursive, force, removeDir }, opts.index)
+    const [error, entryLines] = await rmOne(
+      accessor,
+      p,
+      { recursive, force, removeDir, verbose },
+      opts.index,
+    )
     if (error !== null) {
       errors.push(error)
       continue
     }
     writes[p.mountPath] = new Uint8Array()
-    if (verbose) verboseParts.push(`removed '${p.virtual}'`)
+    if (verbose) verboseParts.push(...entryLines)
   }
   const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
   const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined

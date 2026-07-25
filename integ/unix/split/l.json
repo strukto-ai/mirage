@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "split_l",
+      "seq": 601070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/psp1 && printf 'l1\\nl2\\nl3\\nl4\\n' > /data/psp1/in.txt && split -l 2 /data/psp1/in.txt /data/psp1/p_ && cat /data/psp1/p_aa && printf '|' && cat /data/psp1/p_ab",
+      "expect": {
+        "exit": 0,
+        "stdout": "l1\nl2\n|l3\nl4\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

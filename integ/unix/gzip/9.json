@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "gzip_9_level",
+      "seq": 601301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pgz && printf 'level9\\n' > /data/pgz/l.txt && gzip -9 /data/pgz/l.txt && zcat /data/pgz/l.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "level9\n",
+        "stderr": ""
+      },
+      "flags": [
+        "9"
+      ]
+    }
+  ]
+}

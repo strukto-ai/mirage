@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_ops_card_cat_jq",
+      "seq": 550015,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Ops__brd_ops/lists/Backlog__lst_backlog/cards/Upgrade_Redis_to_7.4__crd_upgrade/card.json | jq -r '.card_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Upgrade Redis to 7.4\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

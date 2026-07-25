@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_comments_jq",
+      "seq": 550009,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/comments.jsonl | jq -rs '.[].text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Prototype uses the index cache store.\nPlease add grep push-down too.\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

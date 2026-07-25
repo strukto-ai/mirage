@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_stat_missing",
+      "seq": 766,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "stat -c '%n' /data/b.txt /data2/xpr_nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data/b.txt\n",
+        "stderr": "stat: /data2/xpr_nope.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

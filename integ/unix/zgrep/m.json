@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_m_max_count",
+      "seq": 500510,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "zgrep -m2 o /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    }
+  ]
+}

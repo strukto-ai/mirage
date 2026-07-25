@@ -25,10 +25,36 @@ import { formatRecords } from '../utils/output.ts'
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
 
+export const LS_OK = 0
+export const LS_MINOR_PROBLEM = 1
+export const LS_FAILURE = 2
+
+// One diagnostic plus how serious GNU ls considers it: `serious` marks a
+// failure on a command-line operand (exit 2); everything met while listing
+// or recursing below an operand is a minor problem (exit 1).
+interface LsWarning {
+  message: string
+  serious: boolean
+}
+
 interface WalkOpts {
   all: boolean
   sortBy: 'time' | 'size' | 'name'
   reverse: boolean
+}
+
+function errText(err: unknown): string {
+  return (
+    gnuStrerror((err as { code?: string }).code) ??
+    (err instanceof Error ? err.message : String(err))
+  )
+}
+
+// GNU ratchets the status upward: a serious problem always wins, a minor one
+// only upgrades a clean run.
+export function exitStatusFor(warnings: readonly LsWarning[]): number {
+  if (warnings.some((w) => w.serious)) return LS_FAILURE
+  return warnings.length > 0 ? LS_MINOR_PROBLEM : LS_OK
 }
 
 function childSpec(entryPath: string, prefix: string): PathSpec {
@@ -91,28 +117,53 @@ async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
 }
 
 // GNU ls prints a file operand as given (`ls sub/x.txt` shows sub/x.txt,
-// not x.txt); the row carries the operand spelling.
+// not x.txt); the row carries the operand spelling. Every other field
+// (mode/uid/gid/atime overlay attrs included) is preserved, mirroring the
+// Python `s.model_copy(update={"name": ...})`.
 function asOperand(s: FileStat, path: PathSpec): FileStat {
   return new FileStat({
     name: path.rawPath,
     size: s.size,
     modified: s.modified,
     fingerprint: s.fingerprint,
+    revision: s.revision,
     type: s.type,
+    mode: s.mode,
+    uid: s.uid,
+    gid: s.gid,
+    atime: s.atime,
     extra: s.extra,
   })
 }
 
+// An entry that cannot be stat'd is skipped with its own diagnostic rather
+// than failing the whole directory: GNU keeps listing the siblings and exits
+// 1. Mirrors the per-entry tolerance of Python ls `walk`.
 async function listDir(
   readdir: Readdir,
   stat: Stat,
   dir: PathSpec,
   all: boolean,
+  warnings: LsWarning[],
 ): Promise<FileStat[]> {
   const entries = await readdir(dir)
-  const stats = await Promise.all(
-    entries.map((p) => stat(childSpec(p, mountPrefixOf(dir.virtual, dir.resourcePath)))),
-  )
+  const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
+  const settled = await Promise.allSettled(entries.map((p) => stat(childSpec(p, prefix))))
+  const stats: FileStat[] = []
+  for (let i = 0; i < settled.length; i++) {
+    const outcome = settled[i]
+    const entry = entries[i]
+    if (outcome === undefined || entry === undefined) continue
+    if (outcome.status === 'rejected') {
+      // An entry below an operand is never a command-line arg.
+      warnings.push({
+        message: `ls: cannot access '${entry}': ${errText(outcome.reason)}`,
+        serious: false,
+      })
+      continue
+    }
+    stats.push(outcome.value)
+  }
   return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
 }
 
@@ -122,16 +173,17 @@ async function walkGrouped(
   dir: PathSpec,
   opts: WalkOpts,
   groups: [PathSpec, FileStat[]][],
-  warnings: string[],
+  warnings: LsWarning[],
+  commandLineArg: boolean,
 ): Promise<void> {
   let stats: FileStat[]
   try {
-    stats = await listDir(readdir, stat, dir, opts.all)
+    stats = await listDir(readdir, stat, dir, opts.all, warnings)
   } catch (err) {
-    const msg =
-      gnuStrerror((err as { code?: string }).code) ??
-      (err instanceof Error ? err.message : String(err))
-    warnings.push(`ls: cannot access '${dir.rawPath}': ${msg}`)
+    warnings.push({
+      message: `ls: cannot access '${dir.rawPath}': ${errText(err)}`,
+      serious: commandLineArg,
+    })
     return
   }
   const sorted = sortStats(stats, opts.sortBy, opts.reverse)
@@ -147,9 +199,20 @@ async function walkGrouped(
         opts,
         groups,
         warnings,
+        false,
       )
     }
   }
+}
+
+function finish(lines: string[], warnings: readonly LsWarning[]): CommandFnResult {
+  const out: ByteSource = formatRecords(lines)
+  const exitCode = exitStatusFor(warnings)
+  if (warnings.length > 0) {
+    const stderr = formatRecords(warnings.map((w) => w.message))
+    return [out, new IOResult({ stderr, exitCode })]
+  }
+  return [out, new IOResult({ exitCode })]
 }
 
 export async function lsGeneric(
@@ -178,7 +241,7 @@ export async function lsGeneric(
   const listDirItself = opts.flags.d === true
   const sortBy: 'time' | 'size' | 'name' =
     opts.flags.t === true ? 'time' : opts.flags.S === true ? 'size' : 'name'
-  const warnings: string[] = []
+  const warnings: LsWarning[] = []
   const lines: string[] = []
 
   if (listDirItself) {
@@ -188,27 +251,21 @@ export async function lsGeneric(
         // GNU ls -d prints the operand as given.
         collected.push(asOperand(await stat(p), p))
       } catch (err) {
-        const msg =
-          gnuStrerror((err as { code?: string }).code) ??
-          (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
+        warnings.push({
+          message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
+          serious: true,
+        })
       }
     }
     appendListing(collected, long, human, classify, lines)
-    const out: ByteSource = formatRecords(lines)
-    const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-    if (warnings.length > 0) {
-      const stderr = formatRecords(warnings)
-      return [out, new IOResult({ stderr, exitCode })]
-    }
-    return [out, new IOResult({ exitCode })]
+    return finish(lines, warnings)
   }
 
   if (recursive) {
     const walkOpts: WalkOpts = { all, sortBy, reverse }
     const groups: [PathSpec, FileStat[]][] = []
     for (const p of targets) {
-      await walkGrouped(readdir, stat, p, walkOpts, groups, warnings)
+      await walkGrouped(readdir, stat, p, walkOpts, groups, warnings, true)
     }
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i]
@@ -223,27 +280,21 @@ export async function lsGeneric(
       lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.rawPath)}:`)
       appendListing(entries, long, human, classify, lines)
     }
-    const out: ByteSource = formatRecords(lines)
-    const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-    if (warnings.length > 0) {
-      const stderr = formatRecords(warnings)
-      return [out, new IOResult({ stderr, exitCode })]
-    }
-    return [out, new IOResult({ exitCode })]
+    return finish(lines, warnings)
   }
 
   for (const p of targets) {
     let stats: FileStat[]
     try {
-      stats = await listDir(readdir, stat, p, all)
+      stats = await listDir(readdir, stat, p, all, warnings)
     } catch (err) {
       try {
         stats = [asOperand(await stat(p), p)]
       } catch {
-        const msg =
-          gnuStrerror((err as { code?: string }).code) ??
-          (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
+        warnings.push({
+          message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
+          serious: true,
+        })
         continue
       }
     }
@@ -253,11 +304,5 @@ export async function lsGeneric(
     }
     appendListing(sortStats(stats, sortBy, reverse), long, human, classify, lines)
   }
-  const out: ByteSource = formatRecords(lines)
-  const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-  if (warnings.length > 0) {
-    const stderr = formatRecords(warnings)
-    return [out, new IOResult({ stderr, exitCode })]
-  }
-  return [out, new IOResult({ exitCode })]
+  return finish(lines, warnings)
 }

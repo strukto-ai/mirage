@@ -22,6 +22,7 @@ def _set_value_flag(
     name: str,
     value: str,
     repeat_flags: set[str],
+    alias: dict[str, str] | None = None,
 ) -> None:
     if name in repeat_flags:
         prev = flags.get(name)
@@ -31,6 +32,42 @@ def _set_value_flag(
             flags[name] = [value]
     else:
         flags[name] = value
+    _mirror_alias(flags, name, alias)
+
+
+def _set_bool_flag(
+    flags: dict[str, str | bool | list[str]],
+    name: str,
+    alias: dict[str, str] | None = None,
+) -> None:
+    flags[name] = True
+    _mirror_alias(flags, name, alias)
+
+
+def _mirror_alias(
+    flags: dict[str, str | bool | list[str]],
+    name: str,
+    alias: dict[str, str] | None,
+) -> None:
+    """Copy a spelling's value onto its counterpart so the last one wins.
+
+    GNU treats ``-u`` and ``--update`` as one option, so the final
+    occurrence decides (``cp --update=all -u`` is ``--update=older``).
+    Flags are stored per spelling, which would otherwise let a fixed
+    short/long read order override command-line order. Only aliased for
+    optional-value options, whose two spellings genuinely disagree;
+    repeatable options accumulate instead and are never mirrored.
+
+    Args:
+        flags (dict): Parsed flag bag, updated in place.
+        name (str): Spelling just written.
+        alias (dict[str, str] | None): Spelling to counterpart-spelling map.
+    """
+    if alias is None:
+        return
+    other = alias.get(name)
+    if other is not None:
+        flags[other] = flags[name]
 
 
 def _match_mixed_cluster(
@@ -72,16 +109,25 @@ def parse_command(
 ) -> ParsedArgs:
     bool_flags: set[str] = set()
     value_flags: set[str] = set()
+    attach_value_flags: set[str] = set()
     long_bool_flags: set[str] = set()
     long_value_flags: set[str] = set()
     long_optional_flags: set[str] = set()
     value_flag_kinds: dict[str, OperandKind] = {}
     repeat_flags: set[str] = set()
+    # Spelling -> counterpart spelling, so an optional-value option's short
+    # and long forms stay in lockstep and the last one on the line wins.
+    alias: dict[str, str] = {}
     numeric_shorthand_flag: str | None = None
     for opt in spec.options:
         if opt.short:
             if opt.value_kind == OperandKind.NONE:
                 bool_flags.add(opt.short)
+            elif opt.value_optional:
+                bool_flags.add(opt.short)
+                if opt.short_value:
+                    attach_value_flags.add(opt.short)
+                value_flag_kinds[opt.short] = opt.value_kind
             else:
                 value_flags.add(opt.short)
                 value_flag_kinds[opt.short] = opt.value_kind
@@ -97,11 +143,18 @@ def parse_command(
                 # attaches via `=`; a detached next token is an operand.
                 long_bool_flags.add(opt.long)
                 long_optional_flags.add(opt.long)
+                value_flag_kinds[opt.long] = opt.value_kind
             else:
                 long_value_flags.add(opt.long)
                 value_flag_kinds[opt.long] = opt.value_kind
                 if opt.repeatable:
                     repeat_flags.add(opt.long)
+
+    for opt in spec.options:
+        if opt.short and opt.long and opt.value_optional \
+                and not opt.repeatable:
+            alias[opt.short] = opt.long
+            alias[opt.long] = opt.short
 
     rest_kind: OperandKind | None = (spec.rest.kind
                                      if spec.rest is not None else None)
@@ -163,10 +216,11 @@ def parse_command(
 
         if tok.startswith("--"):
             if tok in long_bool_flags:
-                flags[tok] = True
+                _set_bool_flag(flags, tok, alias)
                 i += 1
             elif tok in long_value_flags and i + 1 < len(filtered_argv):
-                _set_value_flag(flags, tok, filtered_argv[i + 1], repeat_flags)
+                _set_value_flag(flags, tok, filtered_argv[i + 1], repeat_flags,
+                                alias)
                 word_kinds[orig_indices[i + 1]] = value_flag_kinds[tok]
                 i += 2
             else:
@@ -174,7 +228,7 @@ def parse_command(
                 if eq != -1 and (tok[:eq] in long_value_flags
                                  or tok[:eq] in long_optional_flags):
                     _set_value_flag(flags, tok[:eq], tok[eq + 1:],
-                                    repeat_flags)
+                                    repeat_flags, alias)
                 elif tok in long_value_flags:
                     # Declared value flag at end of line with no argument.
                     needs_value_options.append(tok)
@@ -191,17 +245,28 @@ def parse_command(
                 flags[numeric_shorthand_flag] = tok[1:]
                 i += 1
                 continue
+            matched_optional = False
+            for vf in attach_value_flags:
+                if tok.startswith(vf) and len(tok) > len(vf):
+                    _set_value_flag(flags, vf, tok[len(vf):], repeat_flags,
+                                    alias)
+                    i += 1
+                    matched_optional = True
+                    break
+            if matched_optional:
+                continue
             matched_value = False
             for vf in value_flags:
                 if tok == vf and i + 1 < len(filtered_argv):
                     _set_value_flag(flags, vf, filtered_argv[i + 1],
-                                    repeat_flags)
+                                    repeat_flags, alias)
                     word_kinds[orig_indices[i + 1]] = value_flag_kinds[vf]
                     i += 2
                     matched_value = True
                     break
                 if tok.startswith(vf) and len(tok) > len(vf):
-                    _set_value_flag(flags, vf, tok[len(vf):], repeat_flags)
+                    _set_value_flag(flags, vf, tok[len(vf):], repeat_flags,
+                                    alias)
                     i += 1
                     matched_value = True
                     break
@@ -209,7 +274,7 @@ def parse_command(
                 continue
 
             if tok in bool_flags:
-                flags[tok] = True
+                _set_bool_flag(flags, tok, alias)
                 i += 1
                 continue
 
@@ -220,7 +285,7 @@ def parse_command(
                     break
             if all_bool and len(tok) > 1:
                 for ch in tok[1:]:
-                    flags[f"-{ch}"] = True
+                    _set_bool_flag(flags, f"-{ch}", alias)
                 i += 1
                 continue
 
@@ -229,15 +294,16 @@ def parse_command(
                 cluster_bools, vflag, attached = mixed
                 if attached is not None:
                     for name in cluster_bools:
-                        flags[name] = True
-                    _set_value_flag(flags, vflag, attached, repeat_flags)
+                        _set_bool_flag(flags, name, alias)
+                    _set_value_flag(flags, vflag, attached, repeat_flags,
+                                    alias)
                     i += 1
                     continue
                 if i + 1 < len(filtered_argv):
                     for name in cluster_bools:
-                        flags[name] = True
+                        _set_bool_flag(flags, name, alias)
                     _set_value_flag(flags, vflag, filtered_argv[i + 1],
-                                    repeat_flags)
+                                    repeat_flags, alias)
                     word_kinds[orig_indices[i + 1]] = value_flag_kinds[vflag]
                     i += 2
                     continue

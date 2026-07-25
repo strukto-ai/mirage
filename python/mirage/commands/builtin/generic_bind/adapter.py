@@ -82,8 +82,10 @@ class Operation(StrEnum):
     EXISTS = "exists"
     MKDIR = "mkdir"
     UNLINK = "unlink"
+    RMDIR = "rmdir"
     RENAME = "rename"
     COPY = "copy"
+    TRUNCATE = "truncate"
 
 
 @dataclass(frozen=True)
@@ -134,8 +136,10 @@ class CommandIO:
             Operation.EXISTS: self.exists,
             Operation.MKDIR: self.mkdir,
             Operation.UNLINK: self.unlink,
+            Operation.RMDIR: self.rmdir,
             Operation.RENAME: self.rename,
             Operation.COPY: self.copy,
+            Operation.TRUNCATE: self.truncate,
         }
         return operations[op]
 

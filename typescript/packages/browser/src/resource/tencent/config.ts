@@ -21,6 +21,7 @@ export interface TencentConfig {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface TencentConfigRedacted extends Omit<TencentConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const TencentConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedTencentEndpoint(config: TencentConfig): string | undefined {
@@ -56,6 +58,7 @@ export function tencentToS3Config(config: TencentConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

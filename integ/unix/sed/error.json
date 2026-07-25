@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "sed_count_zero",
+      "seq": 544,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed 's/o/O/0'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: number option to `s' command may not be zero"
+      }
+    }
+  ]
+}

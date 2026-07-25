@@ -542,6 +542,68 @@ def test_redirect_target_stderr():
     assert get_text(target_node) == "/err.txt"
 
 
+def test_redirect_target_raw_string():
+    # Single quotes parse as raw_string; the node must ride along or the
+    # expansion layer sees target_node None and falls back to the empty
+    # target, silently writing nowhere.
+    node = _first("echo x > '/out.txt'")
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.RAW_STRING
+
+
+def test_redirect_target_double_quoted_string():
+    node = _first('echo x > "/out.txt"')
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.STRING
+
+
+def test_redirect_target_unquoted_word():
+    node = _first("echo x > /out.txt")
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.WORD
+
+
+@pytest.mark.parametrize(
+    "cmd", ["echo x > '/out.txt'", 'echo x > "/out.txt"', "echo x > /out.txt"])
+def test_redirect_target_carried_for_every_quoting_form(cmd: str):
+    # Quoting a redirect target is purely syntactic in bash: all three
+    # forms must reach the expansion layer with a target node.
+    _, redirects = get_redirects(_first(cmd))
+    assert redirects[0].target_node is not None
+
+
+@pytest.mark.parametrize("cmd", [
+    "echo x >> '/out.txt'",
+    "cmd 2> '/err.txt'",
+    "cmd < '/in.txt'",
+    "cmd &> '/both.txt'",
+])
+def test_redirect_raw_string_target_all_operators(cmd: str):
+    # Every operator shares _parse_file_redirect, so a single-quoted
+    # target has to survive on all of them, not just plain `>`.
+    _, redirects = get_redirects(_first(cmd))
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.RAW_STRING
+
+
+def test_herestring_raw_string_target():
+    # `<<< 'text'` shares the same target-type gate as file redirects.
+    node = _first("cat <<< 'hi' > out.txt")
+    _, redirects = get_redirects(node)
+    herestring = [r for r in redirects if r.kind == RedirectKind.HERESTRING]
+    assert len(herestring) == 1
+    target_node = herestring[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.RAW_STRING
+
+
 # ── python command parsing ─────────────────────
 
 

@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "slack_reply_to_thread",
+      "seq": 520036,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-reply-to-thread --channel_id C1 --ts 1766165985.000426 --text acknowledged /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000002\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"acknowledged\",\"ts\":\"1775000000.000002\",\"thread_ts\":\"1766165985.000426\"}}",
+        "stderr": ""
+      }
+    }
+  ]
+}

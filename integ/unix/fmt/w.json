@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "fmt_w20",
+      "seq": 80,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/a.txt | fmt -w 20",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello world foo bar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "fmt_w10",
+      "seq": 333,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fmt -w 10 /data/c.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha beta\ngamma\ndelta\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    }
+  ]
+}

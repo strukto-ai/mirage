@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "df_stat_fmt",
+      "seq": 580007,
+      "targets": [
+        "dify"
+      ],
+      "command": "stat -c '%s %n' /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 /knowledge/guides/auth\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

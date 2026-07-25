@@ -15,11 +15,17 @@
 import { ResourceName, command, specOf, uniqGeneric } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
+import { writeBytes as opfsWrite } from '../../../core/opfs/write.ts'
 
 export const OPFS_UNIQ = command({
   name: 'uniq',
   resource: ResourceName.OPFS,
   spec: specOf('uniq'),
   fn: (accessor: OPFSAccessor, paths, _texts, opts) =>
-    uniqGeneric(paths, opts, (p) => opfsStream(accessor, p)),
+    uniqGeneric(
+      paths,
+      opts,
+      (p) => opfsStream(accessor, p),
+      (p, data) => opfsWrite(accessor, p, data),
+    ),
 })

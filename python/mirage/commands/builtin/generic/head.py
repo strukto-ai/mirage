@@ -1,11 +1,40 @@
 import inspect
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from mirage.cache.read_through import cache_aware_read
+from mirage.commands.builtin.tail_helper import number_flag_error
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
+
+
+@dataclass(frozen=True, slots=True)
+class HeadFlags:
+    lines: int | None = None
+    bytes_: int | None = None
+    quiet: bool = False
+    verbose: bool = False
+    zero_terminated: bool = False
+
+
+def parse_flags(flags: Mapping[str, object]) -> HeadFlags:
+    fl = FlagView(flags, spec=SPECS["head"])
+    n_raw = fl.as_str("n") or fl.as_str("lines")
+    c_raw = fl.as_str("c") or fl.as_str("bytes")
+    error = number_flag_error("head", n_raw, c_raw)
+    if error is not None:
+        raise ValueError(error)
+    return HeadFlags(
+        lines=int(n_raw) if n_raw is not None else None,
+        bytes_=int(c_raw) if c_raw is not None else None,
+        quiet=(fl.as_bool("q") or fl.as_bool("quiet") or fl.as_bool("silent")),
+        verbose=fl.as_bool("v") or fl.as_bool("verbose"),
+        zero_terminated=(fl.as_bool("z") or fl.as_bool("zero_terminated")),
+    )
 
 
 async def head(
@@ -13,6 +42,7 @@ async def head(
     *,
     n: int | None = None,
     c: int | None = None,
+    zero_terminated: bool = False,
 ) -> AsyncIterator[bytes]:
     if c is not None:
         if c == 0:
@@ -38,6 +68,7 @@ async def head(
         return
 
     target = n if n is not None else 10
+    separator = b"\x00" if zero_terminated else b"\n"
 
     if target >= 0:
         if target == 0:
@@ -46,9 +77,9 @@ async def head(
         buf = b""
         async for chunk in ensure_stream(src):
             buf += chunk
-            while b"\n" in buf and emitted_lines < target:
-                line, buf = buf.split(b"\n", 1)
-                yield line + b"\n"
+            while separator in buf and emitted_lines < target:
+                line, buf = buf.split(separator, 1)
+                yield line + separator
                 emitted_lines += 1
             if emitted_lines >= target:
                 return
@@ -61,11 +92,15 @@ async def head(
     buf = b""
     async for chunk in ensure_stream(src):
         buf += chunk
-        while b"\n" in buf:
-            line, buf = buf.split(b"\n", 1)
+        while separator in buf:
+            line, buf = buf.split(separator, 1)
             if len(recent) == keep:
-                yield recent[0] + b"\n"
+                yield recent[0] + separator
             recent.append(line)
+    if buf:
+        if len(recent) == keep:
+            yield recent[0] + separator
+        recent.append(buf)
 
 
 def head_multi(
@@ -75,6 +110,7 @@ def head_multi(
     n: int | None = None,
     c: int | None = None,
     show_headers: bool = False,
+    zero_terminated: bool = False,
 ) -> AsyncIterator[bytes]:
     """Run head over multiple already-resolved paths.
 
@@ -100,7 +136,8 @@ def head_multi(
                        read=cache_aware_read(read),
                        n=n,
                        c=c,
-                       show_headers=show_headers)
+                       show_headers=show_headers,
+                       zero_terminated=zero_terminated)
 
 
 async def _head_multi(
@@ -110,6 +147,7 @@ async def _head_multi(
     n: int | None = None,
     c: int | None = None,
     show_headers: bool = False,
+    zero_terminated: bool = False,
 ) -> AsyncIterator[bytes]:
     for i, p in enumerate(paths):
         if show_headers:
@@ -120,5 +158,8 @@ async def _head_multi(
         source = read(p)
         if inspect.isawaitable(source):
             source = await source
-        async for chunk in head(source, n=n, c=c):
+        async for chunk in head(source,
+                                n=n,
+                                c=c,
+                                zero_terminated=zero_terminated):
             yield chunk

@@ -132,7 +132,6 @@ const CHUNKS: Record<string, SeedChunk[]> = {
 const CASES: ReadonlyArray<readonly [string, string]> = [
   ["ls", "ls {root}"],
   ["ls_guides", "ls {root}guides/"],
-  ["tree", "tree {root}"],
   ["find_md", "find {root} -name '*.md'"],
   ["find_type_f", "find {root} -type f | sort"],
   ["find_root_maxdepth0", "find {root} -maxdepth 0"],

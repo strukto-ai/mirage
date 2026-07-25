@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "cat_e_blank",
+      "seq": 601101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcat && printf 'a\\n\\nb\\n' > /data/qcat/e.txt && cat -e /data/qcat/e.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a$\n$\nb$\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    }
+  ]
+}

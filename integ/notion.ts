@@ -369,7 +369,6 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["ls_l_pages", `ls -l ${MOUNT}/pages/`],
   ["ls_page_a", `ls ${DIR_A}/`],
   ["stat_dir_a", `stat -c '%n %y' ${DIR_A}`],
-  ["tree", `tree -L 2 ${MOUNT}/`],
   ["cat_page_a", `cat ${DIR_A}/page.json`],
   ["cat_child", `cat ${DIR_C}/page.json`],
   ["jq_title", `jq ".title" ${DIR_A}/page.json`],

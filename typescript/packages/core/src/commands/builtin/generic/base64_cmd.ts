@@ -42,9 +42,13 @@ async function* base64EncodeStream(
   yield ENC.encode(lines.join('\n') + '\n')
 }
 
-async function* base64DecodeStream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
+async function* base64DecodeStream(
+  source: AsyncIterable<Uint8Array>,
+  ignoreGarbage: boolean,
+): AsyncIterable<Uint8Array> {
   const buf = await materialize(source)
-  const text = DEC.decode(buf).replace(/[\r\n ]/g, '')
+  let text = DEC.decode(buf).replace(/\s/g, '')
+  if (ignoreGarbage) text = text.replace(/[^A-Za-z0-9+/=]/g, '')
   yield decodeBase64(text)
 }
 
@@ -55,8 +59,10 @@ export async function base64Generic(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   if (paths.length > 1) throw extraOperandError(CommandName.BASE64, paths[1]?.rawPath ?? '')
-  const decode = opts.flags.d === true || opts.flags.D === true
-  const wrap = typeof opts.flags.w === 'string' ? Number.parseInt(opts.flags.w, 10) : null
+  const decode = opts.flags.d === true || opts.flags.D === true || opts.flags.decode === true
+  const wrapValue = opts.flags.w ?? opts.flags.wrap
+  const wrap = typeof wrapValue === 'string' ? Number.parseInt(wrapValue, 10) : null
+  const ignoreGarbage = opts.flags.i === true || opts.flags.ignore_garbage === true
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {
@@ -67,6 +73,6 @@ export async function base64Generic(
   } else {
     source = resolveSource(opts.stdin)
   }
-  const out = decode ? base64DecodeStream(source) : base64EncodeStream(source, wrap)
+  const out = decode ? base64DecodeStream(source, ignoreGarbage) : base64EncodeStream(source, wrap)
   return [out, new IOResult({ cache })]
 }

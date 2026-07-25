@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "office_write_read_enriched",
+      "seq": 204000,
+      "targets": [
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/office && printf slide-bytes | tee /data/office/deck.pptx > /dev/null && cat /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "slide-bytes<odsp-metadata/>",
+        "stderr": ""
+      }
+    }
+  ]
+}

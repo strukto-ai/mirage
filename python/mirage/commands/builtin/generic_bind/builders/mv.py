@@ -17,9 +17,14 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.mv import mv as generic_mv
+from mirage.commands.builtin.generic.mv import parse_mv_flags
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.builtin.generic_bind.builders.cp import overlayable_stat
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.config import StatOverlay
 from mirage.types import NativeMove, PathSpec
 
 
@@ -29,22 +34,22 @@ async def mv(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    f: bool = False,
-    n: bool = False,
-    v: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs: object,
+    stat_overlay: StatOverlay | None = None,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor) or len(paths) < 2:
-        raise ValueError("mv: requires src and dst")
+    if not ops.is_mounted(accessor):
+        raise ValueError("mv: no resource")
+    fl = FlagView(flags, spec=SPECS["mv"])
+    parsed = parse_mv_flags(fl)
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_mv(
         paths,
         strategy=NativeMove(
             rename=partial(ops.require(Operation.RENAME), accessor)),
-        stat=bound_op(ops.stat, accessor, index),
-        n=n,
-        v=v)
+        stat=overlayable_stat(ops, accessor, index, stat_overlay),
+        flags=parsed,
+        readdir=bound_op(ops.readdir, accessor, index))
 
 
 BUILDER = Builder('mv',

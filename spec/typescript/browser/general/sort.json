@@ -8,6 +8,7 @@
       "box",
       "chroma",
       "databricks_volume",
+      "dify",
       "discord",
       "dropbox",
       "gdocs",
@@ -20,13 +21,16 @@
       "lancedb",
       "langfuse",
       "linear",
+      "mem0",
       "mongodb",
       "notion",
+      "onedrive",
       "opfs",
       "postgres",
       "qdrant",
       "ram",
       "s3",
+      "sharepoint",
       "slack",
       "trello"
     ]
@@ -36,91 +40,111 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--reverse",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--numeric-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--unique",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-u",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--ignore-case",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--key",
       "numeric_shorthand": false,
-      "repeatable": false,
+      "repeatable": true,
       "short": "-k",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--field-separator",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-t",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--human-numeric-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-h",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--version-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-V",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--stable",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--month-sort",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-M",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--ignore-leading-blanks",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-b",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -129,7 +153,78 @@
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
-      "short": "-b",
+      "short": "-c",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--check",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--dictionary-order",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-d",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--general-numeric-sort",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-g",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--ignore-nonprinting",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-i",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--merge",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-m",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--output",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-o",
+      "short_value": true,
+      "value_kind": "path",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--zero-terminated",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-z",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

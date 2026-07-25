@@ -61,3 +61,18 @@ def test_realpath_e_missing_fails():
     ws = _ws()
     _, io = _run_raw(ws, "realpath -e /data/nope.txt")
     assert io.exit_code != 0
+
+
+def test_realpath_e_missing_message_not_doubled():
+    # Regression guard: the generic raises a plain (non-fs) error so
+    # format_fs_error emits it verbatim; a FileNotFoundError would be
+    # re-prefixed and re-suffixed into a doubled message.
+    ws = _ws()
+
+    async def go():
+        io = await ws.execute("realpath -e /data/nope.txt")
+        return io.exit_code, await io.stderr_str()
+
+    code, err = asyncio.run(go())
+    assert code == 1
+    assert err == "realpath: '/data/nope.txt': No such file or directory\n"

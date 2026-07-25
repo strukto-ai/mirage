@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "awk_v_repeat",
+      "seq": 171,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk -v a=va1 -v b=vb2 '{print a, b}' /data/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "va1 vb2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "awk_v_equals",
+      "seq": 172,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk -v x=eq=val '{print x}' /data/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "eq=val\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    }
+  ]
+}

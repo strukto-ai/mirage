@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "slack_head_chat",
+      "seq": 520019,
+      "targets": [
+        "slack"
+      ],
+      "command": "head -1 /slack/channels/engineering__C3/2026-01-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U8\",\"text\":\"PR #326 is up for the cache refactor, can someone review\",\"ts\":\"1768819073.000650\"}\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

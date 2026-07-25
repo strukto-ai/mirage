@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "ln_no_dereference",
+      "seq": 611023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -sn /data/lnr/a/f.txt /data/lnr/l1 && readlink /data/lnr/l1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lnr/a/f.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "ln_no_target_directory",
+      "seq": 611024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -sT /data/lnr/a/f.txt /data/lnr/l2 && readlink /data/lnr/l2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lnr/a/f.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "T"
+      ]
+    }
+  ]
+}

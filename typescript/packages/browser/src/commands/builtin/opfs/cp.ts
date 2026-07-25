@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  IOResult,
   ResourceName,
   command,
   cpGeneric,
+  parseCpFlags,
   specOf,
   type CommandFnResult,
   type CommandOpts,
@@ -24,6 +24,8 @@ import {
 } from '@struktoai/mirage-core'
 import { copy as coreCopy } from '../../../core/opfs/copy.ts'
 import { find as coreFind } from '../../../core/opfs/find.ts'
+import { mkdir as coreMkdir } from '../../../core/opfs/mkdir.ts'
+import { readdir as coreReaddir } from '../../../core/opfs/readdir.ts'
 import { stat as coreStat } from '../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
@@ -33,24 +35,27 @@ function cpCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  if (paths.length < 2) {
-    return Promise.resolve([
-      null,
-      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
-    ])
-  }
-  const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
+  const parsed = parseCpFlags(opts.flags)
+  const overlay = opts.statOverlay
+  // -u freshness must see the namespace attr overlay (touch on overlay
+  // backends, where OPFS has no setattr op), exactly like ls -l does;
+  // the raw OPFS stat only reports the write wall-clock.
+  const stat =
+    overlay !== undefined
+      ? async (p: PathSpec) => overlay(p.virtual, await coreStat(accessor, p))
+      : (p: PathSpec) => coreStat(accessor, p)
   return cpGeneric(
     paths,
-    (p: PathSpec) => coreStat(accessor, p),
+    stat,
     {
       copy: (src: PathSpec, target: PathSpec) => coreCopy(accessor, src, target),
       find: (src, options) => coreFind(accessor, src, options),
+      mkdir: (p: PathSpec) => coreMkdir(accessor, p),
     },
-    recursive,
-    opts.flags.n === true,
-    opts.flags.v === true,
+    parsed,
     opts.index ?? undefined,
+    undefined,
+    (p: PathSpec) => coreReaddir(accessor, p),
   )
 }
 

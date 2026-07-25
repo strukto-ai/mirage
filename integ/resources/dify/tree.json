@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "df_tree",
+      "seq": 580002,
+      "targets": [
+        "dify"
+      ],
+      "command": "tree /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge\n|-- CHANGELOG.md\n|-- guides\n|   |-- auth\n|   `-- quickstart\n`-- policies\n    |-- privacy\n    `-- refunds\n\n3 directories, 5 files\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "cmd_function_shadows_mount",
+      "seq": 503021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cat() { echo SHADOW; }; echo hi | cat)",
+      "expect": {
+        "exit": 0,
+        "stdout": "SHADOW\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

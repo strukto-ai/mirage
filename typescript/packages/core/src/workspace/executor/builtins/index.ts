@@ -23,10 +23,13 @@ export {
   prepareMv,
   stripLinkOperands,
 } from './links.ts'
-export { handleChmod, handleChown, handleTouch } from './metadata.ts'
+export { handleDf } from './capacity.ts'
+export { handleChgrp, handleChmod, handleChown, handleTouch } from './metadata.ts'
 export {
+  handleEnv,
   handleExit,
   handleExport,
+  handleGetopts,
   handleLocal,
   handlePrintenv,
   handleRead,
@@ -37,6 +40,7 @@ export {
   handleTrap,
   handleUnset,
   handleWhoami,
+  noteLocalArray,
 } from './vars.ts'
 export { handleMan } from './man.ts'
 export { handleHistory } from './history.ts'
@@ -44,4 +48,5 @@ export { handleBash, handleEval, handleSleep, handleSource } from './script.ts'
 export { handleTest } from './condition/index.ts'
 export { handleTimeout } from './timeout.ts'
 export { handleXargs } from './xargs.ts'
+export { handleCommandBuiltin, handleType } from './command.ts'
 export { handleEcho, handlePrintf } from './text.ts'

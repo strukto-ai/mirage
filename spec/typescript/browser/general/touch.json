@@ -9,9 +9,11 @@
       "databricks_volume",
       "dropbox",
       "gdrive",
+      "onedrive",
       "opfs",
       "ram",
-      "s3"
+      "s3",
+      "sharepoint"
     ]
   },
   "description": null,
@@ -23,6 +25,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     },
@@ -32,6 +35,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
+      "short_value": true,
       "value_kind": "path",
       "value_optional": false
     },
@@ -41,6 +45,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     }

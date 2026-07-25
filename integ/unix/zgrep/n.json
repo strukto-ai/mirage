@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_n_line_numbers",
+      "seq": 500503,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "zgrep -n error /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:error: disk full\n4:error: timeout\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    }
+  ]
+}

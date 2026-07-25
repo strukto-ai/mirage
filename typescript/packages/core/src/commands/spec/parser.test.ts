@@ -65,6 +65,12 @@ describe('parseCommand — value flags', () => {
     expect(p.flags['-o']).toBe('/ram/out.txt')
     expect(p.pathFlagValues).toEqual(['/ram/out.txt'])
   })
+
+  it('routes an attached optional long PATH value', () => {
+    const p = parseCommand(specOf('mktemp'), ['--tmpdir=staging', 'file.XXXX'], '/data')
+    expect(p.flags['--tmpdir']).toBe('/data/staging')
+    expect(p.pathFlagValues).toEqual(['/data/staging'])
+  })
 })
 
 describe('parseCommand — numericShorthand', () => {
@@ -366,6 +372,17 @@ describe('parseCommand — optional-value long options', () => {
   })
 })
 
+describe('parseCommand — optional-value short options', () => {
+  it('uses only an attached value and leaves the next option intact', () => {
+    const bare = parseCommand(specOf('split'), ['-d', '-l', '2', '/input', '/prefix'], '/')
+    const attached = parseCommand(specOf('split'), ['-d10', '/input'], '/')
+    expect(bare.flags['-d']).toBe(true)
+    expect(bare.flags['-l']).toBe('2')
+    expect(bare.paths()).toEqual(['/input', '/prefix'])
+    expect(attached.flags['-d']).toBe('10')
+  })
+})
+
 describe('parseCommand — unknown dash tokens warn and drop', () => {
   it('reports unknown long flags and keeps operands aligned', () => {
     const p = parseCommand(specOf('grep'), ['--bogus', 'pat', '/a.txt'], '/')
@@ -434,6 +451,15 @@ describe('parseCommand — clusters ending in a value flag (getopt)', () => {
     const p = parseCommand(specOf('find'), ['/data', '-name', '*.txt'], '/')
     expect(p.flags['-name']).toEqual(['*.txt'])
   })
+
+  it('find grouping tokens are not classified as path operands', () => {
+    const p = parseCommand(
+      specOf('find'),
+      ['/data', '(', '-name', 'inner.txt', '-o', '-name', 'deep.txt', ')'],
+      '/',
+    )
+    expect(p.paths()).toEqual(['/data'])
+  })
 })
 
 describe('parseToKwargs', () => {
@@ -499,5 +525,72 @@ describe('overflow operand pass-through', () => {
       OperandKind.TEXT,
       OperandKind.TEXT,
     ])
+  })
+})
+
+describe('shortValue: false keeps the short boolean and clusterable', () => {
+  it('clusters cp -bv instead of eating v as the backup control', () => {
+    // GNU cp -b never takes an argument: -bv is a cluster, never -b=v.
+    const clustered = parseCommand(specOf('cp'), ['-bv', '/a', '/b'], '/')
+    expect(clustered.flags['-b']).toBe(true)
+    expect(clustered.flags['-v']).toBe(true)
+  })
+
+  it('keeps bare -u boolean and its operands intact', () => {
+    const bare = parseCommand(specOf('cp'), ['-u', '/a', '/b'], '/')
+    expect(bare.flags['-u']).toBe(true)
+    expect(bare.paths()).toEqual(['/a', '/b'])
+  })
+
+  it('still carries the value on --backup=CONTROL', () => {
+    const valued = parseCommand(specOf('cp'), ['--backup=numbered', '/a', '/b'], '/')
+    expect(valued.flags['--backup']).toBe('numbered')
+  })
+})
+
+describe('optional-value aliases honor command-line order', () => {
+  it('lets the last spelling win when -u follows --update=all', () => {
+    // GNU treats -u and --update as one option, so the last spelling on the
+    // line decides (pinned against GNU coreutils 9.7).
+    const shortLast = parseCommand(specOf('cp'), ['--update=all', '-u', '/a', '/b'], '/')
+    expect(shortLast.flags['--update']).toBe(true)
+    expect(shortLast.flags['-u']).toBe(true)
+  })
+
+  it('lets the last spelling win when --update=all follows -u', () => {
+    const longLast = parseCommand(specOf('cp'), ['-u', '--update=all', '/a', '/b'], '/')
+    expect(longLast.flags['-u']).toBe('all')
+    expect(longLast.flags['--update']).toBe('all')
+  })
+
+  it('never mirrors repeatable aliases', () => {
+    // sort -k/--key accumulates; mirroring would double every keydef because
+    // the generic concatenates both spellings' lists.
+    const parsed = parseCommand(specOf('sort'), ['-k1', '--key=2', '/f'], '/')
+    expect(parsed.flags['-k']).toEqual(['1'])
+    expect(parsed.flags['--key']).toEqual(['2'])
+  })
+})
+
+describe('attached short values mirror their alias', () => {
+  it('mirrors -d10 onto --numeric-suffixes and honors order both ways', () => {
+    // Otherwise last-wins would hold for `--long=` but not the short form.
+    const attached = parseCommand(specOf('split'), ['-d10', '/in', '/pre'], '/')
+    expect(attached.flags['-d']).toBe('10')
+    expect(attached.flags['--numeric-suffixes']).toBe('10')
+
+    const shortLast = parseCommand(
+      specOf('split'),
+      ['--numeric-suffixes=3', '-d10', '/in', '/p'],
+      '/',
+    )
+    expect(shortLast.flags['--numeric-suffixes']).toBe('10')
+
+    const longLast = parseCommand(
+      specOf('split'),
+      ['-d10', '--numeric-suffixes=3', '/in', '/p'],
+      '/',
+    )
+    expect(longLast.flags['-d']).toBe('3')
   })
 })

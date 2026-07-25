@@ -73,6 +73,11 @@ class Option:
             ``--color[=WHEN]``): bare ``--color`` parses as True,
             ``--color=auto`` parses as the string, and a detached next
             token is never consumed. Requires a long form.
+        short_value (bool): whether the short spelling of a value flag may
+            carry an attached value (``split -d10``). False for GNU pairs
+            whose short is a plain boolean while only the long accepts a
+            value (``cp -b`` vs ``--backup[=CONTROL]``), so the short
+            clusters (``-bv``) instead of eating the rest as a value.
         description (str | None): help text.
     """
     short: str | None = None
@@ -81,6 +86,7 @@ class Option:
     numeric_shorthand: bool = False
     repeatable: bool = False
     value_optional: bool = False
+    short_value: bool = True
     description: str | None = None
 
 

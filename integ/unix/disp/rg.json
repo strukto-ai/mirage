@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "disp_rg_r",
+      "seq": 527,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && rg nested disptree)",
+      "expect": {
+        "exit": 0,
+        "stdout": "disptree/x.txt:nested\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

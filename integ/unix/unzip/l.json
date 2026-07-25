@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "unzip_l_list",
+      "seq": 601330,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punz && printf hi > /data/punz/a.txt && zip -q -j /data/punz/az.zip /data/punz/a.txt && unzip -l /data/punz/az.zip | grep -c 'a.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

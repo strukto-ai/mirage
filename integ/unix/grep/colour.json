@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "grep_colour_noop",
+      "seq": 500217,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep --colour=auto alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      },
+      "flags": [
+        "colour"
+      ]
+    }
+  ]
+}

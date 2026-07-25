@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import os
 import posixpath
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -618,3 +620,19 @@ async def start_fake_graph() -> tuple[FakeGraph, "GraphServer", web.AppRunner]:
     sharepoint_client.GRAPH_API = state.base
     sharepoint_resolver.GRAPH_API = state.base
     return state, server, runner
+
+
+async def serve_forever() -> None:
+    state, server, runner = await start_fake_graph()
+    for drive in os.environ.get("MIRAGE_GRAPH_DRIVES", "").split(","):
+        if drive and drive not in server.drives:
+            server.add_drive(drive)
+    print(state.base, flush=True)
+    try:
+        await asyncio.Future()
+    finally:
+        await runner.cleanup()
+
+
+if __name__ == "__main__":
+    asyncio.run(serve_forever())

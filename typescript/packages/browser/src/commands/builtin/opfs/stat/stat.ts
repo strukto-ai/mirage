@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, command, specOf, statGeneric } from '@struktoai/mirage-core'
+import { ResourceName, command, overlaidStat, specOf, statGeneric } from '@struktoai/mirage-core'
 import { stat as opfsStat } from '../../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../../accessor/opfs.ts'
 
@@ -21,5 +21,9 @@ export const OPFS_STAT = command({
   resource: ResourceName.OPFS,
   spec: specOf('stat'),
   fn: (accessor: OPFSAccessor, paths, _texts, opts) =>
-    statGeneric(paths, opts, (p) => opfsStat(accessor, p)),
+    statGeneric(
+      paths,
+      opts,
+      overlaidStat((p) => opfsStat(accessor, p), opts.statOverlay),
+    ),
 })

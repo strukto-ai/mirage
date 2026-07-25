@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "rg_l_multi_file",
+      "seq": 464,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -l hello /data/rgm/d1/f1.txt /data/rgm/d2/f2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgm/d1/f1.txt\n/data/rgm/d2/f2.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

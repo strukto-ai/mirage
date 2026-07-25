@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "column_n",
+      "seq": 330,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "column -t /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice  30  engineer\nbob    25  designer\ncarol  40  manager\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    }
+  ]
+}

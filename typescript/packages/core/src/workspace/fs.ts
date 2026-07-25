@@ -20,6 +20,7 @@ import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import type { Resource } from '../resource/base.ts'
 import type { FileStat, MountMode, PathSpec } from '../types.ts'
 import { FileType } from '../types.ts'
+import { isMissingPath } from '../utils/errors.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
@@ -153,12 +154,18 @@ export class WorkspaceFS {
     return result
   }
 
+  // The three probes below answer "is this path there?", so only a genuine
+  // missing path may read back as false. An auth failure, a timeout, or a
+  // backend bug is not an answer to that question: swallowing it would let a
+  // caller act on a false "missing" (overwrite, recreate, skip). Mirrors
+  // Python's `(FileNotFoundError, ValueError)` swallow set.
   async exists(path: string): Promise<boolean> {
     try {
       await this.stat(path)
       return true
-    } catch {
-      return false
+    } catch (err) {
+      if (isMissingPath(err)) return false
+      throw err
     }
   }
 
@@ -166,8 +173,9 @@ export class WorkspaceFS {
     try {
       const s = await this.stat(path)
       return s.type === FileType.DIRECTORY
-    } catch {
-      return false
+    } catch (err) {
+      if (isMissingPath(err)) return false
+      throw err
     }
   }
 
@@ -175,8 +183,9 @@ export class WorkspaceFS {
     try {
       const s = await this.stat(path)
       return s.type !== FileType.DIRECTORY
-    } catch {
-      return false
+    } catch (err) {
+      if (isMissingPath(err)) return false
+      throw err
     }
   }
 

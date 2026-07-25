@@ -211,7 +211,8 @@ def test_ls_command_stderr_on_missing_dir():
 
     async def _run():
         result = await ws.execute("ls /nonexistent")
-        assert result.exit_code == 1
+        # GNU ls exits 2 for an inaccessible command-line operand.
+        assert result.exit_code == 2
         assert b"nonexistent" in await result.materialize_stderr()
 
     asyncio.run(_run())

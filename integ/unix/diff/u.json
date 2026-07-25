@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "diff_u",
+      "seq": 316,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "diff -u /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "--- /data/sorted_a.txt\n+++ /data/sorted_b.txt\n@@ -1,3 +1,3 @@\n-apple\n banana\n-cherry\n+date\n+elder\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u"
+      ]
+    }
+  ]
+}

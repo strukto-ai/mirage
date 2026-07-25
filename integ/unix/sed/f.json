@@ -1,0 +1,115 @@
+{
+  "cases": [
+    {
+      "id": "sed_f_file",
+      "seq": 204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 's/world/EARTH/' | tee /data/prog.sed > /dev/null && sed -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nEARTH\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "sed_f_multi",
+      "seq": 205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 's/world/EARTH/;s/foo/FOO/' | tee /data/prog.sed > /dev/null && sed -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nEARTH\nFOO\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "sed_f_stdin",
+      "seq": 207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 's/world/EARTH/' | tee /data/prog.sed > /dev/null && cat /data/a.txt | sed -f /data/prog.sed && rm /data/prog.sed",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nEARTH\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

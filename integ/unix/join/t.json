@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "join_t",
+      "seq": 331,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "join -t , /data/abc.csv /data/abc.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,1,1\nb,2,2\nc,3,3\nd,4,4\ne,5,5\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    }
+  ]
+}

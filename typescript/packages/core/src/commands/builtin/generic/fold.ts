@@ -50,19 +50,51 @@ function foldLine(line: string, width: number, breakSpaces: boolean): string {
   return parts.join('\n')
 }
 
+function foldBytes(data: Uint8Array, width: number): Uint8Array {
+  const output: number[] = []
+  let column = 0
+  for (const byte of data) {
+    if (byte === 0x0a) {
+      output.push(byte)
+      column = 0
+      continue
+    }
+    if (column === width) {
+      output.push(0x0a)
+      column = 0
+    }
+    output.push(byte)
+    column += 1
+  }
+  return new Uint8Array(output)
+}
+
+function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out
+}
+
 export async function foldGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const width = typeof opts.flags.w === 'string' ? Number.parseInt(opts.flags.w, 10) : 80
-  const breakSpaces = opts.flags.s === true
+  const widthValue = opts.flags.w ?? opts.flags.width
+  const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 80
+  const breakSpaces = opts.flags.s === true || opts.flags.spaces === true
+  const countBytes = opts.flags.b === true || opts.flags.bytes === true
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still fold (GNU fold).
     const [ok, err] = await readOperands(paths, stream, 'fold')
     const io = operandsIo(err)
     if (ok.length === 0 && err !== '') return [null, io]
+    if (countBytes) return [concatBytes(ok.map((operand) => foldBytes(operand.data, width))), io]
     const allLines: string[] = []
     for (const o of ok) {
       const data = DEC.decode(o.data)
@@ -78,6 +110,7 @@ export async function foldGeneric(
   if (stdinData === null) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('fold: missing operand\n') })]
   }
+  if (countBytes) return [foldBytes(stdinData, width), new IOResult()]
   const lines = splitLinesNoTrailing(DEC.decode(stdinData))
   const result: ByteSource =
     lines.length === 0

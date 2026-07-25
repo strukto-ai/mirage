@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "fold_default",
+      "seq": 337,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fold /data/c.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\nbeta\ngamma\ndelta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_empty_file",
+      "seq": 341,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo foldemptyf=$(fold /data/empty.txt | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "foldemptyf=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_blank_in",
+      "seq": 344,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo foldblankin=$(echo | fold | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "foldblankin=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

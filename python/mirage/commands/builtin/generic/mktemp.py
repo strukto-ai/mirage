@@ -15,20 +15,25 @@ def _rand_suffix(length: int) -> str:
     return "".join(random.choices(_ALPHABET, k=length))
 
 
-def _build_path(p: str | PathSpec | None, t: bool,
-                texts: tuple[str, ...]) -> tuple[PathSpec, PathSpec]:
-    if t or p is None:
-        parent = PathSpec.from_str_path("/tmp")
-    elif isinstance(p, PathSpec):
-        parent = p
-    else:
-        parent = PathSpec.from_str_path(p)
+def _build_path(p: str | PathSpec | None, t: bool, texts: tuple[str, ...],
+                suffix: str) -> tuple[PathSpec, PathSpec]:
     template = texts[0] if texts else "tmp.XXXXXXXXXX"
+    if t:
+        parent = PathSpec.from_str_path("/tmp")
+    elif p is not None:
+        parent = p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
+    elif "/" in template:
+        # An explicit path template names its own directory (GNU); only a
+        # bare template with no -p/-t falls back to the temp dir.
+        head, _, template = template.rpartition("/")
+        parent = PathSpec.from_str_path(head or "/")
+    else:
+        parent = PathSpec.from_str_path("/tmp")
     i = len(template)
     while i > 0 and template[i - 1] == "X":
         i -= 1
     if i < len(template):
-        name = template[:i] + _rand_suffix(len(template) - i)
+        name = template[:i] + _rand_suffix(len(template) - i) + suffix
     else:
         name = f"{template}.{_rand_suffix(8)}"
     virtual = f"{parent.virtual.rstrip('/')}/{name}"
@@ -45,15 +50,26 @@ async def mktemp(
     d: bool = False,
     p: str | PathSpec | None = None,
     t: bool = False,
+    dry_run: bool = False,
+    suffix: str = "",
+    quiet: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(texts) > 1:
         raise extra_operand_error(CommandName.MKTEMP, texts[1])
-    path, parent = _build_path(p, t, texts)
-    await mkdir_fn(parent, parents=True)
-    if d:
-        await mkdir_fn(path)
-    else:
-        await write_bytes_fn(path, b"")
+    path, parent = _build_path(p, t, texts, suffix)
+    if not dry_run:
+        # -q suppresses diagnostics about file/directory creation only
+        # (GNU); usage errors and internal failures still propagate.
+        try:
+            await mkdir_fn(parent, parents=True)
+            if d:
+                await mkdir_fn(path)
+            else:
+                await write_bytes_fn(path, b"")
+        except OSError:
+            if not quiet:
+                raise
+            return None, IOResult(exit_code=1)
     return (path.virtual + "\n").encode(), IOResult()
 
 

@@ -25,6 +25,8 @@ export interface GCSConfig {
   region?: string
   timeoutMs?: number
   forcePathStyle?: boolean
+  keyPrefix?: string
+  proxy?: string
 }
 
 export interface GCSConfigRedacted {
@@ -34,6 +36,9 @@ export interface GCSConfigRedacted {
   endpoint: string
   region: string
   timeoutMs?: number
+  forcePathStyle?: boolean
+  keyPrefix?: string
+  proxy?: string
 }
 
 const GCSConfigSchema = z.object({
@@ -43,6 +48,9 @@ const GCSConfigSchema = z.object({
   endpoint: z.string(),
   region: z.string(),
   timeoutMs: z.number().optional(),
+  forcePathStyle: z.boolean().optional(),
+  keyPrefix: z.string().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function gcsToS3Config(config: GCSConfig): S3Config {
@@ -54,6 +62,8 @@ export function gcsToS3Config(config: GCSConfig): S3Config {
     secretAccessKey: config.secretAccessKey,
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -71,11 +81,12 @@ export function normalizeGcsConfig(input: Record<string, unknown>): GCSConfig {
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
       endpoint_url: 'endpoint',
+      path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as GCSConfig
 }

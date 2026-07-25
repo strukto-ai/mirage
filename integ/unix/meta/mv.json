@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "meta_mv_carries",
+      "seq": 200009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rwx-----x 1 alice dev 6 Mar  4 12:00 g.txt\n-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

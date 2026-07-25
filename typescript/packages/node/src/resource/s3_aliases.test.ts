@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ResourceName, type S3Config as S3CoreConfig } from '@struktoai/mirage-core'
+import { ResourceName } from '@struktoai/mirage-core'
 import { S3Resource } from './s3/s3.ts'
+import type { S3Config } from './s3/config.ts'
 import {
   aliyunToS3Config,
   normalizeAliyunConfig,
@@ -38,6 +39,10 @@ import {
   type DigitalOceanConfig,
 } from './digitalocean/config.ts'
 import { DigitalOceanResource } from './digitalocean/digitalocean.ts'
+import { gcsToS3Config, type GCSConfig } from './gcs/config.ts'
+import { ociToS3Config, type OCIConfig } from './oci/config.ts'
+import { r2ToS3Config, type R2Config } from './r2/config.ts'
+import { supabaseToS3Config, type SupabaseConfig } from './supabase/config.ts'
 import { minioToS3Config, normalizeMinIOConfig, type MinIOConfig } from './minio/config.ts'
 import { MinIOResource } from './minio/minio.ts'
 import {
@@ -158,13 +163,18 @@ describe('region-derived S3 aliases', () => {
     })
 
     it(`${c.name}: toS3Config maps fields`, () => {
-      const s3 = c.toS3({ ...c.make(c.region), timeoutMs: 5000 } as never)
+      const s3 = c.toS3({
+        ...c.make(c.region),
+        timeoutMs: 5000,
+        proxy: 'http://localhost:8080',
+      } as never)
       expect(s3.bucket).toBe('b')
       expect(s3.region).toBe(c.region)
       expect(s3.endpoint).toBe(c.expectedEndpoint)
       expect(s3.accessKeyId).toBe('AKIA-LEAK')
       expect(s3.secretAccessKey).toBe('SECRET-LEAK')
       expect(s3.timeoutMs).toBe(5000)
+      expect(s3.proxy).toBe('http://localhost:8080')
       expect(s3.forcePathStyle).toBeUndefined()
     })
 
@@ -175,14 +185,18 @@ describe('region-derived S3 aliases', () => {
         access_key_id: 'k',
         secret_access_key: 's',
         endpoint_url: 'https://custom.example.com',
+        path_style: true,
+        key_prefix: 'team/reports',
         timeout: 30,
         proxy: 'http://localhost:8080',
       }) as unknown as Record<string, unknown>
       expect(norm.accessKeyId).toBe('k')
       expect(norm.secretAccessKey).toBe('s')
       expect(norm.endpoint).toBe('https://custom.example.com')
+      expect(norm.forcePathStyle).toBe(true)
+      expect(norm.keyPrefix).toBe('team/reports')
       expect(norm.timeoutMs).toBe(30000)
-      expect(norm).not.toHaveProperty('proxy')
+      expect(norm.proxy).toBe('http://localhost:8080')
       expect(norm).not.toHaveProperty('access_key_id')
     })
 
@@ -196,11 +210,14 @@ describe('region-derived S3 aliases', () => {
     })
 
     it(`${c.name}: getState redacts creds`, async () => {
-      const state = await c.build(c.make(c.region) as never).getState()
+      const state = await c
+        .build({ ...c.make(c.region), proxy: 'http://user:secret@localhost:8080' } as never)
+        .getState()
       expect(state.type).toBe(c.kind)
       const blob = JSON.stringify(state)
       expect(blob.includes('AKIA-LEAK')).toBe(false)
       expect(blob.includes('SECRET-LEAK')).toBe(false)
+      expect(blob.includes('user:secret')).toBe(false)
       expect(blob.includes('<REDACTED>')).toBe(true)
     })
   }
@@ -230,12 +247,16 @@ describe('wasabi endpoint defaults', () => {
       bucket: 'b',
       access_key_id: 'k',
       secret_access_key: 's',
+      path_style: true,
+      key_prefix: 'team/reports',
       timeout: 30,
       proxy: 'p',
     }) as unknown as Record<string, unknown>
     expect(norm.accessKeyId).toBe('k')
+    expect(norm.forcePathStyle).toBe(true)
+    expect(norm.keyPrefix).toBe('team/reports')
     expect(norm.timeoutMs).toBe(30000)
-    expect(norm).not.toHaveProperty('proxy')
+    expect(norm.proxy).toBe('p')
   })
 
   it('resource remaps kind and redacts state', async () => {
@@ -252,7 +273,7 @@ const ENDPOINT_CASES = [
   {
     name: 'minio',
     kind: ResourceName.MINIO,
-    toS3: minioToS3Config as (config: never) => S3CoreConfig,
+    toS3: minioToS3Config as (config: never) => S3Config,
     normalize: normalizeMinIOConfig as (input: Record<string, unknown>) => unknown,
     make: (): MinIOConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new MinIOResource(config),
@@ -260,7 +281,7 @@ const ENDPOINT_CASES = [
   {
     name: 'ceph',
     kind: ResourceName.CEPH,
-    toS3: cephToS3Config as (config: never) => S3CoreConfig,
+    toS3: cephToS3Config as (config: never) => S3Config,
     normalize: normalizeCephConfig as (input: Record<string, unknown>) => unknown,
     make: (): CephConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new CephResource(config),
@@ -268,7 +289,7 @@ const ENDPOINT_CASES = [
   {
     name: 'seaweedfs',
     kind: ResourceName.SEAWEEDFS,
-    toS3: seaweedfsToS3Config as (config: never) => S3CoreConfig,
+    toS3: seaweedfsToS3Config as (config: never) => S3Config,
     normalize: normalizeSeaweedFSConfig as (input: Record<string, unknown>) => unknown,
     make: (): SeaweedFSConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new SeaweedFSResource(config),
@@ -297,13 +318,15 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
         access_key_id: 'k',
         secret_access_key: 's',
         path_style: false,
+        key_prefix: 'team/reports',
         timeout: 30,
         proxy: 'p',
       }) as Record<string, unknown>
       expect(norm.endpoint).toBe('http://localhost:9000')
       expect(norm.forcePathStyle).toBe(false)
+      expect(norm.keyPrefix).toBe('team/reports')
       expect(norm.timeoutMs).toBe(30000)
-      expect(norm).not.toHaveProperty('proxy')
+      expect(norm.proxy).toBe('p')
     })
 
     it(`${c.name}: resource remaps kind and redacts state`, async () => {
@@ -316,6 +339,99 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
       expect(blob.includes('AKIA-LEAK')).toBe(false)
       expect(blob.includes('SECRET-LEAK')).toBe(false)
       expect(blob.includes('<REDACTED>')).toBe(true)
+    })
+  }
+})
+
+const PREFIX_CASES = [
+  {
+    name: 'aliyun',
+    config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as AliyunConfig,
+    toS3: aliyunToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'backblaze',
+    config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as BackblazeConfig,
+    toS3: backblazeToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'ceph',
+    config: { ...CREDS, endpoint: 'http://localhost:9000' } as CephConfig,
+    toS3: cephToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'digitalocean',
+    config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as DigitalOceanConfig,
+    toS3: digitalOceanToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'gcs',
+    config: { ...CREDS, forcePathStyle: true } as GCSConfig,
+    toS3: gcsToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'minio',
+    config: { ...CREDS, endpoint: 'http://localhost:9000' } as MinIOConfig,
+    toS3: minioToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'oci',
+    config: { ...CREDS, namespace: 'ns', region: 'us-east-1' } as OCIConfig,
+    toS3: ociToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'qingstor',
+    config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as QingStorConfig,
+    toS3: qingStorToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'r2',
+    config: { ...CREDS, accountId: 'account', forcePathStyle: true } as R2Config,
+    toS3: r2ToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'scaleway',
+    config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as ScalewayConfig,
+    toS3: scalewayToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'seaweedfs',
+    config: { ...CREDS, endpoint: 'http://localhost:9000' } as SeaweedFSConfig,
+    toS3: seaweedfsToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'supabase',
+    config: { ...CREDS, projectRef: 'project', region: 'us-east-1' } as SupabaseConfig,
+    toS3: supabaseToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'tencent',
+    config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as TencentConfig,
+    toS3: tencentToS3Config as (config: never) => S3Config,
+  },
+  {
+    name: 'wasabi',
+    config: { ...CREDS, forcePathStyle: true } as WasabiConfig,
+    toS3: wasabiToS3Config as (config: never) => S3Config,
+  },
+] as const
+
+describe('S3 alias subfolder mounts', () => {
+  for (const c of PREFIX_CASES) {
+    it(`${c.name}: forwards keyPrefix and path style`, () => {
+      const s3 = c.toS3({ ...c.config, keyPrefix: '/team/reports/' } as never)
+      expect(s3.keyPrefix).toBe('/team/reports/')
+      expect(s3.forcePathStyle).toBe(true)
+    })
+  }
+
+  for (const c of PREFIX_CASES) {
+    it(`${c.name}: forwards proxy`, () => {
+      const s3 = c.toS3({
+        ...c.config,
+        proxy: 'http://localhost:8080',
+      } as never)
+      expect(s3.proxy).toBe('http://localhost:8080')
     })
   }
 })

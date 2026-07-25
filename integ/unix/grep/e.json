@@ -1,0 +1,153 @@
+{
+  "cases": [
+    {
+      "id": "grep_e_flag",
+      "seq": 260,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -e world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    },
+    {
+      "id": "grep_e_multi_file",
+      "seq": 262,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -e hello /data/mixed.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mixed.txt:hello WORLD\n/data/a.txt:hello\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    },
+    {
+      "id": "grep_e_multi_pattern",
+      "seq": 263,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -e world -e bar /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    },
+    {
+      "id": "grep_e_f_union",
+      "seq": 267,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -e hello -f /data/patterns.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nbar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e",
+        "f"
+      ]
+    }
+  ]
+}

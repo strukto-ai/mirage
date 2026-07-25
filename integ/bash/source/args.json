@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "source_positional_args",
+      "seq": 609221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo argc=$# a1=$1 a2=$2\\n' > /data/sa.sh && source /data/sa.sh AA BB && rm /data/sa.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "argc=2 a1=AA a2=BB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "source_args_restore_parent",
+      "seq": 609222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo inner=$1\\n' > /data/sb.sh && set -- P1 P2 && source /data/sb.sh QQ && echo after=$1 && rm /data/sb.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "inner=QQ\nafter=P1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "source_args_keep_spelling",
+      "seq": 609223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo a1=$1\\n' > /data/sc.sh && source /data/sc.sh ./sub/x.txt && rm /data/sc.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "a1=./sub/x.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

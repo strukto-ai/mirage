@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "cat_unknown_long_flag",
+      "seq": 273,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat --bogus /data/a.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat: unrecognized option '--bogus'\nTry 'cat --help' for more information.\ncode=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "bogus"
+      ]
+    }
+  ]
+}

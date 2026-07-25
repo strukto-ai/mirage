@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_rm_r_tree",
+      "seq": 769,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/xrt /data2/xrt && echo 1 | tee /data/xrt/f.txt > /dev/null && echo 2 | tee /data2/xrt/f.txt > /dev/null && rm -r /data/xrt /data2/xrt && find /data -name xrt && find /data2 -name xrt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

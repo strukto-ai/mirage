@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "job_fg_no_jobs",
+      "seq": 502790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fg 2>&1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "fg: current: no such job\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "job_fg_waits_current",
+      "seq": 502791,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(sleep 0.2 & fg) 2>/dev/null; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "sleep 0.2\nrc=0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -23,6 +23,23 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return toHex(await sha256(bytes))
 }
 
+async function subtleHex(algo: AlgorithmIdentifier, bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest(algo, bytes as BufferSource)
+  return toHex(new Uint8Array(digest))
+}
+
+export async function sha1Hex(bytes: Uint8Array): Promise<string> {
+  return subtleHex('SHA-1', bytes)
+}
+
+export async function sha384Hex(bytes: Uint8Array): Promise<string> {
+  return subtleHex('SHA-384', bytes)
+}
+
+export async function sha512Hex(bytes: Uint8Array): Promise<string> {
+  return subtleHex('SHA-512', bytes)
+}
+
 const S = [
   7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14,
   20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6,

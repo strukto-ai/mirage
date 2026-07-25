@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
@@ -58,39 +59,68 @@ export async function shufGeneric(
   texts: string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const nFlag = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : null
-  const echoMode = opts.flags.e === true
-  const zeroSep = opts.flags.z === true
-  const repeat = opts.flags.r === true
+  const countValue = opts.flags.n ?? opts.flags.head_count
+  const rangeValue = opts.flags.i ?? opts.flags.input_range
+  const outputValue = opts.flags.o ?? opts.flags.output
+  const nFlag = typeof countValue === 'string' ? Number.parseInt(countValue, 10) : null
+  const inputRange = typeof rangeValue === 'string' ? rangeValue : null
+  const output =
+    outputValue instanceof PathSpec
+      ? outputValue
+      : typeof outputValue === 'string'
+        ? new PathSpec({
+            virtual: outputValue,
+            directory: outputValue,
+            resourcePath: mountKey(outputValue, opts.mountPrefix ?? ''),
+            resolved: true,
+          })
+        : null
+  const echoMode = opts.flags.e === true || opts.flags.echo === true
+  const zeroSep = opts.flags.z === true || opts.flags.zero_terminated === true
+  const repeat = opts.flags.r === true || opts.flags.repeat === true
   const sep = zeroSep ? '\x00' : '\n'
 
-  if (echoMode) {
+  let items: string[]
+  if (inputRange !== null) {
+    const match = /^(-?\d+)-(-?\d+)$/.exec(inputRange)
+    if (match === null) {
+      return [
+        null,
+        new IOResult({
+          exitCode: 1,
+          stderr: ENC.encode(`shuf: invalid input range: ${inputRange}\n`),
+        }),
+      ]
+    }
+    const low = Number.parseInt(match[1] ?? '0', 10)
+    const high = Number.parseInt(match[2] ?? '0', 10)
+    items = []
+    for (let value = low; value <= high; value++) items.push(String(value))
+  } else if (echoMode) {
     const base = paths.length > 0 ? paths.map((p) => p.mountPath) : [...texts]
-    const out = processItems(base, repeat, nFlag)
-    const result: ByteSource = ENC.encode(out.join(sep) + sep)
-    return [result, new IOResult()]
-  }
-
-  if (paths.length > 0) {
-    const allLines: string[] = []
+    items = base
+  } else if (paths.length > 0) {
+    items = []
     for (const p of paths) {
       const data = DEC.decode(await materialize(stream(p)))
-      if (zeroSep) for (const l of data.split('\x00')) allLines.push(l)
-      else for (const l of splitLinesNoTrailing(data)) allLines.push(l)
+      if (zeroSep) for (const l of data.split('\x00')) items.push(l)
+      else for (const l of splitLinesNoTrailing(data)) items.push(l)
     }
-    const out = processItems(allLines, repeat, nFlag)
-    const result: ByteSource = ENC.encode(out.join(sep) + sep)
-    return [result, new IOResult()]
+  } else {
+    const stdinData = await readStdinAsync(opts.stdin)
+    if (stdinData === null) {
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('shuf: missing operand\n') })]
+    }
+    const text = DEC.decode(stdinData)
+    items = zeroSep ? text.split('\x00') : splitLinesNoTrailing(text)
   }
-
-  const stdinData = await readStdinAsync(opts.stdin)
-  if (stdinData === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('shuf: missing operand\n') })]
-  }
-  const text = DEC.decode(stdinData)
-  const lines = zeroSep ? text.split('\x00') : splitLinesNoTrailing(text)
-  const out = processItems(lines, repeat, nFlag)
+  const out = processItems(items, repeat, nFlag)
   const result: ByteSource = ENC.encode(out.join(sep) + sep)
+  if (output !== null) {
+    await write(output, result)
+    return [null, new IOResult({ writes: { [output.mountPath]: result } })]
+  }
   return [result, new IOResult()]
 }

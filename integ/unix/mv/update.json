@@ -1,0 +1,144 @@
+{
+  "cases": [
+    {
+      "id": "mv_u_skips_newer_dest_keeps_source",
+      "seq": 613030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvu1 && printf 'stale\\n' > /data/mvu1/src.txt && printf 'fresh\\n' > /data/mvu1/dst.txt && touch -d '2020-01-01T00:00:00' /data/mvu1/src.txt && touch -d '2024-01-01T00:00:00' /data/mvu1/dst.txt && mv -u /data/mvu1/src.txt /data/mvu1/dst.txt && cat /data/mvu1/src.txt /data/mvu1/dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "stale\nfresh\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u"
+      ]
+    },
+    {
+      "id": "mv_u_replaces_older_dest",
+      "seq": 613031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvu2 && printf 'new\\n' > /data/mvu2/src.txt && printf 'old\\n' > /data/mvu2/dst.txt && touch -d '2024-01-01T00:00:00' /data/mvu2/src.txt && touch -d '2020-01-01T00:00:00' /data/mvu2/dst.txt && mv -u /data/mvu2/src.txt /data/mvu2/dst.txt && cat /data/mvu2/dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "new\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u"
+      ]
+    },
+    {
+      "id": "mv_u_source_removed",
+      "seq": 613032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls /data/mvu2",
+      "expect": {
+        "exit": 0,
+        "stdout": "dst.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u"
+      ]
+    },
+    {
+      "id": "mv_update_none_skips_and_keeps_source",
+      "seq": 613082,
+      "command": "mkdir -p /data/mvu3 && printf 'S\\n' > /data/mvu3/src.txt && printf 'D\\n' > /data/mvu3/dst.txt && mv --update=none /data/mvu3/src.txt /data/mvu3/dst.txt && cat /data/mvu3/dst.txt && ls /data/mvu3",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\ndst.txt\nsrc.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "update"
+      ],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    }
+  ]
+}

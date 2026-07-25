@@ -37,6 +37,10 @@ from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.resource.langfuse.langfuse import LangfuseResource
 from mirage.resource.linear.config import LinearConfig
 from mirage.resource.linear.linear import LinearResource
+from mirage.resource.mem0.config import Mem0Config
+from mirage.resource.mem0.mem0 import Mem0Resource
+from mirage.resource.onedrive import OneDriveConfig, OneDriveResource
+from mirage.resource.sharepoint import SharePointConfig, SharePointResource
 from mirage.resource.slack.config import SlackConfig
 from mirage.resource.slack.slack import SlackResource
 from mirage.resource.trello.config import TrelloConfig
@@ -77,6 +81,11 @@ def _resources() -> list[tuple[str, str, object]]:
         ("langfuse", "/langfuse",
          LangfuseResource(LangfuseConfig(public_key="p", secret_key="s"))),
         ("linear", "/linear", LinearResource(LinearConfig(api_key="k"))),
+        ("mem0", "/mem0", Mem0Resource(Mem0Config(api_key="k", user_id="u"))),
+        ("onedrive", "/onedrive",
+         OneDriveResource(OneDriveConfig(access_token="t"))),
+        ("sharepoint", "/sharepoint",
+         SharePointResource(SharePointConfig(access_token="t"))),
         ("slack", "/slack", SlackResource(SlackConfig(token="x"))),
         ("trello", "/trello",
          TrelloResource(TrelloConfig(api_key="k", api_token="t"))),
@@ -86,8 +95,8 @@ def _resources() -> list[tuple[str, str, object]]:
 # Invalid -maxdepth/-mindepth/-size/-mtime must be rejected during flag
 # parsing, before any network call, identically on every backend.
 # Cross-checked py vs ts. (github needs a live repo at construct, notion needs
-# an OAuth provider, hf_buckets validates the bucket id, onedrive is py-only —
-# all excluded from this cred-free cross-language suite.)
+# an OAuth provider and hf_buckets validates the bucket id, so those are
+# excluded from this cred-free cross-language suite.)
 ARG_ERROR_CASES = [
     ("maxdepth", "-maxdepth abc"),
     ("mindepth", "-mindepth xx"),

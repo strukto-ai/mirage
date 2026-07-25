@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "jq_c_compact",
+      "seq": 601140,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qjq && printf '{\"b\":2,\"a\":1}\\n' > /data/qjq/j.json && jq -c . /data/qjq/j.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"b\":2,\"a\":1}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    }
+  ]
+}

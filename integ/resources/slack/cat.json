@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "slack_cat_thread",
+      "seq": 520013,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/engineering__C3/2026-01-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U8\",\"text\":\"PR #326 is up for the cache refactor, can someone review\",\"ts\":\"1768819073.000650\"}\n{\"type\":\"message\",\"user\":\"U4\",\"text\":\"approved, ship it\",\"ts\":\"1768819111.000651\",\"thread_ts\":\"1768819073.000650\"}\n{\"type\":\"message\",\"user\":\"U5\",\"text\":\"deploy #2064 succeeded on preview\",\"ts\":\"1768827382.000652\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_reactions",
+      "seq": 520014,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/engineering__C3/2026-01-11/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U14\",\"text\":\"the queue timeout needs a longer budget\",\"ts\":\"1768128917.000584\",\"reactions\":[{\"name\":\"pray\",\"users\":[\"U15\",\"U4\"],\"count\":2}]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_layoff",
+      "seq": 520015,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U1\",\"text\":\"kudos to Frank for the customer save\",\"ts\":\"1766149911.000425\"}\n{\"type\":\"message\",\"user\":\"U7\",\"text\":\"today we made the hard decision to reduce our team, thank you erin and frank for everything\",\"ts\":\"1766165985.000426\",\"reactions\":[{\"name\":\"pray\",\"users\":[\"U8\",\"U1\",\"U2\"],\"count\":3},{\"name\":\"heart\",\"users\":[\"U3\"],\"count\":1}]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_dm",
+      "seq": 520016,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/dms/dave__D7/2026-03-10/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U4\",\"text\":\"nice work today, genuinely\",\"ts\":\"1773157281.001128\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_csv_file",
+      "seq": 520017,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "suite,cases,passed,accuracy\nrouting,500,472,0.944\ntool_selection,500,461,0.922\npermission,300,300,1.000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_cat_user",
+      "seq": 520018,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/users/priya__U7.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}",
+        "stderr": ""
+      }
+    }
+  ]
+}

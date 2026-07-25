@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "find_flags_provision",
+      "seq": 500300,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/f4/sub1/skipme /data/f4/del && printf 'alpha inner\\n' > /data/f4/sub1/inner.txt && printf 'alpha skip\\n' > /data/f4/sub1/skipme/deep.txt && printf 'x\\n' > /data/f4/del/f1.tmp && printf 'y\\n' > /data/f4/del/f2.tmp && printf 'keep\\n' > /data/f4/del/keep.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_parens_or",
+      "seq": 500306,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/f4/sub1 \\( -name inner.txt -o -name deep.txt \\)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

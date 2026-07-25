@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { enoent, enotdir, enotempty } from '../../utils/errors.ts'
 import { DropboxApiError } from './_client.ts'
 import { deletePath, getMetadata, listFolder } from './api.ts'
-import { invalidateAncestors } from './invalidate.ts'
+import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 
 // delete_v2 removes a folder RECURSIVELY; kernel/GNU rmdir must fail

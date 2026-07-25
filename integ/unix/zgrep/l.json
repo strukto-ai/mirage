@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_l_files_only",
+      "seq": 500502,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "zgrep -l alpha /data/z4/notes.txt.gz /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/z4/notes.txt.gz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

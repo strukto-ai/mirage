@@ -28,6 +28,9 @@ config = SharePointConfig(
     # Optional:
     # tenant_host="contoso.sharepoint.com",  # restrict to one tenant host
     # site_filter="Engineering",             # narrow the site search
+    # site="Engineering",                    # mount one site
+    # drive="Documents",                     # mount one library
+    # key_prefix="team/reports",             # mount one folder subtree
     # timeout=30,
     # max_retries=5,
 )
@@ -47,6 +50,9 @@ drives for you. Both `READ` and `WRITE` modes are supported.
 | `access_token` | Yes      | Microsoft Graph OAuth2 bearer token (string or callable provider) |
 | `tenant_host`  | No       | Restrict resolution to a single SharePoint host                   |
 | `site_filter`  | No       | Search term passed to `/sites?search=` to narrow discovery        |
+| `site`         | No       | Scope the mount to one site; use together with `drive`            |
+| `drive`        | No       | Scope the mount to one document library; use together with `site` |
+| `key_prefix`   | No       | Folder path exposed as the mount root in a scoped library         |
 | `timeout`      | No       | Request timeout in seconds (default `30`)                          |
 | `max_retries`  | No       | Max retries on `429`/`5xx` with backoff (default `5`)             |
 
@@ -82,6 +88,11 @@ For example:
 Path mapping: virtual `/sharepoint/Engineering/Documents/spec.md` resolves the
 site `Engineering` to a site id, the library `Documents` to a drive id, then
 reads the driveItem at `/root:/spec.md`.
+
+When `site` and `drive` are configured, those two namespace levels disappear.
+Adding `key_prefix="team/reports"` makes that folder the mount root, so virtual
+`/sharepoint/q1.csv` resolves to the driveItem at
+`/root:/team/reports/q1.csv`.
 
 ## Versioning and Snapshots
 

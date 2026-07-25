@@ -18,8 +18,9 @@ STREAM_COMMANDS = frozenset(
     {Cmd.CAT, Cmd.NL, Cmd.SORT, Cmd.CUT, Cmd.SED, Cmd.REV, Cmd.AWK})
 FANOUT_COMMANDS = frozenset({
     Cmd.GREP, Cmd.RG, Cmd.HEAD, Cmd.TAIL, Cmd.WC, Cmd.DU, Cmd.FILE, Cmd.MD5,
-    Cmd.SHA256SUM, Cmd.STAT, Cmd.STRINGS, Cmd.TAC, Cmd.LS, Cmd.FIND, Cmd.RM,
-    Cmd.TOUCH, Cmd.MKDIR, Cmd.TEE
+    Cmd.MD5SUM, Cmd.SHA1SUM, Cmd.SHA256SUM, Cmd.SHA384SUM, Cmd.SHA512SUM,
+    Cmd.STAT, Cmd.STRINGS, Cmd.TAC, Cmd.LS, Cmd.FIND, Cmd.RM, Cmd.RMDIR,
+    Cmd.UNLINK, Cmd.TOUCH, Cmd.MKDIR, Cmd.TEE
 })
 RELAY_COMMANDS = frozenset(
     {Cmd.CP, Cmd.MV, Cmd.DIFF, Cmd.CMP, Cmd.PASTE, Cmd.COMM, Cmd.JOIN})

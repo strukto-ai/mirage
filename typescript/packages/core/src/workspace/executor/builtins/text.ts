@@ -15,8 +15,16 @@
 import { interpretEscapes } from '../../../commands/builtin/utils/escapes.ts'
 import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
+import { arrayExtent, arraySet } from '../../../shell/array.ts'
+import { arrayIndex } from '../../expand/variable.ts'
+import { sessionEntry, setSessionEntry } from '../../session/session.ts'
+import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
+
+// A subscript must be non-empty: bash rejects `a[]` as an invalid
+// identifier, while `a[ ]` is a valid arithmetic 0.
+export const PRINTF_TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?$/
 
 /**
  * Print arguments, honoring GNU echo's option rules.
@@ -120,6 +128,34 @@ function numericValue(value: string): [bigint, boolean] {
   return parsePrintfInt(value)
 }
 
+function isDecimalDigit(code: number): boolean {
+  return code >= 48 && code <= 57
+}
+
+function isDecimalFloat(value: string): boolean {
+  let index = 0
+  if (value[index] === '+' || value[index] === '-') index += 1
+  const integerStart = index
+  while (isDecimalDigit(value.charCodeAt(index))) index += 1
+  const integerDigits = index - integerStart
+  let fractionalDigits = 0
+  if (value[index] === '.') {
+    index += 1
+    const fractionalStart = index
+    while (isDecimalDigit(value.charCodeAt(index))) index += 1
+    fractionalDigits = index - fractionalStart
+  }
+  if (integerDigits === 0 && fractionalDigits === 0) return false
+  if (value[index] === 'e' || value[index] === 'E') {
+    index += 1
+    if (value[index] === '+' || value[index] === '-') index += 1
+    const exponentStart = index
+    while (isDecimalDigit(value.charCodeAt(index))) index += 1
+    if (index === exponentStart) return false
+  }
+  return index === value.length
+}
+
 /** Resolve a floating-point argument (decimal, hex float, inf/nan, or the leading-quote code-point form). Returns [value, ok]. */
 function parseFloatArg(value: string): [number, boolean] {
   const s = value.trim()
@@ -133,7 +169,7 @@ function parseFloatArg(value: string): [number, boolean] {
     const v = parseHexFloat(s)
     return v === null ? [0, false] : [v, true]
   }
-  if (/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return [Number(s), true]
+  if (isDecimalFloat(s)) return [Number(s), true]
   const l = s.toLowerCase().replace(/^[+-]/, '')
   if (l === 'inf' || l === 'infinity') return [s.startsWith('-') ? -Infinity : Infinity, true]
   if (l === 'nan') return [NaN, true]
@@ -728,6 +764,48 @@ function runPrintf(fmt: string, args: string[]): [string, string[]] {
 }
 
 /**
+ * Assign `value` to a `printf -v` target (a scalar or `name[idx]`).
+ *
+ * A bare name assigns element 0 when the name already holds an array,
+ * leaving its other elements alone, as bash does. Nothing is mutated
+ * unless the whole assignment succeeds: a readonly name or an
+ * out-of-range subscript leaves the variable exactly as it was.
+ */
+function assignPrintfTarget(
+  session: Session,
+  name: string,
+  subscript: string | undefined,
+  value: string,
+): 'ok' | 'readonly' | 'subscript' {
+  if (session.readonlyVars.has(name)) return 'readonly'
+  if (subscript === undefined) {
+    const existing = sessionEntry(session.arrays, name)
+    if (existing === undefined) setSessionEntry(session.env, name, value)
+    else arraySet(existing, 0, value)
+    return 'ok'
+  }
+  const existing = sessionEntry(session.arrays, name)
+  const fromScalar = existing === undefined
+  let arr = existing
+  if (arr === undefined) {
+    // An existing scalar becomes element 0, even when empty: bash
+    // resolves `x[-1]` against the length-1 array that produces.
+    const scalar = sessionEntry(session.env, name)
+    arr = scalar === undefined ? [] : [scalar]
+  }
+  let idx = arrayIndex(subscript, session.env)
+  if (idx < 0) idx += arrayExtent(arr)
+  if (idx < 0) return 'subscript'
+  arraySet(arr, idx, value)
+  if (fromScalar) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.env[name]
+  }
+  setSessionEntry(session.arrays, name, arr)
+  return 'ok'
+}
+
+/**
  * Print formatted output, honoring GNU printf's format-reuse rules.
  *
  * Supports `%s %c %b %q`, the integer conversions `%d %i %o %u %x %X`,
@@ -737,19 +815,76 @@ function runPrintf(fmt: string, args: string[]): [string, string[]] {
  * arguments remain after one pass the format is reused until they are
  * exhausted; a missing argument renders as the empty string / `0`.
  * Integers wrap at 64 bits; `%a` formats at IEEE double precision.
+ *
+ * With `-v NAME` the formatted text is stored in the shell variable
+ * `NAME` (or the array element `NAME[idx]`) instead of written to
+ * stdout, matching GNU printf. An unusable `NAME` is rejected before the
+ * format runs (status 2); a readonly name or an out-of-range subscript
+ * still reports the format's own errors first, then fails with status 1
+ * and leaves the variable untouched.
  */
-export function handlePrintf(args: string[]): Result {
+export function handlePrintf(args: string[], session: Session): Result {
+  let target: string | null = null
+  let parsed: RegExpExecArray | null = null
+  if (args.length >= 2 && args[0] === '-v') {
+    target = args[1] ?? ''
+    args = args.slice(2)
+    parsed = PRINTF_TARGET_RE.exec(target)
+    if (parsed === null) {
+      // bash validates the name before formatting, so a bad name
+      // suppresses the conversion errors the format would report.
+      const err = new TextEncoder().encode(`printf: \`${target}': not a valid identifier\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
+      ]
+    }
+  }
   if (args.length === 0) {
+    if (target !== null) {
+      const err = new TextEncoder().encode('printf: usage: printf [-v var] format [arguments]\n')
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'printf', exitCode: 2, stderr: err }),
+      ]
+    }
     return [new Uint8Array(), new IOResult(), new ExecutionNode({ command: 'printf', exitCode: 0 })]
   }
   const [output, errors] = runPrintf(args[0] ?? '', args.slice(1))
+  const errBytes = errors.length > 0 ? new TextEncoder().encode(errors.join('')) : null
+  if (target !== null && parsed !== null) {
+    const base = parsed[1] ?? ''
+    const status = assignPrintfTarget(session, base, parsed[2], output)
+    if (status !== 'ok') {
+      const detail =
+        status === 'readonly'
+          ? `bash: ${base}: readonly variable\n`
+          : `bash: ${target}: bad array subscript\n`
+      const err = new TextEncoder().encode(errors.join('') + detail)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: err }),
+        new ExecutionNode({ command: 'printf', exitCode: 1, stderr: err }),
+      ]
+    }
+    const exitCode = errors.length > 0 ? 1 : 0
+    if (errBytes !== null) {
+      return [
+        null,
+        new IOResult({ exitCode, stderr: errBytes }),
+        new ExecutionNode({ command: 'printf', exitCode, stderr: errBytes }),
+      ]
+    }
+    return [null, new IOResult({ exitCode }), new ExecutionNode({ command: 'printf', exitCode })]
+  }
   const out = new TextEncoder().encode(output)
-  if (errors.length > 0) {
-    const err = new TextEncoder().encode(errors.join(''))
+  if (errBytes !== null) {
     return [
       out,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: 'printf', exitCode: 1, stderr: err }),
+      new IOResult({ exitCode: 1, stderr: errBytes }),
+      new ExecutionNode({ command: 'printf', exitCode: 1, stderr: errBytes }),
     ]
   }
   return [out, new IOResult(), new ExecutionNode({ command: 'printf', exitCode: 0 })]

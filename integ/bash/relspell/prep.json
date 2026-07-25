@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "relspell_prep",
+      "seq": 403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/g14/sub && cd /data/g14 && printf 'hello\n' | tee sub/a.txt > /dev/null && printf 'hello\n' | tee sub/b.txt > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

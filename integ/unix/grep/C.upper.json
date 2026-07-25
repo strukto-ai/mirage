@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "id": "grep_C1_context",
+      "seq": 500211,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -C1 warning /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\ninfo: all good\n",
+        "stderr": ""
+      },
+      "flags": [
+        "C"
+      ]
+    },
+    {
+      "id": "grep_C1_merges_groups",
+      "seq": 500212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -C1 error /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: disk full\nwarning: low memory\ninfo: all good\nerror: timeout\nnote: done\n",
+        "stderr": ""
+      },
+      "flags": [
+        "C"
+      ]
+    }
+  ]
+}

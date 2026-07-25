@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "find_depth",
+      "seq": 300,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -depth -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      },
+      "flags": [
+        "depth",
+        "type"
+      ]
+    }
+  ]
+}

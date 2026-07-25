@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "diff_i_ignorecase",
+      "seq": 601120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qdiff && printf 'Hello\\n' > /data/qdiff/d1 && printf 'hello\\n' > /data/qdiff/d2 && diff -i /data/qdiff/d1 /data/qdiff/d2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    }
+  ]
+}

@@ -76,7 +76,9 @@ async def test_stat_folder_is_directory():
         result = await stat(_accessor(), PathSpec.from_str_path("/Docs"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "Docs"
-    assert result.size == 4096
+    assert result.size is None
+    assert result.extra["size_bytes"] == 4096
+    assert result.extra["child_count"] == 2
     assert result.modified == "2026-05-01T10:00:00Z"
 
 
@@ -140,4 +142,5 @@ async def test_stat_from_index_folder_returns_modified():
     result = await stat(_accessor(), PathSpec.from_str_path("/Docs"), index)
     assert result.type == FileType.DIRECTORY
     assert result.modified == "2026-05-28T02:10:00Z"
-    assert result.size == 9000
+    assert result.size is None
+    assert result.extra["size_bytes"] == 9000

@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "uniq_invalid_count",
+      "seq": 600006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "uniq -f 2junk /data/dup.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "uniq: invalid count: '2junk'"
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

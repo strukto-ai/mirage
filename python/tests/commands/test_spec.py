@@ -205,6 +205,7 @@ def test_all_commands_have_specs():
         "find",
         "tree",
         "du",
+        "df",
         "cat",
         "head",
         "tail",
@@ -221,6 +222,9 @@ def test_all_commands_have_specs():
         "cut",
         "mkdir",
         "touch",
+        "chmod",
+        "chown",
+        "chgrp",
         "cp",
         "mv",
         "rm",
@@ -239,7 +243,13 @@ def test_all_commands_have_specs():
         "gunzip",
         "zip",
         "unzip",
+        "md5sum",
+        "sha1sum",
         "sha256sum",
+        "sha384sum",
+        "sha512sum",
+        "rmdir",
+        "unlink",
         "tac",
         "paste",
         "ln",
@@ -279,6 +289,9 @@ def test_all_commands_have_specs():
         "js",
         "node",
         "history",
+        "numfmt",
+        "od",
+        "truncate",
     }
     assert set(SPECS.keys()) == expected
 
@@ -377,7 +390,7 @@ def test_sort_spec():
     spec = SPECS["sort"]
     parsed = parse_command(spec, ["-k", "2", "-t", ",", "-rn", "data.csv"],
                            cwd="/")
-    assert parsed.flag("-k") == "2"
+    assert parsed.flag("-k") == ["2"]
     assert parsed.flag("-t") == ","
     assert parsed.flag("-r") is True
     assert parsed.flag("-n") is True

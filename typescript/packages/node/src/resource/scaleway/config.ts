@@ -21,7 +21,10 @@ export interface ScalewayConfig {
   secretAccessKey: string
   region: string
   endpoint?: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 export interface ScalewayConfigRedacted {
@@ -30,7 +33,10 @@ export interface ScalewayConfigRedacted {
   secretAccessKey: string
   region: string
   endpoint: string
+  forcePathStyle?: boolean
+  keyPrefix?: string
   timeoutMs?: number
+  proxy?: string
 }
 
 const ScalewayConfigSchema = z.object({
@@ -39,7 +45,10 @@ const ScalewayConfigSchema = z.object({
   secretAccessKey: secretStr(),
   region: z.string(),
   endpoint: z.string(),
+  forcePathStyle: z.boolean().optional(),
+  keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
+  proxy: secretStr().optional(),
 })
 
 export function resolvedScalewayEndpoint(config: ScalewayConfig): string {
@@ -55,7 +64,10 @@ export function scalewayToS3Config(config: ScalewayConfig): S3Config {
     endpoint: resolvedScalewayEndpoint(config),
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
+    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }
 
@@ -72,11 +84,12 @@ export function normalizeScalewayConfig(input: Record<string, unknown>): Scalewa
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
       endpoint_url: 'endpoint',
+      path_style: 'forcePathStyle',
+      key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',
     },
     transform: {
       timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
     },
-    drop: ['proxy'],
   }) as unknown as ScalewayConfig
 }

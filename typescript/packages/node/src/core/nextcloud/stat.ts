@@ -6,6 +6,7 @@ import {
   guessType,
   mountPrefixOf,
   ResourceType,
+  stripSlash,
   type IndexCacheStore,
   type PathSpec,
 } from '@struktoai/mirage-core'
@@ -19,7 +20,7 @@ export async function stat(
 ): Promise<FileStat> {
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const raw = rawPathOf(path)
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   if (index !== undefined) {

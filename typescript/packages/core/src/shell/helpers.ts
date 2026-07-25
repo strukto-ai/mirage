@@ -106,6 +106,11 @@ const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.HERESTRING_REDIRECT,
 ])
 
+// RAW_STRING (single quotes) belongs here alongside STRING (double
+// quotes): quoting a redirect target is purely syntactic in bash, so
+// `> 'f'`, `> "f"` and `> f` name the same file. Omitting it left
+// targetNode null and target '', which silently redirected every
+// single-quoted target to one phantom empty path instead of the file.
 const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.WORD,
   NT.CONCATENATION,
@@ -113,6 +118,7 @@ const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.EXPANSION,
   NT.COMMAND_SUBSTITUTION,
   NT.STRING,
+  NT.RAW_STRING,
   NT.PROCESS_SUBSTITUTION,
 ])
 
@@ -336,14 +342,17 @@ export function getCaseWord(node: TSNodeLike): TSNodeLike {
  * every statement up to its ;; terminator, so multi-statement arms
  * (x) cmd1; cmd2;;) keep all commands.
  */
-export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike[]][] {
-  const items: [string[], TSNodeLike[]][] = []
+export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike[], string][] {
+  const items: [string[], TSNodeLike[], string][] = []
   for (const c of node.namedChildren) {
     if (c.type !== NT.CASE_ITEM) continue
     const patterns: string[] = []
     const body: TSNodeLike[] = []
+    let terminator = ';;'
     for (const child of c.children) {
-      if (
+      if (child.type === ';;' || child.type === ';&' || child.type === ';;&') {
+        terminator = child.type
+      } else if (
         body.length === 0 &&
         (child.type === NT.EXTGLOB_PATTERN ||
           child.type === NT.WORD ||
@@ -359,7 +368,7 @@ export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike[]][] {
       const first = c.namedChildren[0]
       if (first !== undefined) patterns.push(getText(first))
     }
-    items.push([patterns, body])
+    items.push([patterns, body, terminator])
   }
   return items
 }
@@ -374,6 +383,73 @@ export function getDeclarationKeyword(node: TSNodeLike): string {
 
 export function getUnsetNames(node: TSNodeLike): string[] {
   return node.namedChildren.filter((c) => c.type === NT.VARIABLE_NAME).map((c) => getText(c))
+}
+
+/**
+ * Split a whitespace-separated operand string, honoring single and
+ * double quotes the way the shell does. Returns null on an unbalanced
+ * quote so the caller can fall back. Mirrors Python's `shlex.split` for
+ * the un-expanded operand cases `unset` needs.
+ */
+function shellSplit(text: string): string[] | null {
+  const tokens: string[] = []
+  let cur = ''
+  let has = false
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charAt(i)
+    if (inSingle) {
+      if (ch === "'") inSingle = false
+      else cur += ch
+      continue
+    }
+    if (inDouble) {
+      if (ch === '"') inDouble = false
+      else if (ch === '\\' && (text.charAt(i + 1) === '"' || text.charAt(i + 1) === '\\'))
+        cur += text.charAt(++i)
+      else cur += ch
+      continue
+    }
+    if (ch === "'") {
+      inSingle = true
+      has = true
+    } else if (ch === '"') {
+      inDouble = true
+      has = true
+    } else if (ch === '\\' && i + 1 < text.length) {
+      cur += text.charAt(++i)
+      has = true
+    } else if (ch === ' ' || ch === '\t' || ch === '\n') {
+      if (has) {
+        tokens.push(cur)
+        cur = ''
+        has = false
+      }
+    } else {
+      cur += ch
+      has = true
+    }
+  }
+  if (inSingle || inDouble) return null
+  if (has) tokens.push(cur)
+  return tokens
+}
+
+/**
+ * Get every operand word of an unset_command, keeping `-f`/`-v`/`-n` and
+ * keeping a subscript target (`unset arr[1]`, quoted or not) as one word.
+ * Mirrors Python's `get_unset_args`.
+ */
+export function getUnsetArgs(node: TSNodeLike): string[] {
+  const operands = node.children.slice(1)
+  const first = operands[0]
+  if (first === undefined) return []
+  if (first.startIndex !== undefined && node.startIndex !== undefined) {
+    const split = shellSplit(node.text.slice(first.startIndex - node.startIndex))
+    if (split !== null) return split
+  }
+  return node.namedChildren.map((c) => getText(c))
 }
 
 export function getTestArgv(node: TSNodeLike): string[] {

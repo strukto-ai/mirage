@@ -1,0 +1,105 @@
+{
+  "cases": [
+    {
+      "id": "grep_H_single_file",
+      "seq": 500208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -H alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:alpha\n",
+        "stderr": ""
+      },
+      "flags": [
+        "H"
+      ]
+    },
+    {
+      "id": "grep_Hn_single_file",
+      "seq": 500209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -Hn alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:1:alpha\n",
+        "stderr": ""
+      },
+      "flags": [
+        "H",
+        "n"
+      ]
+    },
+    {
+      "id": "grep_Hc_single_file",
+      "seq": 500210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -Hc alpha /data/g4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/g4/notes.txt:1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "H",
+        "c"
+      ]
+    }
+  ]
+}

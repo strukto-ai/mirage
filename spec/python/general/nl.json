@@ -46,55 +46,111 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--body-numbering",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-b",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--section-delimiter",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--footer-numbering",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-f",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--header-numbering",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-h",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--join-blank-lines",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-l",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--number-format",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-n",
+      "short_value": true,
+      "value_kind": "text",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--no-renumber",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-p",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--starting-line-number",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--line-increment",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-i",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--number-width",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     },
     {
       "description": null,
-      "long": null,
+      "long": "--number-separator",
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
+      "short_value": true,
       "value_kind": "text",
       "value_optional": false
     }

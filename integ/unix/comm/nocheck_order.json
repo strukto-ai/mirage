@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "comm_nocheck_order",
+      "seq": 601190,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qcomm && printf 'a\\nb\\nc\\n' > /data/qcomm/ca && printf 'a\\nc\\nd\\n' > /data/qcomm/cb && comm --nocheck-order /data/qcomm/ca /data/qcomm/cb",
+      "expect": {
+        "exit": 0,
+        "stdout": "\t\ta\nb\n\t\tc\n\td\n",
+        "stderr": ""
+      },
+      "flags": [
+        "nocheck-order"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "id": "office_plain_files_untouched",
+      "seq": 204006,
+      "targets": [
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "printf plain | tee /data/office/notes.txt > /dev/null && cat /data/office/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "plain",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "col_parquet_file",
+      "seq": 100001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "file /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "parquet, 10 rows, 3 columns (id: int64, value: float64, label: string)",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_parquet_cat",
+      "seq": 100002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Rows: 10, Columns: 3\n\n## Schema\n  id: int64\n  value: float64\n  label: string\n\n## Preview (10 rows)\n\nid               value   label\n 1   0.311574452140155  item_1\n 2  0.6547542097962619  item_2\n 3 0.10082293693632238  item_3\n 4  0.3791338116972246  item_4\n 5  0.6709052457548175  item_5\n 6  0.5798173776944813  item_6\n 7    0.59172793683349  item_7\n 8 0.13056609279171372  item_8\n 9  0.6080492957585183  item_9\n10 0.24992235116489048 item_10\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_parquet_head",
+      "seq": 100003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -n 3 /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Rows: 10, Columns: 3\n\n## Schema\n  id: int64\n  value: float64\n  label: string\n\n## First 3 (3 rows)\n\nid               value  label\n 1   0.311574452140155 item_1\n 2  0.6547542097962619 item_2\n 3 0.10082293693632238 item_3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_parquet_tail",
+      "seq": 100004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -n 2 /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Rows: 10, Columns: 3\n\n## Schema\n  id: int64\n  value: float64\n  label: string\n\n## Last 2 (2 rows)\n\nid               value   label\n 9  0.6080492957585183  item_9\n10 0.24992235116489048 item_10\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_parquet_wc",
+      "seq": 100005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -l /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "10 /res/example.parquet\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_parquet_grep",
+      "seq": 100006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep item /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "id,value,label\n1,0.311574452140155,item_1\n2,0.6547542097962619,item_2\n3,0.10082293693632238,item_3\n4,0.3791338116972246,item_4\n5,0.6709052457548175,item_5\n6,0.5798173776944813,item_6\n7,0.59172793683349,item_7\n8,0.13056609279171372,item_8\n9,0.6080492957585183,item_9\n10,0.24992235116489048,item_10\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_parquet_grepc",
+      "seq": 100007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -c item /res/example.parquet",
+      "expect": {
+        "exit": 0,
+        "stdout": "10",
+        "stderr": ""
+      }
+    }
+  ]
+}

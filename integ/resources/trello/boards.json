@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_boards_ls",
+      "seq": 550002,
+      "targets": [
+        "trello"
+      ],
+      "command": "ls /board/workspaces/Strukto__org_strukto/boards",
+      "expect": {
+        "exit": 0,
+        "stdout": "Ops__brd_ops\nRoadmap_Q3__brd_roadmap\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

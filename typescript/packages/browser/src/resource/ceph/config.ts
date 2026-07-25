@@ -21,6 +21,7 @@ export interface CephConfig {
   endpoint?: string
   region?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface CephConfigRedacted extends Omit<CephConfig, 'presignedUrlProvider'> {
@@ -35,6 +36,7 @@ const CephConfigSchema = z.object({
   endpoint: z.string().optional(),
   region: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function cephToS3Config(config: CephConfig): S3Config {
@@ -46,6 +48,7 @@ export function cephToS3Config(config: CephConfig): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

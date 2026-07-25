@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "cmd_last_flag_v_wins",
+      "seq": 503016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "command -Vv cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_last_flag_bigv_wins",
+      "seq": 503017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "command -vV cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat is a shell builtin\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

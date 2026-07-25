@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "arch_iconv_file",
+      "seq": 475,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "iconv -f utf-8 -t utf-8 /data/arch/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "gz-data\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

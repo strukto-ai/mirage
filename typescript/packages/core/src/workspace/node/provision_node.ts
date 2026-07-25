@@ -72,6 +72,7 @@ const BUILTIN_NAMES: ReadonlySet<string> = new Set([
   SB.READ,
   SB.SET,
   SB.SHIFT,
+  SB.GETOPTS,
   SB.TRAP,
   SB.TEST,
   SB.BRACKET,

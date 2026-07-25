@@ -22,6 +22,7 @@ export interface R2Config {
   region?: string
   endpoint?: string
   defaultContentType?: string
+  keyPrefix?: string
 }
 
 export interface R2ConfigRedacted extends Omit<R2Config, 'presignedUrlProvider'> {
@@ -37,6 +38,7 @@ const R2ConfigSchema = z.object({
   region: z.string().optional(),
   endpoint: z.string().optional(),
   defaultContentType: z.string().optional(),
+  keyPrefix: z.string().optional(),
 })
 
 export function resolvedR2Endpoint(config: R2Config): string | undefined {
@@ -57,6 +59,7 @@ export function r2ToS3Config(config: R2Config): S3Config {
     ...(config.defaultContentType !== undefined
       ? { defaultContentType: config.defaultContentType }
       : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   }
 }
 

@@ -8,6 +8,7 @@
       "box",
       "chroma",
       "databricks_volume",
+      "dify",
       "discord",
       "dropbox",
       "gdocs",
@@ -20,13 +21,16 @@
       "lancedb",
       "langfuse",
       "linear",
+      "mem0",
       "mongodb",
       "notion",
+      "onedrive",
       "opfs",
       "postgres",
       "qdrant",
       "ram",
       "s3",
+      "sharepoint",
       "slack",
       "trello"
     ]
@@ -40,6 +44,7 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
+      "short_value": true,
       "value_kind": "none",
       "value_optional": false
     }

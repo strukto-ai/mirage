@@ -43,10 +43,13 @@ from mirage.commands.builtin.generic_bind.builders import ln
 from mirage.commands.builtin.generic_bind.builders import look
 from mirage.commands.builtin.generic_bind.builders import ls
 from mirage.commands.builtin.generic_bind.builders import md5
+from mirage.commands.builtin.generic_bind.builders import md5sum
 from mirage.commands.builtin.generic_bind.builders import mkdir
 from mirage.commands.builtin.generic_bind.builders import mktemp
 from mirage.commands.builtin.generic_bind.builders import mv
 from mirage.commands.builtin.generic_bind.builders import nl
+from mirage.commands.builtin.generic_bind.builders import numfmt
+from mirage.commands.builtin.generic_bind.builders import od
 from mirage.commands.builtin.generic_bind.builders import paste
 from mirage.commands.builtin.generic_bind.builders import patch
 from mirage.commands.builtin.generic_bind.builders import readlink
@@ -54,8 +57,12 @@ from mirage.commands.builtin.generic_bind.builders import realpath
 from mirage.commands.builtin.generic_bind.builders import rev
 from mirage.commands.builtin.generic_bind.builders import rg
 from mirage.commands.builtin.generic_bind.builders import rm
+from mirage.commands.builtin.generic_bind.builders import rmdir
 from mirage.commands.builtin.generic_bind.builders import sed
+from mirage.commands.builtin.generic_bind.builders import sha1sum
 from mirage.commands.builtin.generic_bind.builders import sha256sum
+from mirage.commands.builtin.generic_bind.builders import sha384sum
+from mirage.commands.builtin.generic_bind.builders import sha512sum
 from mirage.commands.builtin.generic_bind.builders import shuf
 from mirage.commands.builtin.generic_bind.builders import sort
 from mirage.commands.builtin.generic_bind.builders import split
@@ -66,11 +73,13 @@ from mirage.commands.builtin.generic_bind.builders import tail
 from mirage.commands.builtin.generic_bind.builders import tar
 from mirage.commands.builtin.generic_bind.builders import tee
 from mirage.commands.builtin.generic_bind.builders import touch
+from mirage.commands.builtin.generic_bind.builders import truncate
 from mirage.commands.builtin.generic_bind.builders import tr
 from mirage.commands.builtin.generic_bind.builders import tree
 from mirage.commands.builtin.generic_bind.builders import tsort
 from mirage.commands.builtin.generic_bind.builders import unexpand
 from mirage.commands.builtin.generic_bind.builders import uniq
+from mirage.commands.builtin.generic_bind.builders import unlink
 from mirage.commands.builtin.generic_bind.builders import unzip
 from mirage.commands.builtin.generic_bind.builders import wc
 from mirage.commands.builtin.generic_bind.builders import xxd
@@ -109,10 +118,13 @@ _BUILDERS = (
     look.BUILDER,
     ls.BUILDER,
     md5.BUILDER,
+    md5sum.BUILDER,
     mkdir.BUILDER,
     mktemp.BUILDER,
     mv.BUILDER,
     nl.BUILDER,
+    numfmt.BUILDER,
+    od.BUILDER,
     paste.BUILDER,
     patch.BUILDER,
     readlink.BUILDER,
@@ -120,8 +132,12 @@ _BUILDERS = (
     rev.BUILDER,
     rg.BUILDER,
     rm.BUILDER,
+    rmdir.BUILDER,
     sed.BUILDER,
+    sha1sum.BUILDER,
     sha256sum.BUILDER,
+    sha384sum.BUILDER,
+    sha512sum.BUILDER,
     shuf.BUILDER,
     sort.BUILDER,
     split.BUILDER,
@@ -132,11 +148,13 @@ _BUILDERS = (
     tar.BUILDER,
     tee.BUILDER,
     touch.BUILDER,
+    truncate.BUILDER,
     tr.BUILDER,
     tree.BUILDER,
     tsort.BUILDER,
     unexpand.BUILDER,
     uniq.BUILDER,
+    unlink.BUILDER,
     unzip.BUILDER,
     wc.BUILDER,
     xxd.BUILDER,

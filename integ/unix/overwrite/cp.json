@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "ow_cp_onto_existing_file",
+      "seq": 203001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp /data/ow/src.txt /data/ow/dst.txt && cat /data/ow/dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "new",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ow_cp_r_merges_existing_dir",
+      "seq": 203002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp -r /data/ow/s/t /data/ow && cat /data/ow/t/f.txt && ls /data/ow/t",
+      "expect": {
+        "exit": 0,
+        "stdout": "mergedf.old\nf.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

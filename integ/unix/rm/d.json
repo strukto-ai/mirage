@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rm_dv_empty",
+      "seq": 601031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prm2/ev && rm -dv /data/prm2/ev",
+      "expect": {
+        "exit": 0,
+        "stdout": "removed directory '/data/prm2/ev'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "v"
+      ]
+    }
+  ]
+}

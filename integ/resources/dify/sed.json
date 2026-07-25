@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "df_sed_stream",
+      "seq": 580050,
+      "targets": [
+        "dify"
+      ],
+      "command": "sed -n 1p /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_sed_i_readonly",
+      "seq": 580051,
+      "targets": [
+        "dify"
+      ],
+      "command": "sed -i s/x/y/ /knowledge/guides/auth",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
+    }
+  ]
+}

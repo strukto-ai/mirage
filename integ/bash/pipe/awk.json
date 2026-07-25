@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "pipe_awk_sort",
+      "seq": 360,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk '{print $2}' /data/fields.txt | sort -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "25\n30\n40\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

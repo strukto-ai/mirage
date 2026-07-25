@@ -15,7 +15,7 @@
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.head import head as generic_head
-from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic.head import head_multi, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.generic_bind.provision import \
     make_head_tail_provision
@@ -37,21 +37,23 @@ async def head(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: str | None = None,
-    c: str | None = None,
-    q: bool = False,
-    v: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    n_int = int(n) if n is not None else None
-    c_int = int(c) if c is not None else None
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=str(exc).encode())
     if paths:
         return head_multi(paths,
                           read=bound_op(history_read, accessor, index),
-                          n=n_int,
-                          c=c_int,
-                          show_headers=(v or len(paths) > 1)
-                          and not q), IOResult()
+                          n=parsed.lines,
+                          c=parsed.bytes_,
+                          show_headers=(parsed.verbose or len(paths) > 1)
+                          and not parsed.quiet,
+                          zero_terminated=parsed.zero_terminated), IOResult()
     source = _resolve_source(stdin, "head: missing operand")
-    return generic_head(source, n=n_int, c=c_int), IOResult()
+    return generic_head(source,
+                        n=parsed.lines,
+                        c=parsed.bytes_,
+                        zero_terminated=parsed.zero_terminated), IOResult()

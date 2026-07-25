@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "df_cat_auth",
+      "seq": 580010,
+      "targets": [
+        "dify"
+      ],
+      "command": "cat /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\nRequests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.",
+        "stderr": ""
+      }
+    }
+  ]
+}

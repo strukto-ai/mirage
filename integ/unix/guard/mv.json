@@ -1,0 +1,134 @@
+{
+  "cases": [
+    {
+      "id": "guard_mv_same_file",
+      "seq": 612,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/guard/g.txt /data/guard/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: '/data/guard/g.txt' and '/data/guard/g.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "guard_mv_same_file_intact",
+      "seq": 613,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/guard/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "guard\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "guard_mv_into_dir_where_file_lives",
+      "seq": 614,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/guard/sub/s.txt /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: '/data/guard/sub/s.txt' and '/data/guard/sub/s.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "guard_mv_dir_into_own_subtree",
+      "seq": 616,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/guard /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data/guard' to a subdirectory of itself, '/data/guard/sub/guard'\n"
+      }
+    }
+  ]
+}

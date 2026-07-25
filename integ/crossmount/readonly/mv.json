@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "xro_mv_in_refused",
+      "seq": 773,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo keep | tee /data/xro_s2.txt > /dev/null && mv /data/xro_s2.txt /ro/xro2.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot create regular file '/ro/xro2.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "xro_mv_src_kept",
+      "seq": 774,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "cat /data/xro_s2.txt && ls /ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

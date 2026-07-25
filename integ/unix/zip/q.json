@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "zip_j_junk",
+      "seq": 601320,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pzip && printf hi > /data/pzip/u.txt && zip -q -j /data/pzip/uz.zip /data/pzip/u.txt && unzip -l /data/pzip/uz.zip | grep -c 'u.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "j"
+      ]
+    }
+  ]
+}

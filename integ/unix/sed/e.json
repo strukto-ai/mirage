@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "sed_multi_e",
+      "seq": 202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo a | sed -e 's/a/b/' -e 's/b/c/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    },
+    {
+      "id": "sed_e_file",
+      "seq": 203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed -e s/world/EARTH/ /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nEARTH\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    },
+    {
+      "id": "sed_ef_combined",
+      "seq": 206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 's/foo/FOO/' | tee /data/prog.sed > /dev/null && sed -e s/world/EARTH/ -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nEARTH\nFOO\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e",
+        "f"
+      ]
+    }
+  ]
+}

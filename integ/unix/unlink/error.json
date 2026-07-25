@@ -1,0 +1,120 @@
+{
+  "cases": [
+    {
+      "id": "unlink_missing_path",
+      "seq": 601311,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unlink /data/qunl_absent",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "unlink: cannot unlink '/data/qunl_absent': No such file or directory\n"
+      }
+    },
+    {
+      "id": "unlink_dir",
+      "seq": 601312,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qunl_d && unlink /data/qunl_d",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "unlink: cannot unlink '/data/qunl_d': Is a directory\n"
+      }
+    },
+    {
+      "id": "unlink_no_operand",
+      "seq": 601313,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unlink",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "unlink: missing operand\nTry 'unlink --help' for more information.\n"
+      }
+    },
+    {
+      "id": "unlink_extra_operand",
+      "seq": 601314,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/qunl_a && printf x > /data/qunl_b && unlink /data/qunl_a /data/qunl_b",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "unlink: extra operand '/data/qunl_b'\nTry 'unlink --help' for more information.\n"
+      }
+    }
+  ]
+}

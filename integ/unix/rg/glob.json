@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rg_glob_log",
+      "seq": 500418,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg --glob \"*.log\" error /data/r4",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/r4/app.log:error: disk full\n/data/r4/app.log:error: timeout\n",
+        "stderr": ""
+      },
+      "flags": [
+        "glob"
+      ]
+    }
+  ]
+}

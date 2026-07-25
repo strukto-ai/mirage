@@ -393,6 +393,14 @@ describe('workspace: for loop break / continue / test / arith / while', () => {
     await ws.close()
   })
 
+  it('bash -c forwards piped stdin to the inner line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("echo hi | bash -c 'cat'")
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('hi\n')
+    await ws.close()
+  })
+
   it('bash -s reads script from stdin', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('echo "echo from-stdin" | bash -s')

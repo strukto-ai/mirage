@@ -5,6 +5,7 @@ import {
   mountPrefixOf,
   PathSpec,
   ResourceName,
+  type DeltaHook,
   type FileStat,
   type FindOptions,
   type RegisteredCommand,
@@ -30,6 +31,7 @@ import { rangeRead as rangeReadCore, stream as streamCore } from '../../core/nex
 import { truncate as truncateCore } from '../../core/nextcloud/truncate.ts'
 import { unlink as unlinkCore } from '../../core/nextcloud/unlink.ts'
 import { write as writeCore } from '../../core/nextcloud/write.ts'
+import { buildDeltaHook } from '../../core/nextcloud/watch.ts'
 import { NEXTCLOUD_OPS } from '../../ops/nextcloud/index.ts'
 import {
   redactNextcloudConfig,
@@ -182,6 +184,10 @@ export class NextcloudResource extends BaseResource implements Resource {
         )
       : paths
     return resolveGlobCore(this.accessor, effective, this.index)
+  }
+
+  deltaHook(): DeltaHook {
+    return buildDeltaHook(this.accessor)
   }
 
   getState(): Promise<NextcloudResourceState> {

@@ -90,3 +90,22 @@ async def invalidate_after_unlink(path: PathSpec) -> None:
     manager = _active.get()
     if manager is not None:
         await manager.invalidate_after_unlink(path)
+
+
+async def invalidate_ancestors(path: PathSpec) -> None:
+    """Evict every ancestor directory listing of ``path``.
+
+    A single ``invalidate_after_write`` only refreshes the immediate
+    parent listing. When an op materializes several missing levels at
+    once (``mkdir -p a/b/c``, a bucket write that creates parents), the
+    higher ancestors' cached listings stay stale and hide the new
+    entries until the index TTL expires. Walking the chain refreshes
+    each one.
+
+    Args:
+        path (PathSpec): Mount-relative path that was mutated.
+    """
+    parent = path.mount_path.rsplit("/", 1)[0]
+    while parent:
+        await invalidate_after_write(PathSpec.from_str_path(parent))
+        parent = parent.rsplit("/", 1)[0]

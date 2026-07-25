@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "relative_operand_extensionless",
+      "seq": 390,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat sub/README && wc -l sub/README && head -1 sub/README",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n2 sub/README\none\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

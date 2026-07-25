@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_H_filename",
+      "seq": 500507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "zgrep -H error /data/z4/app.log.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/z4/app.log.gz:error: disk full\n/data/z4/app.log.gz:error: timeout\n",
+        "stderr": ""
+      },
+      "flags": [
+        "H"
+      ]
+    },
+    {
+      "id": "zgrep_H_stdin_label",
+      "seq": 500517,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "echo hi | gzip | zgrep -H hi",
+      "expect": {
+        "exit": 0,
+        "stdout": "(standard input):hi\n",
+        "stderr": ""
+      },
+      "flags": [
+        "H"
+      ]
+    }
+  ]
+}

@@ -473,3 +473,62 @@ def test_ls_root_still_lists_mounts():
         assert "ram" in out
 
     _run(go())
+
+
+# ════════════════════════════════════════════════════════════════════
+# rm safety flags: accepted no-ops given mirage's structural protection
+# (non-interactive; mount roots unremovable; recursion never crosses a
+# mount boundary).
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_rm_interactive_flags_are_accepted_noops():
+
+    async def go():
+        ws = _ws_two_mounts()
+        await _exec(ws, "touch /r2/a /r2/b")
+        assert (await _exec(ws, "rm -I /r2/a")).exit_code == 0
+        assert (await _exec(ws, "rm -i /r2/b")).exit_code == 0
+        ls = await _exec(ws, "ls /r2")
+        assert (ls.stdout or b"").strip() == b""
+
+    _run(go())
+
+
+def test_rm_one_file_system_removes_within_mount():
+
+    async def go():
+        ws = _ws_two_mounts()
+        await _exec(ws, "mkdir -p /r2/d")
+        await _exec(ws, "touch /r2/d/x")
+        r = await _exec(ws, "rm --one-file-system -rf /r2/d")
+        assert r.exit_code == 0
+        ls = await _exec(ws, "ls /r2")
+        assert (ls.stdout or b"").strip() == b""
+
+    _run(go())
+
+
+def test_rm_no_preserve_root_still_cannot_remove_mount_root():
+    # mirage protection is structural: --no-preserve-root does not disable it.
+    async def go():
+        ws = _ws_two_mounts()
+        for cmd in ("rm --preserve-root -rf /",
+                    "rm --no-preserve-root -rf /r2"):
+            r = await _exec(ws, cmd)
+            assert r.exit_code == 1
+            assert b"Device or resource busy" in (r.stderr or b"")
+
+    _run(go())
+
+
+def test_rm_capital_i_not_invalid_option():
+
+    async def go():
+        ws = _ws_two_mounts()
+        await _exec(ws, "touch /r2/a")
+        r = await _exec(ws, "rm -rfI /r2/a")
+        assert r.exit_code == 0
+        assert b"invalid option" not in (r.stderr or b"")
+
+    _run(go())

@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "head_v",
+      "seq": 610110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -v -n 1 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/a.txt <==\nhello\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v",
+        "n"
+      ]
+    }
+  ]
+}

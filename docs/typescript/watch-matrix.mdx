@@ -1,0 +1,88 @@
+---
+title: Watch Matrix
+description: TypeScript watch delivery support and the pull or push detection paths available for each resource.
+icon: table-cells
+---
+
+## How To Read This Matrix
+
+Watching has two independent halves:
+
+- **Delivery** (`ws.watch()` and `ws.notify()`) works on **every mount**.
+  Mirage invalidates caches, matches scopes, and delivers the event stream.
+- **Detection** is backend-specific. **Pull** marks resources whose
+  `deltaHook()` ships with Mirage. **Push signal** names the provider mechanism
+  that your application can map to a `FileEvent`.
+
+| Resource              | Pull (`deltaHook`) | Push signal (provider-side)                |
+| --------------------- | ------------------ | ------------------------------------------ |
+| Nextcloud             | ✓ ETag walk diff   | `webhook_listeners` app (Nextcloud 30+)    |
+| S3 / S3-compatible    | planned            | S3 Event Notifications (SQS/EventBridge)   |
+| Google Drive          | planned            | `changes.watch` push channels              |
+| Dropbox               | planned            | Dropbox webhooks + cursor delta            |
+| OneDrive / SharePoint | planned            | Graph change notifications + delta API     |
+| GitHub                | planned            | repository webhooks                        |
+| Slack                 | planned            | Events API (`message`, `file_shared`, ...) |
+| Disk                  | planned            | inotify / FSEvents / filesystem watcher    |
+| RAM, Redis, others    | —                  | no external writers to observe             |
+
+## Delivery Without a Hook
+
+Any backend becomes watchable as soon as your application has a signal:
+
+```ts
+import { FileChangeKind, FileEvent, PathSpec } from "@struktoai/mirage-node";
+
+// your consumer, on any mount, today
+for await (const event of ws.watch("/s3/exports/*.csv")) {
+  console.log(event.kind, event.path.virtual);
+}
+
+// your S3 SQS consumer, your GitHub webhook route, your cron diff:
+await ws.notify(
+  new FileEvent({
+    kind: FileChangeKind.CREATE,
+    path: PathSpec.fromStrPath("/s3/exports/jan.csv"),
+    timestamp: new Date(),
+  }),
+);
+```
+
+`watch()` returns an async generator, so it subscribes on the first iteration,
+not at the call: the loop above and the `notify` call belong to different tasks
+(a request handler, a poll loop). Awaiting `notify` before anything consumes
+the iterator drops the event.
+
+The guarantee is the same on every backend: caches for the changed path and
+its ancestor listings are invalidated before delivery.
+
+## Adding Pull Detection
+
+`ListingDeltaHook` provides a generic checkpointed diff. A backend supplies an
+async walk that reads the backend directly and yields stable fingerprints:
+
+```ts
+import {
+  ListingDeltaHook,
+  type PathSpec,
+  type WalkEntry,
+} from "@struktoai/mirage-core";
+
+async function* walk(root: PathSpec): AsyncGenerator<WalkEntry> {
+  for await (const object of listObjects(root.resourcePath)) {
+    yield {
+      virtual: `/s3/${object.key}`,
+      isDir: false,
+      fingerprint: object.etag,
+      size: object.size,
+      modified: object.lastModified,
+    };
+  }
+}
+
+const hook = new ListingDeltaHook(walk);
+```
+
+Backends with a native cursor API can implement `pull(root, checkpoint)`
+directly. The opaque checkpoint can be a Dropbox cursor, a Microsoft Graph
+delta link, or any other serialized provider state.

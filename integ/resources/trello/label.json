@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_label_cat_jq",
+      "seq": 550011,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/labels/feature__lbl_feature.json | jq -r '.label_name + \" \" + .color'",
+      "expect": {
+        "exit": 0,
+        "stdout": "feature green\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

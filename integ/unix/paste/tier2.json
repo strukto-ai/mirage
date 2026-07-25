@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "id": "paste_tier2_zero_delimiters",
+      "seq": 910009,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/t2paste && printf 'a\\0b\\0' > /data/t2paste/a && printf '1\\02\\0' > /data/t2paste/b && paste --zero-terminated --delimiters=, /data/t2paste/a /data/t2paste/b",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,1\u0002\u0000b,\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "zero-terminated",
+        "delimiters"
+      ]
+    },
+    {
+      "id": "paste_tier2_serial_alias",
+      "seq": 910010,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "paste --serial --delimiters=: /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:2:3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "serial",
+        "delimiters"
+      ]
+    },
+    {
+      "id": "paste_tier2_null_delimiter",
+      "seq": 910046,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/t2pasten && printf 'a\\nb\\n' > /data/t2pasten/x && printf '1\\n2\\n' > /data/t2pasten/y && paste -d '\\0' /data/t2pasten/x /data/t2pasten/y",
+      "expect": {
+        "exit": 0,
+        "stdout": "a1\nb2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "delimiters"
+      ]
+    }
+  ]
+}

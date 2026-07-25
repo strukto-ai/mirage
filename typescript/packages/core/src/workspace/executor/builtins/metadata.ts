@@ -16,6 +16,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { isMissingOp } from '../../../utils/errors.ts'
+import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
@@ -24,9 +25,6 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
-
-const MODE_CLASS_BITS: Record<string, number> = { u: 0o700, g: 0o070, o: 0o007, a: 0o777 }
-const MODE_PERM_BITS: Record<string, number> = { r: 0o444, w: 0o222, x: 0o111 }
 
 function errorResult(cmd: string, message: string, exitCode = 1): Result {
   const err = new TextEncoder().encode(message)
@@ -41,42 +39,6 @@ function okResult(cmd: string): Result {
   return [null, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
 }
 
-// Parse a chmod MODE argument (octal or symbolic). Symbolic supports the
-// common grammar: `[ugoa...][+-=][rwx...]` clauses joined by commas
-// (`u+x`, `go-w`, `a=r`, `+x`). Special bits (s, t, X) are not supported.
-// Returns the new mode, or null when the text does not parse.
-export function parseMode(text: string, current: number): number | null {
-  if (/^[0-7]+$/.test(text)) {
-    const value = parseInt(text, 8)
-    return value <= 0o7777 ? value : null
-  }
-  let mode = current
-  for (const clause of text.split(',')) {
-    let i = 0
-    let classes = ''
-    while (i < clause.length && 'ugoa'.includes(clause.charAt(i))) {
-      classes += clause.charAt(i)
-      i += 1
-    }
-    const action = clause[i]
-    if (action === undefined || !'+-='.includes(action)) return null
-    i += 1
-    const perms = clause.slice(i)
-    if (!/^[rwx]*$/.test(perms)) return null
-    let classMask = 0
-    for (const c of classes.length > 0 ? classes : 'a') {
-      classMask |= MODE_CLASS_BITS[c] ?? 0
-    }
-    let permMask = 0
-    for (const c of perms) permMask |= MODE_PERM_BITS[c] ?? 0
-    const bits = classMask & permMask
-    if (action === '+') mode |= bits
-    else if (action === '-') mode &= ~bits
-    else mode = (mode & ~classMask) | bits
-  }
-  return mode
-}
-
 // Parse a chown OWNER[:GROUP] argument. Numeric ids become numbers; names
 // are kept as strings (mirage has no user database; ownership is stored,
 // not enforced). Each part is null when absent.
@@ -88,6 +50,14 @@ export function parseOwner(text: string): [number | string | null, number | stri
   const gid =
     sep >= 0 && group.length > 0 ? (/^\d+$/.test(group) ? parseInt(group, 10) : group) : null
   return [uid, gid]
+}
+
+// Parse a chgrp GROUP argument. Numeric ids become numbers; names are kept
+// as strings (mirage has no group database; ownership is stored, not
+// enforced). Null when the text is empty.
+export function parseGroup(text: string): number | string | null {
+  if (text.length === 0) return null
+  return /^\d+$/.test(text) ? parseInt(text, 10) : text
 }
 
 // Resolve touch -t/-d into an ISO timestamp. `t` is a POSIX
@@ -153,7 +123,7 @@ function nowIso(): string {
   return isoNoMs(new Date())
 }
 
-interface SplitValueFlags {
+export interface SplitValueFlags {
   flags: Set<string>
   values: Map<string, string>
   operands: (string | PathSpec)[]
@@ -161,7 +131,7 @@ interface SplitValueFlags {
 }
 
 // Split leading flags where some take a value (`-t STAMP`).
-function splitValueFlags(
+export function splitValueFlags(
   args: readonly (string | PathSpec)[],
   boolean: string,
   valued: string,
@@ -182,19 +152,17 @@ function splitValueFlags(
     }
     if (parsing && s !== '-' && s.length >= 2 && s.startsWith('-') && !s.startsWith('--')) {
       const body = s.slice(1)
-      let bad: string | null = null
-      for (const c of body) {
-        if (!boolean.includes(c) && !valued.includes(c)) {
-          bad = c
-          break
-        }
-      }
-      if (bad !== null) return { flags, values, operands, bad }
       for (let j = 0; j < body.length; j++) {
         const c = body.charAt(j)
         if (boolean.includes(c)) {
           flags.add(c)
           continue
+        }
+        // A valued flag consumes the rest of the token (-tSTAMP) or the next
+        // argument (-t STAMP); those trailing chars are its value, not flags,
+        // so validation must stop here rather than pre-scanning the token.
+        if (!valued.includes(c)) {
+          return { flags, values, operands, bad: c }
         }
         const rest = body.slice(j + 1)
         if (rest.length > 0) {
@@ -368,7 +336,8 @@ export async function handleChmod(
     }
     // Backends without a mode default to what ls renders: 755 for
     // directories, 644 for files (symbolic clauses build on this).
-    const current = stat.mode ?? (stat.type === FileType.DIRECTORY ? 0o755 : 0o644)
+    const current =
+      stat.mode ?? (stat.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE)
     const newMode = parseMode(modeText, current)
     if (newMode === null) {
       return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
@@ -451,6 +420,69 @@ export async function handleChown(
   }
   if (errors.length > 0) return joinedError('chown', errors, exitCode)
   return okResult('chown')
+}
+
+// chgrp GROUP FILE...: set group ownership via setattr. The group half of
+// chown: writes gid and leaves uid untouched. Group is stored, not enforced
+// (mirage has no group model); a name is kept verbatim, a numeric id becomes
+// a number. `-h` writes the link node's own group.
+export async function handleChgrp(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  args: readonly (string | PathSpec)[],
+): Promise<Result> {
+  const { flags, operands, bad } = splitValueFlags(args, 'Rvfh', '')
+  if (bad !== null) return errorResult('chgrp', `chgrp: invalid option -- '${bad}'\n`, 2)
+  if (operands.length < 2) return errorResult('chgrp', 'chgrp: missing operand\n', 2)
+  if (flags.has('R')) return errorResult('chgrp', 'chgrp: -R is not supported\n', 2)
+  const first = operands[0]
+  if (first === undefined) return errorResult('chgrp', 'chgrp: missing operand\n', 2)
+  const groupText = first instanceof PathSpec ? first.virtual : first
+  const gid = parseGroup(groupText)
+  if (gid === null) {
+    return errorResult('chgrp', `chgrp: invalid group: '${groupText}'\n`, 1)
+  }
+
+  const noDeref = flags.has('h')
+  let exitCode = 0
+  const errors: string[] = []
+  for (const target of await expandOperands(namespace, operands.slice(1))) {
+    if (noDeref && namespace.isLink(target.virtual)) {
+      await namespace.setAttrs(target.virtual, { gid })
+      continue
+    }
+    let virtual: string
+    try {
+      virtual = namespace.follow(target.virtual)
+    } catch (err) {
+      if (err instanceof CycleError) {
+        errors.push(`chgrp: cannot access '${target.rawPath}': Too many levels of symbolic links\n`)
+        exitCode = 1
+        continue
+      }
+      throw err
+    }
+    const resolved = PathSpec.fromStrPath(virtual)
+    try {
+      await dispatch('stat', resolved)
+    } catch (err) {
+      if (isEnoent(err)) {
+        errors.push(`chgrp: cannot access '${target.rawPath}': No such file or directory\n`)
+        exitCode = 1
+        continue
+      }
+      throw err
+    }
+    try {
+      await setattrVia(namespace, dispatch, resolved, { gid })
+    } catch (err) {
+      if (!isReadOnlyError(err)) throw err
+      errors.push(readOnlyError('chgrp', namespace, resolved))
+      exitCode = 1
+    }
+  }
+  if (errors.length > 0) return joinedError('chgrp', errors, exitCode)
+  return okResult('chgrp')
 }
 
 // touch: set access/modification times, creating missing files. GNU flags:

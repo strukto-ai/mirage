@@ -60,6 +60,7 @@ class FakeAsyncOperator:
     files: dict[str, bytes] = field(default_factory=dict)
     metas: dict[str, _FakeMetadata] = field(default_factory=dict)
     dirs: set[str] = field(default_factory=set)
+    _writes: int = 0
 
     def __post_init__(self):
         for k, data in self.files.items():
@@ -96,10 +97,11 @@ class FakeAsyncOperator:
 
     async def write(self, key: str, data: bytes) -> None:
         self.files[key] = bytes(data)
+        self._writes += 1
         self.metas[key] = _FakeMetadata(
             content_length=len(data),
             mode=EntryMode.File,
-            etag=f"etag-{key}",
+            etag=f"etag-{key}-w{self._writes}",
         )
 
     async def delete(self, key: str) -> None:
@@ -131,8 +133,33 @@ class FakeAsyncOperator:
             self.files.pop(f, None)
             self.metas.pop(f, None)
 
-    async def list(self, path: str):
+    async def list(self, path: str, recursive: bool = False):
         pfx = path.lstrip("/")
+        if recursive:
+            seen: set[str] = set()
+            recursive_entries: list[_FakeEntry] = []
+            for f in self.files:
+                if not f.startswith(pfx):
+                    continue
+                rest = f[len(pfx):]
+                parts = rest.split("/")
+                for i in range(len(parts) - 1):
+                    dkey = pfx + "/".join(parts[:i + 1]) + "/"
+                    if dkey not in seen:
+                        seen.add(dkey)
+                        recursive_entries.append(
+                            _FakeEntry(
+                                path=dkey,
+                                metadata=_FakeMetadata(mode=EntryMode.Dir),
+                            ))
+                recursive_entries.append(
+                    _FakeEntry(path=f, metadata=self.metas[f]))
+
+            async def _iter_recursive():
+                for e in recursive_entries:
+                    yield e
+
+            return _iter_recursive()
         seen_dirs: set[str] = set()
         entries: list[_FakeEntry] = []
         key = pfx.rstrip("/")

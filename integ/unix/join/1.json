@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "join_keys_1_2",
+      "seq": 601362,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pjk && printf 'a 1\\nb 2\\n' > /data/pjk/g && printf '1 x\\n2 y\\n' > /data/pjk/h && join -1 2 -2 1 /data/pjk/g /data/pjk/h",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 a x\n2 b y\n",
+        "stderr": ""
+      },
+      "flags": [
+        "1",
+        "2"
+      ]
+    }
+  ]
+}

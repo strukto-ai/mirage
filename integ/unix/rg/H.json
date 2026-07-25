@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rg_H_single_file",
+      "seq": 500407,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -H alpha /data/r4/notes.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/r4/notes.txt:alpha\n",
+        "stderr": ""
+      },
+      "flags": [
+        "H"
+      ]
+    }
+  ]
+}

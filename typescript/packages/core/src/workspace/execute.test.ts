@@ -58,6 +58,28 @@ describe('Workspace.execute', () => {
     await ws.close()
   })
 
+  it('readonly registers a bare name and an array assignment', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('RO=1; readonly RO; RO=2')
+    expect(res.exitCode).toBe(1)
+    expect(new TextDecoder().decode(res.stderr)).toBe('bash: RO: readonly variable\n')
+    const res2 = await ws.execute("readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
+    expect(new TextDecoder().decode(res2.stdout)).toBe('rc=1\n')
+    expect(new TextDecoder().decode(res2.stderr)).toBe(
+      'bash: unset: RA: cannot unset: readonly variable\n',
+    )
+    await ws.close()
+  })
+
+  it("source positional args keep the operand's spelling", async () => {
+    const { ws } = buildWorkspace()
+    await ws.execute("printf 'echo a1=$1\\n' > /ram/s.sh")
+    // A path-looking argument stays as typed, not resolved.
+    const res = await ws.execute('cd /ram && source /ram/s.sh ./sub/x.txt')
+    expect(new TextDecoder().decode(res.stdout)).toBe('a1=./sub/x.txt\n')
+    await ws.close()
+  })
+
   it('runs `pwd` and prints /', async () => {
     const { ws } = buildWorkspace()
     const res = await ws.execute('pwd')
@@ -279,6 +301,39 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
     const res = await ws.execute('nosuchcmd /ram/*.txt')
     expect(res.exitCode).toBe(127)
     expect(new TextDecoder().decode(res.stderr)).toBe('nosuchcmd: command not found\n')
+    await ws.close()
+  })
+
+  it('runs a getopts option-parsing loop', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute(
+      'set -- -a val -b\n' +
+        'while getopts "a:b" opt; do\n' +
+        '  case $opt in\n' +
+        '    a) echo "a=$OPTARG" ;;\n' +
+        '    b) echo "b-set" ;;\n' +
+        '  esac\n' +
+        'done',
+    )
+    expect(new TextDecoder().decode(res.stdout)).toBe('a=val\nb-set\n')
+    await ws.close()
+  })
+
+  it('reparses when OPTIND is reassigned to its current value', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute(
+      'set -- -ab; getopts ab o; echo "1:$o"; OPTIND=1; getopts ab o; echo "2:$o"',
+    )
+    expect(new TextDecoder().decode(res.stdout)).toBe('1:a\n2:a\n')
+    await ws.close()
+  })
+
+  it('does not let a subshell corrupt the parent getopts cursor', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute(
+      'set -- -ab; OPTIND=1; getopts ab o; (getopts ab o); getopts ab o; echo "$o"',
+    )
+    expect(new TextDecoder().decode(res.stdout)).toBe('b\n')
     await ws.close()
   })
 })

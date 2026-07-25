@@ -53,6 +53,7 @@ import { OPFS_LN } from './ln.ts'
 import { OPFS_LOOK } from './look.ts'
 import { OPFS_LS } from './ls/ls.ts'
 import { OPFS_MD5 } from './md5.ts'
+import { OPFS_MD5SUM } from './md5sum.ts'
 import { OPFS_MKDIR } from './mkdir.ts'
 import { OPFS_MKTEMP } from './mktemp.ts'
 import { OPFS_MV } from './mv.ts'
@@ -64,8 +65,12 @@ import { OPFS_REALPATH } from './realpath.ts'
 import { OPFS_REV } from './rev.ts'
 import { OPFS_RG } from './rg.ts'
 import { OPFS_RM } from './rm.ts'
+import { OPFS_RMDIR } from './rmdir.ts'
 import { OPFS_SED } from './sed.ts'
+import { OPFS_SHA1SUM } from './sha1sum.ts'
 import { OPFS_SHA256SUM } from './sha256sum.ts'
+import { OPFS_SHA384SUM } from './sha384sum.ts'
+import { OPFS_SHA512SUM } from './sha512sum.ts'
 import { OPFS_SHUF } from './shuf.ts'
 import { OPFS_SORT } from './sort.ts'
 import { OPFS_SPLIT } from './split.ts'
@@ -81,6 +86,7 @@ import { OPFS_TREE } from './tree.ts'
 import { OPFS_TSORT } from './tsort.ts'
 import { OPFS_UNEXPAND } from './unexpand.ts'
 import { OPFS_UNIQ } from './uniq.ts'
+import { OPFS_UNLINK } from './unlink.ts'
 import { OPFS_UNZIP } from './unzip.ts'
 import { OPFS_WC } from './wc/wc.ts'
 import { OPFS_XXD } from './xxd.ts'
@@ -128,6 +134,7 @@ export const OPFS_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions
     ...OPFS_LOOK,
     ...OPFS_LS,
     ...OPFS_MD5,
+    ...OPFS_MD5SUM,
     ...OPFS_MKDIR,
     ...OPFS_MKTEMP,
     ...OPFS_MV,
@@ -139,8 +146,12 @@ export const OPFS_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions
     ...OPFS_REV,
     ...OPFS_RG,
     ...OPFS_RM,
+    ...OPFS_RMDIR,
     ...OPFS_SED,
+    ...OPFS_SHA1SUM,
     ...OPFS_SHA256SUM,
+    ...OPFS_SHA384SUM,
+    ...OPFS_SHA512SUM,
     ...OPFS_SHUF,
     ...OPFS_SORT,
     ...OPFS_SPLIT,
@@ -156,6 +167,7 @@ export const OPFS_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions
     ...OPFS_TSORT,
     ...OPFS_UNEXPAND,
     ...OPFS_UNIQ,
+    ...OPFS_UNLINK,
     ...OPFS_UNZIP,
     ...OPFS_WC,
     ...OPFS_XXD,

@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "shift_too_many",
+      "seq": 434,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "shift 1 2 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "shift: too many arguments\ncode=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

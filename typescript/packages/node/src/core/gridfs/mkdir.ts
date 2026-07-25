@@ -12,12 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
+import { invalidateAfterWrite, invalidateAncestors, type PathSpec } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { gridfsPrefix, rawPathOf } from './_client.ts'
 import { uploadBytes } from './write.ts'
 
-export async function mkdir(accessor: GridFSAccessor, path: PathSpec): Promise<void> {
+export async function mkdir(
+  accessor: GridFSAccessor,
+  path: PathSpec,
+  parents = false,
+): Promise<void> {
   // GridFS has no real directories; parents are implicit. A zero-byte
   // "key/" marker doc makes the empty directory visible.
   const raw = rawPathOf(path)
@@ -25,4 +29,5 @@ export async function mkdir(accessor: GridFSAccessor, path: PathSpec): Promise<v
   if (pfx === '') return
   await uploadBytes(accessor, pfx, new Uint8Array(0))
   await invalidateAfterWrite(path)
+  if (parents) await invalidateAncestors(path)
 }

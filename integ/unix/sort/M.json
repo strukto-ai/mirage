@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "sort_M",
+      "seq": 244,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo -e 'Feb\\nJan\\nMar' | sort -M",
+      "expect": {
+        "exit": 0,
+        "stdout": "Jan\nFeb\nMar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "M"
+      ]
+    }
+  ]
+}

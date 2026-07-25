@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "test_relative_paths",
+      "seq": 395,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "test -f plain.txt && echo yes-f && test -d sub && echo yes-d && test -f missing.txt || echo no-f",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes-f\nyes-d\nno-f\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

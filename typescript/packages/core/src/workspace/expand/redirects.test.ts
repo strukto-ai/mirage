@@ -154,3 +154,102 @@ describe('process substitution output redirect', () => {
     }
   })
 })
+
+describe('quoted redirect targets', () => {
+  // Quoting a redirect target names the same file in bash. A
+  // single-quoted target used to leave the parsed target empty, so the
+  // write silently went nowhere and exited 0 (silent data loss).
+  it.each(["'/data/Q'", '"/data/Q"', '/data/Q'])('%s creates the file', async (target) => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, , err] = await runResult(ws, `printf 'V\\n' > ${target}`)
+      expect(exit).toBe(0)
+      expect(err).toBe('')
+      expect(await run(ws, 'cat /data/Q')).toBe('V\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('appends to a single-quoted target', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute("printf 'one\\n' > '/data/APP'")
+      await ws.execute("printf 'two\\n' >> '/data/APP'")
+      expect(await run(ws, 'cat /data/APP')).toBe('one\ntwo\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('captures stderr into a single-quoted target', async () => {
+    // The empty-target fallback swallowed stderr entirely: the command
+    // failed with no message anywhere.
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit] = await runResult(ws, "cat /data/missing 2> '/data/ERR'")
+      expect(exit).not.toBe(0)
+      expect(await run(ws, 'cat /data/ERR')).toContain('No such file or directory')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads stdin from a single-quoted source', async () => {
+    const { ws } = await makeIntegrationWS({ IN: 'a\nb\n' })
+    try {
+      expect(await run(ws, "wc -l < '/data/IN'")).toBe('2\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('routes both streams to a single-quoted target', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute("{ echo out; echo err >&2; } &> '/data/BOTH'")
+      expect(await run(ws, 'cat /data/BOTH')).toBe('out\nerr\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('does not alias distinct single-quoted targets', async () => {
+    // Every single-quoted target collapsed to the same empty path, so
+    // distinct files aliased onto one phantom entry and a read of an
+    // unrelated name returned another file's bytes. Asserted on the
+    // bytes rather than the message: the missing-source wording for `<`
+    // still differs between the hosts and from GNU.
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute("printf 'first\\n' > '/data/A1'")
+      const [exit, out] = await runResult(ws, "cat < '/data/A2'")
+      expect(exit).not.toBe(0)
+      expect(out).not.toContain('first')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('handles a single-quoted target containing a space', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute("printf 'S\\n' > '/data/sp ace.txt'")
+      expect(await run(ws, "cat '/data/sp ace.txt'")).toBe('S\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('delivers a single-quoted herestring body into a redirect', async () => {
+    // `<<< 'text'` shares the target-type gate; it delivered an empty
+    // body (a bare newline) instead of the text.
+    const { ws } = await makeIntegrationWS()
+    try {
+      await ws.execute("cat <<< 'hi' > /data/HS")
+      expect(await run(ws, 'cat /data/HS')).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})

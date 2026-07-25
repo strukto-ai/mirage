@@ -58,9 +58,7 @@ describe('tree', () => {
     const r = await runTree(resource, [PathSpec.fromStrPath('/tmp')])
     expect(r.exitCode).toBe(0)
     const joined = r.lines.join('\n')
-    expect(joined.includes('\u251c\u2500\u2500') || joined.includes('\u2514\u2500\u2500')).toBe(
-      true,
-    )
+    expect(joined.includes('|-- ') || joined.includes('`-- ')).toBe(true)
   })
 
   it('single file uses last connector', async () => {
@@ -68,8 +66,7 @@ describe('tree', () => {
     resource.store.dirs.add('/tmp')
     resource.store.files.set('/tmp/a.txt', ENC.encode('hello'))
     const r = await runTree(resource, [PathSpec.fromStrPath('/tmp')])
-    expect(r.lines.length).toBe(1)
-    expect(r.lines[0]).toContain('\u2514\u2500\u2500')
+    expect(r.lines).toEqual(['/tmp', '`-- a.txt', '', '1 directory, 1 file'])
   })
 
   it('shows file names in output', async () => {
@@ -96,17 +93,19 @@ describe('tree', () => {
     expect(joined).toContain('f.txt')
   })
 
-  it('empty directory produces empty output', async () => {
+  it('empty directory reports zero counts', async () => {
     const resource = new RAMResource()
     resource.store.dirs.add('/tmp')
     const r = await runTree(resource, [PathSpec.fromStrPath('/tmp')])
-    expect(r.lines).toEqual([])
+    expect(r.lines).toEqual(['/tmp', '', '0 directories, 0 files'])
+    expect(r.exitCode).toBe(0)
   })
 
-  it('missing path produces empty output', async () => {
+  it('missing path marks the error and exits 2', async () => {
     const resource = new RAMResource()
     const r = await runTree(resource, [PathSpec.fromStrPath('/nonexistent')])
-    expect(r.lines).toEqual([])
+    expect(r.lines).toEqual(['/nonexistent  [error opening dir]', '', '0 directories, 0 files'])
+    expect(r.exitCode).toBe(2)
   })
 
   it('hides dotfiles by default, shows them with -a', async () => {

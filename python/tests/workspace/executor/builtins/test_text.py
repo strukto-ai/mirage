@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.workspace.executor.builtins.text import handle_echo, handle_printf
+from mirage.workspace.session import Session
 
 
 async def echo_bytes(args: list[str]) -> bytes:
@@ -11,7 +12,7 @@ async def echo_bytes(args: list[str]) -> bytes:
 
 
 async def printf_result(args: list[str]) -> tuple[bytes, int]:
-    out, io, node = await handle_printf(args)
+    out, io, node = await handle_printf(args, Session(session_id="s1"))
     assert isinstance(out, bytes)
     assert io.exit_code == node.exit_code
     return out, node.exit_code
@@ -201,3 +202,117 @@ async def test_printf_invalid_number_reports_exit_1():
     out, code = await printf_result(["%d\n", "abc"])
     assert out == b"0\n"
     assert code == 1
+
+
+@pytest.mark.asyncio
+async def test_printf_v_assigns_variable_and_prints_nothing():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "V", "x=%d", "42"], session)
+    assert out is None
+    assert node.exit_code == 0
+    assert session.env["V"] == "x=42"
+
+
+@pytest.mark.asyncio
+async def test_printf_v_targets_array_element():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "arr[2]", "hi"], session)
+    assert out is None
+    assert node.exit_code == 0
+    # Indices 0 and 1 are holes, not empty elements.
+    assert session.arrays["arr"] == [None, None, "hi"]
+
+
+@pytest.mark.asyncio
+async def test_printf_v_invalid_name_errors():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "1bad", "x"], session)
+    assert node.exit_code == 2
+    assert b"`1bad': not a valid identifier" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_printf_v_invalid_name_suppresses_conversion_errors():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "1bad", "%d", "nope"], session)
+    assert node.exit_code == 2
+    assert io.stderr == b"printf: `1bad': not a valid identifier\n"
+
+
+@pytest.mark.asyncio
+async def test_printf_v_empty_subscript_is_not_an_identifier():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "a[]", "x"], session)
+    assert node.exit_code == 2
+    assert io.stderr == b"printf: `a[]': not a valid identifier\n"
+    assert "a" not in session.arrays
+
+
+@pytest.mark.asyncio
+async def test_printf_v_blank_subscript_is_arithmetic_zero():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "a[ ]", "x"], session)
+    assert node.exit_code == 0
+    assert session.arrays["a"] == ["x"]
+
+
+@pytest.mark.asyncio
+async def test_printf_v_readonly_scalar_is_rejected():
+    session = Session(session_id="s1")
+    session.env["R"] = "orig"
+    session.readonly_vars.add("R")
+    out, io, node = await handle_printf(["-v", "R", "new"], session)
+    assert node.exit_code == 1
+    assert io.stderr == b"bash: R: readonly variable\n"
+    assert session.env["R"] == "orig"
+
+
+@pytest.mark.asyncio
+async def test_printf_v_readonly_array_element_is_rejected():
+    session = Session(session_id="s1")
+    session.arrays["A"] = ["x", "y"]
+    session.readonly_vars.add("A")
+    out, io, node = await handle_printf(["-v", "A[0]", "%d", "nope"], session)
+    assert node.exit_code == 1
+    assert io.stderr == (b"printf: nope: invalid number\n"
+                         b"bash: A: readonly variable\n")
+    assert session.arrays["A"] == ["x", "y"]
+
+
+@pytest.mark.asyncio
+async def test_printf_v_scalar_target_keeps_other_array_elements():
+    session = Session(session_id="s1")
+    session.arrays["B"] = ["p", "q", "r"]
+    out, io, node = await handle_printf(["-v", "B", "Q"], session)
+    assert node.exit_code == 0
+    assert session.arrays["B"] == ["Q", "q", "r"]
+    assert "B" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_printf_v_bad_subscript_keeps_the_scalar():
+    session = Session(session_id="s1")
+    session.env["V"] = "orig"
+    out, io, node = await handle_printf(["-v", "V[-2]", "hi"], session)
+    assert node.exit_code == 1
+    assert io.stderr == b"bash: V[-2]: bad array subscript\n"
+    assert session.env["V"] == "orig"
+    assert "V" not in session.arrays
+
+
+@pytest.mark.asyncio
+async def test_printf_v_negative_subscript_wraps_over_the_scalar():
+    session = Session(session_id="s1")
+    session.env["W"] = "orig"
+    out, io, node = await handle_printf(["-v", "W[-1]", "hi"], session)
+    assert node.exit_code == 0
+    assert session.arrays["W"] == ["hi"]
+    assert "W" not in session.env
+
+
+@pytest.mark.asyncio
+async def test_printf_v_keeps_exit_1_on_bad_number_but_still_assigns():
+    session = Session(session_id="s1")
+    out, io, node = await handle_printf(["-v", "V", "%d", "notanum"], session)
+    assert node.exit_code == 1
+    assert session.env["V"] == "0"

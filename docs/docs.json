@@ -382,6 +382,14 @@
             ]
           },
           {
+            "group": "Watch",
+            "icon": "bell",
+            "pages": [
+              "python/watch",
+              "python/watch-matrix"
+            ]
+          },
+          {
             "group": "Runtimes",
             "pages": [
               "python/runtime/python",
@@ -479,6 +487,14 @@
                 ]
               },
               {
+                "group": "Microsoft",
+                "icon": "microsoft",
+                "pages": [
+                  "typescript/setup/onedrive",
+                  "typescript/setup/sharepoint"
+                ]
+              },
+              {
                 "group": "Cloud Files",
                 "icon": "folder-open",
                 "pages": [
@@ -519,6 +535,13 @@
                 ]
               },
               {
+                "group": "Memory",
+                "icon": "/images/mem0.svg",
+                "pages": [
+                  "typescript/setup/mem0"
+                ]
+              },
+              {
                 "group": "Notes",
                 "icon": "book",
                 "pages": [
@@ -532,6 +555,14 @@
                   "typescript/setup/trello"
                 ]
               }
+            ]
+          },
+          {
+            "group": "Watch",
+            "icon": "bell",
+            "pages": [
+              "typescript/watch",
+              "typescript/watch-matrix"
             ]
           },
           {

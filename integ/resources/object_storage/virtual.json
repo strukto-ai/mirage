@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "object_storage_prefix_virtual_root",
+      "seq": 902,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "find /aliyun -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/aliyun/identity.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

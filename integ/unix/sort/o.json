@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "sort_o",
+      "seq": 610149,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/tier1-sort && printf 'b\\na\\n' > /data/tier1-sort/in && sort -o /data/tier1-sort/out /data/tier1-sort/in && cat /data/tier1-sort/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    }
+  ]
+}

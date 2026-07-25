@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "glob_matched_echo",
+      "seq": 383,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo /data/sorted_*.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sorted_a.txt /data/sorted_b.txt /data/sorted_c.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

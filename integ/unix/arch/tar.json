@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "arch_tar_create_verbose",
+      "seq": 468,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -c -v -z -f /data/arch/a.tgz /data/arch/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/arch/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_list",
+      "seq": 469,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -t -z -f /data/arch/a.tgz",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/arch/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_extract_strip",
+      "seq": 470,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -x -z -f /data/arch/a.tgz --strip-components 2 -C /data/arch/out && cat /data/arch/out/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "gz-data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_exclude",
+      "seq": 471,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo noise | tee /data/arch/skip.log > /dev/null && tar -c -v -f /data/arch/b.tar --exclude '*.log' /data/arch/g.txt /data/arch/skip.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/arch/g.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

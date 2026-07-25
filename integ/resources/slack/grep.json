@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "slack_grep_pushdown",
+      "seq": 520021,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -r Quokka /slack/channels/product-runtime__C7/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[henry] quokka milestone 27 is basically done\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[marcus] kicking off project Quokka, the runtime for building agents over company tools\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:[file] Runtime Spec\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_searchonly",
+      "seq": 520023,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -r 'reply moat' /slack/channels/leadership__C5/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/leadership__C5/2025-11-24/chat.jsonl:[priya] the reply moat is basically gone after this week's model launches\n/slack/channels/leadership__C5/2026-01-06/files/pivot_memo__F4.md:[file] Pivot Memo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_empty",
+      "seq": 520024,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -r zzzznomatch /slack/channels/general__C1/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_users",
+      "seq": 520025,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rn Anderson /slack/users/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/users/alice__U1.json:1:{\"id\":\"U1\",\"name\":\"alice\",\"real_name\":\"Alice Anderson\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Alice Anderson\",\"display_name\":\"alice\",\"email\":\"alice@kestrel.example.com\"}}\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

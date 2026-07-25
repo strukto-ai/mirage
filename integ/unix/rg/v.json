@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rg_v_invert",
+      "seq": 500401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -v error /data/r4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "warning: low memory\ninfo: all good\nnote: done\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    }
+  ]
+}

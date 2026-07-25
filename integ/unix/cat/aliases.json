@@ -1,0 +1,263 @@
+{
+  "cases": [
+    {
+      "id": "cat_number",
+      "seq": 610102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\ny\\n' | cat --number",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tx\n     2\ty\n",
+        "stderr": ""
+      },
+      "flags": [
+        "number"
+      ]
+    },
+    {
+      "id": "cat_number_nonblank",
+      "seq": 610103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\nx\\n' | cat --number-nonblank",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n     1\tx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "number-nonblank"
+      ]
+    },
+    {
+      "id": "cat_show_all",
+      "seq": 610104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\tA\\001\\n' | cat --show-all",
+      "expect": {
+        "exit": 0,
+        "stdout": "^IA^A$\n",
+        "stderr": ""
+      },
+      "flags": [
+        "show-all"
+      ]
+    },
+    {
+      "id": "cat_show_ends",
+      "seq": 610105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | cat --show-ends",
+      "expect": {
+        "exit": 0,
+        "stdout": "x$\n",
+        "stderr": ""
+      },
+      "flags": [
+        "show-ends"
+      ]
+    },
+    {
+      "id": "cat_show_nonprinting",
+      "seq": 610106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\001b\\n' | cat --show-nonprinting",
+      "expect": {
+        "exit": 0,
+        "stdout": "a^Ab\n",
+        "stderr": ""
+      },
+      "flags": [
+        "show-nonprinting"
+      ]
+    },
+    {
+      "id": "cat_show_tabs",
+      "seq": 610107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\ty\\n' | cat --show-tabs",
+      "expect": {
+        "exit": 0,
+        "stdout": "x^Iy\n",
+        "stderr": ""
+      },
+      "flags": [
+        "show-tabs"
+      ]
+    },
+    {
+      "id": "cat_squeeze_blank",
+      "seq": 610108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n\\n\\n\\ny\\n' | cat --squeeze-blank",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n\ny\n",
+        "stderr": ""
+      },
+      "flags": [
+        "squeeze-blank"
+      ]
+    }
+  ]
+}

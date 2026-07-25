@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "glob_class_two",
+      "seq": 500901,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo /data/[ab].txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt /data/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_class_bang",
+      "seq": 500902,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo /data/[!ab].txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/c.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_class_caret",
+      "seq": 500903,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo /data/[^ab].txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/c.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_class_range",
+      "seq": 500904,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo /data/[a-c].txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt /data/b.txt /data/c.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_class_nomatch",
+      "seq": 500905,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo /data/[xy].txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/[xy].txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_class_sorted",
+      "seq": 500907,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo /data/sorted_[ac].txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sorted_a.txt /data/sorted_c.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

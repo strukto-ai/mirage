@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "tree_d_dirs",
+      "seq": 601372,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptd/a/deep /data/ptd/b && printf x>/data/ptd/a/f.txt && tree -d /data/ptd",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/ptd\n|-- a\n|   `-- deep\n`-- b\n\n4 directories\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    }
+  ]
+}

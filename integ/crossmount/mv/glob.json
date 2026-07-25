@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_mv_glob",
+      "seq": 752,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ga | tee /data/xm2_ga.txt > /dev/null && echo gb | tee /data/xm2_gb.txt > /dev/null && mv /data/xm2_g*.txt /data2/ && cat /data2/xm2_ga.txt /data2/xm2_gb.txt && find /data -name 'xm2_g*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "ga\ngb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

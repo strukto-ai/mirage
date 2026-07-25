@@ -330,6 +330,18 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeGDriveConfig } = await import('./gdrive/config.ts')
     return new GDriveResource(normalizeGDriveConfig(config))
   },
+  onedrive: async (config) => {
+    const { OneDriveResource, normalizeOneDriveConfig } = await import('@struktoai/mirage-core')
+    return new OneDriveResource(normalizeOneDriveConfig(config))
+  },
+  sharepoint: async (config) => {
+    const { SharePointResource, normalizeSharePointConfig } = await import('@struktoai/mirage-core')
+    return new SharePointResource(normalizeSharePointConfig(config))
+  },
+  mem0: async (config) => {
+    const { Mem0Resource, normalizeMem0Config } = await import('@struktoai/mirage-core')
+    return new Mem0Resource(normalizeMem0Config(config))
+  },
   dropbox: async (config) => {
     const { DropboxResource } = await import('./dropbox/dropbox.ts')
     const { normalizeDropboxConfig } = await import('./dropbox/config.ts')

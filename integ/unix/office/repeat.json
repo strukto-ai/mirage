@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "office_repeat_read_stable",
+      "seq": 204002,
+      "targets": [
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "cat /data/office/deck.pptx && cat /data/office/deck.pptx",
+      "expect": {
+        "exit": 0,
+        "stdout": "slide-bytes<odsp-metadata/>slide-bytes<odsp-metadata/>",
+        "stderr": ""
+      }
+    }
+  ]
+}

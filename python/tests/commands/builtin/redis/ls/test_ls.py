@@ -76,7 +76,8 @@ async def test_ls_d_lists_dir_itself(workspace):
 
 
 @pytest.mark.asyncio
-async def test_ls_missing_path_returns_exit_1(workspace):
+async def test_ls_missing_path_returns_exit_2(workspace):
+    # GNU ls exits 2 when a command-line operand cannot be accessed.
     io = await workspace.execute("ls /nope")
-    assert io.exit_code == 1
+    assert io.exit_code == 2
     assert b"nope" in (io.stderr or b"")

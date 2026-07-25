@@ -24,8 +24,11 @@ import {
   GSlidesResource,
   LangfuseResource,
   LinearResource,
+  Mem0Resource,
   MountMode,
+  OneDriveResource,
   type Resource,
+  SharePointResource,
   SlackResource,
   TrelloResource,
   Workspace,
@@ -61,6 +64,9 @@ function resources(): Array<readonly [string, string, Resource]> {
     ["gslides", "/gslides", new GSlidesResource({ clientId: "c", refreshToken: "r" })],
     ["langfuse", "/langfuse", new LangfuseResource({ publicKey: "p", secretKey: "s" })],
     ["linear", "/linear", new LinearResource({ apiKey: "k" })],
+    ["mem0", "/mem0", new Mem0Resource({ apiKey: "k", userId: "u" })],
+    ["onedrive", "/onedrive", new OneDriveResource({ accessToken: "t" })],
+    ["sharepoint", "/sharepoint", new SharePointResource({ accessToken: "t" })],
     ["slack", "/slack", new SlackResource({ token: "x" })],
     ["trello", "/trello", new TrelloResource({ apiKey: "k", apiToken: "t" })],
   ];
@@ -69,8 +75,8 @@ function resources(): Array<readonly [string, string, Resource]> {
 // Invalid -maxdepth/-mindepth/-size/-mtime must be rejected during flag
 // parsing, before any network call, identically on every backend.
 // Cross-checked py vs ts. (github needs a live repo at construct, notion needs
-// an OAuth provider, hf_buckets validates the bucket id, onedrive is py-only —
-// all excluded from this cred-free cross-language suite.)
+// an OAuth provider and hf_buckets validates the bucket id, so those are
+// excluded from this cred-free cross-language suite.)
 const ARG_ERROR_CASES: ReadonlyArray<readonly [string, string]> = [
   ["maxdepth", "-maxdepth abc"],
   ["mindepth", "-mindepth xx"],

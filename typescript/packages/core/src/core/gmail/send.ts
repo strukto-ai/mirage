@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { encodeBase64 } from '../../utils/base64.ts'
 import { type TokenManager, gmailBase, googlePost } from '../google/_client.ts'
 import { extractHeader, getMessageProcessed, getMessageRaw } from './messages.ts'
 
 const ENC = new TextEncoder()
 
 function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  const std =
-    typeof btoa === 'function' ? btoa(binary) : Buffer.from(binary, 'binary').toString('base64')
-  return std.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return encodeBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 function buildMime(headers: Record<string, string>, body: string): string {

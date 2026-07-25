@@ -13,6 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import {
+  Mem0Resource,
+  normalizeMem0Config,
+  normalizeOneDriveConfig,
+  OneDriveResource,
+  resourceStateRequiresOverride,
+} from '@struktoai/mirage-core'
 import { normalizeS3Config } from './s3/config.ts'
 import { buildResource, knownResources, register } from './registry.ts'
 
@@ -25,7 +32,54 @@ describe('node resource registry', () => {
     expect(names).toContain('s3')
     expect(names).toContain('postgres')
     expect(names).toContain('mongodb')
+    expect(names).toContain('onedrive')
+    expect(names).toContain('sharepoint')
+    expect(names).toContain('mem0')
     expect(names).toEqual([...names].sort())
+  })
+
+  it('builds Microsoft Graph and Mem0 resources from snake_case config', async () => {
+    const oneDrive = await buildResource('onedrive', {
+      access_token: 'token',
+      drive_id: 'drive',
+    })
+    const sharePoint = await buildResource('sharepoint', { access_token: 'token' })
+    const mem0 = await buildResource('mem0', { api_key: 'key', user_id: 'user' })
+
+    expect(oneDrive.kind).toBe('onedrive')
+    expect(sharePoint.kind).toBe('sharepoint')
+    expect(mem0.kind).toBe('mem0')
+  })
+
+  // The factories used to double-cast an unvalidated blob, so a bad config
+  // only failed later at the first API call.
+  it('validates Microsoft Graph and Mem0 config instead of casting it through', async () => {
+    await expect(buildResource('onedrive', { drive_id: 'drive' })).rejects.toThrow()
+    await expect(buildResource('sharepoint', { access_token: 7 })).rejects.toThrow()
+    await expect(buildResource('mem0', { api_key: 'key', user_id: 3 })).rejects.toThrow()
+  })
+
+  // getState() used to hand-write the redacted literal, so a field added to
+  // the config later would silently leak or vanish from snapshot state. It is
+  // schema-driven now, so the config shape is the single source of truth.
+  it('redacts Graph and Mem0 secrets in state and keeps every other field', () => {
+    const oneDrive = new OneDriveResource(
+      normalizeOneDriveConfig({ access_token: 'token', drive_id: 'drive', key_prefix: 'sub' }),
+    )
+    const mem0 = new Mem0Resource(
+      normalizeMem0Config({ api_key: 'key', user_id: 'user', default_page_size: 5 }),
+    )
+
+    expect(oneDrive.getState()).toEqual({
+      type: 'onedrive',
+      config: { accessToken: '<REDACTED>', driveId: 'drive', keyPrefix: 'sub' },
+    })
+    expect(mem0.getState()).toEqual({
+      type: 'mem0',
+      config: { apiKey: '<REDACTED>', userId: 'user', defaultPageSize: 5 },
+    })
+    expect(resourceStateRequiresOverride(oneDrive.getState())).toBe(true)
+    expect(resourceStateRequiresOverride(mem0.getState())).toBe(true)
   })
 
   it('builds MongoDB with uri', async () => {
@@ -97,7 +151,7 @@ describe('node resource registry', () => {
       endpoint_url: 'https://example.com',
       path_style: true,
       timeout: 30,
-      proxy: 'http://discarded',
+      proxy: 'http://proxy.example',
     })) as unknown as { config: Record<string, unknown> }
     expect(config).toMatchObject({
       bucket: 'b',
@@ -109,8 +163,8 @@ describe('node resource registry', () => {
       endpoint: 'https://example.com',
       forcePathStyle: true,
       timeoutMs: 30_000,
+      proxy: 'http://proxy.example',
     })
-    expect(config).not.toHaveProperty('proxy')
   })
 
   it('S3: accepts already-camelCase keys (TS-idiomatic)', async () => {
@@ -164,6 +218,7 @@ describe('node resource registry', () => {
       accessKeyId: 'A',
       endpoint: 'https://x',
       timeoutMs: 5_000,
+      proxy: 'p',
     })
   })
 })

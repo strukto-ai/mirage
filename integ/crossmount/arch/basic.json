@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_gzip_cross",
+      "seq": 602010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xmgz && printf 'gzcross\\n' > /data/xmgz/f.txt && gzip /data/xmgz/f.txt && cp /data/xmgz/f.txt.gz /data2/xmf.txt.gz && zcat /data2/xmf.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "gzcross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

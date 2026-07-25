@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "cp_a_tree",
+      "seq": 601002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcp3/at/sub && printf 'a' > /data/pcp3/at/f.txt && cp -a /data/pcp3/at /data/pcp3/atcopy && cat /data/pcp3/atcopy/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
+    }
+  ]
+}

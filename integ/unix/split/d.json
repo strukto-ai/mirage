@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "split_d",
+      "seq": 601071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/psp2 && printf 'l1\\nl2\\nl3\\nl4\\n' > /data/psp2/in.txt && split -d -l 2 /data/psp2/in.txt /data/psp2/n && ls /data/psp2 | grep '^n0' | tr '\\n' ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "n00 n01 ",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "l"
+      ]
+    }
+  ]
+}

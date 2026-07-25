@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "sym_cp_follow",
+      "seq": 632,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp /data/symd/m.txt /data/symd/copy.txt && cat /data/symd/copy.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "beta\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

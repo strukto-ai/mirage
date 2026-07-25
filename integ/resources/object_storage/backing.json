@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "object_storage_prefix_backing_keys",
+      "seq": 903,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "command": "find /raw -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/raw/aliases/aliyun/identity.txt\n/raw/aliases/backblaze/identity.txt\n/raw/aliases/ceph/identity.txt\n/raw/aliases/digitalocean/identity.txt\n/raw/aliases/gcs/identity.txt\n/raw/aliases/minio/identity.txt\n/raw/aliases/oci/identity.txt\n/raw/aliases/qingstor/identity.txt\n/raw/aliases/r2/identity.txt\n/raw/aliases/s3/identity.txt\n/raw/aliases/scaleway/identity.txt\n/raw/aliases/seaweedfs/identity.txt\n/raw/aliases/supabase/identity.txt\n/raw/aliases/tencent/identity.txt\n/raw/aliases/wasabi/identity.txt\n/raw/outside.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

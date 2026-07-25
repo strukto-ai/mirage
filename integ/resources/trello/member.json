@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_member_cat_jq",
+      "seq": 550010,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/members/Alex_Kim__mem_alex.json | jq -r '.full_name + \" @\" + .username'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Alex Kim @alexkim\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

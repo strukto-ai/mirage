@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "tr_cmd_board_list",
+      "seq": 550017,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello board list | jq -r '.[].board_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Roadmap Q3\nOps\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_board_show",
+      "seq": 550018,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello board show brd_roadmap | jq -r '.board_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Roadmap Q3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_board_members",
+      "seq": 550019,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello board members brd_roadmap | jq -r '.[].full_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Alex Kim\nSam Rivera\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_list_list",
+      "seq": 550020,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello list list brd_roadmap | jq -r '.[].list_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "To Do\nIn Progress\nDone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_label_list",
+      "seq": 550021,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello label list brd_roadmap | jq -r '.[].label_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "feature\nbug\nurgent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_card_list",
+      "seq": 550022,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello card list lst_todo | jq -r '.[].card_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add full-text search\nCSV export for reports\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_card_show",
+      "seq": 550023,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello card show crd_search | jq -r '.card_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add full-text search\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_card_comments",
+      "seq": 550024,
+      "targets": [
+        "trello"
+      ],
+      "command": "trello card comments crd_search | jq -r '.[].text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Prototype uses the index cache store.\nPlease add grep push-down too.\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

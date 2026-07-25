@@ -64,10 +64,10 @@ describe('slack tree', () => {
       { index: idx },
     )
     const lines = out.trimEnd().split('\n')
-    expect(lines).toHaveLength(3)
-    expect(lines[0]).toContain('channels')
-    expect(lines[1]).toContain('dms')
-    expect(lines[2]).toContain('users')
+    expect(lines[0]).toBe('/mnt/slack')
+    expect(out).toContain('channels')
+    expect(out).toContain('dms')
+    expect(out).toContain('users')
   })
 
   it('descends into channels subtree from cached index', async () => {

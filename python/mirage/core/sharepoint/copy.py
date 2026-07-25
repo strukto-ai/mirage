@@ -13,7 +13,7 @@ def drive_loc(resolved: ResolvedPath, virt: str) -> DriveLoc:
     assert resolved.item_path is not None
     return DriveLoc(drive=resolved.drive_id,
                     path=resolved.item_path,
-                    virt=virt,
+                    virt=virt.strip("/"),
                     url=partial(item_url, resolved.drive_id),
                     ref=partial(drive_ref_path, resolved.drive_id))
 

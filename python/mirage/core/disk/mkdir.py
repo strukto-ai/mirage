@@ -17,7 +17,7 @@ from pathlib import Path
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.types import PathSpec
 
 
@@ -42,3 +42,5 @@ async def mkdir(accessor: DiskAccessor,
             # mkdir -p semantics: an existing directory is success
             pass
     await invalidate_after_write(path_spec)
+    if parents:
+        await invalidate_ancestors(path_spec)

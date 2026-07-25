@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "read_pipe_group_sets_vars",
+      "seq": 502505,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '1 2 3\\n' | { read rg1 rg2 rg3; echo \"$rg1:$rg2:$rg3\"; }",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:2:3\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

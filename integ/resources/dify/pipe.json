@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "df_pipe_sort_uniq_wc",
+      "seq": 580021,
+      "targets": [
+        "dify"
+      ],
+      "command": "cat /knowledge/guides/auth | sort | uniq | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_pipe_sort_uniq_w0_wc",
+      "seq": 580022,
+      "targets": [
+        "dify"
+      ],
+      "command": "cat /knowledge/guides/auth | sort | uniq -w 0 | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

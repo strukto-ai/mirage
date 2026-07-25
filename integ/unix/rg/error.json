@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "rg_usage_exit",
+      "seq": 577,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: usage: rg [flags] pattern [path]\n"
+      }
+    },
+    {
+      "id": "rg_usage_no_input",
+      "seq": 582,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg foo",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: usage: rg [flags] pattern [path]\n"
+      }
+    }
+  ]
+}

@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tee import parse_flags, write_output
 from mirage.commands.builtin.s3.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -30,18 +33,21 @@ async def tee(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    a: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     paths = await resolve_glob(accessor, paths, index)
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raw = (" ".join(texts)).encode() if texts else b""
     write_data = raw
-    if a:
+    if parsed.append:
         try:
             existing = b""
             async for chunk in read_stream(accessor, paths[0], index=index):
@@ -50,6 +56,5 @@ async def tee(
         except FileNotFoundError:
             # appending to a missing object starts from empty
             pass
-    await write_bytes(accessor, paths[0], write_data)
-    return raw, IOResult(writes={paths[0].mount_path: write_data},
-                         cache=[paths[0].mount_path])
+    return await write_output(partial(write_bytes, accessor), paths[0],
+                              write_data, raw)

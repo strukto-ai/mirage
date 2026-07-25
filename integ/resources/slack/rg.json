@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "slack_rg_pushdown",
+      "seq": 520022,
+      "targets": [
+        "slack"
+      ],
+      "command": "rg Quokka /slack/channels/product-runtime__C7/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[henry] quokka milestone 27 is basically done\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[marcus] kicking off project Quokka, the runtime for building agents over company tools\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:[file] Runtime Spec\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

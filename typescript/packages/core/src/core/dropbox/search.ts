@@ -16,6 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { PathSpec } from '../../types.ts'
 import { rebaseRaw } from '../../utils/path.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchFiles } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 
@@ -68,11 +69,11 @@ export async function narrowPaths(
       return null
     }
     const scopeLower = scopeApi.toLowerCase()
-    const scopePrefix = scopeLower.replace(/\/+$/, '') + '/'
+    const scopePrefix = rstripSlash(scopeLower) + '/'
     const scoped: string[] = []
     for (const [lower, display] of results) {
       if (lower !== scopeLower && !lower.startsWith(scopePrefix)) continue
-      const key = display.slice(root.length).replace(/^\/+|\/+$/g, '')
+      const key = stripSlash(display.slice(root.length))
       scoped.push(key === '' ? mountPrefix || '/' : `${mountPrefix}/${key}`)
     }
     scoped.sort(compareComponents)

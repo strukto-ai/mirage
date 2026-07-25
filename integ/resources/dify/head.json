@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "df_head_1",
+      "seq": 580011,
+      "targets": [
+        "dify"
+      ],
+      "command": "head -n 1 /knowledge/guides/quickstart",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome to Acme. This quickstart gets you running fast.\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

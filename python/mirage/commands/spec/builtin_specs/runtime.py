@@ -59,9 +59,15 @@ SPECS: dict[str, CommandSpec] = {
     'mktemp':
     CommandSpec(
         options=(
-            Option(short="-d"),
+            Option(short="-d", long="--directory"),
             Option(short="-p", value_kind=OperandKind.PATH),
+            Option(long="--tmpdir",
+                   value_kind=OperandKind.PATH,
+                   value_optional=True),
             Option(short="-t"),
+            Option(short="-u", long="--dry-run"),
+            Option(short="-q", long="--quiet"),
+            Option(long="--suffix", value_kind=OperandKind.TEXT),
         ),
         positional=(Operand(kind=OperandKind.TEXT), ),
     ),

@@ -310,31 +310,41 @@ export function handleUntil(
 export async function handleCase(
   executeNode: ExecuteNodeFn,
   word: string,
-  items: readonly [readonly string[], readonly TSNodeLike[]][],
+  items: readonly [readonly string[], readonly TSNodeLike[], string][],
   session: Session,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
-  for (const [patterns, body] of items) {
-    if (patterns.some((p) => fnmatch(word, p.trim()))) {
-      const allStdout: ByteSource[] = []
-      let mergedIo = new IOResult()
-      let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
-      let stageStdin = stdin
-      for (const stmt of body) {
-        const [stdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
-        stageStdin = null
-        lastExec = execNode
-        if (stdout !== null) allStdout.push(stdout)
-        mergedIo = await mergedIo.merge(io)
-      }
-      const first = allStdout[0]
-      if (allStdout.length === 1 && first !== undefined) return [first, mergedIo, lastExec]
-      const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
-      return [combined, mergedIo, lastExec]
+  const allStdout: ByteSource[] = []
+  let mergedIo = new IOResult()
+  let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
+  let stageStdin = stdin
+  let ran = false
+  let fallthrough = false
+  for (const [patterns, body, terminator] of items) {
+    if (!(fallthrough || patterns.some((p) => fnmatch(word, p.trim())))) continue
+    ran = true
+    for (const stmt of body) {
+      const [stdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
+      stageStdin = null
+      lastExec = execNode
+      if (stdout !== null) allStdout.push(stdout)
+      mergedIo = await mergedIo.merge(io)
     }
+    if (terminator === ';&') {
+      // Fall through: run the next arm's body without testing it.
+      fallthrough = true
+      continue
+    }
+    // ;;& keeps testing remaining patterns; ;; stops here.
+    fallthrough = false
+    if (terminator !== ';;&') break
   }
-  return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]
+  if (!ran) return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]
+  const first = allStdout[0]
+  if (allStdout.length === 1 && first !== undefined) return [first, mergedIo, lastExec]
+  const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
+  return [combined, mergedIo, lastExec]
 }
 
 /**

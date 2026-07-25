@@ -19,6 +19,8 @@ from dataclasses import dataclass
 import tree_sitter
 
 from mirage.shell.arith import evaluate_arith
+from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
+                                array_indices, array_slice, array_values)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.helpers import get_text
@@ -43,6 +45,11 @@ _CASE_OPS = frozenset({"^", "^^", ",", ",,"})
 # Ops whose first operand is a glob pattern that must keep its literal
 # spelling (no unescaping) while still expanding nested $-expansions.
 _PATTERN_OPS = _REPLACE_OPS | _STRIP_OPS | _CASE_OPS
+
+# Ops on a "${a[@]...}" splat that act per element, so a quoted splat
+# still splits into one word per element; every other op acts on the
+# space-joined value and stays a single word.
+_MULTIWORD_AT_OPS = frozenset({":"}) | _STRIP_OPS | _REPLACE_OPS | _CASE_OPS
 
 _LITERAL_ARG_TYPES = frozenset({NT.WORD, NT.NUMBER, "regex"})
 
@@ -116,8 +123,7 @@ def _lookup_var(var: str,
             return local_val
     arrays = getattr(session, "arrays", None)
     if arrays and var in arrays:
-        arr = arrays[var]
-        return arr[0] if arr else ""
+        return array_get(arrays[var], 0)
     if var == "PWD":
         return session.cwd
     if var == "HOME":
@@ -440,6 +446,15 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
             (dependency-injected to avoid a cycle with ``expand_node``).
     """
     p = _parse_braces(node)
+    if any(c.type == "}" and c.is_missing for c in node.children):
+        # tree-sitter-bash cannot parse a $-spelled substring offset
+        # (${v:$o}, ${v:$o:n}): it truncates the expansion with a
+        # zero-width `}` and reparses the tail as stray siblings. bash
+        # accepts the form, so emitting the mis-parse would corrupt the
+        # value silently; fail loudly instead. Spell it ${v:o} or
+        # ${v:$((o))}.
+        msg = f"bash: ${{{p.var_name or ''}}}: bad substitution\n"
+        raise ExitSignal(2, stderr=msg.encode(), contained_code=2)
     env = session.env
     arrays = getattr(session, "arrays", {})
 
@@ -454,30 +469,32 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
     if p.subscript is not None and p.var_name is not None:
         arr = arrays.get(p.var_name)
         if arr is None:
-            scalar = env.get(p.var_name, "")
-            arr = [scalar] if scalar else []
+            # A scalar is element 0 of a one-element array, even when
+            # empty: ${#x[@]} is 1 for x="" but 0 for an unset name.
+            arr = [env[p.var_name]] if p.var_name in env else []
         var_in_env = p.var_name in arrays or p.var_name in env
         if p.subscript in ("@", "*"):
+            # ${a[@]} and friends see only the assigned elements: a hole
+            # left by `unset a[i]` (or skipped by a[9]=v) neither expands
+            # nor counts, though it keeps the later indices in place.
+            values = array_values(arr)
             if p.indirect_op:
-                return " ".join(str(i) for i in range(len(arr)))
+                return " ".join(str(i) for i in array_indices(arr))
             if p.length_op:
-                return str(len(arr))
+                return str(len(values))
             if p.op == ":":
                 sliced = _slice_array(arr, groups, env)
                 return " ".join(sliced)
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
-                return " ".join(_value_op(p.op, el, groups, env) for el in arr)
-            val = " ".join(arr)
+                return " ".join(
+                    _value_op(p.op, el, groups, env) for el in values)
+            val = " ".join(values)
         else:
             idx = _array_index(p.subscript, env)
             if idx < 0:
-                idx += len(arr)
-            if 0 <= idx < len(arr):
-                val = arr[idx]
-                var_in_env = True
-            else:
-                val = ""
-                var_in_env = False
+                idx += array_extent(arr)
+            val = array_get(arr, idx)
+            var_in_env = array_has(arr, idx)
     elif p.var_name:
         if call_stack:
             local_val = call_stack.get_local(p.var_name)
@@ -485,8 +502,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
                 val = local_val
                 var_in_env = True
         if not var_in_env and p.var_name in arrays:
-            arr = arrays[p.var_name]
-            val = arr[0] if arr else ""
+            val = array_get(arrays[p.var_name], 0)
             var_in_env = True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]
@@ -546,22 +562,81 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
     return _value_op(p.op, val, groups, env)
 
 
-def _slice_array(arr: list[str], groups: list[str],
+def _slice_array(arr: ShellArray, groups: list[str],
                  env: dict[str, str]) -> list[str]:
+    """Resolve ``${a[@]:offset:length}`` against a shell array.
+
+    Args:
+        arr (ShellArray): the array being sliced.
+        groups (list[str]): the raw offset and length words.
+        env (dict[str, str]): environment for the arithmetic context.
+    """
     if not groups:
-        return arr
+        return array_values(arr)
     offset = _arith_int(groups[0], env)
     if offset is None:
-        return arr
+        return array_values(arr)
     length = None
     if len(groups) > 1:
         length = _arith_int(groups[1], env)
         if length is None:
-            return arr
-    if offset < 0:
-        offset = max(0, len(arr) + offset)
-    if length is None:
-        return arr[offset:]
-    if length < 0:
-        return arr[offset:max(offset, len(arr) + length)]
-    return arr[offset:offset + length]
+            return array_values(arr)
+    return array_slice(arr, offset, length)
+
+
+def is_multiword_at(node: tree_sitter.Node) -> bool:
+    """Report whether a "${a[@]...}" splat word-splits when quoted.
+
+    True for the ``@``-subscript forms bash keeps as one word per
+    element: plain ``${a[@]}``, slice ``${a[@]:o:l}``, per-element
+    strip/replace/case ops, and ``${!a[@]}`` indices. False for
+    single-word forms (``${a[*]}``, ``${#a[@]}``, non-``@`` subscript,
+    or a default/alternate op that acts on the joined value).
+
+    Args:
+        node (tree_sitter.Node): the ``expansion`` node.
+    """
+    if node.type != NT.EXPANSION:
+        return False
+    p = _parse_braces(node)
+    if p.subscript != "@" or p.length_op:
+        return False
+    if p.indirect_op or p.op is None:
+        return True
+    return p.op in _MULTIWORD_AT_OPS
+
+
+async def expand_array_at(node: tree_sitter.Node, session: Session,
+                          call_stack: CallStack | None,
+                          expand_child: ExpandChild) -> list[str]:
+    """Resolve a multi-word "${a[@]...}" splat to its word list.
+
+    Only call when ``is_multiword_at`` is True; the caller word-splits
+    (or stitches prefix/suffix onto) the returned words, matching bash's
+    quoted-splat semantics.
+
+    Args:
+        node (tree_sitter.Node): the ``expansion`` node.
+        session (Session): shell session (arrays, env).
+        call_stack (CallStack | None): function-call scope, if any.
+        expand_child (ExpandChild): nested-node expander for op operands.
+    """
+    p = _parse_braces(node)
+    arrays = getattr(session, "arrays", {})
+    arr = arrays.get(p.var_name)
+    if arr is None:
+        name = p.var_name or ""
+        arr = [session.env[name]] if name in session.env else []
+    if p.indirect_op:
+        return [str(i) for i in array_indices(arr)]
+    values = array_values(arr)
+    if p.op is None:
+        return values
+    groups: list[str] = []
+    for gi, group in enumerate(p.groups):
+        pattern_mode = gi == 0 and p.op in _PATTERN_OPS
+        groups.append(await _expand_group(group, expand_child, pattern_mode,
+                                          session, call_stack))
+    if p.op == ":":
+        return _slice_array(arr, groups, session.env)
+    return [_value_op(p.op, el, groups, session.env) for el in values]

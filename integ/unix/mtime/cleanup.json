@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "mtime_cleanup",
+      "seq": 400004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rm -rf /data/mtimecheck && echo cleaned",
+      "expect": {
+        "exit": 0,
+        "stdout": "cleaned\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

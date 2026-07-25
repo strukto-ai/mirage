@@ -1,0 +1,76 @@
+{
+  "cases": [
+    {
+      "id": "date_d_iso",
+      "seq": 601270,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '2021-06-15T12:00:00Z' -I",
+      "expect": {
+        "exit": 0,
+        "stdout": "2021-06-15\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d",
+        "I"
+      ]
+    },
+    {
+      "id": "date_d_rfc",
+      "seq": 601271,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '2021-06-15T12:00:00Z' -R",
+      "expect": {
+        "exit": 0,
+        "stdout": "Tue, 15 Jun 2021 12:00:00 +0000\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d",
+        "R"
+      ]
+    }
+  ]
+}

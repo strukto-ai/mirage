@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_lists_ls",
+      "seq": 550004,
+      "targets": [
+        "trello"
+      ],
+      "command": "ls /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists",
+      "expect": {
+        "exit": 0,
+        "stdout": "Done__lst_done\nIn_Progress__lst_doing\nTo_Do__lst_todo\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

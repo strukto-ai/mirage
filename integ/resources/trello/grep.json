@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "tr_grep_desc",
+      "seq": 550014,
+      "targets": [
+        "trello"
+      ],
+      "command": "grep -rl 'redirect' /board",
+      "expect": {
+        "exit": 0,
+        "stdout": "/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -13,6 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { evaluateArith } from '../../shell/arith.ts'
+import {
+  type ShellArray,
+  arrayExtent,
+  arrayGet,
+  arrayHas,
+  arrayIndices,
+  arraySlice,
+  arrayValues,
+} from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -31,13 +40,14 @@ export interface TSNodeLike {
   namedChildren: TSNodeLike[]
   parent?: TSNodeLike | null
   isNamed?: boolean
+  isMissing?: boolean
   startIndex?: number
   endIndex?: number
 }
 
 export type ExpandChild = (node: TSNodeLike) => Promise<string>
 
-export const PARAM_OPS: ReadonlySet<string> = new Set([
+const PARAM_OPS: ReadonlySet<string> = new Set([
   ':-',
   '-',
   ':+',
@@ -71,6 +81,16 @@ const CASE_OPS: ReadonlySet<string> = new Set(['^', '^^', ',', ',,'])
 // Ops whose first operand is a glob pattern that must keep its literal
 // spelling (no unescaping) while still expanding nested $-expansions.
 const PATTERN_OPS: ReadonlySet<string> = new Set([...REPLACE_OPS, ...STRIP_OPS, ...CASE_OPS])
+
+// Ops on a "${a[@]...}" splat that act per element, so a quoted splat
+// still splits into one word per element; every other op acts on the
+// space-joined value and stays a single word.
+const MULTIWORD_AT_OPS: ReadonlySet<string> = new Set([
+  ':',
+  ...STRIP_OPS,
+  ...REPLACE_OPS,
+  ...CASE_OPS,
+])
 
 const LITERAL_ARG_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, 'regex'])
 
@@ -144,7 +164,7 @@ export function lookupVar(
   }
   const fromArray = session.arrays[name]
   if (fromArray !== undefined) {
-    return fromArray[0] ?? ''
+    return arrayGet(fromArray, 0)
   }
   if (name === 'PWD') return session.cwd
   if (name === 'HOME') return homeDir(session) ?? ''
@@ -408,21 +428,60 @@ function substring(val: string, groups: string[], env: Record<string, string>): 
   return val.slice(offset, offset + length)
 }
 
-function sliceArray(arr: string[], groups: string[], env: Record<string, string>): string[] {
+/** Resolve `${a[@]:offset:length}` against a shell array. */
+function sliceArray(arr: ShellArray, groups: string[], env: Record<string, string>): string[] {
   const offsetRaw = groups[0]
-  if (offsetRaw === undefined) return arr
-  let offset = arithInt(offsetRaw, env)
-  if (offset === null) return arr
+  if (offsetRaw === undefined) return arrayValues(arr)
+  const offset = arithInt(offsetRaw, env)
+  if (offset === null) return arrayValues(arr)
   let length: number | null = null
   const lengthRaw = groups[1]
   if (lengthRaw !== undefined) {
     length = arithInt(lengthRaw, env)
-    if (length === null) return arr
+    if (length === null) return arrayValues(arr)
   }
-  if (offset < 0) offset = Math.max(0, arr.length + offset)
-  if (length === null) return arr.slice(offset)
-  if (length < 0) return arr.slice(offset, Math.max(offset, arr.length + length))
-  return arr.slice(offset, offset + length)
+  return arraySlice(arr, offset, length)
+}
+
+// True for the "${a[@]...}" forms bash keeps as one word per element:
+// plain, slice, per-element strip/replace/case ops, and ${!a[@]}
+// indices. False for single-word forms (${a[*]}, ${#a[@]}, non-@
+// subscript, or a default/alternate op acting on the joined value).
+export function isMultiwordAt(node: TSNodeLike): boolean {
+  if (node.type !== NT.EXPANSION) return false
+  const p = parseBraces(node)
+  if (p.subscript !== '@' || p.lengthOp) return false
+  if (p.indirectOp || p.op === null) return true
+  return MULTIWORD_AT_OPS.has(p.op)
+}
+
+// Resolve a multi-word "${a[@]...}" splat to its word list. Only call
+// when isMultiwordAt is true; the caller word-splits (or stitches
+// prefix/suffix onto) the words, matching bash's quoted-splat rule.
+export async function expandArrayAt(
+  node: TSNodeLike,
+  session: Session,
+  callStack: CallStack | null,
+  expandChild: ExpandChild,
+): Promise<string[]> {
+  const p = parseBraces(node)
+  const env = session.env
+  let arr = session.arrays[p.varName ?? '']
+  if (arr === undefined) {
+    const scalar = env[p.varName ?? '']
+    arr = scalar === undefined ? [] : [scalar]
+  }
+  if (p.indirectOp) return arrayIndices(arr).map((i) => String(i))
+  const values = arrayValues(arr)
+  if (p.op === null) return values
+  const op = p.op
+  const groups: string[] = []
+  for (let gi = 0; gi < p.groups.length; gi++) {
+    const patternMode = gi === 0 && PATTERN_OPS.has(op)
+    groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
+  }
+  if (op === ':') return sliceArray(arr, groups, env)
+  return values.map((el) => valueOp(op, el, groups, env))
 }
 
 // bash evaluates subscripts in arithmetic context (${a[i+1]});
@@ -461,6 +520,20 @@ export async function expandBraces(
   expandChild: ExpandChild,
 ): Promise<string> {
   const p = parseBraces(node)
+  if (node.children.some((c) => c.type === '}' && c.isMissing)) {
+    // tree-sitter-bash cannot parse a $-spelled substring offset
+    // (${v:$o}, ${v:$o:n}): it truncates the expansion with a
+    // zero-width `}` and reparses the tail as stray siblings. bash
+    // accepts the form, so emitting the mis-parse would corrupt the
+    // value silently; fail loudly instead. Spell it ${v:o} or
+    // ${v:$((o))}.
+    throw new ExitSignal(
+      2,
+      new TextEncoder().encode(`bash: \${${p.varName ?? ''}}: bad substitution\n`),
+      null,
+      2,
+    )
+  }
   const env = session.env
   const arrays = session.arrays
 
@@ -476,33 +549,36 @@ export async function expandBraces(
   if (p.subscript !== null && p.varName !== null) {
     let arr = arrays[p.varName]
     if (arr === undefined) {
-      const scalar = env[p.varName] ?? ''
-      arr = scalar !== '' ? [scalar] : []
+      // A scalar is element 0 of a one-element array, even when empty:
+      // ${#x[@]} is 1 for x="" but 0 for an unset name.
+      const scalar = env[p.varName]
+      arr = scalar === undefined ? [] : [scalar]
     }
     varInEnv = p.varName in arrays || p.varName in env
     if (p.subscript === '@' || p.subscript === '*') {
+      // ${a[@]} and friends see only the assigned elements: a hole left
+      // by `unset a[i]` (or skipped by a[9]=v) neither expands nor
+      // counts, though it keeps the later indices in place.
+      const values = arrayValues(arr)
       if (p.indirectOp) {
-        return arr.map((_, i) => String(i)).join(' ')
+        return arrayIndices(arr)
+          .map((i) => String(i))
+          .join(' ')
       }
-      if (p.lengthOp) return String(arr.length)
+      if (p.lengthOp) return String(values.length)
       if (p.op === ':') {
         return sliceArray(arr, groups, env).join(' ')
       }
       if (p.op !== null && (STRIP_OPS.has(p.op) || REPLACE_OPS.has(p.op) || CASE_OPS.has(p.op))) {
         const op = p.op
-        return arr.map((el) => valueOp(op, el, groups, env)).join(' ')
+        return values.map((el) => valueOp(op, el, groups, env)).join(' ')
       }
-      val = arr.join(' ')
+      val = values.join(' ')
     } else {
       let idx = arrayIndex(p.subscript, env)
-      if (idx < 0) idx += arr.length
-      if (idx >= 0 && idx < arr.length) {
-        val = arr[idx] ?? ''
-        varInEnv = true
-      } else {
-        val = ''
-        varInEnv = false
-      }
+      if (idx < 0) idx += arrayExtent(arr)
+      val = arrayGet(arr, idx)
+      varInEnv = arrayHas(arr, idx)
     }
   } else if (p.varName !== null) {
     if (callStack) {
@@ -513,8 +589,7 @@ export async function expandBraces(
       }
     }
     if (!varInEnv && p.varName in arrays) {
-      const arr = arrays[p.varName] ?? []
-      val = arr[0] ?? ''
+      val = arrayGet(arrays[p.varName] ?? [], 0)
       varInEnv = true
     }
     if (!varInEnv && p.varName in env) {

@@ -30,4 +30,14 @@ describe.each(NATIVE_BACKENDS)('native sha256sum (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('supports tagged and binary NUL-terminated output', async () => {
+    const env = makeEnv(kind)
+    try {
+      expect(await env.mirage('sha256sum --tag', ENC.encode('abc'))).toMatch(/^SHA256 \(-\) = /)
+      expect(await env.mirage('sha256sum -b -z', ENC.encode('abc'))).toMatch(/ \*-\0$/)
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

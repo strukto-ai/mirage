@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "id": "grep_A1",
+      "seq": 85,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -A 1 world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nfoo\n",
+        "stderr": ""
+      },
+      "flags": [
+        "A"
+      ]
+    },
+    {
+      "id": "grep_A_B_combined",
+      "seq": 500213,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "grep -A1 -B2 timeout /data/g4/app.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "warning: low memory\ninfo: all good\nerror: timeout\nnote: done\n",
+        "stderr": ""
+      },
+      "flags": [
+        "A",
+        "B"
+      ]
+    }
+  ]
+}

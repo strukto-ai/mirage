@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "slack_search",
+      "seq": 520029,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query Quokka /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"Quokka\",\"messages\":{\"total\":4,\"pagination\":{\"total_count\":4,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":4,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767691369.000536\",\"text\":\"Quokka is the right bet, let us commit to the runtime\",\"channel\":{\"id\":\"D1\",\"name\":\"marcus\"}},{\"type\":\"message\",\"user\":\"U11\",\"username\":\"henry\",\"ts\":\"1767863370.000558\",\"text\":\"quokka milestone 27 is basically done\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1767878065.000559\",\"text\":\"kicking off project Quokka, the runtime for building agents over company tools\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767888155.000553\",\"text\":\"we are pivoting to Kestrel Runtime, an agent infrastructure play, codename Quokka\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_from",
+      "seq": 520030,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'from:@priya Quokka' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"from:@priya Quokka\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767691369.000536\",\"text\":\"Quokka is the right bet, let us commit to the runtime\",\"channel\":{\"id\":\"D1\",\"name\":\"marcus\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1767888155.000553\",\"text\":\"we are pivoting to Kestrel Runtime, an agent infrastructure play, codename Quokka\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_after",
+      "seq": 520031,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'bridge after:2026-02-01' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"bridge after:2026-02-01\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U16\",\"username\":\"mia\",\"ts\":\"1771406854.000951\",\"text\":\"runway model spreadsheet after the bridge attached\",\"channel\":{\"id\":\"C5\",\"name\":\"leadership\"}},{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1771581029.000961\",\"text\":\"we closed a bridge round to fund the runtime pivot\",\"channel\":{\"id\":\"C1\",\"name\":\"general\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_in",
+      "seq": 520032,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'in:#product-runtime beta' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"in:#product-runtime beta\",\"messages\":{\"total\":5,\"pagination\":{\"total_count\":5,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":5,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1767980755.000568\",\"text\":\"prepping the private beta build for Henry\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1768303399.000606\",\"text\":\"prepping the private beta build for Jack\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U17\",\"username\":\"noah\",\"ts\":\"1768843921.000654\",\"text\":\"prepping the private beta build for Jack\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U11\",\"username\":\"henry\",\"ts\":\"1772818308.001093\",\"text\":\"prepping the private beta build for Priya\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}},{\"type\":\"message\",\"user\":\"U8\",\"username\":\"marcus\",\"ts\":\"1773247518.001140\",\"text\":\"Kestrel Runtime private beta is live for design partners\",\"channel\":{\"id\":\"C7\",\"name\":\"product-runtime\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_archived",
+      "seq": 520033,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'tone control' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"tone control\",\"messages\":{\"total\":4,\"pagination\":{\"total_count\":4,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":4,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1762259676.000007\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U3\",\"username\":\"carol\",\"ts\":\"1763024882.000099\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1763401150.000148\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}},{\"type\":\"message\",\"user\":\"U1\",\"username\":\"alice\",\"ts\":\"1765475491.000347\",\"text\":\"shipping the tone control feature this week\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}}]}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_searchonly",
+      "seq": 520034,
+      "targets": [
+        "slack"
+      ],
+      "command": "slack-search --query 'reply moat' /slack/",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"query\":\"reply moat\",\"messages\":{\"total\":2,\"pagination\":{\"total_count\":2,\"page\":1,\"page_count\":1},\"paging\":{\"count\":20,\"total\":2,\"page\":1,\"pages\":1},\"matches\":[{\"type\":\"message\",\"user\":\"U7\",\"username\":\"priya\",\"ts\":\"1763985579.000212\",\"text\":\"the reply moat is basically gone after this week's model launches\",\"channel\":{\"id\":\"C5\",\"name\":\"leadership\"}},{\"type\":\"message\",\"user\":\"U12\",\"username\":\"iris\",\"ts\":\"1764090866.000220\",\"text\":\"are we sure the reply moat still holds, customers can do this in the box now\",\"channel\":{\"id\":\"C6\",\"name\":\"product-reply\"}}]}}",
+        "stderr": ""
+      }
+    }
+  ]
+}

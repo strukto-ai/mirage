@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "disp_md5_rel",
+      "seq": 521,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && md5 a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "191c53e00627438f88824862472a3f59  a.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

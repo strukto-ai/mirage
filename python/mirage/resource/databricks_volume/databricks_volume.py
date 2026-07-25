@@ -77,8 +77,8 @@ class DatabricksVolumeResource(BaseResource):
 
         for fn in DATABRICKS_VOLUME_COMMANDS:
             self.register(fn)
-        for fn in DATABRICKS_VOLUME_OPS:
-            self.register_op(fn)
+        for op in DATABRICKS_VOLUME_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

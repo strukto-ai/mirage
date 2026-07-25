@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { cpGeneric } from '../../cp.ts'
+import { cpGeneric, parseCpFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
 
@@ -31,33 +30,11 @@ export async function runCp(
   const stat = statOp(dispatch)
   const readBytes = readBytesOp(dispatch)
   const readdir = readdirOp(dispatch)
-  const noClobber = flagKwargs.n === true
-  const verbose = flagKwargs.v === true
   const write = async (p: PathSpec, data: Uint8Array): Promise<void> => {
     await dispatch('write', p, [data])
   }
   const mkdir = async (p: PathSpec): Promise<void> => {
     await dispatch('mkdir', p)
   }
-  const recursive = flagKwargs.r === true || flagKwargs.R === true || flagKwargs.a === true
-  // Sources stream through the client here, so record them as reads:
-  // apply_io then populates the file cache (a cp is also a full read).
-  const reads: Record<string, Uint8Array> = {}
-  const recordingRead = async (p: PathSpec): Promise<Uint8Array> => {
-    const data = await readBytes(p)
-    reads[p.virtual] = data
-    return data
-  }
-  const result = await cpGeneric(
-    flat,
-    stat,
-    { readBytes: recordingRead, write, mkdir, readdir },
-    recursive,
-    noClobber,
-    verbose,
-  )
-  const [out, io] = result ?? [null, new IOResult()]
-  io.reads = { ...io.reads, ...reads }
-  io.cache = [...io.cache, ...Object.keys(reads)]
-  return [out, io]
+  return cpGeneric(flat, stat, { readBytes, write, mkdir, readdir }, parseCpFlags(flagKwargs))
 }

@@ -11,12 +11,14 @@
           "redis"
         ],
         "typescript": [
-          "ram"
+          "ram",
+          "disk",
+          "redis"
         ]
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "a.txt\nb.txt\nbinary.bin\nempty.txt\nno_nl.txt\nsame_a.txt\nsame_b.txt\nsub\n",
+        "stdout_text": "a.txt\nb.txt\nbinary.bin\nempty.txt\nno_nl.txt\nsame_a.txt\nsame_b.txt\nsk_colon.txt\nsk_fields.txt\nsk_ties.txt\nsub\n",
         "stderr_text": ""
       }
     },
@@ -30,12 +32,52 @@
           "redis"
         ],
         "typescript": [
-          "ram"
+          "ram",
+          "disk",
+          "redis"
         ]
       },
       "expect": {
         "exit": 0,
         "stdout_text": "deep\nnested.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "ls_missing_operand_exit",
+      "cmd": "ls /data/nope 2>/dev/null; echo rc=$?",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "rc=2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "ls_missing_operand_beside_good_exit",
+      "cmd": "ls /data/nope /data/sub 2>/dev/null; echo rc=$?",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "deep\nnested.txt\nrc=2\n",
         "stderr_text": ""
       }
     }

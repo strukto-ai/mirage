@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "id": "rm_rv_chain",
+      "seq": 601033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prm4/lin/sub && printf 'z' > /data/prm4/lin/sub/z.txt && rm -rv /data/prm4/lin",
+      "expect": {
+        "exit": 0,
+        "stdout": "removed '/data/prm4/lin/sub/z.txt'\nremoved directory '/data/prm4/lin/sub'\nremoved directory '/data/prm4/lin'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "v"
+      ]
+    },
+    {
+      "id": "rm_r_effect",
+      "seq": 601034,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/prm5/re/s && printf 'a' > /data/prm5/re/s/a.txt && rm -r /data/prm5/re; test -d /data/prm5/re && echo present || echo gone",
+      "expect": {
+        "exit": 0,
+        "stdout": "gone\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    }
+  ]
+}

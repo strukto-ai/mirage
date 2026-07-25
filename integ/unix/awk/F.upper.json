@@ -1,0 +1,115 @@
+{
+  "cases": [
+    {
+      "id": "awk_first_col",
+      "seq": 50,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/csv.csv | awk -F, '{print $1}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "name\nalice\nbob\n",
+        "stderr": ""
+      },
+      "flags": [
+        "F,"
+      ]
+    },
+    {
+      "id": "awk_fs_comma",
+      "seq": 168,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk -F , '{print $2}' /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "age\n30\n25\n",
+        "stderr": ""
+      },
+      "flags": [
+        "F"
+      ]
+    },
+    {
+      "id": "awk_ofs",
+      "seq": 169,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk -F , 'BEGIN{OFS=\":\"} {print $1, $2}' /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "name age\nalice 30\nbob 25\n",
+        "stderr": ""
+      },
+      "flags": [
+        "F"
+      ]
+    }
+  ]
+}

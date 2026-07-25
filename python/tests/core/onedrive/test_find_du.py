@@ -152,6 +152,51 @@ async def test_find_honors_or_tree():
 
 
 @pytest.mark.asyncio
+async def test_find_empty_matches_childless_folder():
+    with aioresponses() as m:
+        m.get(_BASE + "/root/children",
+              payload={
+                  "value": [
+                      {
+                          "id": "1",
+                          "name": "a.txt",
+                          "size": 3,
+                          "file": {}
+                      },
+                      {
+                          "id": "2",
+                          "name": "hollow",
+                          "folder": {
+                              "childCount": 0
+                          }
+                      },
+                      {
+                          "id": "3",
+                          "name": "full",
+                          "folder": {
+                              "childCount": 1
+                          }
+                      },
+                  ]
+              })
+        m.get(_BASE + "/root:/hollow:/children", payload={"value": []})
+        m.get(_BASE + "/root:/full:/children",
+              payload={
+                  "value": [{
+                      "id": "4",
+                      "name": "c.txt",
+                      "size": 1,
+                      "file": {}
+                  }]
+              })
+        out = await find(_accessor(),
+                         PathSpec.from_str_path("/"),
+                         type="d",
+                         empty=True)
+    assert out == ["/hollow"]
+
+
+@pytest.mark.asyncio
 async def test_find_empty_folder_emits_start_path():
     with aioresponses() as m:
         m.get(_BASE + "/root:/empty:/children", payload={"value": []})

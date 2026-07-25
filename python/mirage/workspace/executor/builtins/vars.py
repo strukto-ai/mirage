@@ -12,18 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+import shlex
+from collections.abc import Callable
+from typing import Any
+
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
+from mirage.shell.array import array_extent, array_unset
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.types import SET_FLAG_TO_OPTION
+from mirage.workspace.executor.builtins.text import _PRINTF_TARGET_RE
 from mirage.workspace.executor.control import ReturnSignal
+from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
+
+_ENV_HELP_HINT = "Try 'env --help' for more information.\n"
+
+
+def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
+    err = (message + "\n" + _ENV_HELP_HINT).encode()
+    return None, IOResult(exit_code=125,
+                          stderr=err), ExecutionNode(command="env",
+                                                     exit_code=125,
+                                                     stderr=err)
 
 
 async def handle_export(
@@ -61,19 +79,130 @@ async def handle_readonly(
     return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)
 
 
+def _unset_variable(session: Session, name: str) -> str:
+    """Remove a scalar/array variable, or one array element ``name[idx]``.
+
+    Clearing an element keeps the indices of the elements after it, as
+    bash does: it leaves a hole, which neither expands in ``${arr[@]}``
+    nor counts toward ``${#arr[@]}`` but keeps ``${arr[i]}`` addressing
+    the same values. Trailing holes are dropped, so ``arr+=(x)`` refills
+    the slot a trailing unset freed.
+
+    A subscript on a scalar names element 0 only: ``x[0]`` unsets the
+    scalar and any other subscript is an error. A subscript on a name
+    that holds nothing at all is a silent no-op, but on an existing array
+    a negative subscript still below zero after the extent is added is a
+    bad-subscript error.
+
+    Args:
+        session (Session): shell session state.
+        name (str): a variable name or ``name[subscript]``.
+
+    Returns:
+        str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
+            applied to a scalar, or ``"subscript"`` for a negative
+            subscript outside an existing array.
+    """
+    match = _PRINTF_TARGET_RE.match(name)
+    if match is not None and match.group(2) is not None:
+        base, subscript = match.group(1), match.group(2)
+        arr = session.arrays.get(base)
+        if arr is None:
+            if base not in session.env:
+                return "ok"
+            if _array_index(subscript, session.env) != 0:
+                return "notarray"
+            session.env.pop(base, None)
+            return "ok"
+        idx = _array_index(subscript, session.env)
+        if idx < 0:
+            idx += array_extent(arr)
+            if idx < 0:
+                return "subscript"
+        array_unset(arr, idx)
+        return "ok"
+    session.env.pop(name, None)
+    session.arrays.pop(name, None)
+    if name == "OPTIND":
+        session._getopts_optind = None
+    return "ok"
+
+
 async def handle_unset(
-    names: list[str],
+    args: list[str],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    for name in names:
-        if name in session.readonly_vars:
-            err = (f"bash: unset: {name}: cannot unset: "
+    """Unset shell variables, arrays, or functions, with bash's flags.
+
+    ``-v`` targets a variable only, ``-f`` a function only, and a bare
+    name a variable if one exists or else a function. A ``name[idx]``
+    operand clears one element; the readonly guard resolves it to the
+    base name first, since that is what ``readonly`` records. ``-n``
+    (unset a nameref itself) has no referent here — mirage has no
+    nameref attribute — so it matches bash on a non-nameref name and
+    leaves it untouched.
+
+    Args:
+        args (list[str]): option words followed by names to unset.
+        session (Session): shell session state.
+    """
+    mode = "auto"
+    i = 0
+    while i < len(args) and args[i].startswith("-") and args[i] != "-":
+        tok = args[i]
+        if tok == "--":
+            i += 1
+            break
+        if all(ch in "vfn" for ch in tok[1:]):
+            if "f" in tok[1:]:
+                mode = "f"
+            elif "n" in tok[1:]:
+                mode = "n"
+            else:
+                mode = "v"
+            i += 1
+            continue
+        err = f"bash: unset: {tok}: invalid option\n".encode()
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="unset",
+                                                         exit_code=2,
+                                                         stderr=err)
+    for name in args[i:]:
+        if mode == "n":
+            # No nameref attribute exists, so as in bash on a plain
+            # variable this leaves the name untouched.
+            continue
+        if mode == "f":
+            session.functions.pop(name, None)
+            continue
+        target = _PRINTF_TARGET_RE.match(name)
+        is_element = target is not None and target.group(2) is not None
+        # `readonly arr` records the base name, so an `arr[i]` operand has
+        # to be resolved before the guard, as bash does (which also names
+        # the base, not the element, in the error).
+        base = target.group(1) if target is not None else name
+        if base in session.readonly_vars:
+            err = (f"bash: unset: {base}: cannot unset: "
                    f"readonly variable\n").encode()
             return None, IOResult(exit_code=1,
                                   stderr=err), ExecutionNode(command="unset",
                                                              exit_code=1,
                                                              stderr=err)
-        session.env.pop(name, None)
+        existed = is_element or name in session.env or name in session.arrays
+        status = _unset_variable(session, name)
+        if status != "ok":
+            # bash names the base for "not an array variable" but prints
+            # only the bracketed part for a bad subscript.
+            detail = (f"unset: {base}: not an array variable"
+                      if status == "notarray" else
+                      f"unset: {name[len(base):]}: bad array subscript")
+            err = f"bash: {detail}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command="unset",
+                                                             exit_code=1,
+                                                             stderr=err)
+        if mode == "auto" and not existed and name in session.functions:
+            session.functions.pop(name, None)
     return None, IOResult(), ExecutionNode(command="unset", exit_code=0)
 
 
@@ -91,6 +220,115 @@ async def handle_printenv(
         lines = [f"{k}={v}" for k, v in session.env.items()]
         out = ("\n".join(sorted(lines)) + "\n").encode()
     return out, IOResult(), ExecutionNode(command="printenv", exit_code=0)
+
+
+async def handle_env(
+    execute_fn: Callable[..., Any],
+    args: list[str],
+    session: Session,
+    stdin: ByteSource | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run the ``env`` builtin (print environment or run a command).
+
+    Usage: ``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``.
+    With no command it prints the (optionally modified) environment in
+    ``environ`` order, unsorted, terminated per entry by newline or NUL
+    (``-0``). With a command it runs it under the modified environment,
+    forwarding stdin, then restores the session environment. Missing
+    commands fail like GNU with the shell's own exit 127.
+
+    Args:
+        execute_fn (Callable): shell evaluator for the inner command.
+        args (list[str]): words after the ``env`` name.
+        session (Session): shell session state.
+        stdin (ByteSource | None): piped input forwarded to the command.
+    """
+    ignore_env = False
+    null = False
+    unset: list[str] = []
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok in ("-i", "--ignore-environment"):
+            ignore_env = True
+            i += 1
+            continue
+        if tok in ("-0", "--null"):
+            null = True
+            i += 1
+            continue
+        if tok == "-":
+            # GNU: "a mere - implies -i".
+            ignore_env = True
+            i += 1
+            continue
+        if tok == "--unset":
+            if i + 1 >= len(args):
+                return _env_error("env: option '--unset' requires an argument")
+            unset.append(args[i + 1])
+            i += 2
+            continue
+        if tok.startswith("--unset="):
+            unset.append(tok[len("--unset="):])
+            i += 1
+            continue
+        if tok.startswith("--"):
+            return _env_error(f"env: unrecognized option '{tok}'")
+        if tok.startswith("-") and len(tok) > 1:
+            j = 1
+            consumed_next = False
+            while j < len(tok):
+                ch = tok[j]
+                if ch == "i":
+                    ignore_env = True
+                elif ch == "0":
+                    null = True
+                elif ch == "u":
+                    rest = tok[j + 1:]
+                    if rest:
+                        unset.append(rest)
+                    elif i + 1 < len(args):
+                        unset.append(args[i + 1])
+                        consumed_next = True
+                    else:
+                        return _env_error(
+                            "env: option requires an argument -- 'u'")
+                    break
+                else:
+                    return _env_error(f"env: invalid option -- '{ch}'")
+                j += 1
+            i += 2 if consumed_next else 1
+            continue
+        break
+
+    base = {} if ignore_env else dict(session.env)
+    for name in unset:
+        base.pop(name, None)
+    while i < len(args) and "=" in args[i] and not args[i].startswith("="):
+        key, _, value = args[i].partition("=")
+        base[key] = value
+        i += 1
+
+    command = args[i:]
+    if command and null:
+        return _env_error("env: cannot specify --null (-0) with command")
+    if not command:
+        sep = "\0" if null else "\n"
+        out = "".join(f"{k}={v}{sep}" for k, v in base.items()).encode()
+        return out, IOResult(), ExecutionNode(command="env", exit_code=0)
+
+    saved = session.env
+    session.env = base
+    try:
+        io = await execute_fn(shlex.join(command),
+                              session_id=session.session_id,
+                              stdin=stdin)
+    finally:
+        session.env = saved
+    return io.stdout, io, ExecutionNode(command="env", exit_code=io.exit_code)
 
 
 async def handle_whoami(
@@ -191,6 +429,30 @@ async def handle_read(
     return None, IOResult(), ExecutionNode(command="read", exit_code=0)
 
 
+def note_local_array(session: Session, name: str) -> bool:
+    """Record the caller's array before a function shadows ``name``.
+
+    ``local -a`` / ``declare -a`` inside a function shadow the caller's
+    array, so the old value (or its absence) has to be remembered for the
+    teardown in ``execute_command``.
+
+    Args:
+        session (Session): shell session state.
+        name (str): the array name being declared.
+
+    Returns:
+        bool: True when a function scope is active, so the caller should
+            shadow rather than reuse whatever is already there.
+    """
+    local_arrays = session._local_arrays
+    if local_arrays is None:
+        return False
+    if name not in local_arrays:
+        existing = session.arrays.get(name)
+        local_arrays[name] = None if existing is None else list(existing)
+    return True
+
+
 async def handle_local(
     assignments: list[str],
     session: Session,
@@ -282,6 +544,146 @@ async def handle_set(
         session.positional_args = args[i:]
         break
     return None, IOResult(), ExecutionNode(command="set", exit_code=0)
+
+
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _is_valid_name(name: str) -> bool:
+    return _IDENTIFIER_RE.fullmatch(name) is not None
+
+
+def _getopts_finish(
+    session: Session,
+    name: str,
+    opt_value: str,
+    optarg: str | None,
+    new_optind: int,
+    new_pos: int,
+    exit_code: int,
+    stderr: bytes = b"",
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    # The name is assigned last, exactly as bash does: OPTIND/OPTARG and
+    # the hidden cursor still advance, but a bad destination fails the
+    # write and turns the call into a status-1 error.
+    if not _is_valid_name(name):
+        stderr = f"bash: getopts: `{name}': not a valid identifier\n".encode()
+        exit_code = 1
+    elif name in session.readonly_vars:
+        stderr = f"bash: {name}: readonly variable\n".encode()
+        exit_code = 1
+    else:
+        session.env[name] = opt_value
+    if optarg is None:
+        session.env.pop("OPTARG", None)
+    else:
+        session.env["OPTARG"] = optarg
+    session.env["OPTIND"] = str(new_optind)
+    session._getopts_pos = new_pos
+    session._getopts_optind = new_optind
+    io = IOResult(exit_code=exit_code, stderr=stderr)
+    return None, io, ExecutionNode(command="getopts",
+                                   exit_code=exit_code,
+                                   stderr=stderr)
+
+
+async def handle_getopts(
+    args: list[str],
+    session: Session,
+    call_stack: CallStack | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Parse one option per call, with bash's getopts semantics.
+
+    Args:
+        args (list[str]): words after `getopts`: the optstring, the name
+            variable, then optional explicit arguments (the positional
+            parameters are scanned when no explicit ones are given).
+        session (Session): shell session; OPTIND/OPTARG live in its env
+            and the hidden per-word scan offset in its getopts state.
+        call_stack (CallStack | None): function-call positional frames;
+            inside a shell function getopts scans the function's own
+            positional parameters, matching bash.
+    """
+    if len(args) < 2:
+        err = b"getopts: usage: getopts optstring name [arg]\n"
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="getopts",
+                                                         exit_code=2,
+                                                         stderr=err)
+    optstring = args[0]
+    name = args[1]
+    if len(args) > 2:
+        params = args[2:]
+    elif call_stack is not None and call_stack.get_all_positional():
+        params = call_stack.get_all_positional()
+    else:
+        params = session.positional_args
+    silent = optstring.startswith(":")
+    verbose = not silent and session.env.get("OPTERR", "1") != "0"
+    try:
+        optind = int(session.env.get("OPTIND", "1"))
+    except ValueError:
+        optind = 1
+    # Bash treats a nonpositive OPTIND as a restart at argument 1.
+    restart = optind < 1
+    if restart:
+        optind = 1
+    if restart or session._getopts_optind != optind:
+        session._getopts_pos = 0
+    pos = session._getopts_pos
+
+    if optind > len(params):
+        return _getopts_finish(session, name, "?", None, optind, 0, 1)
+    word = params[optind - 1]
+    # A stale cursor left past the end of the current word (a shorter or
+    # reused argument) restarts the scan rather than indexing out of range.
+    if pos >= len(word):
+        pos = 0
+    if pos == 0:
+        if not word.startswith("-") or word == "-":
+            return _getopts_finish(session, name, "?", None, optind, 0, 1)
+        if word == "--":
+            return _getopts_finish(session, name, "?", None, optind + 1, 0, 1)
+        pos = 1
+
+    letter = word[pos]
+    rest = word[pos + 1:]
+    idx = optstring.find(letter)
+    is_valid = letter != ":" and idx != -1
+    takes_arg = (is_valid and idx + 1 < len(optstring)
+                 and optstring[idx + 1] == ":")
+
+    if not is_valid:
+        if rest:
+            after_optind, after_pos = optind, pos + 1
+        else:
+            after_optind, after_pos = optind + 1, 0
+        if silent:
+            return _getopts_finish(session, name, "?", letter, after_optind,
+                                   after_pos, 0)
+        err = (f"bash: illegal option -- {letter}\n".encode()
+               if verbose else b"")
+        return _getopts_finish(session, name, "?", None, after_optind,
+                               after_pos, 0, err)
+
+    if not takes_arg:
+        if rest:
+            after_optind, after_pos = optind, pos + 1
+        else:
+            after_optind, after_pos = optind + 1, 0
+        return _getopts_finish(session, name, letter, None, after_optind,
+                               after_pos, 0)
+
+    if rest:
+        return _getopts_finish(session, name, letter, rest, optind + 1, 0, 0)
+    if optind < len(params):
+        return _getopts_finish(session, name, letter, params[optind],
+                               optind + 2, 0, 0)
+    if silent:
+        return _getopts_finish(session, name, ":", letter, optind + 1, 0, 0)
+    err = (f"bash: option requires an argument -- {letter}\n".encode()
+           if verbose else b"")
+    return _getopts_finish(session, name, "?", None, optind + 1, 0, 0, err)
 
 
 async def handle_trap(

@@ -22,3 +22,12 @@ export function utcDateFolder(ts?: number): string {
 export function epochToIso(seconds: number): string {
   return new Date(Math.floor(seconds) * 1000).toISOString().replace('.000Z', 'Z')
 }
+
+// Inverse of epochToIso; a naive stamp (no Z/offset, e.g. a `touch -t`
+// overlay time) is read as UTC so this matches the Python isoToEpoch. JS
+// interprets an offset-less date-time as local, so append Z when absent.
+// Truncated to whole seconds to mirror epochToIso.
+export function isoToEpoch(iso: string): number {
+  const text = /(Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`
+  return Math.floor(Date.parse(text) / 1000)
+}

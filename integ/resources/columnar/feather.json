@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "col_feather_file",
+      "seq": 100008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "file /res/example.feather",
+      "expect": {
+        "exit": 0,
+        "stdout": "feather, 10 rows, 3 columns (id: int64, value: float64, label: string)",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_feather_cat",
+      "seq": 100009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /res/example.feather",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Rows: 10, Columns: 3\n\n## Schema\n  id: int64\n  value: float64\n  label: string\n\n## Preview (10 rows)\n\nid value  label\n 0     0 item_0\n 1   1.5 item_1\n 2     3 item_2\n 3   4.5 item_3\n 4     6 item_4\n 5   7.5 item_5\n 6     9 item_6\n 7  10.5 item_7\n 8    12 item_8\n 9  13.5 item_9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_feather_head",
+      "seq": 100010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -n 3 /res/example.feather",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Rows: 10, Columns: 3\n\n## Schema\n  id: int64\n  value: float64\n  label: string\n\n## First 3 (3 rows)\n\nid value  label\n 0     0 item_0\n 1   1.5 item_1\n 2     3 item_2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_feather_tail",
+      "seq": 100011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -n 2 /res/example.feather",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Rows: 10, Columns: 3\n\n## Schema\n  id: int64\n  value: float64\n  label: string\n\n## Last 2 (2 rows)\n\nid value  label\n 8    12 item_8\n 9  13.5 item_9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_feather_wc",
+      "seq": 100012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -l /res/example.feather",
+      "expect": {
+        "exit": 0,
+        "stdout": "10 /res/example.feather\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_feather_grep",
+      "seq": 100013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep item /res/example.feather",
+      "expect": {
+        "exit": 0,
+        "stdout": "id,value,label\n0,0,item_0\n1,1.5,item_1\n2,3,item_2\n3,4.5,item_3\n4,6,item_4\n5,7.5,item_5\n6,9,item_6\n7,10.5,item_7\n8,12,item_8\n9,13.5,item_9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "col_feather_grepc",
+      "seq": 100014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -c item /res/example.feather",
+      "expect": {
+        "exit": 0,
+        "stdout": "10",
+        "stderr": ""
+      }
+    }
+  ]
+}

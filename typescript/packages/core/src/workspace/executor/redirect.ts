@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { formatFsError } from '../../utils/errors.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -26,6 +27,23 @@ import type { DispatchFn } from './cross_mount.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
+
+// The name a failed redirect write reports itself under, matching the
+// workspace chokepoint (and Python's `command.split()[0]`): the command's
+// own name, or the redirect operator for the command-less `> file` form.
+function redirectCmdName(command: TSNodeLike | null, redirects: readonly Redirect[]): string {
+  if (command !== null) return command.text.trim().split(/\s+/, 1)[0] ?? 'redirect'
+  const write = redirects.find(
+    (r) =>
+      r.kind !== RedirectKind.STDIN &&
+      r.kind !== RedirectKind.HEREDOC &&
+      r.kind !== RedirectKind.HERESTRING,
+  )
+  if (write === undefined) return 'redirect'
+  const arrow = write.append ? '>>' : '>'
+  if (write.fd === -1) return `&${arrow}`
+  return write.fd === 2 ? `2${arrow}` : arrow
+}
 
 const TO_STDOUT = Symbol('stdout')
 const TO_STDERR = Symbol('stderr')
@@ -168,8 +186,12 @@ export async function handleRedirect(
       await dispatch('write', scope, [data])
       io.writes[path] = data
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      outStderr = concat([outStderr, new TextEncoder().encode(msg + '\n')])
+      // GNU spells a failed redirect target `<cmd>: <path>: <strerror>`;
+      // the raw error message leaked the internal op-registry wording.
+      outStderr = concat([
+        outStderr,
+        formatFsError(redirectCmdName(command, redirects), err, [scope]),
+      ])
       io.exitCode = 1
     }
   }

@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "ctl_select_picks_choice",
+      "seq": 502113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '2\\n' | select sx in aa bb; do echo got:$sx; break; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "got:bb\n",
+        "stderr": "1) aa\n2) bb\n#? "
+      }
+    },
+    {
+      "id": "ctl_select_invalid_empty",
+      "seq": 502114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '9\\n' | select sx in aa bb; do echo got:${sx:-none}; break; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "got:none\n",
+        "stderr": "1) aa\n2) bb\n#? "
+      }
+    },
+    {
+      "id": "ctl_select_reply_raw",
+      "seq": 502115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'zz\\n' | select sx in aa bb; do echo r:$REPLY; break; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "r:zz\n",
+        "stderr": "1) aa\n2) bb\n#? "
+      }
+    },
+    {
+      "id": "ctl_select_eof_ends",
+      "seq": 502116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '' | select sx in aa bb; do echo body; done; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nafter\n",
+        "stderr": "1) aa\n2) bb\n#? "
+      }
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+name: Integ battery setup
+description: >-
+  Toolchain + shared fake-server fleet for the declarative integ battery.
+  Both the python-host and typescript-host battery jobs use this so the
+  setup stays defined once.
+inputs:
+  build-packages:
+    description: >-
+      Build the mirage TypeScript packages (core/node/browser). Required by
+      the typescript-host battery; the python host only needs node for the
+      tsx fake servers (which import no mirage package), so it passes false.
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - name: Install Python dependencies
+      working-directory: python
+      shell: bash
+      run: uv sync --all-extras --no-extra camel
+
+    - name: Set up Node
+      uses: actions/setup-node@v7
+      with:
+        node-version: '24'
+
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: 10.32.1
+
+    - name: Install dependencies
+      working-directory: typescript
+      shell: bash
+      run: pnpm install --frozen-lockfile=false
+
+    - name: Build mirage-core
+      if: ${{ inputs.build-packages == 'true' }}
+      working-directory: typescript
+      shell: bash
+      run: pnpm --filter @struktoai/mirage-core build
+
+    - name: Build mirage-node
+      if: ${{ inputs.build-packages == 'true' }}
+      working-directory: typescript
+      shell: bash
+      run: pnpm --filter @struktoai/mirage-node build
+
+    - name: Build mirage-browser
+      if: ${{ inputs.build-packages == 'true' }}
+      working-directory: typescript
+      shell: bash
+      run: pnpm --filter @struktoai/mirage-browser build
+
+    - name: Start moto S3
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/moto_server -H 127.0.0.1 -p 5001 > /tmp/moto.log 2>&1 &
+        for i in $(seq 1 30); do
+          curl -sf http://127.0.0.1:5001/moto-api/ > /dev/null && break
+          sleep 1
+        done
+        echo "S3_ENDPOINT=http://127.0.0.1:5001" >> "$GITHUB_ENV"
+        echo "S3_REGION=us-east-1" >> "$GITHUB_ENV"
+        echo "AWS_ACCESS_KEY_ID=testing" >> "$GITHUB_ENV"
+        echo "AWS_SECRET_ACCESS_KEY=testing" >> "$GITHUB_ENV"
+
+    - name: Start sftp server
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/ssh_server.py --port 2222 > /tmp/sshsrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "SSH_PORT=" /tmp/sshsrv.log && break
+          sleep 1
+        done
+        cat /tmp/sshsrv.log
+        echo "SSH_HOST=127.0.0.1" >> "$GITHUB_ENV"
+        echo "SSH_PORT=2222" >> "$GITHUB_ENV"
+
+    - name: Start fake Google Workspace server
+      working-directory: integ
+      shell: bash
+      run: |
+        nohup pnpm exec tsx server/gws_server.ts --port 19999 > /tmp/gws.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "GWS_URL=" /tmp/gws.log && break
+          sleep 1
+        done
+        cat /tmp/gws.log
+        echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
+
+    - name: Start fake Hugging Face hub
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/hf_server.py --port 5099 > /tmp/hfsrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "HF_ENDPOINT=" /tmp/hfsrv.log && break
+          sleep 1
+        done
+        cat /tmp/hfsrv.log
+        echo "HF_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
+
+    - name: Wait for GreenMail
+      shell: bash
+      run: |
+        for i in $(seq 1 30); do
+          curl -sf -X POST http://localhost:8080/api/service/reset && break
+          sleep 2
+        done
+
+    - name: Start fake Box API
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/box_server.py --port 5096 > /tmp/boxsrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "BOX_ENDPOINT=" /tmp/boxsrv.log && break
+          sleep 1
+        done
+        cat /tmp/boxsrv.log
+        echo "BOX_ENDPOINT=http://127.0.0.1:5096" >> "$GITHUB_ENV"
+
+    - name: Start fake Slack Web API (Prisma)
+      working-directory: integ
+      shell: bash
+      env:
+        SLACK_DB_URL: file:/tmp/mirage-slack-ci.db
+      run: |
+        ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+        nohup ./node_modules/.bin/tsx server/slack.ts --port 5097 > /tmp/slacksrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "SLACK_URL=" /tmp/slacksrv.log && break
+          sleep 1
+        done
+        cat /tmp/slacksrv.log
+        echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
+
+    - name: Start fake Trello API
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/trello_server.py --port 5095 > /tmp/trellosrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "TRELLO_ENDPOINT=" /tmp/trellosrv.log && break
+          sleep 1
+        done
+        cat /tmp/trellosrv.log
+        echo "TRELLO_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
+
+    - name: Start fake Linear API
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linearsrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "LINEAR_ENDPOINT=" /tmp/linearsrv.log && break
+          sleep 1
+        done
+        cat /tmp/linearsrv.log
+        echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
+
+    - name: Start fake Dify API
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/dify_server.py --port 5093 > /tmp/difysrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "DIFY_ENDPOINT=" /tmp/difysrv.log && break
+          sleep 1
+        done
+        cat /tmp/difysrv.log
+        echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
+
+    - name: Start fake Databricks API
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/databricks_server.py --port 5092 > /tmp/databrickssrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "DATABRICKS_ENDPOINT=" /tmp/databrickssrv.log && break
+          sleep 1
+        done
+        cat /tmp/databrickssrv.log
+        echo "DATABRICKS_ENDPOINT=http://127.0.0.1:5092" >> "$GITHUB_ENV"

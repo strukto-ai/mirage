@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "read_default_ifs_collapses_ws",
+      "seq": 502504,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '  a   b  \\n' | { read rw1 rw2; echo \"[$rw1][$rw2]\"; }",
+      "expect": {
+        "exit": 0,
+        "stdout": "[a][b]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

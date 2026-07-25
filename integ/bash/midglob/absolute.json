@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "midglob_absolute",
+      "seq": 414,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/g15/s*/x.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "yo\nhi\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

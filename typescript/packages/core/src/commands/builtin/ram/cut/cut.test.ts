@@ -87,6 +87,20 @@ describe('cut', () => {
     expect(await runCut(ENC.encode('nodelim\na\tb\n'), { f: '2' })).toBe('nodelim\nb\n')
   })
 
+  it('-w handles long whitespace runs', async () => {
+    const whitespace = '\t'.repeat(50_000)
+    expect(await runCut(ENC.encode(`a${whitespace}b\n`), { f: '2', w: true })).toBe('b\n')
+  })
+
+  it('--whitespace-delimited=trimmed removes edge whitespace', async () => {
+    expect(
+      await runCut(ENC.encode('  a   b c  \n'), {
+        f: '1,3',
+        whitespace_delimited: 'trimmed',
+      }),
+    ).toBe('a\tc\n')
+  })
+
   it('-c overlapping ranges dedup ascending', async () => {
     expect(await runCut(ENC.encode('abcdef\n'), { c: '1-3,2-4' })).toBe('abcd\n')
   })
@@ -117,5 +131,30 @@ describe('cut', () => {
           ? stderr
           : await materialize(stderr)
     expect(DEC.decode(errBytes)).toMatch(/missing operand/)
+  })
+
+  it('multi-character delimiter is rejected', async () => {
+    const resource = new RAMResource()
+    const cmd = RAM_CUT[0]
+    if (cmd === undefined) throw new Error('cut not registered')
+    const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+      stdin: ENC.encode('a,b\n'),
+      flags: { f: '1', d: ',,' },
+      filetypeFns: null,
+      cwd: '/',
+      resource,
+    })
+    if (result === null) throw new Error('result null')
+    const [out, ioResult] = result
+    expect(out).toBeNull()
+    expect(ioResult.exitCode).toBe(1)
+    const stderr = ioResult.stderr
+    const errBytes =
+      stderr === null
+        ? new Uint8Array()
+        : stderr instanceof Uint8Array
+          ? stderr
+          : await materialize(stderr)
+    expect(DEC.decode(errBytes)).toMatch(/delimiter must be a single character/)
   })
 })
