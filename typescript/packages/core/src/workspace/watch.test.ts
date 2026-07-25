@@ -56,6 +56,16 @@ describe('Workspace watch integration', () => {
     await workspace.close()
   })
 
+  it('rejects watch operations after close', async () => {
+    const workspace = new Workspace({ '/data': new RAMResource() })
+    await workspace.close()
+    expect(() => workspace.watch('/data')).toThrow('Workspace is closed')
+    await expect(workspace.notify(change('/data/a.txt'))).rejects.toThrow('Workspace is closed')
+    expect(() => {
+      workspace.attachWatchRuntime(new Watcher(workspace.registry))
+    }).toThrow('Workspace is closed')
+  })
+
   it('rejects replacing an attached runtime', async () => {
     const workspace = new Workspace({ '/data': new RAMResource() })
     await workspace.notify(change('/data/a.txt'))

@@ -677,9 +677,12 @@ class Workspace:
             runtime (WatchDelegate): Runtime to attach.
 
         Raises:
-            RuntimeError: A runtime is already attached (call
-                ``detach_watch_runtime`` first to replace it).
+            RuntimeError: The workspace is closed, or a runtime is
+                already attached (call ``detach_watch_runtime`` first to
+                replace it).
         """
+        if self._closed:
+            raise RuntimeError("Workspace is closed")
         if self._watch_runtime is not None:
             raise RuntimeError(
                 "watch runtime already attached: detach_watch_runtime "
@@ -703,8 +706,16 @@ class Workspace:
         """The attached watch runtime, lazily creating the default one.
 
         Nothing is constructed until something is actually watched or
-        notified; an idle workspace carries no watch state at all.
+        notified; an idle workspace carries no watch state at all. A
+        closed workspace attaches nothing: its resources and caches are
+        already gone, and ``close`` would never reach a runtime created
+        afterwards.
+
+        Raises:
+            RuntimeError: The workspace is closed.
         """
+        if self._closed:
+            raise RuntimeError("Workspace is closed")
         if self._watch_runtime is None:
             self._watch_runtime = Watcher(self._registry)
         return self._watch_runtime

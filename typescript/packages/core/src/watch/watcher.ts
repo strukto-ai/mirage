@@ -15,7 +15,7 @@
 import { FileChangeKind, FileEvent, PathSpec } from '../types.ts'
 import { hasGlob } from '../utils/glob_walk.ts'
 import { globPrefixMatch } from '../utils/path.ts'
-import { stripSlash } from '../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import type { WatchMount, WatchOptions, WatchRegistry, WatchRuntime } from './base.ts'
 import { QueueClosed } from './errors.ts'
 import type { QueueFactory } from './queue/base.ts'
@@ -53,13 +53,13 @@ export class Watcher implements WatchRuntime {
 
   private inScope(root: string, virtual: string): boolean {
     if (hasGlob(root)) {
-      const pattern = root.replace(/\/+$/, '')
+      const pattern = rstripSlash(root)
       if (!globPrefixMatch(virtual, pattern)) return false
       const pathDepth = stripSlash(virtual).split('/').length
       const patternDepth = stripSlash(pattern).split('/').length
       return root.endsWith('/') ? pathDepth > patternDepth : pathDepth === patternDepth
     }
-    const literal = root.replace(/\/+$/, '')
+    const literal = rstripSlash(root)
     return virtual === literal || virtual.startsWith(`${literal}/`)
   }
 
@@ -68,9 +68,9 @@ export class Watcher implements WatchRuntime {
   }
 
   private ancestors(mount: WatchMount, virtual: string): PathSpec[] {
-    const prefix = mount.prefix.replace(/\/+$/, '')
+    const prefix = rstripSlash(mount.prefix)
     const ancestors: PathSpec[] = []
-    let current = virtual.replace(/\/+$/, '')
+    let current = rstripSlash(virtual)
     for (;;) {
       current = current.slice(0, current.lastIndexOf('/'))
       if (current.length <= prefix.length) return ancestors

@@ -283,3 +283,16 @@ async def test_close_workspace_stops_watcher():
     with pytest.raises(StopAsyncIteration):
         await asyncio.wait_for(task, timeout=2)
     await agen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_closed_workspace_rejects_watch_operations():
+    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.close()
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        ws.watch(PathSpec.from_str_path("/data"))
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        await ws.notify(_change(FileChangeKind.CREATE, "/data/a.txt"))
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        ws.attach_watch_runtime(Watcher(ws.registry))

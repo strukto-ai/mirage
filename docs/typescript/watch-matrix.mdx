@@ -33,8 +33,12 @@ Any backend becomes watchable as soon as your application has a signal:
 ```ts
 import { FileChangeKind, FileEvent, PathSpec } from "@struktoai/mirage-node";
 
-const events = ws.watch("/s3/exports/*.csv");
+// your consumer, on any mount, today
+for await (const event of ws.watch("/s3/exports/*.csv")) {
+  console.log(event.kind, event.path.virtual);
+}
 
+// your S3 SQS consumer, your GitHub webhook route, your cron diff:
 await ws.notify(
   new FileEvent({
     kind: FileChangeKind.CREATE,
@@ -43,6 +47,11 @@ await ws.notify(
   }),
 );
 ```
+
+`watch()` returns an async generator, so it subscribes on the first iteration,
+not at the call: the loop above and the `notify` call belong to different tasks
+(a request handler, a poll loop). Awaiting `notify` before anything consumes
+the iterator drops the event.
 
 The guarantee is the same on every backend: caches for the changed path and
 its ancestor listings are invalidated before delivery.

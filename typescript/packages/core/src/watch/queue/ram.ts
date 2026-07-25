@@ -64,6 +64,7 @@ export class RAMWatchQueue implements WatchQueue {
 
   private merge(old: FileEvent | undefined, change: FileEvent): FileEvent | null {
     if (old === undefined) return change
+    if (old.kind === FileChangeKind.UNKNOWN) return old
     if (old.kind === FileChangeKind.CREATE) {
       if (change.kind === FileChangeKind.DELETE) return null
       return replacement({
@@ -71,6 +72,15 @@ export class RAMWatchQueue implements WatchQueue {
         path: change.path,
         timestamp: change.timestamp,
         previousPath: change.previousPath,
+        metadata: change.metadata,
+      })
+    }
+    if (old.kind === FileChangeKind.MOVE && change.kind !== FileChangeKind.DELETE) {
+      return replacement({
+        kind: FileChangeKind.MOVE,
+        path: change.path,
+        timestamp: change.timestamp,
+        previousPath: old.previousPath,
         metadata: change.metadata,
       })
     }
@@ -86,13 +96,57 @@ export class RAMWatchQueue implements WatchQueue {
     return change
   }
 
+  private absorbSource(change: FileEvent): FileEvent {
+    if (change.kind !== FileChangeKind.MOVE || change.previousPath === null) return change
+    const source = this.changes.get(change.previousPath.virtual)
+    if (source === undefined || source.kind === FileChangeKind.UNKNOWN) return change
+    this.changes.delete(change.previousPath.virtual)
+    if (source.kind === FileChangeKind.CREATE) {
+      return replacement({
+        kind: FileChangeKind.CREATE,
+        path: change.path,
+        timestamp: change.timestamp,
+        metadata: change.metadata,
+      })
+    }
+    if (source.kind === FileChangeKind.MOVE && source.previousPath !== null) {
+      return replacement({
+        kind: FileChangeKind.MOVE,
+        path: change.path,
+        timestamp: change.timestamp,
+        previousPath: source.previousPath,
+        metadata: change.metadata,
+      })
+    }
+    return change
+  }
+
   push(change: FileEvent): Promise<void> {
     if (this.closed) return Promise.resolve()
-    const key = change.path.virtual
+    const event = this.absorbSource(change)
+    const key = event.path.virtual
     const old = this.changes.get(key)
     this.changes.delete(key)
-    const merged = this.merge(old, change)
-    if (merged !== null) this.changes.set(key, merged)
+    if (
+      old?.kind === FileChangeKind.MOVE &&
+      old.previousPath !== null &&
+      event.kind === FileChangeKind.DELETE
+    ) {
+      const source = old.previousPath.virtual
+      if (!this.changes.has(source)) {
+        this.changes.set(
+          source,
+          replacement({
+            kind: FileChangeKind.DELETE,
+            path: old.previousPath,
+            timestamp: event.timestamp,
+          }),
+        )
+      }
+    } else {
+      const merged = this.merge(old, event)
+      if (merged !== null) this.changes.set(key, merged)
+    }
     if (this.changes.size > this.maxPending) this.applyOverflow()
     if (this.changes.size > 0 || this.overflowed) this.ready.wake()
     return Promise.resolve()

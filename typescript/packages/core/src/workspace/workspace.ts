@@ -799,6 +799,7 @@ export class Workspace {
   }
 
   attachWatchRuntime(runtime: WatchRuntime): void {
+    if (this.closed) throw new Error('Workspace is closed')
     if (this.watchRuntime !== null) {
       throw new Error(
         'watch runtime already attached: detachWatchRuntime first, or attach before the first watch()/notify()',
@@ -814,6 +815,7 @@ export class Workspace {
   }
 
   private watchDelegate(): WatchRuntime {
+    if (this.closed) throw new Error('Workspace is closed')
     this.watchRuntime ??= new Watcher(this.registry)
     return this.watchRuntime
   }
@@ -824,8 +826,8 @@ export class Workspace {
     return this.watchDelegate().watch(specs)
   }
 
-  notify(change: FileEvent): Promise<void> {
-    return this.watchDelegate().notify(change)
+  async notify(change: FileEvent): Promise<void> {
+    await this.watchDelegate().notify(change)
   }
 
   /**

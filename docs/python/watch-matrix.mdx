@@ -45,6 +45,11 @@ await ws.notify(FileEvent(kind=FileChangeKind.CREATE,
                           timestamp=datetime.now(timezone.utc)))
 ```
 
+`watch()` is an async generator, so it subscribes on the first iteration, not at
+the call: the loop and the `notify` call belong to different tasks (a request
+handler, a poll loop). Awaiting `notify` before anything consumes the iterator
+drops the event.
+
 The guarantee is identical on every backend: caches for the changed path and
 its ancestor listings are invalidated before delivery, so reads after an event
 are fresh.
