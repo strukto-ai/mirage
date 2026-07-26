@@ -311,7 +311,7 @@ export async function handleDf(
     if (showType) cells.push(mount.resource.kind)
     cells.push(...numCells(cap, human, si, block, inodes))
     cells.push(pctCell(cap, inodes))
-    cells.push(mount.prefix.replace(/\/+$/, '') || '/')
+    cells.push(rstripSlash(mount.prefix) || '/')
     data.push(cells)
   }
 

@@ -56,6 +56,15 @@ function epoch(iso: string | null): string {
 }
 
 const STR_DIRECTIVES = new Set(['n', 'N', 'F'])
+const FORMAT_FLAGS = new Set(['#', '0', ' ', '+', '-'])
+
+interface FormatDirective {
+  end: number
+  flags: string
+  width: string
+  precision: string | undefined
+  spec: string
+}
 
 // Shell-safe quoting for %N, mirroring GNU's default: a name with no
 // apostrophe is single-quoted; one containing an apostrophe (but no double
@@ -114,18 +123,80 @@ function directiveValue(spec: string, s: FileStat, name: string): string {
   return '?'
 }
 
-// GNU printf-style directive: %[flags][width][.precision]conversion, where the
-// conversion is a letter (optionally H/L-prefixed for device major/minor) or a
-// literal %. Parsing flags/width/precision up front stops them being mistaken
-// for the conversion char (e.g. %04a must not read as directive "0").
-const FORMAT_RE = /%([#0 +-]*)(\d*)(?:\.(\d*))?([HL]?[A-Za-z%])/g
+function isAsciiDigit(char: string | undefined): boolean {
+  return char !== undefined && char >= '0' && char <= '9'
+}
+
+function isConversion(char: string | undefined): boolean {
+  return (
+    char === '%' ||
+    (char !== undefined && ((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z')))
+  )
+}
+
+function parseFormatDirective(fmt: string, start: number): FormatDirective | null {
+  let cursor = start + 1
+  let flags = ''
+  while (cursor < fmt.length && FORMAT_FLAGS.has(fmt[cursor] ?? '')) {
+    flags += fmt.charAt(cursor)
+    cursor += 1
+  }
+
+  let width = ''
+  while (isAsciiDigit(fmt[cursor])) {
+    width += fmt.charAt(cursor)
+    cursor += 1
+  }
+
+  let precision: string | undefined
+  if (fmt[cursor] === '.') {
+    cursor += 1
+    precision = ''
+    while (isAsciiDigit(fmt[cursor])) {
+      precision += fmt.charAt(cursor)
+      cursor += 1
+    }
+  }
+
+  const first = fmt.charAt(cursor)
+  if (!isConversion(first)) return null
+  let spec = first
+  cursor += 1
+  if ((first === 'H' || first === 'L') && isConversion(fmt[cursor])) {
+    spec += fmt.charAt(cursor)
+    cursor += 1
+  }
+  return { end: cursor, flags, width, precision, spec }
+}
 
 function formatStat(fmt: string, s: FileStat, name: string): string {
-  return fmt.replace(
-    FORMAT_RE,
-    (_m, flags: string, width: string, precision: string | undefined, spec: string) =>
-      applyFlags(directiveValue(spec, s, name), flags, width, precision, spec),
-  )
+  const parts: string[] = []
+  let cursor = 0
+  while (cursor < fmt.length) {
+    const start = fmt.indexOf('%', cursor)
+    if (start === -1) {
+      parts.push(fmt.slice(cursor))
+      break
+    }
+    parts.push(fmt.slice(cursor, start))
+    const directive = parseFormatDirective(fmt, start)
+    if (directive === null) {
+      parts.push('%')
+      cursor = start + 1
+      continue
+    }
+    parts.push(
+      applyFlags(
+        directiveValue(directive.spec, s, name),
+        directive.flags,
+        directive.width,
+        directive.precision,
+        directive.spec,
+      ),
+    )
+    cursor = directive.end
+  }
+  return parts.join('')
 }
 
 export async function statGeneric(
