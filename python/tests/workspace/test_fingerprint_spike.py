@@ -20,7 +20,7 @@ from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import ConsistencyPolicy, MountMode
 from mirage.workspace import Workspace
-from tests.integration.s3_mock import MultiBucketSession, patch_s3_session
+from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
 
 
 def test_disk_always_refetches_after_external_mutation(tmp_path):

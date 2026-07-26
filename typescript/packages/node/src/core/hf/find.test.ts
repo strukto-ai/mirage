@@ -16,7 +16,7 @@ import { PathSpec, resolveGlobOf } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { HfModelsAccessor } from '../../accessor/hf.ts'
 import { HF_IO } from '../../commands/builtin/hf/io.ts'
-import { du, duAll } from './du.ts'
+import { size, entries } from './du/index.ts'
 import { exists } from './exists.ts'
 import { find } from './find.ts'
 import { fakeHfOperator, installFakeOperator } from './mock.ts'
@@ -92,14 +92,14 @@ describe('hf find', () => {
 describe('hf du', () => {
   it('sums file sizes recursively', async () => {
     const accessor = accessorWith(FILES)
-    expect(await du(accessor, PathSpec.fromStrPath('/'))).toBe(20)
-    expect(await du(accessor, PathSpec.fromStrPath('/onnx'))).toBe(3)
-    expect(await du(accessor, PathSpec.fromStrPath('/missing'))).toBe(0)
+    expect(await size(accessor, PathSpec.fromStrPath('/'))).toBe(20)
+    expect(await size(accessor, PathSpec.fromStrPath('/onnx'))).toBe(3)
+    expect(await size(accessor, PathSpec.fromStrPath('/missing'))).toBe(0)
   })
 
-  it('duAll lists per-file sizes plus a total', async () => {
+  it('duEntries lists per-file sizes plus a total', async () => {
     const accessor = accessorWith(FILES)
-    const [rows, total] = await duAll(accessor, PathSpec.fromStrPath('/onnx'))
+    const [rows, total] = await entries(accessor, PathSpec.fromStrPath('/onnx'))
     expect(rows).toEqual([
       ['/onnx/model.onnx', 2],
       ['/onnx/sub/extra.txt', 1],

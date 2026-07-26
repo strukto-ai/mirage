@@ -30,7 +30,7 @@
       "command": "du --max-depth=1 /data/sub",
       "expect": {
         "exit": 0,
-        "stdout": "20\t/data/sub\n",
+        "stdout": "5\t/data/sub/deep\n20\t/data/sub\n",
         "stderr": ""
       },
       "flags": [

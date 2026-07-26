@@ -12,10 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '@struktoai/mirage-core'
 import {
   ResourceName,
   command,
   duGeneric,
+  duHasContent,
+  duOperands,
+  parseDuFlags,
   metadataProvision,
   resolveGlobOf,
   specOf,
@@ -24,7 +28,7 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../../accessor/gridfs.ts'
-import { du as gridfsDu, duAll as gridfsDuAll } from '../../../core/gridfs/du.ts'
+import { size as gridfsDu, entries as gridfsDuAll } from '../../../core/gridfs/du/index.ts'
 import { GRIDFS_IO } from './io.ts'
 
 const resolveGlob = resolveGlobOf(GRIDFS_IO)
@@ -35,14 +39,28 @@ async function duCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return duGeneric(
-    resolved,
-    opts,
+  const flags = parseDuFlags(opts)
+  const idx = opts.index ?? undefined
+  const { present, missing } = await duOperands(
+    paths,
+    opts.cwd,
+    (targets) => resolveGlob(accessor, targets, idx),
+    (p) => GRIDFS_IO.stat(accessor, p, idx),
+    (p) =>
+      duHasContent(
+        (x) => gridfsDu(accessor, x),
+        (x) => gridfsDuAll(accessor, x),
+        p,
+      ),
+  )
+  const out = await duGeneric(
+    present,
+    flags,
     (p) => gridfsDu(accessor, p),
     (p) => gridfsDuAll(accessor, p),
+    missing,
   )
+  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const GRIDFS_DU = command({

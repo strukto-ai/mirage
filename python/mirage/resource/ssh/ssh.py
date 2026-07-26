@@ -21,7 +21,8 @@ from mirage.core.ssh.config import SSHConfig
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy
 from mirage.core.ssh.create import create
-from mirage.core.ssh.du import du, du_all
+from mirage.core.ssh.du import entries as du_entries
+from mirage.core.ssh.du import size as du_size
 from mirage.core.ssh.exists import exists
 from mirage.core.ssh.find import find
 from mirage.core.ssh.mkdir import mkdir
@@ -56,8 +57,8 @@ _SSH_OPS = {
     "read_stream": read_stream,
     "range_read": range_read,
     "rm_recursive": rm_r,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "create": create,
     "truncate": truncate,
     "exists": exists,

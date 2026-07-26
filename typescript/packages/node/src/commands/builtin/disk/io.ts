@@ -18,7 +18,7 @@ import { appendBytes as diskAppend } from '../../../core/disk/append.ts'
 import { SCOPE_ERROR } from '../../../core/disk/constants.ts'
 import { copy as diskCopy } from '../../../core/disk/copy.ts'
 import { create as diskCreate } from '../../../core/disk/create.ts'
-import { du as diskDu, duAll as diskDuAll } from '../../../core/disk/du.ts'
+import { size as diskDu, entries as diskDuAll } from '../../../core/disk/du/index.ts'
 import { exists as diskExists } from '../../../core/disk/exists.ts'
 import { find as diskFind } from '../../../core/disk/find.ts'
 import { mkdir as diskMkdir } from '../../../core/disk/mkdir.ts'
@@ -55,6 +55,6 @@ export const DISK_IO: CommandIO<DiskAccessor> = {
   append: diskAppend,
   setAttrs: diskSetAttrs,
   find: diskFind,
-  duTotal: diskDu,
-  duAll: diskDuAll,
+  duSize: diskDu,
+  duEntries: diskDuAll,
 }

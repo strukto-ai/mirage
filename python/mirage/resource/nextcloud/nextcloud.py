@@ -46,8 +46,8 @@ class NextcloudResource(BaseResource):
         self.accessor = NextcloudAccessor(self.config)
         for fn in NEXTCLOUD_COMMANDS:
             self.register(fn)
-        for fn in NEXTCLOUD_OPS:
-            self.register_op(fn)
+        for op in NEXTCLOUD_OPS:
+            self.register_op(op)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

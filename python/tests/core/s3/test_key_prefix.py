@@ -15,7 +15,7 @@ from mirage.resource.s3 import S3Config
 from mirage.resource.s3.s3 import S3Resource
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
-from tests.integration.s3_mock import patch_s3_multi
+from tests.e2e.s3_mock import patch_s3_multi
 
 resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
 

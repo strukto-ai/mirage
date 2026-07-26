@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { du as githubDu, duAll as githubDuAll } from '../../../core/github/du.ts'
+import { size as githubDu, entries as githubDuAll } from '../../../core/github/du/index.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { GITHUB_IO } from './io.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { duGeneric } from '../generic/du.ts'
+import { IOResult } from '../../../io/types.ts'
+import { duGeneric, duHasContent, duOperands, parseDuFlags } from '../generic/du.ts'
 
 const resolveGlob = resolveGlobOf(GITHUB_IO)
 
@@ -29,14 +30,28 @@ async function duCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return duGeneric(
-    resolved,
-    opts,
-    (p) => githubDu(accessor, p),
-    (p) => githubDuAll(accessor, p),
+  const flags = parseDuFlags(opts)
+  const idx = opts.index ?? undefined
+  const { present, missing } = await duOperands(
+    paths,
+    opts.cwd,
+    (targets) => resolveGlob(accessor, targets, idx),
+    (p) => GITHUB_IO.stat(accessor, p, idx),
+    (p) =>
+      duHasContent(
+        (x) => githubDu(accessor, x, idx),
+        (x) => githubDuAll(accessor, x, idx),
+        p,
+      ),
   )
+  const out = await duGeneric(
+    present,
+    flags,
+    (p) => githubDu(accessor, p, idx),
+    (p) => githubDuAll(accessor, p, idx),
+    missing,
+  )
+  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const GITHUB_DU = command({

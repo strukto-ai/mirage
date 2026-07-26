@@ -98,7 +98,7 @@
       "command": "du /data",
       "expect": {
         "exit": 0,
-        "stdout": "894\t/data\n",
+        "stdout": "5\t/data/disptree/d\n20\t/data/disptree\n6\t/data/dr/x/sub\n17\t/data/dr/x\n6\t/data/dr/y/sub\n17\t/data/dr/y\n34\t/data/dr\n8\t/data/fs/sub\n13\t/data/fs\n6\t/data/guard/sub\n12\t/data/guard\n5\t/data/sub/deep\n20\t/data/sub\n894\t/data\n",
         "stderr": ""
       }
     }

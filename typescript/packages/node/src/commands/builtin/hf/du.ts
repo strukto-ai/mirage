@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '@struktoai/mirage-core'
 import {
   command,
   duGeneric,
+  duHasContent,
+  duOperands,
+  parseDuFlags,
   resolveGlobOf,
   specOf,
   type CommandFnResult,
@@ -22,7 +26,7 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
-import { du as hfDu, duAll as hfDuAll } from '../../../core/hf/du.ts'
+import { size as hfDu, entries as hfDuAll } from '../../../core/hf/du/index.ts'
 import { HF_IO } from './io.ts'
 
 const resolveGlob = resolveGlobOf(HF_IO)
@@ -33,14 +37,28 @@ async function duCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return duGeneric(
-    resolved,
-    opts,
+  const flags = parseDuFlags(opts)
+  const idx = opts.index ?? undefined
+  const { present, missing } = await duOperands(
+    paths,
+    opts.cwd,
+    (targets) => resolveGlob(accessor, targets, idx),
+    (p) => HF_IO.stat(accessor, p, idx),
+    (p) =>
+      duHasContent(
+        (x) => hfDu(accessor, x),
+        (x) => hfDuAll(accessor, x),
+        p,
+      ),
+  )
+  const out = await duGeneric(
+    present,
+    flags,
     (p) => hfDu(accessor, p),
     (p) => hfDuAll(accessor, p),
+    missing,
   )
+  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const HF_DU = command({

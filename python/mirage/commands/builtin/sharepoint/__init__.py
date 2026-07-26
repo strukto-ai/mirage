@@ -16,7 +16,6 @@ from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.sharepoint._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.sharepoint.du import du
 from mirage.commands.builtin.sharepoint.io import IO as _IO
 from mirage.core.sharepoint.read import read_bytes as _read
 
@@ -30,5 +29,4 @@ COMMANDS = [
         _IO,
         overrides=_SHAREPOINT_OVERRIDES,
     ),
-    du,
 ]

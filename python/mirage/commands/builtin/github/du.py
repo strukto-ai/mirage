@@ -16,9 +16,11 @@ from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.du import du_multi
+from mirage.commands.builtin.generic.du import du as generic_du
+from mirage.commands.builtin.generic.du import (du_has_content, du_operands,
+                                                parse_flags)
 from mirage.commands.builtin.github._provision import metadata_provision
-from mirage.commands.builtin.github.io import resolve_glob
+from mirage.commands.builtin.github.io import IO, resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -26,14 +28,25 @@ from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-async def _du_total(index: IndexCacheStore, path: PathSpec) -> int:
+async def _subtree(index: IndexCacheStore,
+                   path: PathSpec) -> list[tuple[str, int]]:
     key = "/" + path.resource_path if path.resource_path else "/"
-    du_prefix = key.rstrip("/") + "/"
-    total = 0
-    for ep, entry in (await index.entries()).items():
-        if (ep == key or ep.startswith(du_prefix)) and entry.size is not None:
-            total += entry.size
-    return total
+    prefix = key.rstrip("/") + "/"
+    found = [(ep, entry.size) for ep, entry in (await index.entries()).items()
+             if (ep == key or ep.startswith(prefix)) and entry.size is not None
+             ]
+    found.sort()
+    return found
+
+
+async def _du_size(index: IndexCacheStore, path: PathSpec) -> int:
+    return sum(size for _, size in await _subtree(index, path))
+
+
+async def _du_entries(index: IndexCacheStore,
+                      path: PathSpec) -> tuple[list[tuple[str, int]], int]:
+    found = await _subtree(index, path)
+    return found, sum(size for _, size in found)
 
 
 async def du_provision(
@@ -57,17 +70,30 @@ async def du(
     s: bool = False,
     a: bool = False,
     max_depth: str | None = None,
+    d: str | None = None,
     c: bool = False,
     index: IndexCacheStore,
+    cwd: PathSpec | str = "/",
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_glob(accessor, paths, index)
-    out = await du_multi(
+    flags = parse_flags(s=s,
+                        a=a,
+                        h=h,
+                        c=c,
+                        max_depth=max_depth if max_depth is not None else d)
+    present, missing = await du_operands(
         paths,
-        compute_total=partial(_du_total, index),
-        h=h,
-        s=s,
-        a=a,
-        c=c,
+        cwd,
+        lambda targets: resolve_glob(accessor, targets, index),
+        lambda path: IO.stat(accessor, path, index),
+        partial(du_has_content, partial(_du_size, index),
+                partial(_du_entries, index)),
     )
-    return out, IOResult()
+    out = await generic_du(
+        present,
+        compute_size=partial(_du_size, index),
+        compute_entries=partial(_du_entries, index),
+        flags=flags,
+        missing=missing,
+    )
+    return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

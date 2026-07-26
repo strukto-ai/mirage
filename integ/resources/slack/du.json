@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "slack_du_a_virtual_paths",
+      "seq": 520100,
+      "targets": [
+        "slack"
+      ],
+      "command": "du -a /slack/channels/eng-agents__C8/2026-02-06 | sed 's/^[0-9]*\\t//'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/eng-agents__C8/2026-02-06/chat.jsonl\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n/slack/channels/eng-agents__C8/2026-02-06/files\n/slack/channels/eng-agents__C8/2026-02-06\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_du_whole_mount_stops_at_the_budget",
+      "seq": 520101,
+      "targets": [
+        "slack"
+      ],
+      "command": "du -s /slack >/dev/null 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_du_whole_mount_warns_on_stderr",
+      "seq": 520102,
+      "targets": [
+        "slack"
+      ],
+      "command": "du -s /slack 2>&1 >/dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "du: walk stopped early: the reported sizes are incomplete\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

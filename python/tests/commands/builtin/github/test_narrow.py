@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.commands.builtin.github.du import _du_total
+from mirage.commands.builtin.github.du import _du_size
 from mirage.commands.builtin.github.grep import grep
 from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.github.rg import rg
@@ -63,7 +63,7 @@ def _subdir() -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_du_uses_store_interface_not_ram_implementation():
-    assert await _du_total(EntryOnlyIndex(), _subdir()) == 7
+    assert await _du_size(EntryOnlyIndex(), _subdir()) == 7
 
 
 @pytest.mark.asyncio

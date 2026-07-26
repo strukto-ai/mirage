@@ -20,7 +20,8 @@ from mirage.commands.builtin.s3 import COMMANDS as S3_COMMANDS
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy
 from mirage.core.s3.create import create
-from mirage.core.s3.du import du, du_all
+from mirage.core.s3.du import entries as du_entries
+from mirage.core.s3.du import size as du_size
 from mirage.core.s3.exists import exists
 from mirage.core.s3.find import find
 from mirage.core.s3.mkdir import mkdir
@@ -56,8 +57,8 @@ _S3_OPS = {
     "read_stream": read_stream,
     "range_read": range_read,
     "rm_recursive": rm_r,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "create": create,
     "truncate": truncate,
     "exists": exists,

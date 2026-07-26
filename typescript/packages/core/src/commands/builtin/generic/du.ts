@@ -12,12 +12,177 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import type { CommandOpts } from '../../config.ts'
+import { UsageError } from '../../errors.ts'
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { rebaseRaw } from '../../../utils/path.ts'
+import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
+
+export type DuEntries = [entries: [string, number][], total: number]
+export type ComputeSize = (p: PathSpec) => Promise<number>
+export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
+
+export const DEFAULT_MAX_DU_ENTRIES = 10000
+const USAGE_HINT = "Try 'du --help' for more information."
+const DEPTH_HEX = /^[+-]?0[xX][0-9a-fA-F]+$/
+const DEPTH_OCT = /^[+-]?0[0-7]*$/
+const DEPTH_DEC = /^[+-]?[1-9][0-9]*$/
+
+/**
+ * Read a `--max-depth` value the way GNU's `xstrtoul` does.
+ *
+ * That is C `strtoul` with base 0: a `0x` prefix is hexadecimal, a bare
+ * leading `0` is octal (so `010` is 8 and `09` is invalid), anything else is
+ * decimal. Surrounding whitespace is not allowed.
+ */
+export function parseDepth(text: string): number | null {
+  const negative = text.startsWith('-')
+  const body = text.replace(/^[+-]/, '')
+  let value: number
+  if (DEPTH_HEX.test(text)) value = Number.parseInt(body.slice(2), 16)
+  else if (DEPTH_OCT.test(text)) value = Number.parseInt(body, 8)
+  else if (DEPTH_DEC.test(text)) value = Number.parseInt(body, 10)
+  else return null
+  return negative && value !== 0 ? -value : value
+}
+
+/** The parsed `du` command line. */
+export interface DuFlags {
+  /** -s, one total per operand and no subtree lines. */
+  s: boolean
+  /** -a, list files as well as directories. */
+  a: boolean
+  /** -h, human-readable sizes. */
+  h: boolean
+  /** -c, append a grand total. */
+  c: boolean
+  /** --max-depth/-d, deepest level to print. */
+  maxDepth: number | null
+}
+
+/** What `du` produced for one invocation. */
+export interface DuOutput {
+  stdout: Uint8Array
+  /** Diagnostics: unreadable operands, then the truncation notice. */
+  stderr: Uint8Array
+  /**
+   * 0, or 1 when an operand could not be read or a walk was cut short, as GNU
+   * does for a tree it could not fully account for.
+   */
+  exitCode: number
+}
+
+const TRUNCATED_NOTE = 'du: walk stopped early: the reported sizes are incomplete'
+
+/**
+ * Validate a `du` command line the way GNU does, before any I/O.
+ *
+ * GNU parses `--max-depth` as each option is read, so a bad depth is reported
+ * ahead of the mutually-exclusive checks that run once the whole line is
+ * parsed. All three exit 1, du's usage-error code.
+ */
+export function parseDuFlags(opts: CommandOpts): DuFlags {
+  const s = opts.flags.s === true
+  const a = opts.flags.a === true
+  const raw = opts.flags.max_depth ?? opts.flags.d
+  let maxDepth: number | null = null
+  if (typeof raw === 'string') {
+    maxDepth = parseDepth(raw)
+    if (maxDepth === null) {
+      throw new UsageError(`du: invalid maximum depth '${raw}'\n${USAGE_HINT}`, 1)
+    }
+  }
+  if (s && a) {
+    throw new UsageError(`du: cannot both summarize and show all entries\n${USAGE_HINT}`, 1)
+  }
+  if (s && maxDepth !== null) {
+    throw new UsageError(
+      `du: warning: summarizing conflicts with --max-depth=${String(maxDepth)}\n${USAGE_HINT}`,
+      1,
+    )
+  }
+  return { s, a, h: opts.flags.h === true, c: opts.flags.c === true, maxDepth }
+}
+
+/** The operand GNU `du` assumes when the line names none. */
+function cwdSpec(cwd: string): PathSpec {
+  const dir = cwd || '/'
+  return new PathSpec({
+    resourcePath: stripSlash(dir),
+    virtual: dir,
+    directory: dir,
+    resolved: false,
+  })
+}
+
+/**
+ * Whether an operand holds anything, for the unstattable case.
+ */
+export async function duHasContent(
+  computeSize: ComputeSize,
+  computeEntries: ComputeEntries | undefined,
+  path: PathSpec,
+): Promise<boolean> {
+  if (computeEntries !== undefined) {
+    const [entries] = await computeEntries(path)
+    return entries.length > 0
+  }
+  return (await computeSize(path)) > 0
+}
+
+/**
+ * Split the operands into the ones du can read and the ones it cannot.
+ *
+ * GNU names every operand it fails to stat, keeps going with the rest, and
+ * exits 1. With no operand at all it measures the working directory.
+ *
+ * A failed stat is not proof of absence. Several backends never materialise a
+ * directory entry for the mount root (redis is one), so `stat` throws there
+ * even though the subtree is full. `hasContent` is the second opinion: only an
+ * operand that neither stats nor holds anything is reported missing.
+ */
+export async function duOperands(
+  paths: PathSpec[],
+  cwd: string,
+  resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
+  stat: (p: PathSpec) => Promise<unknown>,
+  hasContent?: (p: PathSpec) => Promise<boolean>,
+): Promise<{ present: PathSpec[]; missing: string[] }> {
+  const targets = paths.length > 0 ? paths : [cwdSpec(cwd)]
+  const resolved = await resolveGlob(targets)
+  const present: PathSpec[] = []
+  const missing: string[] = []
+  // An unmatched glob reaches GNU as the literal pattern, which it then
+  // reports as unreadable.
+  if (resolved.length === 0) missing.push(...targets.map((p) => p.rawPath))
+  for (const path of resolved) {
+    // A stat failure is the diagnostic, not an error to propagate.
+    let stattable = true
+    try {
+      await stat(path)
+    } catch {
+      stattable = false
+    }
+    if (!stattable && !(hasContent !== undefined && (await hasContent(path)))) {
+      missing.push(path.rawPath)
+      continue
+    }
+    present.push(path)
+  }
+  return { present, missing }
+}
+
+function norm(path: string): string {
+  return rstripSlash(path) || '/'
+}
+
+function parentOf(path: string): string {
+  const cut = norm(path).lastIndexOf('/')
+  return cut > 0 ? path.slice(0, cut) : '/'
+}
 
 function depthOf(entryPath: string, basePath: string): number {
   const base = rstripSlash(basePath)
@@ -26,100 +191,160 @@ function depthOf(entryPath: string, basePath: string): number {
   return (stripSlash(rel).match(/\//g) ?? []).length + 1
 }
 
-export async function duGeneric(
-  paths: PathSpec[],
-  opts: CommandOpts,
-  computeTotal: (p: PathSpec) => Promise<number>,
-  computeAll: (p: PathSpec) => Promise<[[string, number][], number]>,
-): Promise<CommandFnResult> {
-  const human = opts.flags.h === true
-  const all = opts.flags.a === true
-  const cumulative = opts.flags.c === true
-  const summarize = opts.flags.s === true
-  const maxDepthRaw = opts.flags['max-depth']
-  const maxDepth = typeof maxDepthRaw === 'string' ? Number.parseInt(maxDepthRaw, 10) : null
-  const targets =
-    paths.length > 0
-      ? paths
-      : [
-          new PathSpec({
-            resourcePath: '',
-            virtual: '/',
-            directory: '/',
-            resolved: false,
-          }),
-        ]
-  const fmt = (size: number): string => (human ? humanSize(size) : String(size))
-  const lines: string[] = []
-  let grand = 0
-  for (const root of targets) {
-    if (all && !summarize) {
-      try {
-        const [entries, total] = await computeAll(root)
-        const filtered =
-          maxDepth !== null
-            ? entries.filter(([p]) => depthOf(p, root.virtual) <= maxDepth)
-            : entries
-        for (const [p, size] of filtered) lines.push(`${fmt(size)}\t${p}`)
-        lines.push(`${fmt(total)}\t${root.rawPath}`)
-        grand += total
-      } catch {
-        lines.push(`${fmt(0)}\t${root.rawPath}`)
-      }
-    } else {
-      let total = 0
-      try {
-        total = await computeTotal(root)
-      } catch {
-        total = 0
-      }
-      lines.push(`${fmt(total)}\t${root.rawPath}`)
-      grand += total
-    }
-  }
-  if (cumulative) {
-    lines.push(`${fmt(grand)}\ttotal`)
-  }
-  const out: ByteSource = formatRecords(lines)
-  return [out, new IOResult()]
+/**
+ * Lift mount-relative walk entries onto absolute virtual paths.
+ *
+ * Backends walk their own key space and report mount-relative paths, so two
+ * mounts that both hold `notes.txt` would otherwise render the same line. The
+ * mount prefix is recovered from the operand the same way `find` and `grep -r`
+ * recover it.
+ */
+export function toVirtual(entries: [string, number][], path: PathSpec): [string, number][] {
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  if (!prefix) return [...entries]
+  return entries.map(([entry, size]) => [`${prefix}/${lstripSlash(entry)}`, size])
 }
 
-// Fallback for backends with no native du op: one recursive-total line per
-// operand, computed by walking stat/readdir. Mirrors the Python du_multi path
-// (compute_all=None), so -a/-s/--max-depth collapse to a single summary line.
-export async function duMulti(
+/**
+ * Derive GNU's per-directory lines from a flat list of leaf files.
+ *
+ * Backends report only files, but GNU `du` prints a line per directory
+ * carrying its recursive total (and, under `-a`, a line per file too). Every
+ * directory between the operand and a leaf therefore accumulates that leaf's
+ * size, and the result is emitted post-order: children before their parent,
+ * siblings sorted by name. GNU walks in readdir order, which is unspecified,
+ * so sorting is a deterministic choice within the same shape.
+ *
+ * The operand's own line is not included; the caller renders it with the
+ * operand as typed.
+ */
+export function rollup(
+  entries: [string, number][],
+  root: string,
+  opts: { all: boolean; maxDepth: number | null },
+): [string, number][] {
+  const rootKey = norm(root)
+  const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
+  const sizes = new Map<string, number>()
+  const files = new Map<string, number>()
+  for (const [leaf, size] of entries) {
+    const node = norm(leaf)
+    if (node === rootKey || !node.startsWith(prefix)) continue
+    files.set(node, size)
+    let parent = parentOf(node)
+    while (parent !== rootKey && parent.startsWith(prefix)) {
+      sizes.set(parent, (sizes.get(parent) ?? 0) + size)
+      parent = parentOf(parent)
+    }
+  }
+
+  const nodes = new Map(sizes)
+  if (opts.all) for (const [node, size] of files) nodes.set(node, size)
+  const kids = new Map<string, string[]>()
+  for (const node of nodes.keys()) {
+    const parent = parentOf(node)
+    const group = kids.get(parent)
+    if (group === undefined) kids.set(parent, [node])
+    else group.push(node)
+  }
+  for (const group of kids.values()) group.sort()
+
+  const order: [string, number][] = []
+  const stack: [string, boolean][] = [[rootKey, false]]
+  while (stack.length > 0) {
+    const frame = stack.pop()
+    if (frame === undefined) break
+    const [node, expanded] = frame
+    if (expanded) {
+      const deep = opts.maxDepth !== null && depthOf(node, rootKey) > opts.maxDepth
+      if (node !== rootKey && !deep) order.push([node, nodes.get(node) ?? 0])
+      continue
+    }
+    stack.push([node, true])
+    const group = kids.get(node) ?? []
+    for (let i = group.length - 1; i >= 0; i--) stack.push([group[i] ?? '', false])
+  }
+  return order
+}
+
+async function duOne(
+  path: PathSpec,
+  computeSize: ComputeSize,
+  computeEntries: ComputeEntries | undefined,
+  fmt: (size: number) => string,
+  flags: DuFlags,
+): Promise<[string[], number]> {
+  const label = path.rawPath
+
+  if (flags.s || computeEntries === undefined) {
+    const total = await computeSize(path)
+    return [[`${fmt(total)}\t${label}`], total]
+  }
+
+  const [raw, total] = await computeEntries(path)
+  if (raw.length === 0) {
+    const fallback = await computeSize(path)
+    return [[`${fmt(fallback)}\t${label}`], fallback]
+  }
+
+  const entries = toVirtual(raw, path)
+  const rootKey = norm(path.virtual)
+  // A file operand walks to itself. GNU prints it once, with or without -a,
+  // never as a leaf line plus a roll-up line.
+  const first = entries[0]
+  if (entries.length === 1 && first !== undefined && norm(first[0]) === rootKey) {
+    return [[`${fmt(first[1])}\t${label}`], total]
+  }
+
+  const rows = rollup(entries, path.virtual, { all: flags.a, maxDepth: flags.maxDepth })
+  const shown = rebaseRaw(
+    rows.map(([p]) => p),
+    path.virtual,
+    label,
+  )
+  const lines = rows.map(([, size], i) => `${fmt(size)}\t${shown[i] ?? ''}`)
+  lines.push(`${fmt(total)}\t${label}`)
+  return [lines, total]
+}
+
+/**
+ * Render `du` output for a list of operands.
+ *
+ * `computeEntries` reports mount-relative (path, size) pairs plus the total;
+ * pass `undefined` on backends that can only produce a size, which makes both
+ * `-a` and the per-directory lines degrade to one total. `missing` names the
+ * operands that could not be read: GNU reports each and exits 1 but still
+ * prints the rest. `truncated` is read after the walks to ask whether any of
+ * them hit its entry cap.
+ */
+export async function duGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
-  computeTotal: (p: PathSpec) => Promise<number>,
-): Promise<CommandFnResult> {
-  const human = opts.flags.h === true
-  const cumulative = opts.flags.c === true
-  const targets =
-    paths.length > 0
-      ? paths
-      : [
-          new PathSpec({
-            resourcePath: '',
-            virtual: '/',
-            directory: '/',
-            resolved: false,
-          }),
-        ]
-  const fmt = (size: number): string => (human ? humanSize(size) : String(size))
+  flags: DuFlags,
+  computeSize: ComputeSize,
+  computeEntries?: ComputeEntries,
+  missing: string[] = [],
+  truncated?: () => boolean,
+): Promise<DuOutput> {
+  const fmt = (size: number): string => (flags.h ? humanSize(size) : String(size))
+
   const lines: string[] = []
   let grand = 0
-  for (const root of targets) {
-    let total = 0
-    try {
-      total = await computeTotal(root)
-    } catch {
-      total = 0
-    }
-    lines.push(`${fmt(total)}\t${root.rawPath}`)
+  for (const root of paths) {
+    const [block, total] = await duOne(root, computeSize, computeEntries, fmt, flags)
+    lines.push(...block)
     grand += total
   }
-  if (cumulative) {
-    lines.push(`${fmt(grand)}\ttotal`)
+  // GNU still prints the grand total when every operand failed ("0 total"), so
+  // this stays outside the loop guard.
+  if (flags.c) lines.push(`${fmt(grand)}\ttotal`)
+
+  const notes = missing.map((raw) => `du: cannot access '${raw}': No such file or directory`)
+  let exitCode = notes.length > 0 ? 1 : 0
+  if (truncated?.() === true) {
+    notes.push(TRUNCATED_NOTE)
+    exitCode = 1
   }
-  return [formatRecords(lines), new IOResult()]
+  const stderr =
+    notes.length > 0 ? new TextEncoder().encode(`${notes.join('\n')}\n`) : new Uint8Array(0)
+  return { stdout: formatRecords(lines), stderr, exitCode }
 }

@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
-import { du as s3Du, duAll as s3DuAll } from '../../../core/s3/du.ts'
+import { size as s3Du, entries as s3DuAll } from '../../../core/s3/du/index.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { S3_IO } from './io.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { duGeneric } from '../generic/du.ts'
+import { IOResult } from '../../../io/types.ts'
+import { duGeneric, duHasContent, duOperands, parseDuFlags } from '../generic/du.ts'
 import { metadataProvision } from '../generic_bind/provision.ts'
 
 const resolveGlob = resolveGlobOf(S3_IO)
@@ -30,14 +31,28 @@ async function duCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return duGeneric(
-    resolved,
-    opts,
-    (p) => s3Du(accessor, p),
-    (p) => s3DuAll(accessor, p),
+  const flags = parseDuFlags(opts)
+  const idx = opts.index ?? undefined
+  const { present, missing } = await duOperands(
+    paths,
+    opts.cwd,
+    (targets) => resolveGlob(accessor, targets, idx),
+    (p) => S3_IO.stat(accessor, p, idx),
+    (p) =>
+      duHasContent(
+        (x) => s3Du(accessor, x, idx),
+        (x) => s3DuAll(accessor, x, idx),
+        p,
+      ),
   )
+  const out = await duGeneric(
+    present,
+    flags,
+    (p) => s3Du(accessor, p, idx),
+    (p) => s3DuAll(accessor, p, idx),
+    missing,
+  )
+  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const S3_DU = command({
