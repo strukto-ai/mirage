@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from mirage.commands.errors import UsageError
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import rebase_raw
+
+logger = logging.getLogger(__name__)
 
 DuEntries = tuple[list[tuple[str, int]], int]
 ComputeSize = Callable[[PathSpec], Awaitable[int]]
@@ -190,10 +193,19 @@ async def du_has_content(compute_size: ComputeSize,
         compute_entries (ComputeEntries | None): per-file breakdown.
         path (PathSpec): the operand to probe.
     """
-    if compute_entries is not None:
-        entries, _ = await compute_entries(path)
-        return bool(entries)
-    return await compute_size(path) > 0
+    try:
+        if compute_entries is not None:
+            entries, _ = await compute_entries(path)
+            return bool(entries)
+        return await compute_size(path) > 0
+    except Exception as exc:
+        # This runs only after stat already failed, to tell an implicit
+        # directory from an absent path. Backends raise their own error
+        # types here (Graph 404, SFTP no-such-file), and every one of
+        # them means the same thing: nothing to measure. Surfacing it
+        # would replace GNU's "cannot access" line with a driver error.
+        logger.debug("du: content probe failed for %s: %r", path.virtual, exc)
+        return False
 
 
 def _format_size(size: int, human: bool) -> str:
@@ -282,9 +294,11 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
             sizes[parent] = sizes.get(parent, 0) + size
             parent = _parent(parent)
 
-    nodes: dict[str, int] = dict(sizes)
-    if a:
-        nodes.update(files)
+    # Keyed backends (S3, GridFS) carry a zero-byte marker object for a
+    # directory, which arrives here as a leaf. Under -a it must not
+    # replace that directory's computed total, so sums win on a clash.
+    nodes: dict[str, int] = dict(files) if a else {}
+    nodes.update(sizes)
     kids: dict[str, list[str]] = {}
     for node in nodes:
         kids.setdefault(_parent(node), []).append(node)

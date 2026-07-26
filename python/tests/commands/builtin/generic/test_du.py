@@ -2,9 +2,13 @@ import pytest
 
 from mirage.commands.builtin.generic.du import (DuFlags, _depth, du,
                                                 parse_depth, parse_flags,
-                                                rollup, to_virtual)
+                                                rollup, run_du, to_virtual)
 from mirage.commands.errors import UsageError
 from mirage.types import PathSpec
+
+
+async def _ok(value):
+    return value
 
 
 def _spec(virtual: str, resource_path: str, raw_path: str | None = None):
@@ -268,6 +272,32 @@ async def test_c_still_prints_a_total_when_every_operand_is_missing():
 
 
 @pytest.mark.asyncio
+async def test_backend_error_on_the_content_probe_reads_as_missing():
+    """A driver error probing an absent path must not replace GNU's line."""
+
+    async def stat(path):
+        raise FileNotFoundError(path.virtual)
+
+    async def compute_size(path):
+        raise RuntimeError("Graph API error 404 (itemNotFound)")
+
+    async def compute_entries(path):
+        raise RuntimeError("Graph API error 404 (itemNotFound)")
+
+    out = await run_du([_spec("/data/nosuch", "nosuch")],
+                       "/",
+                       lambda targets: _ok(list(targets)),
+                       stat,
+                       compute_size,
+                       compute_entries,
+                       c=True)
+    assert out.stdout == b"0\ttotal\n"
+    assert out.stderr == (b"du: cannot access '/data/nosuch': "
+                          b"No such file or directory\n")
+    assert out.exit_code == 1
+
+
+@pytest.mark.asyncio
 async def test_truncated_walk_reports_partial_output_and_exits_one():
     """GNU du prints what it accounted for, warns, and exits 1."""
     compute_size, compute_entries = _make_backend({"/dir/a.txt": 2})
@@ -369,6 +399,12 @@ def test_rollup_totals_are_recursive():
     rows = dict(rollup(entries, "/d", a=False, max_depth=None))
     assert rows["/d/sub"] == 3
     assert rows["/d/sub/deep"] == 1
+
+
+def test_rollup_a_keeps_the_sum_over_a_directory_marker():
+    entries = [("/d/sub/deep/c.txt", 5), ("/d/sub/deep", 0)]
+    rows = dict(rollup(entries, "/d", a=True, max_depth=None))
+    assert rows["/d/sub/deep"] == 5
 
 
 def test_rollup_handles_a_root_mount():

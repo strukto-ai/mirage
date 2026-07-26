@@ -34,7 +34,7 @@
       ],
       "command": "du -s /slack 2>&1 >/dev/null",
       "expect": {
-        "exit": 0,
+        "exit": 1,
         "stdout": "du: walk stopped early: the reported sizes are incomplete\n",
         "stderr": ""
       }

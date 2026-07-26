@@ -126,11 +126,20 @@ async function duHasContent(
   computeEntries: ComputeEntries | undefined,
   path: PathSpec,
 ): Promise<boolean> {
-  if (computeEntries !== undefined) {
-    const [entries] = await computeEntries(path)
-    return entries.length > 0
+  try {
+    if (computeEntries !== undefined) {
+      const [entries] = await computeEntries(path)
+      return entries.length > 0
+    }
+    return (await computeSize(path)) > 0
+  } catch {
+    // This runs only after stat already failed, to tell an implicit
+    // directory from an absent path. Backends raise their own error types
+    // here (Graph 404, SFTP no-such-file), and every one of them means the
+    // same thing: nothing to measure. Surfacing it would replace GNU's
+    // "cannot access" line with a driver error.
+    return false
   }
-  return (await computeSize(path)) > 0
 }
 
 /**
@@ -238,8 +247,11 @@ export function rollup(
     }
   }
 
-  const nodes = new Map(sizes)
-  if (opts.all) for (const [node, size] of files) nodes.set(node, size)
+  // Keyed backends (S3, GridFS) carry a zero-byte marker object for a
+  // directory, which arrives here as a leaf. Under -a it must not replace
+  // that directory's computed total, so sums win on a clash.
+  const nodes = opts.all ? new Map(files) : new Map<string, number>()
+  for (const [node, size] of sizes) nodes.set(node, size)
   const kids = new Map<string, string[]>()
   for (const node of nodes.keys()) {
     const parent = parentOf(node)

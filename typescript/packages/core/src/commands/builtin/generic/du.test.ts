@@ -21,6 +21,7 @@ import {
   parseDepth,
   parseDuFlags,
   rollup,
+  runDu,
   toVirtual,
 } from './du.ts'
 import { PathSpec } from '../../../types.ts'
@@ -209,6 +210,25 @@ describe('duGeneric', () => {
     expect(out.exitCode).toBe(1)
   })
 
+  it('reads a driver error on the content probe as missing', async () => {
+    const boom = () => {
+      throw new Error('Graph API error 404 (itemNotFound)')
+    }
+    const out = await runDu(
+      [spec('/data/nosuch', 'nosuch')],
+      opts({ c: true }),
+      (targets) => Promise.resolve(targets),
+      () => Promise.reject(new Error('ENOENT')),
+      boom as unknown as ComputeSize,
+      boom as unknown as ComputeEntries,
+    )
+    expect(DEC.decode(out.stdout)).toBe('0\ttotal\n')
+    expect(DEC.decode(out.stderr)).toBe(
+      "du: cannot access '/data/nosuch': No such file or directory\n",
+    )
+    expect(out.exitCode).toBe(1)
+  })
+
   it('still prints a total under -c when every operand is missing', async () => {
     const [size, entries] = backend({})
     const out = await duGeneric([], flags({ c: true }), size, entries, ['nosuch'])
@@ -333,6 +353,15 @@ describe('rollup', () => {
     const rows = new Map(rollup(entries, '/d', { all: false, maxDepth: null }))
     expect(rows.get('/d/sub')).toBe(3)
     expect(rows.get('/d/sub/deep')).toBe(1)
+  })
+
+  it('keeps the sum over a directory marker under -a', () => {
+    const entries: [string, number][] = [
+      ['/d/sub/deep/c.txt', 5],
+      ['/d/sub/deep', 0],
+    ]
+    const rows = new Map(rollup(entries, '/d', { all: true, maxDepth: null }))
+    expect(rows.get('/d/sub/deep')).toBe(5)
   })
 
   it('handles a root mount', () => {
