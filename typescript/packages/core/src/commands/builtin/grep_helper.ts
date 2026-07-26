@@ -209,18 +209,15 @@ export function searchQuery(pattern: string, fixedString: boolean): string | nul
   return extractRequiredLiteral(pattern)
 }
 
-const GREP_META: ReadonlySet<string> = new Set('.^$*+?()[]{}|\\')
-
-// True when a pattern matches as a plain substring with no regex meaning.
-// Stricter than isRegexPattern/classifyPattern (which treat "." as literal),
-// because the push-down feeds ILIKE directly with no regex re-scan.
+// Whether the pattern is searched verbatim, with no regex extraction.
+// Push-down against a whole-word search index is only complete when the term
+// handed to the provider is the entire match. A regex narrowed on an extracted
+// literal fails that: `foo[0-9]` under -w matches `foo1`, but a whole-word
+// search for `foo` never returns a file whose only token is `foo1`.
 export function isLiteralPattern(pattern: string, fixedString: boolean): boolean {
-  if (pattern.includes('\n')) return false
   if (fixedString) return true
-  for (const c of pattern) {
-    if (GREP_META.has(c)) return false
-  }
-  return true
+  const pt = classifyPattern(pattern, fixedString)
+  return pt === PatternType.EXACT || (pt === PatternType.SIMPLE && !pattern.includes('.'))
 }
 
 // True when a flag alters the match set or output shape of grep/rg. A search

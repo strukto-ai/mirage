@@ -81,7 +81,7 @@ describe('slack grep', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { transport },
     )
     expect(transport.calls[0]?.endpoint).toBe('search.messages')

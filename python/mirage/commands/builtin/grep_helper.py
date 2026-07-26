@@ -123,6 +123,29 @@ def extract_required_literal(pattern: str) -> str | None:
     return best if len(best) >= _MIN_SEARCH_LITERAL else None
 
 
+def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
+    """Whether the pattern is searched verbatim, with no regex extraction.
+
+    Push-down against a whole-word search index is only complete when the term
+    handed to the provider is the entire match. A regex narrowed on an
+    extracted literal fails that: ``foo[0-9]`` under -w matches ``foo1``, but a
+    whole-word search for ``foo`` never returns a file whose only token is
+    ``foo1``.
+
+    Args:
+        pattern (str): the search pattern.
+        fixed_string (bool): True if -F is set.
+
+    Returns:
+        bool: True when the pattern itself is the search term.
+    """
+    if fixed_string:
+        return True
+    pt = classify_pattern(pattern, fixed_string)
+    return pt == PatternType.EXACT or (pt == PatternType.SIMPLE
+                                       and "." not in pattern)
+
+
 def search_query(pattern: str, fixed_string: bool) -> str | None:
     """Literal to push down to a code-search API for a grep/rg pattern.
 
@@ -139,24 +162,8 @@ def search_query(pattern: str, fixed_string: bool) -> str | None:
     return extract_required_literal(pattern)
 
 
-_GREP_META = frozenset(".^$*+?()[]{}|\\")
-
 _PUSHDOWN_SHAPING_BOOL = ("v", "n", "c", "args_l", "w", "o", "q", "H", "h")
 _PUSHDOWN_SHAPING_INT = ("m", "A", "B", "C")
-
-
-def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
-    """True when a pattern matches as a plain substring with no regex meaning.
-
-    Args:
-        pattern (str): the search pattern.
-        fixed_string (bool): True when -F forces literal interpretation.
-    """
-    if "\n" in pattern:
-        return False
-    if fixed_string:
-        return True
-    return not any(c in _GREP_META for c in pattern)
 
 
 def has_search_shaping_flags(flags: Mapping[str, object] | None) -> bool:

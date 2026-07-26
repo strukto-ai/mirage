@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 
 from aiohttp import web
@@ -36,6 +37,16 @@ def freeze_clock(base: datetime) -> None:
     global BASE_TIME, MODIFIED
     BASE_TIME = base
     MODIFIED = base.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+def _content_hit(query: str, text: str) -> bool:
+    # Real Box indexes content by whole words, so `foo` never matches
+    # `foobar`. Modelling that is what lets the battery prove grep/rg
+    # push-down cannot silently drop substring matches; a substring fake
+    # would agree with a full scan and test nothing. Names stay substring:
+    # extra hits there only over-fetch, which the local scan filters.
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(query)}(?![A-Za-z0-9_])",
+                     text) is not None
 
 
 def _error(status: int, code: str, message: str) -> web.Response:
@@ -481,7 +492,7 @@ class BoxServer:
             matched = match_name and query in it["name"].lower()
             if not matched and match_content and it["type"] == "file":
                 text = it["content"].decode("utf-8", "ignore").lower()
-                matched = query in text
+                matched = _content_hit(query, text)
             if matched:
                 hits.append(it)
         hits.sort(key=lambda it: it["name"])

@@ -82,7 +82,11 @@ async def grep(
                                  stderr=b"grep: root-level search "
                                  b"not yet supported\n")
 
-        if scope.level in ("channel", "guild"):
+        # Provider search matches whole words while grep matches
+        # substrings, and the native path returns search results verbatim
+        # as the output, so a bare literal would under-report. Only -w
+        # makes the two agree; otherwise fall through to the scan.
+        if scope.level in ("channel", "guild") and fl.as_bool("w"):
             try:
                 if scope.guild_id is None:
                     raise RuntimeError("cannot resolve guild ID")

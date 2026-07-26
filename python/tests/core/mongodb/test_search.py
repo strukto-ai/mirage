@@ -72,13 +72,7 @@ async def test_search_collection_unions_string_fields_across_sampled_docs():
     ]
     matched = [{"_id": 2, "body": "World matches"}]
     client, col = _build_search_client(sampled, matched)
-    with patch("mirage.core.mongodb.search.get_indexes",
-               new=AsyncMock(return_value=[])):
-        out = await search_collection(client,
-                                      "db1",
-                                      "coll1",
-                                      "World",
-                                      limit=10)
+    out = await search_collection(client, "db1", "coll1", "World", limit=10)
     assert out == matched
     filter_arg = col.find.call_args[0][0]
     or_fields = {list(clause.keys())[0] for clause in filter_arg["$or"]}
@@ -86,36 +80,22 @@ async def test_search_collection_unions_string_fields_across_sampled_docs():
 
 
 @pytest.mark.asyncio
-async def test_search_collection_uses_text_when_textIndexVersion_present():
-    indexes = [{
-        "name": "title_text",
-        "key": {
-            "_fts": "text",
-            "_ftsx": 1
-        },
-        "weights": {
-            "title": 1
-        },
-        "textIndexVersion": 3,
-    }]
-    client, col = _build_search_client([], [{"_id": 1}])
-    with patch("mirage.core.mongodb.search.get_indexes",
-               new=AsyncMock(return_value=indexes)):
-        await search_collection(client, "db1", "coll1", "query", limit=10)
-    assert col.find.call_args[0][0] == {"$text": {"$search": "query"}}
+async def test_search_collection_uses_regex_even_with_text_index():
+    # $text matches whole words and stems them while grep matches substrings,
+    # and these rows are the grep output with no local re-scan, so the text
+    # index is never used.
+    client, col = _build_search_client([{"title": "hello"}], [{"_id": 1}])
+    await search_collection(client, "db1", "coll1", "query", limit=10)
+    sent = col.find.call_args[0][0]
+    assert "$text" not in sent
+    assert sent == {"$or": [{"title": {"$regex": "query", "$options": "i"}}]}
 
 
 @pytest.mark.asyncio
 async def test_search_collection_no_string_fields_returns_no_results():
     sampled = [{"_id": 1, "n": 42}, {"_id": 2, "n": 7}]
     client, col = _build_search_client(sampled, [])
-    with patch("mirage.core.mongodb.search.get_indexes",
-               new=AsyncMock(return_value=[])):
-        out = await search_collection(client,
-                                      "db1",
-                                      "coll1",
-                                      "anything",
-                                      limit=10)
+    out = await search_collection(client, "db1", "coll1", "anything", limit=10)
     assert out == []
     assert col.find.call_args is None
 

@@ -66,6 +66,7 @@ from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
 from mirage.resource.gdrive.gdrive import GoogleDriveResource
+from mirage.resource.github import GitHubConfig, GitHubResource
 from mirage.resource.gmail.config import GmailConfig
 from mirage.resource.gmail.gmail import GmailResource
 from mirage.resource.gridfs import GridFSConfig, GridFSResource
@@ -897,6 +898,38 @@ class SlackService:
         return None
 
 
+class GitHubService:
+    """Points github mounts at the fake api.github.com server.
+
+    The server (integ/server/github_server.py) runs out of process on
+    GITHUB_URL, mirroring the fake Slack and Google Workspace servers.
+    In-process is not an option here: GitHubResource fetches the repo tree
+    with a blocking urlopen from its constructor, which would starve an
+    aiohttp fake sharing the runner's event loop.
+
+    Args:
+        url (str): GITHUB_URL origin the fake is listening on.
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    @classmethod
+    async def create(cls) -> "GitHubService":
+        return cls(os.environ["GITHUB_URL"].rstrip("/"))
+
+    def resource(self, mount: dict) -> GitHubResource:
+        owner, _, repo = mount["repo"].partition("/")
+        return GitHubResource(
+            GitHubConfig(token="ghp-integ",
+                         owner=owner,
+                         repo=repo,
+                         base_url=self.url))
+
+    async def teardown(self) -> None:
+        return None
+
+
 class DifyService:
 
     def __init__(self, runner, base: str, dataset: str) -> None:
@@ -1573,6 +1606,13 @@ def build_nextcloud(
     return service.resource(mount), _noop
 
 
+def build_github(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GitHubService)
+    return service.resource(mount), _noop
+
+
 def build_slack(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -1621,6 +1661,7 @@ BUILDERS = {
     "hf": build_hf,
     "box": build_box,
     "dropbox": build_dropbox,
+    "github": build_github,
     "slack": build_slack,
     "trello": build_trello,
     "linear": build_linear,
@@ -1667,6 +1708,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await BoxService.create(run_id)
     if target.get("service") == "dropbox":
         return await DropboxService.create(target)
+    if target.get("service") == "github":
+        return await GitHubService.create()
     if target.get("service") == "slack":
         return await SlackService.create()
     if target.get("service") == "trello":

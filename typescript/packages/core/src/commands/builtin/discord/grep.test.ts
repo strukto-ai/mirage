@@ -82,7 +82,7 @@ describe('discord grep', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { transport },
     )
     expect(transport.calls[0]?.endpoint).toBe('/guilds/G1/messages/search')
@@ -123,7 +123,7 @@ describe('discord grep', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { index: idx, transport },
     )
     const lines = out.stdout.split('\n').filter((l) => l !== '')

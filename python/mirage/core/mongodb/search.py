@@ -17,7 +17,7 @@ from typing import Any
 
 from pymongo import AsyncMongoClient
 
-from mirage.core.mongodb._client import get_indexes, list_collections
+from mirage.core.mongodb._client import list_collections
 from mirage.core.mongodb.stream import render_doc
 from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind
 
@@ -39,10 +39,6 @@ async def _sampled_string_paths(col, sample_size: int = 100) -> list[str]:
     return sorted(paths)
 
 
-def _has_text_index(indexes: list[dict[str, Any]]) -> bool:
-    return any("textIndexVersion" in idx for idx in indexes)
-
-
 async def search_collection(
     client: AsyncMongoClient[Any],
     database: str,
@@ -52,21 +48,22 @@ async def search_collection(
 ) -> list[dict[str, Any]]:
     db = client[database]
     col = db[collection]
-    indexes = await get_indexes(client, database, collection)
-    if _has_text_index(indexes):
-        filter_expr: dict[str, Any] = {"$text": {"$search": pattern}}
-    else:
-        paths = await _sampled_string_paths(col)
-        if not paths:
-            return []
-        filter_expr = {
-            "$or": [{
-                p: {
-                    "$regex": pattern,
-                    "$options": "i"
-                }
-            } for p in paths]
-        }
+    # Always $regex, never $text. A $text index matches whole words and
+    # stems them, while grep matches substrings, and these rows are
+    # returned as the grep output without a local re-scan: $text would
+    # both miss `foo` inside `foobar` and match stems the pattern never
+    # had. $regex takes the pattern as written.
+    paths = await _sampled_string_paths(col)
+    if not paths:
+        return []
+    filter_expr: dict[str, Any] = {
+        "$or": [{
+            p: {
+                "$regex": pattern,
+                "$options": "i"
+            }
+        } for p in paths]
+    }
     cursor = col.find(filter_expr).limit(limit)
     return await cursor.to_list(length=limit)
 

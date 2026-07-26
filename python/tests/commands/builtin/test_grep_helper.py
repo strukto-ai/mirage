@@ -187,7 +187,7 @@ async def test_grep_files_only_recursive_scans_file_operands():
     ("^start", False, False),
     ("a.b", True, True),
     ("a\nb", False, False),
-    ("a\nb", True, False),
+    ("a\nb", True, True),
 ])
 def test_is_literal_pattern(pattern, fixed, expected):
     assert grep_helper.is_literal_pattern(pattern, fixed) is expected

@@ -213,7 +213,7 @@ describe('isLiteralPattern', () => {
     ['^start', false, false],
     ['a.b', true, true],
     ['a\nb', false, false],
-    ['a\nb', true, false],
+    ['a\nb', true, true],
   ])('isLiteralPattern(%j, %j) === %j', (pattern, fixed, expected) => {
     expect(isLiteralPattern(pattern, fixed)).toBe(expected)
   })

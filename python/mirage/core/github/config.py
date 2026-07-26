@@ -20,3 +20,4 @@ class GitHubConfig(BaseModel):
     owner: str | None = None
     repo: str | None = None
     ref: str = "main"
+    base_url: str | None = None

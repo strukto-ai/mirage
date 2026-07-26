@@ -145,6 +145,10 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: BOX_ENDPOINT not set\n`)
       continue
     }
+    if (target.service === 'github' && !process.env.GITHUB_URL) {
+      process.stderr.write(`skip [${id}]: GITHUB_URL not set\n`)
+      continue
+    }
     if (target.service === 'slack' && !process.env.SLACK_URL) {
       process.stderr.write(`skip [${id}]: SLACK_URL not set\n`)
       continue

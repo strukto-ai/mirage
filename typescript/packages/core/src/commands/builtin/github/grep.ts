@@ -24,7 +24,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { prefixAggregate } from '../aggregators.ts'
 import { patternArg } from '../grep_helper.ts'
 import { grepGeneric } from '../generic/grep.ts'
-import { filesOnlyShortcircuit, narrowScope } from './narrow.ts'
+import { narrowScope } from './narrow.ts'
 
 const ENC = new TextEncoder()
 
@@ -47,6 +47,7 @@ async function grepCommand(
       pattern,
       fixedString,
       recursive,
+      opts.flags.w === true,
       opts.index ?? undefined,
     )
     resolved = narrowed.resolved
@@ -56,14 +57,10 @@ async function grepCommand(
         new IOResult({
           exitCode: 1,
           stderr: ENC.encode(
-            `grep: ${String(narrowed.fileCount)} files in scope, narrow the path\n`,
+            `grep: ${String(narrowed.fileCount)} files in scope, narrow the path, or use -w to enable code search\n`,
           ),
         }),
       ]
-    }
-    if (narrowed.usedSearch) {
-      const short = filesOnlyShortcircuit(opts.flags, pattern, resolved, first)
-      if (short !== null) return short
     }
   }
   const stat = (p: PathSpec): Promise<FileStat> => githubStat(accessor, p, opts.index ?? undefined)
