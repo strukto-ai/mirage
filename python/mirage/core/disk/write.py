@@ -38,7 +38,6 @@ async def write_bytes(accessor: DiskAccessor, path_spec: PathSpec,
     start_ms = int(time.monotonic() * 1000)
     p = _resolve(root, path)
     with disk_errors(path_spec.virtual):
-        p.parent.mkdir(parents=True, exist_ok=True)
         async with aiofiles.open(p, "wb") as f:
             await f.write(data)
     record("write", path, "disk", len(data), start_ms)

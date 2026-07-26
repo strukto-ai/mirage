@@ -27,8 +27,10 @@ def check_dest_parents(store: RAMStore, dst_spec: PathSpec, d: str) -> None:
     it never recorded, and that orphan makes both the phantom directory
     and its real parent unlistable.
 
-    Shared by ``rename`` and ``copy``: neither creates parents (that is
-    ``mkdir -p``), so both owe the destination the same probe.
+    Shared by every op that places a key at a caller-supplied path
+    (``rename``, ``copy``, ``create``, ``write_bytes``): none of them
+    creates parents (that is ``mkdir -p``), so all owe the destination the
+    same probe. The real-filesystem backends get this from the kernel.
 
     Args:
         store (RAMStore): The backing store.

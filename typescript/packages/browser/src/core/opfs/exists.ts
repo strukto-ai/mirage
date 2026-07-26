@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, resolveDirHandle, resolveParentDirHandle } from './utils.ts'
+import { isNotFound, isTypeMismatch, resolveDirHandle, resolveParentDirHandle } from './utils.ts'
 
 export async function exists(accessor: OPFSAccessor, path: PathSpec): Promise<boolean> {
   const root = accessor.rootHandle
@@ -41,6 +41,10 @@ export async function exists(accessor: OPFSAccessor, path: PathSpec): Promise<bo
     }
   } catch (err) {
     if (isNotFound(err)) return false
+    // A plain file partway down the chain means the path cannot exist, the
+    // same answer the kernel gives `test -e /plain/x`. Leaking the raw
+    // DOMException instead made callers report the mock's own wording.
+    if (isTypeMismatch(err)) return false
     if (err instanceof Error && err.message.startsWith('path escapes root')) return false
     if (err instanceof Error && err.message.startsWith('no parent directory')) {
       try {

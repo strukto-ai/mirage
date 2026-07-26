@@ -17,6 +17,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
+import { checkDestParents } from './dest.ts'
 
 export async function appendBytes(
   accessor: RAMAccessor,
@@ -25,6 +26,7 @@ export async function appendBytes(
 ): Promise<void> {
   const start = performance.now()
   const p = norm(path.mountPath)
+  checkDestParents(accessor, path, p)
   const existing = accessor.store.files.get(p)
   if (existing) {
     const combined = new Uint8Array(existing.byteLength + data.byteLength)

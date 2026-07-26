@@ -34,7 +34,6 @@ async def create(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     path = path_spec.mount_path
     p = _resolve(accessor.root, path)
     with disk_errors(path_spec.virtual):
-        await aiofiles.os.makedirs(p.parent, exist_ok=True)
         async with aiofiles.open(p, "wb") as f:
             await f.write(b"")
     await invalidate_after_write(path_spec)

@@ -64,3 +64,44 @@ async def test_create_normalizes_path(mk_store):
     a = await mk_store("test:create:3:")
     await create(a, PathSpec.from_str_path("file.txt"))
     assert await a.store.has_file("/file.txt")
+
+
+@pytest.mark.asyncio
+async def test_create_into_missing_parent_leaves_no_orphan(mk_store):
+    a = await mk_store("test:create:4:")
+    with pytest.raises(FileNotFoundError):
+        await create(a, PathSpec.from_str_path("/missing/f.txt"))
+    assert not await a.store.has_file("/missing/f.txt")
+
+
+@pytest.mark.asyncio
+async def test_create_under_a_missing_grandparent_is_not_found(mk_store):
+    a = await mk_store("test:create:5:")
+    with pytest.raises(FileNotFoundError):
+        await create(a, PathSpec.from_str_path("/missing/sub/f.txt"))
+    assert not await a.store.has_file("/missing/sub/f.txt")
+
+
+@pytest.mark.asyncio
+async def test_create_under_a_plain_file_is_not_a_directory(mk_store):
+    a = await mk_store("test:create:6:")
+    await a.store.set_file("/plain", b"x")
+    with pytest.raises(NotADirectoryError):
+        await create(a, PathSpec.from_str_path("/plain/f.txt"))
+    assert not await a.store.has_file("/plain/f.txt")
+
+
+@pytest.mark.asyncio
+async def test_create_deep_under_a_plain_file_is_not_a_directory(mk_store):
+    a = await mk_store("test:create:7:")
+    await a.store.set_file("/plain", b"x")
+    with pytest.raises(NotADirectoryError):
+        await create(a, PathSpec.from_str_path("/plain/sub/f.txt"))
+
+
+@pytest.mark.asyncio
+async def test_create_into_an_existing_dir_is_allowed(mk_store):
+    a = await mk_store("test:create:8:")
+    await a.store.add_dir("/d")
+    await create(a, PathSpec.from_str_path("/d/f.txt"))
+    assert await a.store.get_file("/d/f.txt") == b""

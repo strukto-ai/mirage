@@ -17,6 +17,8 @@ import {
   ResourceName,
   command,
   formatRecords,
+  fsStrerror,
+  isFsError,
   specOf,
   type ByteSource,
   type CommandFnResult,
@@ -44,12 +46,22 @@ async function mkdirCommand(
     ]
   }
   const lines: string[] = []
+  const errors: string[] = []
   for (const p of paths) {
-    await opfsMkdir(accessor, p, parents)
+    try {
+      await opfsMkdir(accessor, p, parents)
+    } catch (err) {
+      // Mirrors the generic builder: one unusable operand is reported and
+      // the rest still run, with the GNU "cannot create directory" wording.
+      if (!isFsError(err)) throw err
+      errors.push(`mkdir: cannot create directory '${p.virtual}': ${String(fsStrerror(err))}`)
+      continue
+    }
     if (verbose) lines.push(`mkdir: created directory '${p.virtual.replace(/\/+$/, '') || '/'}'`)
   }
   const output: ByteSource | null = verbose && lines.length > 0 ? formatRecords(lines) : null
-  return [output, new IOResult()]
+  const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+  return [output, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
 }
 
 export const OPFS_MKDIR = command({

@@ -19,16 +19,19 @@ import type { RedisStore } from '../../resource/redis/store.ts'
 // rename(2) resolves the destination: a component that does not exist is
 // ENOENT, a component that is a plain file is ENOTDIR (at any depth). Without
 // this the store grows a key under a directory it never recorded, and that
-// orphan makes both the phantom directory and its real parent unlistable. The
-// directory set is read once so a deep destination costs one round trip, not
-// one per component. Shared by rename and copy: neither creates parents (that
-// is `mkdir -p`), so both owe the destination the same probe.
+// orphan makes both the phantom directory and its real parent unlistable.
+// Shared by every op that places a key at a caller-supplied path (rename,
+// copy, create, write, append, mkdir): none of them creates parents (that is
+// `mkdir -p`), so all owe the destination the same probe. The real-filesystem
+// backends get this from the kernel.
+//
+// Components are probed one at a time rather than by pulling the whole
+// directory set: this runs on every write, so a set membership test per
+// component (O(1), and a path is only a few components deep) beats
+// transferring every directory in the mount.
 export async function checkDestParents(store: RedisStore, dst: PathSpec, d: string): Promise<void> {
-  const chain = ancestors(d)
-  if (chain.length === 0) return
-  const dirs = await store.listDirs()
-  for (const ancestor of chain) {
-    if (dirs.has(ancestor)) continue
+  for (const ancestor of ancestors(d)) {
+    if (await store.hasDir(ancestor)) continue
     if (await store.hasFile(ancestor)) throw enotdir(dst)
     throw enoent(dst)
   }

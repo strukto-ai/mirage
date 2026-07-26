@@ -16,10 +16,11 @@ import time
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.ram.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.observe.context import record
 from mirage.types import PathSpec
-from mirage.utils.path import norm, parent
+from mirage.utils.path import norm
 
 
 async def write_bytes(accessor: RAMAccessor, path_spec: PathSpec,
@@ -28,10 +29,7 @@ async def write_bytes(accessor: RAMAccessor, path_spec: PathSpec,
     store = accessor.store
     start_ms = int(time.monotonic() * 1000)
     p = norm(path)
-    parent_dir = parent(p)
-    if parent_dir != "/" and parent_dir not in store.dirs:
-        raise FileNotFoundError(
-            f"parent directory does not exist: {parent_dir}")
+    check_dest_parents(store, path_spec, p)
     store.files[p] = data
     store.modified[p] = now_iso()
     record("write", path, "ram", len(data), start_ms)

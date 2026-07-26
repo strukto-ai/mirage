@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, resolveFileHandle, toWritableChunk } from './utils.ts'
+import { destError, isNotFound, resolveFileHandle, toWritableChunk } from './utils.ts'
 
 export async function truncate(
   accessor: OPFSAccessor,
@@ -31,10 +31,14 @@ export async function truncate(
     existing = new Uint8Array(await file.arrayBuffer())
   } catch (err) {
     if (isNotFound(err)) {
-      handle = await resolveFileHandle(root, virtual, { create: true })
+      try {
+        handle = await resolveFileHandle(root, virtual, { create: true })
+      } catch (cerr) {
+        throw destError(cerr, path)
+      }
       existing = new Uint8Array()
     } else {
-      throw err
+      throw destError(err, path)
     }
   }
   const out = new Uint8Array(length)

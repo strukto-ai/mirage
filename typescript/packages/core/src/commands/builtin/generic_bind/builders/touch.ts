@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
+import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 const ENC = new TextEncoder()
@@ -31,12 +32,23 @@ export const TOUCH_BUILDER: Builder = {
     }
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     const createOnly = opts.flags.c === true
+    const writes: Record<string, Uint8Array> = {}
+    const errors: string[] = []
     for (const p of resolved) {
       if (createOnly) continue
-      if (!(await exists(accessor, p))) {
+      if (await exists(accessor, p)) continue
+      try {
         await write(accessor, p, new Uint8Array(0))
+      } catch (err) {
+        // One unusable operand is not an aborted command: GNU reports it
+        // and still touches the remaining ones.
+        if (!isFsError(err)) throw err
+        errors.push(`touch: cannot touch '${p.virtual}': ${String(fsStrerror(err))}`)
+        continue
       }
+      writes[p.mountPath] = new Uint8Array(0)
     }
-    return [null, new IOResult()]
+    const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
+    return [null, new IOResult({ writes, stderr, exitCode: errors.length > 0 ? 1 : 0 })]
   },
 }

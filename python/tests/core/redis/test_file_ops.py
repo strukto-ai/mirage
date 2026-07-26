@@ -248,6 +248,32 @@ async def test_append_to_new(mk_store):
 
 
 @pytest.mark.asyncio
+async def test_append_into_missing_parent_leaves_no_orphan(mk_store):
+    # `>>` is not `mkdir -p` either: GNU reports ENOENT on the operand.
+    a = await mk_store("test:fops:ap:orphan:")
+    with pytest.raises(FileNotFoundError):
+        await append_bytes(
+            a,
+            PathSpec(resource_path="missing/new.txt",
+                     virtual="/missing/new.txt",
+                     directory="/missing/new.txt"), b"data")
+    assert not await a.store.has_file("/missing/new.txt")
+
+
+@pytest.mark.asyncio
+async def test_append_under_a_plain_file_is_not_a_directory(mk_store):
+    a = await mk_store("test:fops:ap:notdir:")
+    await a.store.set_file("/plain", b"x")
+    with pytest.raises(NotADirectoryError):
+        await append_bytes(
+            a,
+            PathSpec(resource_path="plain/new.txt",
+                     virtual="/plain/new.txt",
+                     directory="/plain/new.txt"), b"data")
+    assert not await a.store.has_file("/plain/new.txt")
+
+
+@pytest.mark.asyncio
 async def test_append_multiple(mk_store):
     a = await mk_store("test:fops:ap2:")
     await append_bytes(

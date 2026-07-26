@@ -22,8 +22,10 @@ import { enoent, enotdir } from '../../utils/errors.ts'
 // ENOENT, a component that is a plain file is ENOTDIR (at any depth). Without
 // this the store grows a key under a directory it never recorded, and that
 // orphan makes both the phantom directory and its real parent unlistable.
-// Shared by rename and copy: neither creates parents (that is `mkdir -p`), so
-// both owe the destination the same probe.
+// Shared by every op that places a key at a caller-supplied path (rename,
+// copy, write, append, mkdir; create routes through write): none of them
+// creates parents (that is `mkdir -p`), so all owe the destination the same
+// probe. The real-filesystem backends get this from the kernel.
 export function checkDestParents(accessor: RAMAccessor, dst: PathSpec, d: string): void {
   for (const ancestor of ancestors(d)) {
     if (accessor.store.dirs.has(ancestor)) continue

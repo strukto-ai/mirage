@@ -26,11 +26,18 @@ async def check_dest_parents(store: RedisStore, dst_spec: PathSpec,
     does not exist is ENOENT, a component that is a plain file is ENOTDIR
     (at any depth). Without this the store grows a key under a directory
     it never recorded, and that orphan makes both the phantom directory
-    and its real parent unlistable. The directory set is read once so a
-    deep destination costs one round trip, not one per component.
+    and its real parent unlistable.
 
-    Shared by ``rename`` and ``copy``: neither creates parents (that is
-    ``mkdir -p``), so both owe the destination the same probe.
+    Shared by every op that places a key at a caller-supplied path
+    (``rename``, ``copy``, ``create``, ``write_bytes``, ``append_bytes``,
+    ``mkdir``): none of them creates parents (that is ``mkdir -p``), so all
+    owe the destination the same probe. The real-filesystem backends get
+    this from the kernel.
+
+    Components are probed one at a time rather than by pulling the whole
+    directory set: this runs on every write, so a set membership test per
+    component (O(1), and a path is only a few components deep) beats
+    transferring every directory in the mount.
 
     Args:
         store (RedisStore): The backing store.
@@ -41,12 +48,8 @@ async def check_dest_parents(store: RedisStore, dst_spec: PathSpec,
         NotADirectoryError: A parent component is a plain file.
         FileNotFoundError: A parent component does not exist.
     """
-    chain = ancestors(d)
-    if not chain:
-        return
-    dirs = await store.list_dirs()
-    for ancestor in chain:
-        if ancestor in dirs:
+    for ancestor in ancestors(d):
+        if await store.has_dir(ancestor):
             continue
         if await store.has_file(ancestor):
             raise enotdir(dst_spec)

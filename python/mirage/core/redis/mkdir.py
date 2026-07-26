@@ -14,9 +14,10 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.core.redis.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
-from mirage.utils.path import norm, parent
+from mirage.utils.path import norm
 
 
 async def mkdir(
@@ -40,10 +41,7 @@ async def mkdir(
         await invalidate_after_write(path_spec)
         await invalidate_ancestors(path_spec)
         return
-    parent_dir = parent(p)
-    if parent_dir != "/" and not await store.has_dir(parent_dir):
-        raise FileNotFoundError(
-            f"parent directory does not exist: {parent_dir}")
+    await check_dest_parents(store, path_spec, p)
     await store.add_dir(p)
     await store.set_modified(p, now_iso())
     await invalidate_after_write(path_spec)

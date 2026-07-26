@@ -36,10 +36,12 @@ describe('core/disk/copy', () => {
     await copy(accessor, spec('/src'), spec('/dst'))
     expect(await readFile(join(root, 'dst'), 'utf-8')).toBe('CP')
   })
-  it('creates parent directories for the destination', async () => {
+  it('does not create parent directories for the destination', async () => {
+    // cp is not `mkdir -p`: GNU reports ENOENT on the destination.
     await writeFile(join(root, 'src'), 'X')
-    await copy(accessor, spec('/src'), spec('/a/b/dst'))
-    expect(await readFile(join(root, 'a/b/dst'), 'utf-8')).toBe('X')
+    await expect(copy(accessor, spec('/src'), spec('/a/b/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
   it('throws on missing source', async () => {
     await expect(copy(accessor, spec('/missing'), spec('/x'))).rejects.toMatchObject({

@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_mode
 from mirage.utils.path import CycleError, resolve_path
 from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
@@ -522,6 +523,15 @@ async def handle_touch(
                                mtime=mtime)
         except PermissionError:
             errors.append(_read_only_error("touch", namespace, resolved))
+        except FS_ERRORS as exc:
+            # A destination whose parent chain is not all directories is one
+            # failed operand, not an aborted command: GNU reports it and
+            # touches the rest. Caught here rather than around the write
+            # because backends disagree about which call refuses first (ram
+            # answers stat with ENOENT and fails the write; a real
+            # filesystem answers stat itself with ENOTDIR).
+            errors.append(f"touch: cannot touch '{target.raw_path}': "
+                          f"{fs_strerror(exc)}\n")
     return finish("touch", errors, io=IOResult(writes=writes))
 
 

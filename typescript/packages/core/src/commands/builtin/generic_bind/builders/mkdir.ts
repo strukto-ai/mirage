@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
+import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
 import { DEFAULT_DIR_MODE, parseMode } from '../../../../utils/mode.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
@@ -50,14 +51,24 @@ export const MKDIR_BUILDER: Builder = {
     }
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     const lines: string[] = []
+    const errors: string[] = []
     for (const p of resolved) {
-      await mkdir(accessor, p, parents)
+      try {
+        await mkdir(accessor, p, parents)
+      } catch (err) {
+        // One unusable operand is not an aborted command: GNU reports it
+        // and still makes the remaining directories.
+        if (!isFsError(err)) throw err
+        errors.push(`mkdir: cannot create directory '${p.virtual}': ${String(fsStrerror(err))}`)
+        continue
+      }
       // -m applies to the named directory only; any parents made by -p keep
       // the default mode (GNU).
       if (mode !== null && setAttrs !== undefined) await setAttrs(accessor, p, { mode })
       if (verbose) lines.push(`mkdir: created directory '${p.virtual}'`)
     }
     const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-    return [out, new IOResult()]
+    const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+    return [out, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
   },
 }

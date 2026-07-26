@@ -14,11 +14,13 @@
 
 import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
+import { checkDestParents } from './dest.ts'
 import { norm, nowIso } from './utils.ts'
 
 export async function create(accessor: RedisAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.mountPath)
   const store = accessor.store
+  await checkDestParents(store, path, p)
   await store.setFile(p, new Uint8Array(0))
   await store.setModified(p, nowIso())
   await invalidateAfterWrite(path)
