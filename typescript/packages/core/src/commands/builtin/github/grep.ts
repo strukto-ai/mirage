@@ -57,7 +57,7 @@ async function grepCommand(
         new IOResult({
           exitCode: 1,
           stderr: ENC.encode(
-            `grep: ${String(narrowed.fileCount)} files in scope, narrow the path\n`,
+            `grep: ${String(narrowed.fileCount)} files in scope, narrow the path, or use -w to enable code search\n`,
           ),
         }),
       ]

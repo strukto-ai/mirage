@@ -58,7 +58,7 @@
       "targets": [
         "github"
       ],
-      "command": "grep -rl wombat /repo",
+      "command": "grep -rlw wombat /repo",
       "expect": {
         "exit": 0,
         "stdout": "/repo/docs/contributing.md\n/repo/src/cache/step_2.py\n/repo/src/store/step_5.py\n",
@@ -71,7 +71,7 @@
       "targets": [
         "github"
       ],
-      "command": "rg -l wombat /repo",
+      "command": "rg -lw wombat /repo",
       "expect": {
         "exit": 0,
         "stdout": "/repo/docs/contributing.md\n/repo/src/cache/step_2.py\n/repo/src/store/step_5.py\n",
@@ -111,6 +111,32 @@
         "github"
       ],
       "command": "grep -rlw quokka /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/architecture.md\n/repo/src/auth/step_1.py\n/repo/src/route/step_3.py\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_rg_substring_scans_all",
+      "seq": 530010,
+      "targets": [
+        "github"
+      ],
+      "command": "rg -l quokka /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/architecture.md\n/repo/docs/release.md\n/repo/src/auth/step_1.py\n/repo/src/route/step_3.py\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_rg_word_uses_search",
+      "seq": 530011,
+      "targets": [
+        "github"
+      ],
+      "command": "rg -lw quokka /repo",
       "expect": {
         "exit": 0,
         "stdout": "/repo/docs/architecture.md\n/repo/src/auth/step_1.py\n/repo/src/route/step_3.py\n",

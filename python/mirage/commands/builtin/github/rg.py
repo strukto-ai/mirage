@@ -56,7 +56,11 @@ async def rg(
             whole_word=fl.as_bool("w"),
         )
         if file_count > SCOPE_ERROR:
-            msg = f"rg: {file_count} files in scope, narrow the path\n"
+            # Push-down needs -w (see narrow_scope); without it a scope
+            # this large has no complete narrowing strategy, so say so
+            # rather than scanning thousands of blobs.
+            msg = (f"rg: {file_count} files in scope, "
+                   "narrow the path, or use -w to enable code search\n")
             return b"", IOResult(exit_code=1, stderr=msg.encode())
 
     return await generic_rg(

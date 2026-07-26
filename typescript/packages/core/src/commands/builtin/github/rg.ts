@@ -54,7 +54,9 @@ async function rgCommand(
         null,
         new IOResult({
           exitCode: 1,
-          stderr: ENC.encode(`rg: ${String(narrowed.fileCount)} files in scope, narrow the path\n`),
+          stderr: ENC.encode(
+            `rg: ${String(narrowed.fileCount)} files in scope, narrow the path, or use -w to enable code search\n`,
+          ),
         }),
       ]
     }

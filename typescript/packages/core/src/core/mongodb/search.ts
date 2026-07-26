@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { findDocuments, listCollections, listIndexes } from './_client.ts'
+import { findDocuments, listCollections } from './_client.ts'
 import { stringifyDoc } from './stream.ts'
 import { EntityKind, PRIMARY_KEY } from './types.ts'
 
@@ -61,11 +61,11 @@ export async function searchCollection(
   pattern: string,
   limit: number,
 ): Promise<Record<string, unknown>[]> {
-  const indexes = await listIndexes(accessor, database, collection)
-  const hasTextIndex = indexes.some((idx) => 'textIndexVersion' in idx)
-  if (hasTextIndex) {
-    return findDocuments(accessor, database, collection, { $text: { $search: pattern } }, { limit })
-  }
+  // Always $regex, never $text. A $text index matches whole words and stems
+  // them, while grep matches substrings, and these rows are returned as the
+  // grep output without a local re-scan: $text would both miss `foo` inside
+  // `foobar` and match stems the pattern never had. $regex takes the pattern
+  // as written.
   const paths = await sampledStringPaths(accessor, database, collection)
   if (paths.length === 0) return []
   const orFilters = paths.map((f) => ({ [f]: { $regex: pattern, $options: 'i' } }))
