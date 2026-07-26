@@ -50,15 +50,11 @@ jobs:
               - '.github/workflows/test_integ.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             database:
-              - 'integ/mongodb.py'
-              - 'integ/mongodb.ts'
-              - 'integ/truth_mongodb.txt'
-              - 'integ/postgres.py'
-              - 'integ/postgres.ts'
-              - 'integ/truth_postgres.txt'
-              - 'integ/chroma.py'
-              - 'integ/chroma.ts'
-              - 'integ/truth_chroma.txt'
+              - 'integ/resources/mongodb/**'
+              - 'integ/resources/postgres/**'
+              - 'integ/targets.json'
+              - 'integ/runners/**'
+              - 'integ/resources/chroma/**'
               - 'integ/check_lines.sh'
               - 'python/mirage/accessor/mongodb.py'
               - 'python/mirage/core/mongodb/**'
@@ -72,9 +68,7 @@ jobs:
               - 'python/mirage/core/chroma/**'
               - 'python/mirage/commands/builtin/chroma/**'
               - 'python/mirage/resource/chroma/**'
-              - 'integ/qdrant.py'
-              - 'integ/qdrant.ts'
-              - 'integ/truth_qdrant.txt'
+              - 'integ/resources/qdrant/**'
               - 'python/mirage/accessor/qdrant.py'
               - 'python/mirage/core/qdrant/**'
               - 'python/mirage/commands/builtin/qdrant/**'
@@ -154,10 +148,10 @@ jobs:
           ./python/.venv/bin/python integ/history.py > /tmp/history.out
           diff integ/truth_history.txt /tmp/history.out
 
-      - name: Run lancedb integ (embedded) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/lancedb.py > /tmp/lancedb.out
-          diff integ/truth_lancedb.txt /tmp/lancedb.out
+      - name: Run lancedb integ (embedded, JSON harness)
+        env:
+          LANCEDB_ENABLED: "1"
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target lancedb
 
       - name: Run find arg-error suite (SaaS backends, dummy creds) and diff
         run: |
@@ -303,17 +297,21 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
 
-      - name: Run notion integ (TS, mock server) and diff against truth
+      - name: Run notion integ (TS, mock server, JSON harness)
         working-directory: integ
-        run: |
-          pnpm exec tsx notion.ts > /tmp/notion_ts.out
-          diff truth_notion.txt /tmp/notion_ts.out
+        env:
+          NOTION_ENABLED: "1"
+        run: pnpm exec tsx runners/typescript/main.ts --target notion
 
-      - name: Run lancedb integ (TS, embedded) and diff against truth
+      - name: Run notion MCP/REST parity check (TS)
         working-directory: integ
-        run: |
-          pnpm exec tsx lancedb.ts > /tmp/ts-lancedb.out
-          diff truth_lancedb.txt /tmp/ts-lancedb.out
+        run: pnpm exec tsx notion_mcp_parity.ts
+
+      - name: Run lancedb integ (TS, embedded, JSON harness)
+        working-directory: integ
+        env:
+          LANCEDB_ENABLED: "1"
+        run: pnpm exec tsx runners/typescript/main.ts --target lancedb
 
       - name: Run find arg-error suite (SaaS backends, dummy creds) and diff
         working-directory: integ
@@ -524,29 +522,23 @@ jobs:
             sleep 1
           done
 
-      - name: Run MongoDB backend and check against truth
-        shell: bash
-        run: |
-          set -o pipefail
-          ./python/.venv/bin/python integ/mongodb.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_mongodb.txt
+      - name: Run MongoDB backend (JSON harness)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target mongodb
 
-      - name: Run Postgres backend and check against truth
-        shell: bash
-        run: |
-          set -o pipefail
-          ./python/.venv/bin/python integ/postgres.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_postgres.txt
+      - name: Run Postgres backend (JSON harness)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target postgres
 
-      - name: Run chroma integ (ChromaDB OSS) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/chroma.py > /tmp/chroma.out
-          diff integ/truth_chroma.txt /tmp/chroma.out
+      - name: Run chroma integ (ChromaDB OSS, JSON harness)
+        env:
+          CHROMA_HOST: localhost
+          CHROMA_PORT: "8000"
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target chroma
 
-      - name: Run qdrant integ and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/qdrant.py > /tmp/qdrant.out
-          diff integ/truth_qdrant.txt /tmp/qdrant.out
+      - name: Run qdrant integ (JSON harness)
+        env:
+          QDRANT_HOST: localhost
+          QDRANT_PORT: "6333"
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target qdrant
 
   integ-database-ts:
     needs: changes
@@ -602,6 +594,10 @@ jobs:
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node build
 
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
+
       - name: Wait for ChromaDB OSS
         run: |
           for i in $(seq 1 30); do
@@ -635,33 +631,27 @@ jobs:
           echo "Qdrant did not become healthy" >&2
           exit 1
 
-      - name: Run MongoDB backend (TS) and check against truth
-        shell: bash
+      - name: Run MongoDB backend (TS, JSON harness)
         working-directory: integ
-        run: |
-          set -o pipefail
-          pnpm exec tsx mongodb.ts 2>&1 \
-            | bash check_lines.sh truth_mongodb.txt
+        run: pnpm exec tsx runners/typescript/main.ts --target mongodb
 
-      - name: Run Postgres backend (TS) and check against truth
-        shell: bash
+      - name: Run Postgres backend (TS, JSON harness)
         working-directory: integ
-        run: |
-          set -o pipefail
-          pnpm exec tsx postgres.ts 2>&1 \
-            | bash check_lines.sh truth_postgres.txt
+        run: pnpm exec tsx runners/typescript/main.ts --target postgres
 
-      - name: Run TS chroma integ (ChromaDB OSS) and diff against truth
+      - name: Run TS chroma integ (ChromaDB OSS, JSON harness)
         working-directory: integ
-        run: |
-          pnpm exec tsx chroma.ts > /tmp/ts-chroma.out
-          diff truth_chroma.txt /tmp/ts-chroma.out
+        env:
+          CHROMA_HOST: localhost
+          CHROMA_PORT: "8000"
+        run: pnpm exec tsx runners/typescript/main.ts --target chroma
 
-      - name: Run TS qdrant integ and diff against truth
+      - name: Run TS qdrant integ (JSON harness)
         working-directory: integ
-        run: |
-          pnpm exec tsx qdrant.ts > /tmp/ts-qdrant.out
-          diff truth_qdrant.txt /tmp/ts-qdrant.out
+        env:
+          QDRANT_HOST: localhost
+          QDRANT_PORT: "6333"
+        run: pnpm exec tsx runners/typescript/main.ts --target qdrant
 
   integ-data:
     needs: changes
@@ -698,10 +688,10 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Run notion integ (mock server) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/notion.py > /tmp/notion.out
-          diff integ/truth_notion.txt /tmp/notion.out
+      - name: Run notion integ (mock server, JSON harness)
+        env:
+          NOTION_ENABLED: "1"
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target notion
 
       - name: Wait for Nextcloud install
         shell: bash

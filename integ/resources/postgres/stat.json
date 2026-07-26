@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "pg_stat_size_rows",
+      "seq": 610030,
+      "targets": [
+        "postgres"
+      ],
+      "command": "stat -c '%s %n' /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 /pg/public/tables/books/rows.jsonl\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "notion_cat_missing",
+      "seq": 660030,
+      "targets": [
+        "notion"
+      ],
+      "command": "cat /notion/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /notion/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "notion_write_rejected",
+      "seq": 660031,
+      "targets": [
+        "notion"
+      ],
+      "command": "echo hi > /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json: Operation not supported\n"
+      }
+    },
+    {
+      "id": "notion_sed_stream_1p",
+      "seq": 660032,
+      "targets": [
+        "notion"
+      ],
+      "command": "sed -n 1p /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "notion_sed_i_readonly",
+      "seq": 660033,
+      "targets": [
+        "notion"
+      ],
+      "command": "sed -i s/x/y/ /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
+    },
+    {
+      "id": "notion_prov_cat",
+      "seq": 660034,
+      "targets": [
+        "notion"
+      ],
+      "command": "cat /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=1 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "notion_prov_grep",
+      "seq": 660035,
+      "targets": [
+        "notion"
+      ],
+      "command": "grep x /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=1 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "notion_prov_ls",
+      "seq": 660036,
+      "targets": [
+        "notion"
+      ],
+      "command": "ls /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

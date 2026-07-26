@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from bson import Decimal128, ObjectId
@@ -36,7 +36,7 @@ class _AsyncIter:
 
 def _col(docs):
     col = MagicMock()
-    col.aggregate = AsyncMock(return_value=_AsyncIter(docs))
+    col.find = MagicMock(return_value=_AsyncIter(docs))
     return col
 
 
@@ -114,6 +114,17 @@ async def test_sample_field_types_handles_bson_scalars():
     by_path = {f["path"]: f for f in out}
     assert by_path["dec"]["types"] == {"decimal": 1.0}
     assert by_path["oid"]["types"] == {"objectId": 1.0}
+
+
+@pytest.mark.asyncio
+async def test_sample_field_types_whole_valued_double_classified_as_int():
+    # The JS driver returns BSON double as a plain number and cannot tell a
+    # whole-valued double from an int, so both languages classify by value:
+    # 5.0 -> int, 4.5 -> double. Keeps py/ts schema.json inference identical.
+    docs = [{"_id": 1, "rating": 5.0}, {"_id": 2, "rating": 4.5}]
+    out = await sample_field_types(_col(docs), sample_size=2)
+    by_path = {f["path"]: f for f in out}
+    assert by_path["rating"]["types"] == {"int": 0.5, "double": 0.5}
 
 
 @pytest.mark.asyncio

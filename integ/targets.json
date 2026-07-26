@@ -659,6 +659,102 @@
       ]
     },
     {
+      "id": "postgres",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "postgres",
+      "mounts": [
+        {
+          "path": "/pg",
+          "resource": "postgres",
+          "backend": "postgres",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "mongodb",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "mongodb",
+      "mounts": [
+        {
+          "path": "/mongodb",
+          "resource": "mongodb",
+          "backend": "mongodb",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "chroma",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "chroma",
+      "mounts": [
+        {
+          "path": "/knowledge",
+          "resource": "chroma",
+          "backend": "chroma",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "qdrant",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "qdrant",
+      "mounts": [
+        {
+          "path": "/db",
+          "resource": "qdrant",
+          "backend": "qdrant",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "lancedb",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "lancedb",
+      "mounts": [
+        {
+          "path": "/db",
+          "resource": "lancedb",
+          "backend": "lancedb",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "notion",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "notion",
+      "mounts": [
+        {
+          "path": "/notion",
+          "resource": "notion",
+          "backend": "notion",
+          "mode": "read"
+        }
+      ]
+    },
+    {
       "id": "hf",
       "hosts": [
         "python",

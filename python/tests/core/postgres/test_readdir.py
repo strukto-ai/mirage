@@ -106,6 +106,7 @@ async def test_readdir_entity_lists_schema_and_rows(accessor, index):
                  directory="/public/tables/users"), index)
     assert result == [
         "/public/tables/users/schema.json",
+        "/public/tables/users/semantic.json",
         "/public/tables/users/rows.jsonl",
     ]
 
@@ -119,6 +120,7 @@ async def test_readdir_view_entity_lists_schema_and_rows(accessor, index):
                  directory="/analytics/views/daily_revenue"), index)
     assert result == [
         "/analytics/views/daily_revenue/schema.json",
+        "/analytics/views/daily_revenue/semantic.json",
         "/analytics/views/daily_revenue/rows.jsonl",
     ]
 

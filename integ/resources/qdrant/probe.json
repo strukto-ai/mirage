@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "qdrant_cat_missing",
+      "seq": 640036,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /db/__nf_missing__.txt: Is a directory\n"
+      }
+    },
+    {
+      "id": "qdrant_write_rejected",
+      "seq": 640037,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "echo hi > /db/cat/big/1.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/db/cat/big/1.txt: Operation not supported\n"
+      }
+    },
+    {
+      "id": "qdrant_sed_stream_1p",
+      "seq": 640038,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "sed -n 1p /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_sed_i_readonly",
+      "seq": 640039,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "sed -i s/x/y/ /db/cat/big/1.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
+    },
+    {
+      "id": "qdrant_prov_cat",
+      "seq": 640040,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=17 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_prov_grep",
+      "seq": 640041,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep x /db/cat/big/1.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=17 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_prov_ls",
+      "seq": 640042,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "ls /db/cat/big",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

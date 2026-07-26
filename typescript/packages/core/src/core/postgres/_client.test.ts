@@ -33,6 +33,34 @@ function makeAccessor(
   return { accessor: new PostgresAccessor(driver, cfg), query }
 }
 
+describe('quoteIdent', () => {
+  it('escapes embedded quotes', () => {
+    expect(_client.quoteIdent('users')).toBe('"users"')
+    expect(_client.quoteIdent('a"b')).toBe('"a""b"')
+  })
+
+  it('neutralizes an injection payload', () => {
+    const payload = 'books" CROSS JOIN secret AS "s'
+    const quoted = _client.quoteIdent(payload)
+    // Every embedded quote is doubled, so the payload cannot terminate the
+    // identifier and become executable SQL: it stays one (nonexistent) name.
+    expect(quoted).toBe('"books"" CROSS JOIN secret AS ""s"')
+    // After stripping the outer wrapper and collapsing every doubled-quote
+    // pair, no lone quote survives to break out of the identifier.
+    expect(quoted.slice(1, -1).replace(/""/g, '')).not.toContain('"')
+  })
+})
+
+describe('countRows', () => {
+  it('quotes a malicious relation name instead of interpolating it raw', async () => {
+    const { accessor, query } = makeAccessor([{ count: 0 }])
+    await _client.countRows(accessor, 'public', 'books" CROSS JOIN secret AS "s')
+    const sql = query.mock.calls[0]?.[0] as string
+    expect(sql).toContain('"books"" CROSS JOIN secret AS ""s"')
+    expect(sql).not.toContain('FROM "public"."books" CROSS JOIN secret')
+  })
+})
+
 describe('listSchemas', () => {
   it('filters system schemas via SQL and returns names', async () => {
     const { accessor, query } = makeAccessor([

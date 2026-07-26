@@ -19,10 +19,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { NotionResource as BrowserNotionResource } from "@struktoai/mirage-browser";
-import { MemoryOAuthClientProvider } from "@struktoai/mirage-core";
-import { MountMode, NotionResource, Workspace } from "@struktoai/mirage-node";
-import { runNotFound, runProvisionProbe, runSedReadonlyProbe } from "./cases.ts";
 
 const MOUNT = "/notion";
 const PAGE_A = "aaaa1111-2222-3333-4444-555566667777";
@@ -37,8 +33,6 @@ const DIR_B = `${MOUNT}/pages/Notes__${PAGE_B}`;
 const DIR_C = `${DIR_A}/Q1_Goals__${PAGE_C}`;
 const DB_DIR = `${MOUNT}/databases/Tasks__${DB_TASKS}`;
 const ROW_1_DIR = `${DB_DIR}/Write_spec__${ROW_1}`;
-
-const DEC = new TextDecoder();
 
 type Json = Record<string, unknown>;
 
@@ -180,7 +174,7 @@ function searchResults(args: Json): Json[] {
     : Object.values(PAGES);
 }
 
-function startMockServer(): Promise<{ server: Server; port: number }> {
+export function startMockServer(): Promise<{ server: Server; port: number }> {
   const server = createServer((req, res) => {
     const path = (req.url ?? "").split("?")[0] ?? "";
     const parts = path.split("/").filter((part) => part !== "");
@@ -335,7 +329,7 @@ function buildMcpServer(): McpServer {
   return server;
 }
 
-function startMockMcpServer(): Promise<{ server: Server; port: number }> {
+export function startMockMcpServer(): Promise<{ server: Server; port: number }> {
   const server = createServer((req, res) => {
     void (async () => {
       const mcp = buildMcpServer();
@@ -363,7 +357,7 @@ function startMockMcpServer(): Promise<{ server: Server; port: number }> {
   });
 }
 
-const CASES: ReadonlyArray<readonly [string, string]> = [
+export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["ls_root", `ls ${MOUNT}/`],
   ["ls_pages", `ls ${MOUNT}/pages/`],
   ["ls_l_pages", `ls -l ${MOUNT}/pages/`],
@@ -393,100 +387,8 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["du_page_a", `du ${DIR_A}/`],
 ];
 
-const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
+export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_c_match_exit", `grep -c alpha ${DIR_B}/page.json`],
   ["grep_c_no_match_exit", `grep -c zzz ${DIR_B}/page.json`],
   ["grep_rc_no_match_exit", `grep -rc zzz ${MOUNT}/pages/`],
 ];
-
-async function runCase(
-  ws: Workspace,
-  name: string,
-  cmd: string,
-): Promise<string> {
-  const result = await ws.execute(cmd);
-  const out = DEC.decode(result.stdout);
-  return `=== ${name} ===\n` + (out.endsWith("\n") ? out : out + "\n");
-}
-
-async function runExitCase(
-  ws: Workspace,
-  name: string,
-  cmd: string,
-): Promise<string> {
-  const result = await ws.execute(cmd);
-  const out = DEC.decode(result.stdout);
-  let rendered = `=== ${name} ===\nexit=${String(result.exitCode)}\n`;
-  if (out !== "") rendered += out.endsWith("\n") ? out : out + "\n";
-  return rendered;
-}
-
-async function main(): Promise<void> {
-  const { server, port } = await startMockServer();
-  const { server: mcpServer, port: mcpPort } = await startMockMcpServer();
-  const restResource = new NotionResource({
-    apiKey: "integ-test",
-    baseUrl: `http://127.0.0.1:${String(port)}/v1`,
-  });
-  const restWs = new Workspace(
-    { [MOUNT]: restResource },
-    { mode: MountMode.READ },
-  );
-  const authProvider = new MemoryOAuthClientProvider({
-    clientMetadata: { redirect_uris: ["http://127.0.0.1/cb"] },
-    redirect: () => {},
-  });
-  const mcpResource = new BrowserNotionResource({
-    authProvider,
-    serverUrl: `http://127.0.0.1:${String(mcpPort)}/mcp`,
-  });
-  const mcpWs = new Workspace(
-    { [MOUNT]: mcpResource },
-    { mode: MountMode.READ },
-  );
-  try {
-    const allCases: ReadonlyArray<
-      readonly [
-        string,
-        string,
-        (ws: Workspace, name: string, cmd: string) => Promise<string>,
-      ]
-    > = [
-      ...CASES.map(([name, cmd]) => [name, cmd, runCase] as const),
-      ...EXIT_CODE_CASES.map(
-        ([name, cmd]) => [name, cmd, runExitCase] as const,
-      ),
-    ];
-    let mismatches = 0;
-    for (const [name, cmd, run] of allCases) {
-      const restOut = await run(restWs, name, cmd);
-      process.stdout.write(restOut);
-      const mcpOut = await run(mcpWs, name, cmd);
-      if (mcpOut !== restOut) {
-        mismatches += 1;
-        process.stderr.write(
-          `MCP/REST MISMATCH in ${name}:\n--- rest ---\n${restOut}--- mcp ---\n${mcpOut}`,
-        );
-      }
-    }
-    if (mismatches > 0) {
-      process.exitCode = 1;
-    } else {
-      const n = String(allCases.length);
-      process.stderr.write(`mcp parity: ${n}/${n} cases byte-identical\n`);
-    }
-    await runNotFound(restWs, MOUNT);
-    await runProvisionProbe(restWs, `${DIR_A}/page.json`);
-    await runSedReadonlyProbe(restWs, `${DIR_A}/page.json`);
-  } finally {
-    await restWs.close();
-    await mcpWs.close();
-    server.close();
-    mcpServer.close();
-  }
-}
-
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});

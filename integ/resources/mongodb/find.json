@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "mdb_find_docs",
+      "seq": 620040,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "find /mongodb/mirage_integ/ -name documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ/collections/authors/documents.jsonl\n/mongodb/mirage_integ/collections/books/documents.jsonl\n/mongodb/mirage_integ/collections/system.views/documents.jsonl\n/mongodb/mirage_integ/views/recent_books/documents.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_find_schema",
+      "seq": 620041,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "find /mongodb/mirage_integ/ -name schema.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ/collections/authors/schema.json\n/mongodb/mirage_integ/collections/books/schema.json\n/mongodb/mirage_integ/collections/system.views/schema.json\n/mongodb/mirage_integ/views/recent_books/schema.json\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

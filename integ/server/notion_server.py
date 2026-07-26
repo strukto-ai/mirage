@@ -12,15 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-from cases import run_not_found, run_provision_probe, run_sed_readonly_probe
-
-from mirage import MountMode, Workspace
-from mirage.resource.notion import NotionConfig, NotionResource
 
 MOUNT = "/notion"
 PAGE_A = "aaaa1111-2222-3333-4444-555566667777"
@@ -290,79 +284,8 @@ class NotionMockHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-CASES: list[tuple[str, str]] = [
-    ("ls_root", f"ls {MOUNT}/"),
-    ("ls_pages", f"ls {MOUNT}/pages/"),
-    ("ls_l_pages", f"ls -l {MOUNT}/pages/"),
-    ("ls_page_a", f"ls {DIR_A}/"),
-    ("stat_dir_a", f"stat -c '%n %y' {DIR_A}"),
-    ("cat_page_a", f"cat {DIR_A}/page.json"),
-    ("cat_child", f"cat {DIR_C}/page.json"),
-    ("jq_title", f'jq ".title" {DIR_A}/page.json'),
-    ("jq_markdown", f'jq ".markdown" {DIR_B}/page.json'),
-    ("head_4", f"head -n 4 {DIR_A}/page.json"),
-    ("wc_l_two", f"wc -l {DIR_A}/page.json {DIR_B}/page.json"),
-    ("stat_page_json", f"stat {DIR_A}/page.json"),
-    ("find_json", f"find {MOUNT}/pages/ -name page.json"),
-    ("find_root_maxdepth0", f"find {MOUNT} -maxdepth 0"),
-    ("find_root_name", f"find {MOUNT} -name notion"),
-    ("pipe_grep", f"cat {DIR_B}/page.json | grep -c alpha"),
-    ("grep_file", f"grep -n alpha {DIR_B}/page.json"),
-    ("grep_multi", f"grep -c alpha {DIR_A}/page.json {DIR_B}/page.json"),
-    ("grep_recursive", f"grep -rl alpha {MOUNT}/pages/"),
-    ("realpath_dotdot", f"realpath -e {DIR_C}/../page.json"),
-    ("ls_databases", f"ls {MOUNT}/databases/"),
-    ("ls_database_dir", f"ls {DB_DIR}/"),
-    ("cat_database_json", f"cat {DB_DIR}/database.json"),
-    ("jq_db_props", f'jq ".properties | keys" {DB_DIR}/database.json'),
-    ("cat_row", f"cat {ROW_1_DIR}/page.json"),
-    ("du_pages", f"du {MOUNT}/pages/"),
-    ("du_page_a", f"du {DIR_A}/"),
-]
-
-EXIT_CODE_CASES: list[tuple[str, str]] = [
-    ("grep_c_match_exit", f"grep -c alpha {DIR_B}/page.json"),
-    ("grep_c_no_match_exit", f"grep -c zzz {DIR_B}/page.json"),
-    ("grep_rc_no_match_exit", f"grep -rc zzz {MOUNT}/pages/"),
-]
-
-
-async def _run(ws: Workspace, name: str, cmd: str) -> None:
-    result = await ws.execute(cmd)
-    out = await result.stdout_str()
-    print(f"=== {name} ===")
-    print(out, end="" if out.endswith("\n") else "\n")
-
-
-async def _run_exit(ws: Workspace, name: str, cmd: str) -> None:
-    result = await ws.execute(cmd)
-    out = await result.stdout_str()
-    print(f"=== {name} ===")
-    print(f"exit={result.exit_code}")
-    if out:
-        print(out, end="" if out.endswith("\n") else "\n")
-
-
-async def main() -> None:
+def start_server() -> tuple[ThreadingHTTPServer, int]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), NotionMockHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    port = server.server_address[1]
-    try:
-        config = NotionConfig(api_key="integ-test",
-                              base_url=f"http://127.0.0.1:{port}/v1")
-        resource = NotionResource(config=config)
-        ws = Workspace({MOUNT: resource}, mode=MountMode.READ)
-        for name, cmd in CASES:
-            await _run(ws, name, cmd)
-        for name, cmd in EXIT_CODE_CASES:
-            await _run_exit(ws, name, cmd)
-        await run_not_found(ws, MOUNT)
-        await run_provision_probe(ws, f"{DIR_A}/page.json")
-        await run_sed_readonly_probe(ws, f"{DIR_A}/page.json")
-    finally:
-        server.shutdown()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    return server, server.server_address[1]

@@ -1,0 +1,433 @@
+{
+  "cases": [
+    {
+      "id": "lancedb_ls_root",
+      "seq": 650000,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "ls /db/",
+      "expect": {
+        "exit": 0,
+        "stdout": "animals\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_ls_table",
+      "seq": 650001,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "ls /db/animals",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat\ndog\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_ls_group",
+      "seq": 650002,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "ls /db/animals/cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "big\nsmall\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_find_md",
+      "seq": 650003,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "find /db/animals -name '*.md'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/cat/big/1.md\n/db/animals/cat/small/2.md\n/db/animals/dog/big/3.md\n/db/animals/dog/small/4.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_cat_card",
+      "seq": 650004,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "cat /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\n\nid: 1\nlabel: cat\nkind: big\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_wc_c_card",
+      "seq": 650005,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "wc -c /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "70 /db/animals/cat/big/1.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_cold_single",
+      "seq": 650006,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep orange /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_warm_single",
+      "seq": 650007,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep orange /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_i",
+      "seq": 650008,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -i ORANGE /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_n",
+      "seq": 650009,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -n label /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "4:label: cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_v",
+      "seq": 650010,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -v cat /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nid: 1\nkind: big\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_c",
+      "seq": 650011,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -c cat /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_o",
+      "seq": 650012,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -o cat /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat\ncat\ncat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_w",
+      "seq": 650013,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -w cat /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\nlabel: cat\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_F_literal",
+      "seq": 650014,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -F \"id: 1\" /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "id: 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_m1",
+      "seq": 650015,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -m 1 cat /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_A1",
+      "seq": 650016,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -A 1 id /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "id: 1\nlabel: cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_B1",
+      "seq": 650017,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -B 1 label /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "id: 1\nlabel: cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_C1",
+      "seq": 650018,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -C 1 label /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "id: 1\nlabel: cat\nkind: big\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_multi",
+      "seq": 650019,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep small /db/animals/cat/small/2.md /db/animals/dog/small/4.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/cat/small/2.md:# a small grey cat\n/db/animals/cat/small/2.md:kind: small\n/db/animals/cat/small/2.md:name: a small grey cat\n/db/animals/dog/small/4.md:# a small white dog\n/db/animals/dog/small/4.md:kind: small\n/db/animals/dog/small/4.md:name: a small white dog\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_r_table",
+      "seq": 650020,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -r orange /db/animals",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/cat/big/1.md:# a big orange cat\n/db/animals/cat/big/1.md:name: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_r_multipath",
+      "seq": 650021,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -r small /db/animals/cat /db/animals/dog",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/cat/small/2.md:# a small grey cat\n/db/animals/cat/small/2.md:kind: small\n/db/animals/cat/small/2.md:name: a small grey cat\n/db/animals/dog/small/4.md:# a small white dog\n/db/animals/dog/small/4.md:kind: small\n/db/animals/dog/small/4.md:name: a small white dog\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_rl",
+      "seq": 650022,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -rl cat /db/animals",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/cat/big/1.md\n/db/animals/cat/small/2.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_E_alt",
+      "seq": 650023,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -E \"orange|brown\" /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_pipe_grep_stdin",
+      "seq": 650024,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "cat /db/animals/cat/big/1.md | grep orange",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_rg_basic",
+      "seq": 650025,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "rg orange /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\nname: a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_du_file",
+      "seq": 650026,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "du /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "70\t/db/animals/cat/big/1.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_du_group",
+      "seq": 650027,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "du /db/animals/cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "142\t/db/animals/cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_du_table",
+      "seq": 650028,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "du /db/animals",
+      "expect": {
+        "exit": 0,
+        "stdout": "284\t/db/animals\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_du_c_multi",
+      "seq": 650029,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "du -c /db/animals/cat /db/animals/dog",
+      "expect": {
+        "exit": 0,
+        "stdout": "142\t/db/animals/cat\n142\t/db/animals/dog\n284\ttotal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_q_match",
+      "seq": 650030,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -q cat /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_q_no_match",
+      "seq": 650031,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -q zebra /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_grep_no_match",
+      "seq": 650032,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep zebra /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -37,6 +37,16 @@ export interface Relationship {
   kind: 'many_to_one'
 }
 
+export interface EnumInfo {
+  type: string
+  labels: string[]
+}
+
+export interface ColumnStats {
+  n_distinct: number
+  most_common_vals: string[]
+}
+
 export function quoteIdent(ident: string): string {
   return `"${ident.replace(/"/g, '""')}"`
 }
@@ -343,4 +353,97 @@ export async function fetchAllRelationships(
     rel.to.columns.push(row.to_column)
   }
   return [...grouped.values()]
+}
+
+export async function fetchTableComment(
+  accessor: PostgresAccessor,
+  schema: string,
+  name: string,
+): Promise<string | null> {
+  const result = await accessor.store.query<{ obj_description: string | null }>(
+    "SELECT obj_description(c.oid, 'pg_class') " +
+      'FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+      'WHERE n.nspname = $1 AND c.relname = $2',
+    [schema, name],
+  )
+  return result.rows[0]?.obj_description ?? null
+}
+
+export async function fetchColumnComments(
+  accessor: PostgresAccessor,
+  schema: string,
+  name: string,
+): Promise<Map<string, string>> {
+  const result = await accessor.store.query<{ attname: string; comment: string | null }>(
+    'SELECT a.attname, col_description(c.oid, a.attnum) AS comment ' +
+      'FROM pg_class c ' +
+      'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+      'JOIN pg_attribute a ' +
+      '  ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped ' +
+      'WHERE n.nspname = $1 AND c.relname = $2 ' +
+      'ORDER BY a.attnum',
+    [schema, name],
+  )
+  const out = new Map<string, string>()
+  for (const r of result.rows) {
+    if (r.comment) out.set(r.attname, r.comment)
+  }
+  return out
+}
+
+export async function fetchEnumColumns(
+  accessor: PostgresAccessor,
+  schema: string,
+  name: string,
+): Promise<Map<string, EnumInfo>> {
+  const result = await accessor.store.query<{
+    attname: string
+    typname: string
+    labels: string[]
+  }>(
+    'SELECT a.attname, t.typname, ' +
+      '       array_agg(e.enumlabel ORDER BY e.enumsortorder)::text[] AS labels ' +
+      'FROM pg_class c ' +
+      'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+      'JOIN pg_attribute a ' +
+      '  ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped ' +
+      'JOIN pg_type t ON t.oid = a.atttypid ' +
+      'JOIN pg_enum e ON e.enumtypid = t.oid ' +
+      'WHERE n.nspname = $1 AND c.relname = $2 ' +
+      'GROUP BY a.attname, t.typname',
+    [schema, name],
+  )
+  const out = new Map<string, EnumInfo>()
+  for (const r of result.rows) {
+    out.set(r.attname, { type: r.typname, labels: [...r.labels] })
+  }
+  return out
+}
+
+export async function fetchColumnStats(
+  accessor: PostgresAccessor,
+  schema: string,
+  name: string,
+): Promise<Map<string, ColumnStats>> {
+  // pg_stats is populated by ANALYZE, so it is empty for a freshly written
+  // relation until autovacuum gets to it. Callers treat it as best-effort;
+  // mirage never runs ANALYZE itself (a write and a cost on the user's DB).
+  const result = await accessor.store.query<{
+    attname: string
+    n_distinct: number | string
+    mcv: string[] | null
+  }>(
+    'SELECT attname, n_distinct, ' +
+      '       most_common_vals::text::text[] AS mcv ' +
+      'FROM pg_stats WHERE schemaname = $1 AND tablename = $2',
+    [schema, name],
+  )
+  const out = new Map<string, ColumnStats>()
+  for (const r of result.rows) {
+    out.set(r.attname, {
+      n_distinct: Number(r.n_distinct),
+      most_common_vals: r.mcv ? [...r.mcv] : [],
+    })
+  }
+  return out
 }

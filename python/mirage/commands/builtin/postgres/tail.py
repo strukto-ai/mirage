@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.postgres._provision import head_tail_provision
 from mirage.commands.builtin.postgres.io import resolve_glob
 from mirage.commands.builtin.tail_helper import _parse_n
+from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -59,7 +60,8 @@ async def tail(
     c_int = int(c) if c is not None else None
     if paths:
         scope = detect_scope(paths[0])
-        if (len(paths) == 1 and isinstance(scope, PostgresEntityRowsScope)
+        if (len(paths) == 1 and not has_unresolved_glob(paths)
+                and isinstance(scope, PostgresEntityRowsScope)
                 and c_int is None and n_int is not None):
             limit = min(n_int, accessor.config.default_row_limit)
             pool = await accessor.pool()

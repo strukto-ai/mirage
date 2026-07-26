@@ -15,6 +15,7 @@
 import asyncio
 import base64
 import functools
+import gzip
 import imaplib
 import importlib.util
 import json
@@ -32,9 +33,13 @@ from pathlib import Path
 from types import ModuleType
 
 import aiohttp
+import asyncpg
 import boto3
+import chromadb
+import lancedb
 from moto.server import ThreadedMotoServer
 from pymongo import AsyncMongoClient
+from qdrant_client import AsyncQdrantClient, models
 
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
@@ -46,6 +51,7 @@ from mirage.resource.aliyun import AliyunConfig, AliyunResource
 from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
 from mirage.resource.box import BoxConfig, BoxResource
 from mirage.resource.ceph import CephConfig, CephResource
+from mirage.resource.chroma import ChromaConfig, ChromaResource
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
                                                DatabricksVolumeResource)
 from mirage.resource.dify import DifyConfig, DifyResource
@@ -68,12 +74,17 @@ from mirage.resource.gsheets.gsheets import GSheetsResource
 from mirage.resource.gslides.config import GSlidesConfig
 from mirage.resource.gslides.gslides import GSlidesResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+from mirage.resource.lancedb import LanceDBConfig, LanceDBResource
 from mirage.resource.linear import LinearConfig, LinearResource
 from mirage.resource.mem0 import Mem0Config, Mem0Resource
 from mirage.resource.minio import MinIOConfig, MinIOResource
+from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+from mirage.resource.notion import NotionConfig, NotionResource
 from mirage.resource.oci import OCIConfig, OCIResource
 from mirage.resource.onedrive.onedrive import OneDriveResource
+from mirage.resource.postgres import PostgresConfig, PostgresResource
+from mirage.resource.qdrant import QdrantConfig, QdrantResource
 from mirage.resource.qingstor import QingStorConfig, QingStorResource
 from mirage.resource.r2 import R2Config, R2Resource
 from mirage.resource.ram import RAMResource
@@ -313,6 +324,11 @@ def _load_dropbox_server() -> ModuleType:
 def _load_ssh_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "ssh_server.py")
+
+
+def _load_notion_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" / "notion_server.py")
 
 
 def _load_box_server() -> ModuleType:
@@ -986,8 +1002,361 @@ class SharePointService:
         await self.runner.cleanup()
 
 
+class NotionService:
+
+    def __init__(self, server, port: int) -> None:
+        self.server = server
+        self.port = port
+
+    @classmethod
+    async def create(cls) -> "NotionService":
+        module = _load_notion_server()
+        server, port = module.start_server()
+        return cls(server, port)
+
+    def resource(self, mount: dict) -> NotionResource:
+        return NotionResource(config=NotionConfig(
+            api_key="integ-test", base_url=f"http://127.0.0.1:{self.port}/v1"))
+
+    async def teardown(self) -> None:
+        self.server.shutdown()
+
+
+LANCEDB_ROWS = [
+    {
+        "id": 1,
+        "label": "cat",
+        "kind": "big",
+        "name": "a big orange cat"
+    },
+    {
+        "id": 2,
+        "label": "cat",
+        "kind": "small",
+        "name": "a small grey cat"
+    },
+    {
+        "id": 3,
+        "label": "dog",
+        "kind": "big",
+        "name": "a big brown dog"
+    },
+    {
+        "id": 4,
+        "label": "dog",
+        "kind": "small",
+        "name": "a small white dog"
+    },
+]
+
+
+class LanceDBService:
+
+    def __init__(self, uri: str) -> None:
+        self.uri = uri
+
+    @classmethod
+    async def create(cls) -> "LanceDBService":
+        uri = tempfile.mkdtemp(prefix="mirage-integ-lancedb-")
+        db = lancedb.connect(uri)
+        db.create_table("animals", data=LANCEDB_ROWS)
+        return cls(uri)
+
+    def resource(self, mount: dict) -> LanceDBResource:
+        return LanceDBResource(
+            LanceDBConfig(uri=self.uri,
+                          group_by=["label", "kind"],
+                          id_column="id",
+                          title_column="name",
+                          text_column="name"))
+
+    async def teardown(self) -> None:
+        shutil.rmtree(self.uri, ignore_errors=True)
+
+
+QDRANT_EMBED_DIM = 8
+
+QDRANT_ROWS = [
+    (1, "cat", "big", "a big orange cat"),
+    (2, "cat", "small", "a small grey cat"),
+    (3, "dog", "big", "a big brown dog"),
+    (4, "dog", "small", "a small white dog"),
+]
+
+
+class QdrantService:
+
+    def __init__(self, host: str, port: int, collection: str) -> None:
+        self.host = host
+        self.port = port
+        self.collection = collection
+
+    @classmethod
+    async def create(cls) -> "QdrantService":
+        host = os.environ.get("QDRANT_HOST", "localhost")
+        port = int(os.environ.get("QDRANT_PORT", "6333"))
+        collection = f"mirage-integ-{uuid.uuid4().hex[:8]}"
+        client = AsyncQdrantClient(host=host, port=port)
+        try:
+            await client.create_collection(
+                collection,
+                vectors_config=models.VectorParams(
+                    size=QDRANT_EMBED_DIM, distance=models.Distance.COSINE))
+            await client.upsert(collection,
+                                points=[
+                                    models.PointStruct(id=i,
+                                                       vector=[0.1] *
+                                                       QDRANT_EMBED_DIM,
+                                                       payload={
+                                                           "label": label,
+                                                           "kind": kind,
+                                                           "name": name
+                                                       })
+                                    for i, label, kind, name in QDRANT_ROWS
+                                ])
+            for field in ("label", "kind"):
+                await client.create_payload_index(
+                    collection,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD)
+            await asyncio.sleep(2)
+        finally:
+            await client.close()
+        return cls(host, port, collection)
+
+    def resource(self, mount: dict) -> QdrantResource:
+        return QdrantResource(
+            QdrantConfig(host=self.host,
+                         port=self.port,
+                         collection=self.collection,
+                         group_by=["label", "kind"],
+                         id_field="id",
+                         text_field="name"))
+
+    async def teardown(self) -> None:
+        client = AsyncQdrantClient(host=self.host, port=self.port)
+        try:
+            await client.delete_collection(self.collection)
+        finally:
+            await client.close()
+
+
+CHROMA_EMBED_DIM = 8
+
+
+def _chroma_embedding(position: int) -> list[float]:
+    vector = [0.0] * CHROMA_EMBED_DIM
+    vector[position % CHROMA_EMBED_DIM] = 1.0
+    return vector
+
+
+class ChromaService:
+
+    def __init__(self, host: str, port: int, collection_name: str) -> None:
+        self.host = host
+        self.port = port
+        self.collection_name = collection_name
+
+    @classmethod
+    async def create(cls) -> "ChromaService":
+        host = os.environ.get("CHROMA_HOST", "localhost")
+        port = int(os.environ.get("CHROMA_PORT", "8000"))
+        collection_name = f"mirage-integ-{uuid.uuid4().hex[:8]}"
+        seed_path = (Path(__file__).resolve().parents[2] / "server" /
+                     "chroma_seed.json")
+        seed = json.loads(seed_path.read_text())
+        encoded = base64.b64encode(
+            gzip.compress(json.dumps(seed["path_tree"]).encode())).decode()
+        ids = ["__path_tree__"]
+        documents = [encoded]
+        metadatas: list[dict] = [{"kind": "path_tree"}]
+        embeddings = [_chroma_embedding(0)]
+        position = 1
+        for chunks in seed["chunks"].values():
+            for chunk in chunks:
+                slug = chunk["metadata"]["page_slug"]
+                index = chunk["metadata"]["chunk_index"]
+                ids.append(f"{slug}#{index}")
+                documents.append(chunk["document"])
+                metadatas.append(chunk["metadata"])
+                embeddings.append(_chroma_embedding(position))
+                position += 1
+        client = await chromadb.AsyncHttpClient(host=host, port=port)
+        collection = await client.create_collection(collection_name)
+        await collection.add(ids=ids,
+                             documents=documents,
+                             metadatas=metadatas,
+                             embeddings=embeddings)
+        return cls(host, port, collection_name)
+
+    def resource(self, mount: dict) -> ChromaResource:
+        return ChromaResource(
+            config=ChromaConfig(host=self.host,
+                                port=self.port,
+                                collection_name=self.collection_name))
+
+    async def teardown(self) -> None:
+        client = await chromadb.AsyncHttpClient(host=self.host, port=self.port)
+        await client.delete_collection(self.collection_name)
+
+
+MONGODB_DB = "mirage_integ"
+
+MONGODB_BOOKS = [
+    {
+        "_id": 1,
+        "title": "alpha",
+        "author": "ada",
+        "year": 2020,
+        "tags": ["fiction", "classic"],
+        "rating": 4.5,
+    },
+    {
+        "_id": 2,
+        "title": "beta",
+        "author": "ben",
+        "year": 2021,
+        "tags": ["fiction"],
+        "rating": 3.2,
+    },
+    {
+        "_id": 3,
+        "title": "gamma",
+        "author": "cara",
+        "year": 2022,
+        "rating": 5.0,
+    },
+    {
+        "_id": 4,
+        "title": "delta",
+        "author": "ada",
+        "year": 2023,
+        "tags": ["history"],
+        "rating": 4.0,
+    },
+    {
+        "_id": 5,
+        "title": "epsilon",
+        "author": "ben",
+        "year": 2024,
+        "rating": 2.5,
+    },
+]
+
+MONGODB_AUTHORS = [
+    {
+        "_id": 1,
+        "name": "ada",
+        "books": 2
+    },
+    {
+        "_id": 2,
+        "name": "ben",
+        "books": 2
+    },
+    {
+        "_id": 3,
+        "name": "cara",
+        "books": 1
+    },
+]
+
+
+class MongoDBService:
+
+    def __init__(self, uri: str) -> None:
+        self.uri = uri
+
+    @classmethod
+    async def create(cls) -> "MongoDBService":
+        uri = os.environ["MONGODB_URI"]
+        client: AsyncMongoClient = AsyncMongoClient(uri)
+        try:
+            await client.drop_database(MONGODB_DB)
+            db = client[MONGODB_DB]
+            await db["books"].insert_many([dict(d) for d in MONGODB_BOOKS])
+            await db["authors"].insert_many([dict(d) for d in MONGODB_AUTHORS])
+            await db.create_collection(
+                "recent_books",
+                viewOn="books",
+                pipeline=[{
+                    "$match": {
+                        "year": {
+                            "$gte": 2022
+                        }
+                    }
+                }],
+            )
+        finally:
+            await client.close()
+        return cls(uri)
+
+    def resource(self, mount: dict) -> MongoDBResource:
+        return MongoDBResource(
+            config=MongoDBConfig(uri=self.uri, databases=[MONGODB_DB]))
+
+    async def teardown(self) -> None:
+        return None
+
+
+POSTGRES_BOOKS = [
+    (1, "alpha", "ada", 2020, 4.5),
+    (2, "beta", "ben", 2021, 3.2),
+    (3, "gamma", "cara", 2022, 5.0),
+    (4, "delta", "ada", 2023, 4.0),
+    (5, "epsilon", "ben", 2024, 2.5),
+]
+
+POSTGRES_AUTHORS = [
+    (1, "ada", 2),
+    (2, "ben", 2),
+    (3, "cara", 1),
+]
+
+
+class PostgresService:
+
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+
+    @classmethod
+    async def create(cls) -> "PostgresService":
+        dsn = os.environ["POSTGRES_DSN"]
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute("DROP VIEW IF EXISTS recent_books")
+            await conn.execute("DROP TABLE IF EXISTS books")
+            await conn.execute("DROP TABLE IF EXISTS authors")
+            await conn.execute(
+                "CREATE TABLE books (id int PRIMARY KEY, title text, "
+                "author text, year int, rating double precision)")
+            await conn.execute("CREATE TABLE authors (id int PRIMARY KEY, "
+                               "name text, books int)")
+            await conn.executemany(
+                "INSERT INTO books (id, title, author, year, rating) "
+                "VALUES ($1, $2, $3, $4, $5)", POSTGRES_BOOKS)
+            await conn.executemany(
+                "INSERT INTO authors (id, name, books) VALUES ($1, $2, $3)",
+                POSTGRES_AUTHORS)
+            await conn.execute("CREATE VIEW recent_books AS SELECT * FROM "
+                               "books WHERE year >= 2022")
+            await conn.execute("ANALYZE books")
+            await conn.execute("ANALYZE authors")
+        finally:
+            await conn.close()
+        return cls(dsn)
+
+    def resource(self, mount: dict) -> PostgresResource:
+        return PostgresResource(PostgresConfig(dsn=self.dsn,
+                                               max_read_rows=200))
+
+    async def teardown(self) -> None:
+        return None
+
+
 Service = (S3Service | OneDriveService | SharePointService | Mem0Service
-           | SSHService
+           | SSHService | PostgresService | MongoDBService | ChromaService
+           | QdrantService | LanceDBService | NotionService
            | NextcloudService | GwsService | HfService | BoxService
            | DropboxService | GridFSService | SlackService | TrelloService
            | LinearService | DifyService | DatabricksVolumeService)
@@ -1057,6 +1426,52 @@ def build_mem0(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, Mem0Service)
+    return service.resource(mount), _noop
+
+
+def build_postgres(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, PostgresService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_mongodb(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, MongoDBService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_chroma(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, ChromaService)
+    return service.resource(mount), _noop
+
+
+def build_qdrant(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, QdrantService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_lancedb(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, LanceDBService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_notion(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, NotionService)
     return service.resource(mount), _noop
 
 
@@ -1189,6 +1604,12 @@ BUILDERS = {
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,
     "mem0": build_mem0,
+    "postgres": build_postgres,
+    "mongodb": build_mongodb,
+    "chroma": build_chroma,
+    "qdrant": build_qdrant,
+    "lancedb": build_lancedb,
+    "notion": build_notion,
     "ssh": build_ssh,
     "nextcloud": build_nextcloud,
     "gdrive": build_gdrive,
@@ -1220,6 +1641,18 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await SharePointService.create()
     if target.get("service") == "mem0":
         return await Mem0Service.create()
+    if target.get("service") == "postgres":
+        return await PostgresService.create()
+    if target.get("service") == "mongodb":
+        return await MongoDBService.create()
+    if target.get("service") == "chroma":
+        return await ChromaService.create()
+    if target.get("service") == "qdrant":
+        return await QdrantService.create()
+    if target.get("service") == "lancedb":
+        return await LanceDBService.create()
+    if target.get("service") == "notion":
+        return await NotionService.create()
     if target.get("service") == "ssh":
         return await SSHService.create(run_id, target)
     if target.get("service") == "nextcloud":

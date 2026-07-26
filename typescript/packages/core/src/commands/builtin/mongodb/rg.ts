@@ -13,15 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
+import { listDatabases } from '../../../core/mongodb/_client.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
+import { hasUnresolvedGlob } from '../utils/operands.ts'
 import { MONGODB_IO } from './io.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { readdir as mongoReaddir } from '../../../core/mongodb/readdir.ts'
+import { detectScope } from '../../../core/mongodb/scope.ts'
+import {
+  formatGrepResults,
+  searchCollection,
+  searchDatabase,
+} from '../../../core/mongodb/search.ts'
 import { stat as mongoStat } from '../../../core/mongodb/stat.ts'
+import { ScopeLevel } from '../../../core/mongodb/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { rgGeneric } from '../generic/rg.ts'
+import { hasSearchShapingFlags, patternArg } from '../grep_helper.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const resolveGlob = resolveGlobOf(MONGODB_IO)
 
@@ -31,6 +43,52 @@ async function rgCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const pattern = patternArg(texts, opts.flags)
+  const limit = accessor.config.defaultSearchLimit
+
+  // The $regex push-down prints each matching document as a whole line, so
+  // output/match-shaping flags must defer to the generic scan below.
+  const first = paths[0]
+  if (
+    first !== undefined &&
+    !hasUnresolvedGlob(paths) &&
+    pattern !== null &&
+    !pattern.includes('\n') &&
+    !hasSearchShapingFlags(opts.flags)
+  ) {
+    const scope = detectScope(first)
+
+    if (scope.level !== ScopeLevel.ROOT) {
+      await mongoStat(accessor, first, opts.index ?? undefined)
+    }
+
+    if (scope.level === ScopeLevel.ROOT) {
+      const dbs = await listDatabases(accessor)
+      const results: Awaited<ReturnType<typeof searchDatabase>> = []
+      for (const db of dbs) {
+        results.push(...(await searchDatabase(accessor, db, pattern, limit)))
+      }
+      const allLines = formatGrepResults(results)
+      if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+      return [formatRecords(allLines), new IOResult()]
+    }
+
+    if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
+      const results = await searchDatabase(accessor, scope.database, pattern, limit)
+      const allLines = formatGrepResults(results)
+      if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+      return [formatRecords(allLines), new IOResult()]
+    }
+
+    if (scope.level === ScopeLevel.ENTITY && scope.database !== null && scope.name !== null) {
+      const docs = await searchCollection(accessor, scope.database, scope.name, pattern, limit)
+      if (docs.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+      const results = [{ database: scope.database, collection: scope.name, docs }]
+      const allLines = formatGrepResults(results)
+      return [formatRecords(allLines), new IOResult()]
+    }
+  }
+
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
   const stat = (p: PathSpec): Promise<FileStat> => mongoStat(accessor, p, opts.index ?? undefined)

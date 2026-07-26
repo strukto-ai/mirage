@@ -157,6 +157,30 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: LINEAR_ENDPOINT not set\n`)
       continue
     }
+    if (target.service === 'postgres' && !process.env.POSTGRES_DSN) {
+      process.stderr.write(`skip [${id}]: POSTGRES_DSN not set\n`)
+      continue
+    }
+    if (target.service === 'mongodb' && !process.env.MONGODB_URI) {
+      process.stderr.write(`skip [${id}]: MONGODB_URI not set\n`)
+      continue
+    }
+    if (target.service === 'chroma' && !process.env.CHROMA_HOST) {
+      process.stderr.write(`skip [${id}]: CHROMA_HOST not set\n`)
+      continue
+    }
+    if (target.service === 'qdrant' && !process.env.QDRANT_HOST) {
+      process.stderr.write(`skip [${id}]: QDRANT_HOST not set\n`)
+      continue
+    }
+    if (target.service === 'lancedb' && !process.env.LANCEDB_ENABLED) {
+      process.stderr.write(`skip [${id}]: LANCEDB_ENABLED not set\n`)
+      continue
+    }
+    if (target.service === 'notion' && !process.env.NOTION_ENABLED) {
+      process.stderr.write(`skip [${id}]: NOTION_ENABLED not set\n`)
+      continue
+    }
     await runTarget(target, cases, root, report, emit)
   }
 

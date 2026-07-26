@@ -176,3 +176,88 @@ async def test_grep_files_only_recursive_scans_file_operands():
         warnings=[],
     )
     assert hits == ["/data/notes.txt"]
+
+
+@pytest.mark.parametrize("pattern,fixed,expected", [
+    ("abc", False, True),
+    ("a-b_c.d", False, False),
+    ("plain text", False, True),
+    ("a.b", False, False),
+    ("a*b", False, False),
+    ("^start", False, False),
+    ("a.b", True, True),
+    ("a\nb", False, False),
+    ("a\nb", True, False),
+])
+def test_is_literal_pattern(pattern, fixed, expected):
+    assert grep_helper.is_literal_pattern(pattern, fixed) is expected
+
+
+@pytest.mark.parametrize("flags,expected", [
+    ({}, False),
+    ({
+        "i": True
+    }, False),
+    ({
+        "F": True
+    }, False),
+    ({
+        "r": True
+    }, False),
+    ({
+        "v": True
+    }, True),
+    ({
+        "n": True
+    }, True),
+    ({
+        "c": True
+    }, True),
+    ({
+        "args_l": True
+    }, True),
+    ({
+        "w": True
+    }, True),
+    ({
+        "o": True
+    }, True),
+    ({
+        "q": True
+    }, True),
+    ({
+        "H": True
+    }, True),
+    ({
+        "h": True
+    }, True),
+    ({
+        "m": "3"
+    }, True),
+    ({
+        "A": "2"
+    }, True),
+    ({
+        "B": "2"
+    }, True),
+    ({
+        "C": "2"
+    }, True),
+])
+def test_has_search_shaping_flags(flags, expected):
+    assert grep_helper.has_search_shaping_flags(flags) is expected
+
+
+def test_search_pushdown_ok_plain_literal():
+    assert grep_helper.search_pushdown_ok({}, "ada") is True
+    assert grep_helper.search_pushdown_ok({"i": True}, "ada") is True
+
+
+def test_search_pushdown_ok_rejects_shaping_flag():
+    assert grep_helper.search_pushdown_ok({"v": True}, "ada") is False
+    assert grep_helper.search_pushdown_ok({"c": True}, "ada") is False
+
+
+def test_search_pushdown_ok_rejects_regex_but_allows_fixed_string():
+    assert grep_helper.search_pushdown_ok({}, "a.b") is False
+    assert grep_helper.search_pushdown_ok({"F": True}, "a.b") is True

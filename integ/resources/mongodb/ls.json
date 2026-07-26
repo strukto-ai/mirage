@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "mdb_ls_root",
+      "seq": 620000,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ls /mongodb/",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage_integ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_ls_db",
+      "seq": 620001,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ls /mongodb/mirage_integ/",
+      "expect": {
+        "exit": 0,
+        "stdout": "collections\ndatabase.json\nviews\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_ls_collections",
+      "seq": 620002,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ls /mongodb/mirage_integ/collections/",
+      "expect": {
+        "exit": 0,
+        "stdout": "authors\nbooks\nsystem.views\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_ls_views",
+      "seq": 620003,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ls /mongodb/mirage_integ/views/",
+      "expect": {
+        "exit": 0,
+        "stdout": "recent_books\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_ls_entity",
+      "seq": 620004,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ls /mongodb/mirage_integ/collections/books/",
+      "expect": {
+        "exit": 0,
+        "stdout": "documents.jsonl\nschema.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_tree",
+      "seq": 620005,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "tree -L 3 /mongodb/mirage_integ/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ\n|-- collections\n|   |-- authors\n|   |   |-- documents.jsonl\n|   |   `-- schema.json\n|   |-- books\n|   |   |-- documents.jsonl\n|   |   `-- schema.json\n|   `-- system.views\n|       |-- documents.jsonl\n|       `-- schema.json\n|-- database.json\n`-- views\n    `-- recent_books\n        |-- documents.jsonl\n        `-- schema.json\n\n7 directories, 9 files\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

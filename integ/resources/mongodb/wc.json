@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "mdb_wc_l_books",
+      "seq": 620020,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "wc -l /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /mongodb/mirage_integ/collections/books/documents.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_wc_default_books",
+      "seq": 620021,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "wc /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "  5  57 447 /mongodb/mirage_integ/collections/books/documents.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_wc_l_authors",
+      "seq": 620022,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "wc -l /mongodb/mirage_integ/collections/authors/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 /mongodb/mirage_integ/collections/authors/documents.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_wc_l_view",
+      "seq": 620023,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "wc -l /mongodb/mirage_integ/views/recent_books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 /mongodb/mirage_integ/views/recent_books/documents.jsonl\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -15,10 +15,10 @@
 import asyncio
 from typing import Any
 
-from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 from pymongo import AsyncMongoClient
 
 from mirage.core.mongodb._client import get_indexes, list_collections
+from mirage.core.mongodb.stream import render_doc
 from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind
 
 
@@ -96,6 +96,6 @@ def format_grep_results(
     for db_name, col_name, docs in results:
         path = f"{db_name}/collections/{col_name}/documents.jsonl"
         for doc in docs:
-            line_json = dumps(doc, json_options=RELAXED_JSON_OPTIONS)
+            line_json = render_doc(doc)
             lines.append(f"{path}:{line_json}")
     return lines

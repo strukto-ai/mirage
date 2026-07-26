@@ -15,6 +15,7 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
+import { hasUnresolvedGlob } from '../utils/operands.ts'
 import { POSTGRES_IO } from './io.ts'
 import { read as postgresRead } from '../../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../../core/postgres/readdir.ts'
@@ -22,9 +23,13 @@ import { detectScope } from '../../../core/postgres/scope.ts'
 import {
   formatGrepResults,
   searchDatabase,
+  searchDatabaseMetadata,
   searchEntity,
+  searchEntityMetadata,
   searchKind,
+  searchKindMetadata,
   searchSchema,
+  searchSchemaMetadata,
 } from '../../../core/postgres/search.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -32,7 +37,7 @@ import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
-import { patternArg } from '../grep_helper.ts'
+import { patternArg, searchPushdownOk } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
 import { searchProvision } from './_provision.ts'
 
@@ -55,17 +60,30 @@ async function grepCommand(
   const pattern = patternArg(texts, opts.flags)
   const limit = accessor.config.defaultSearchLimit
 
+  // The push-down is a case-insensitive literal-substring search that prints
+  // each matching row as a whole line; it cannot honor output/match-shaping
+  // flags or a real regex, so those defer to the generic scan below.
   const first = paths[0]
-  if (first !== undefined && pattern !== null && !pattern.includes('\n')) {
+  if (
+    first !== undefined &&
+    !hasUnresolvedGlob(paths) &&
+    pattern !== null &&
+    searchPushdownOk(opts.flags, pattern)
+  ) {
     const scope = detectScope(first)
 
     if (scope.level !== 'root') {
       await postgresStat(accessor, first, opts.index ?? undefined)
     }
 
+    // Directory scopes cover every file under them, so the rendered
+    // schema.json / semantic.json are searched alongside the row push-down.
+    // Deliberate divergence from GNU: rows come first and metadata second,
+    // rather than in per-entity readdir order.
     if (scope.level === 'root') {
       const results = await searchDatabase(accessor, pattern, limit)
       const allLines = formatGrepResults(results)
+      allLines.push(...(await searchDatabaseMetadata(accessor, pattern)))
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [formatRecords(allLines), new IOResult()]
     }
@@ -73,6 +91,7 @@ async function grepCommand(
     if (scope.level === 'schema') {
       const results = await searchSchema(accessor, scope.schema, pattern, limit)
       const allLines = formatGrepResults(results)
+      allLines.push(...(await searchSchemaMetadata(accessor, scope.schema, pattern)))
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [formatRecords(allLines), new IOResult()]
     }
@@ -80,6 +99,7 @@ async function grepCommand(
     if (scope.level === 'kind') {
       const results = await searchKind(accessor, scope.schema, scope.kind, pattern, limit)
       const allLines = formatGrepResults(results)
+      allLines.push(...(await searchKindMetadata(accessor, scope.schema, scope.kind, pattern)))
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [formatRecords(allLines), new IOResult()]
     }
@@ -93,9 +113,22 @@ async function grepCommand(
         pattern,
         limit,
       )
-      if (rows.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       const results = [{ schema: scope.schema, kind: scope.kind, entity: scope.entity, rows }]
       const allLines = formatGrepResults(results)
+      // entity_rows names rows.jsonl explicitly; only the directory scope
+      // pulls in the sibling metadata files.
+      if (scope.level === 'entity') {
+        allLines.push(
+          ...(await searchEntityMetadata(
+            accessor,
+            scope.schema,
+            scope.kind,
+            scope.entity,
+            pattern,
+          )),
+        )
+      }
+      if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [formatRecords(allLines), new IOResult()]
     }
   }

@@ -20,6 +20,7 @@ from mirage.core.postgres import _client
 from mirage.core.postgres._schema_json import (build_database_json,
                                                build_entity_schema_json)
 from mirage.core.postgres.scope import detect_scope
+from mirage.core.postgres.semantic import build_entity_semantic_json
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -50,6 +51,12 @@ async def read(
         kind = "table" if scope.kind == "tables" else "view"
         doc = await build_entity_schema_json(accessor, scope.schema,
                                              scope.entity, kind)
+        return orjson.dumps(doc, option=orjson.OPT_INDENT_2)
+
+    if scope.level == "entity_semantic":
+        kind = "table" if scope.kind == "tables" else "view"
+        doc = await build_entity_semantic_json(accessor, scope.schema,
+                                               scope.entity, kind)
         return orjson.dumps(doc, option=orjson.OPT_INDENT_2)
 
     if scope.level == "entity_rows":

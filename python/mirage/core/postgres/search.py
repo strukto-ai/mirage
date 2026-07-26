@@ -18,6 +18,10 @@ import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres import _client
+from mirage.core.postgres._client import (canonicalize_row, qualified,
+                                          quote_ident)
+from mirage.core.postgres._schema_json import build_entity_schema_json
+from mirage.core.postgres.semantic import build_entity_semantic_json
 
 _TEXT_TYPES = (
     "text",
@@ -47,23 +51,114 @@ async def search_entity(accessor: PostgresAccessor, schema: str, kind: str,
         cols = await _text_columns(conn, schema, entity)
         if not cols:
             return []
-        where = " OR ".join(f'"{c}"::text ILIKE $1' for c in cols)
-        sql = f'SELECT * FROM "{schema}"."{entity}" WHERE {where} LIMIT $2'
+        where = " OR ".join(f"{quote_ident(c)}::text ILIKE $1" for c in cols)
+        sql = (f"SELECT * FROM {qualified(schema, entity)} "
+               f"WHERE {where} LIMIT $2")
         rows = await conn.fetch(sql, f"%{pattern}%", limit)
-        return [dict(r) for r in rows]
+        return [canonicalize_row(dict(r)) for r in rows]
+
+
+async def search_entity_metadata(accessor: PostgresAccessor, schema: str,
+                                 kind: str, entity: str,
+                                 pattern: str) -> list[str]:
+    """Grep an entity's rendered metadata files.
+
+    The ILIKE push-down only ever sees row values, so schema.json and
+    semantic.json would be invisible at directory scope: `grep -r` would
+    report "not found" for content that is plainly there. These documents
+    are rendered, not stored, so the only honest way to match them is to
+    render and scan. Matching is case-insensitive to agree with ILIKE.
+
+    Args:
+        accessor (PostgresAccessor): backend handle.
+        schema (str): the owning schema.
+        kind (str): "tables" or "views".
+        entity (str): the entity name.
+        pattern (str): the literal substring to match.
+    """
+    entity_kind = "table" if kind == "tables" else "view"
+    needle = pattern.lower()
+    docs = (
+        ("schema.json", await build_entity_schema_json(accessor, schema,
+                                                       entity, entity_kind)),
+        ("semantic.json", await
+         build_entity_semantic_json(accessor, schema, entity, entity_kind)),
+    )
+    lines: list[str] = []
+    for name, doc in docs:
+        rendered = orjson.dumps(doc, option=orjson.OPT_INDENT_2).decode()
+        for line in rendered.splitlines():
+            if needle in line.lower():
+                lines.append(f"{schema}/{kind}/{entity}/{name}:{line}")
+    return lines
+
+
+async def search_kind_metadata(accessor: PostgresAccessor, schema: str,
+                               kind: str, pattern: str) -> list[str]:
+    """Grep every entity's metadata files under one kind directory.
+
+    Args:
+        accessor (PostgresAccessor): backend handle.
+        schema (str): the owning schema.
+        kind (str): "tables" or "views".
+        pattern (str): the literal substring to match.
+    """
+    names = await _entity_names(accessor, schema, kind)
+    lines: list[str] = []
+    for n in names:
+        lines.extend(await search_entity_metadata(accessor, schema, kind, n,
+                                                  pattern))
+    return lines
+
+
+async def search_schema_metadata(accessor: PostgresAccessor, schema: str,
+                                 pattern: str) -> list[str]:
+    """Grep metadata files across both kinds of one schema.
+
+    Args:
+        accessor (PostgresAccessor): backend handle.
+        schema (str): the owning schema.
+        pattern (str): the literal substring to match.
+    """
+    lines: list[str] = []
+    for kind in ("tables", "views"):
+        lines.extend(await search_kind_metadata(accessor, schema, kind,
+                                                pattern))
+    return lines
+
+
+async def search_database_metadata(accessor: PostgresAccessor,
+                                   pattern: str) -> list[str]:
+    """Grep metadata files across every visible schema.
+
+    Args:
+        accessor (PostgresAccessor): backend handle.
+        pattern (str): the literal substring to match.
+    """
+    pool = await accessor.pool()
+    async with pool.acquire() as conn:
+        schemas = await _client.list_schemas(conn, accessor.config.schemas)
+    lines: list[str] = []
+    for s in schemas:
+        lines.extend(await search_schema_metadata(accessor, s, pattern))
+    return lines
+
+
+async def _entity_names(accessor: PostgresAccessor, schema: str,
+                        kind: str) -> list[str]:
+    pool = await accessor.pool()
+    async with pool.acquire() as conn:
+        if kind == "tables":
+            return await _client.list_tables(conn, schema)
+        views = await _client.list_views(conn, schema)
+        mviews = await _client.list_matviews(conn, schema)
+        return sorted(set(views) | set(mviews))
 
 
 async def search_kind(
         accessor: PostgresAccessor, schema: str, kind: str, pattern: str,
         limit: int) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
-    pool = await accessor.pool()
-    async with pool.acquire() as conn:
-        if kind == "tables":
-            names = await _client.list_tables(conn, schema)
-        else:
-            views = await _client.list_views(conn, schema)
-            mviews = await _client.list_matviews(conn, schema)
-            names = sorted(set(views) | set(mviews))
+    names = await _entity_names(accessor, schema, kind)
     out: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for n in names:
         rows = await search_entity(accessor, schema, kind, n, pattern, limit)

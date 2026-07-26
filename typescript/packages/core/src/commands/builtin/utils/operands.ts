@@ -23,6 +23,14 @@ const ENC = new TextEncoder()
 
 type Stat = (p: PathSpec) => Promise<FileStat>
 
+// True when any operand still carries a glob to expand. Backend push-down
+// branches read paths[0] directly to build SQL, so they must not run before
+// glob expansion: a pattern segment would be taken for a literal entity
+// name, and tables/*/rows.jsonl would query a relation actually called "*".
+export function hasUnresolvedGlob(paths: PathSpec[]): boolean {
+  return paths.some((p) => p.pattern !== null && p.pattern !== '')
+}
+
 // Resolve a script operand (absolute or cwd-relative) to a fully-resolved
 // PathSpec, the way python3/js locate a mounted script before running it.
 export function resolveScript(name: string, cwd: string): PathSpec {

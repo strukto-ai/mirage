@@ -15,6 +15,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import {
   CreateBucketCommand,
   DeleteBucketCommand,
@@ -28,6 +29,7 @@ import {
   BackblazeResource,
   BoxResource,
   CephResource,
+  ChromaResource,
   DatabricksVolumeResource,
   DifyResource,
   DigitalOceanResource,
@@ -42,14 +44,19 @@ import {
   GSheetsResource,
   GSlidesResource,
   HfBucketsResource,
+  LanceDBResource,
   LinearResource,
   MinIOResource,
   Mem0Resource,
+  MongoDBResource,
+  NotionResource,
   ConsistencyPolicy,
   MountMode,
   NextcloudResource,
   OCIResource,
   OneDriveResource,
+  PostgresResource,
+  QdrantResource,
   QingStorResource,
   R2Resource,
   RAMResource,
@@ -66,9 +73,15 @@ import {
   WasabiResource,
   Workspace,
 } from '@struktoai/mirage-node'
+import * as lancedb from '@lancedb/lancedb'
+import { QdrantClient } from '@qdrant/js-client-rest'
+import { ChromaClient } from 'chromadb'
 import { ImapFlow } from 'imapflow'
+import { Double, MongoClient } from 'mongodb'
+import pg from 'pg'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
 import { startFakeDropbox, type FakeDropbox } from '../../server/dropbox.ts'
+import { startMockServer as startNotionMock } from '../../server/notion_server.ts'
 import { integRoot, walkFiles } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
 import { startPythonServer } from './server_process.ts'
@@ -646,6 +659,283 @@ async function openGraphConsistency(
   return { ws: ws as unknown as ExecWorkspace, mutate, cleanup }
 }
 
+async function openNotion(target: Target): Promise<Open> {
+  const { server, port } = await startNotionMock()
+  const mounts: Record<string, NotionResource | [NotionResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new NotionResource({
+      apiKey: 'integ-test',
+      baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+    })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const LANCEDB_ROWS: ReadonlyArray<Record<string, unknown>> = [
+  { id: 1, label: 'cat', kind: 'big', name: 'a big orange cat' },
+  { id: 2, label: 'cat', kind: 'small', name: 'a small grey cat' },
+  { id: 3, label: 'dog', kind: 'big', name: 'a big brown dog' },
+  { id: 4, label: 'dog', kind: 'small', name: 'a small white dog' },
+]
+
+async function openLancedb(target: Target): Promise<Open> {
+  const uri = mkdtempSync(join(tmpdir(), 'mirage-integ-lancedb-'))
+  const db = await lancedb.connect(uri)
+  await db.createTable('animals', LANCEDB_ROWS as Record<string, unknown>[])
+  const mounts: Record<string, LanceDBResource | [LanceDBResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new LanceDBResource({
+      uri,
+      groupBy: ['label', 'kind'],
+      idColumn: 'id',
+      titleColumn: 'name',
+      textColumn: 'name',
+    })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    rmSync(uri, { recursive: true, force: true })
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const QDRANT_EMBED_DIM = 8
+
+const QDRANT_ROWS: ReadonlyArray<readonly [number, string, string, string]> = [
+  [1, 'cat', 'big', 'a big orange cat'],
+  [2, 'cat', 'small', 'a small grey cat'],
+  [3, 'dog', 'big', 'a big brown dog'],
+  [4, 'dog', 'small', 'a small white dog'],
+]
+
+async function openQdrant(target: Target): Promise<Open> {
+  const host = process.env.QDRANT_HOST ?? 'localhost'
+  const port = Number.parseInt(process.env.QDRANT_PORT ?? '6333', 10)
+  const collection = `mirage-integ-${runId()}`
+  const client = new QdrantClient({ host, port })
+  await client.createCollection(collection, {
+    vectors: { size: QDRANT_EMBED_DIM, distance: 'Cosine' },
+  })
+  await client.upsert(collection, {
+    points: QDRANT_ROWS.map(([id, label, kind, name]) => ({
+      id,
+      vector: Array<number>(QDRANT_EMBED_DIM).fill(0.1),
+      payload: { label, kind, name },
+    })),
+  })
+  for (const field of ['label', 'kind']) {
+    await client.createPayloadIndex(collection, { field_name: field, field_schema: 'keyword' })
+  }
+  await new Promise((r) => setTimeout(r, 2000))
+  const mounts: Record<string, QdrantResource | [QdrantResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new QdrantResource({
+      host,
+      port,
+      collection,
+      groupBy: ['label', 'kind'],
+      idField: 'id',
+      textField: 'name',
+    })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await new QdrantClient({ host, port }).deleteCollection(collection)
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const CHROMA_EMBED_DIM = 8
+
+interface ChromaChunk {
+  document: string
+  metadata: { page_slug: string; chunk_index: number }
+}
+
+interface ChromaSeed {
+  path_tree: Record<string, unknown>
+  chunks: Record<string, ChromaChunk[]>
+}
+
+function chromaEmbedding(position: number): number[] {
+  const vector = new Array<number>(CHROMA_EMBED_DIM).fill(0)
+  vector[position % CHROMA_EMBED_DIM] = 1
+  return vector
+}
+
+async function seedChroma(host: string, port: number, collectionName: string): Promise<void> {
+  const seed = JSON.parse(
+    readFileSync(join(integRoot(), 'server', 'chroma_seed.json'), 'utf8'),
+  ) as ChromaSeed
+  const encoded = gzipSync(Buffer.from(JSON.stringify(seed.path_tree))).toString('base64')
+  const ids = ['__path_tree__']
+  const documents = [encoded]
+  const metadatas: Record<string, string | number>[] = [{ kind: 'path_tree' }]
+  const embeddings = [chromaEmbedding(0)]
+  let position = 1
+  for (const chunks of Object.values(seed.chunks)) {
+    for (const chunk of chunks) {
+      ids.push(`${chunk.metadata.page_slug}#${String(chunk.metadata.chunk_index)}`)
+      documents.push(chunk.document)
+      metadatas.push(chunk.metadata)
+      embeddings.push(chromaEmbedding(position))
+      position += 1
+    }
+  }
+  const client = new ChromaClient({ host, port })
+  const collection = await client.createCollection({ name: collectionName, embeddingFunction: null })
+  await collection.add({ ids, documents, metadatas, embeddings })
+}
+
+async function openChroma(target: Target): Promise<Open> {
+  const host = process.env.CHROMA_HOST ?? 'localhost'
+  const port = Number.parseInt(process.env.CHROMA_PORT ?? '8000', 10)
+  const collectionName = `mirage-integ-${runId()}`
+  await seedChroma(host, port, collectionName)
+  const mounts: Record<string, ChromaResource | [ChromaResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new ChromaResource({ host, port, collectionName })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await new ChromaClient({ host, port }).deleteCollection({ name: collectionName })
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const MONGODB_DB = 'mirage_integ'
+
+const MONGODB_BOOKS: ReadonlyArray<Record<string, unknown>> = [
+  { _id: 1, title: 'alpha', author: 'ada', year: 2020, tags: ['fiction', 'classic'], rating: 4.5 },
+  { _id: 2, title: 'beta', author: 'ben', year: 2021, tags: ['fiction'], rating: 3.2 },
+  { _id: 3, title: 'gamma', author: 'cara', year: 2022, rating: 5.0 },
+  { _id: 4, title: 'delta', author: 'ada', year: 2023, tags: ['history'], rating: 4.0 },
+  { _id: 5, title: 'epsilon', author: 'ben', year: 2024, rating: 2.5 },
+]
+
+const MONGODB_AUTHORS: ReadonlyArray<Record<string, unknown>> = [
+  { _id: 1, name: 'ada', books: 2 },
+  { _id: 2, name: 'ben', books: 2 },
+  { _id: 3, name: 'cara', books: 1 },
+]
+
+async function seedMongodb(uri: string): Promise<void> {
+  const client = new MongoClient(uri)
+  await client.connect()
+  try {
+    const db = client.db(MONGODB_DB)
+    await db.dropDatabase()
+    // Python seeds floats (BSON double); insert Double so the inferred schema
+    // and rendered documents match byte-for-byte across languages.
+    await db
+      .collection('books')
+      .insertMany(MONGODB_BOOKS.map((d) => ({ ...d, rating: new Double(d.rating as number) })))
+    await db.collection('authors').insertMany(MONGODB_AUTHORS.map((d) => ({ ...d })))
+    await db.createCollection('recent_books', {
+      viewOn: 'books',
+      pipeline: [{ $match: { year: { $gte: 2022 } } }],
+    })
+  } finally {
+    await client.close()
+  }
+}
+
+async function openMongodb(target: Target): Promise<Open> {
+  const uri = process.env.MONGODB_URI
+  if (uri === undefined) throw new Error('mongodb target requires MONGODB_URI')
+  await seedMongodb(uri)
+  const resources: MongoDBResource[] = []
+  const mounts: Record<string, MongoDBResource | [MongoDBResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new MongoDBResource({ uri, databases: [MONGODB_DB] })
+    resources.push(resource)
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    for (const resource of resources) await resource.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const POSTGRES_BOOKS: ReadonlyArray<readonly [number, string, string, number, number]> = [
+  [1, 'alpha', 'ada', 2020, 4.5],
+  [2, 'beta', 'ben', 2021, 3.2],
+  [3, 'gamma', 'cara', 2022, 5.0],
+  [4, 'delta', 'ada', 2023, 4.0],
+  [5, 'epsilon', 'ben', 2024, 2.5],
+]
+
+const POSTGRES_AUTHORS: ReadonlyArray<readonly [number, string, number]> = [
+  [1, 'ada', 2],
+  [2, 'ben', 2],
+  [3, 'cara', 1],
+]
+
+async function seedPostgres(dsn: string): Promise<void> {
+  const client = new pg.Client({ connectionString: dsn })
+  await client.connect()
+  try {
+    await client.query('DROP VIEW IF EXISTS recent_books')
+    await client.query('DROP TABLE IF EXISTS books')
+    await client.query('DROP TABLE IF EXISTS authors')
+    await client.query(
+      'CREATE TABLE books (id int PRIMARY KEY, title text, author text, year int, rating double precision)',
+    )
+    await client.query('CREATE TABLE authors (id int PRIMARY KEY, name text, books int)')
+    for (const [id, title, author, year, rating] of POSTGRES_BOOKS) {
+      await client.query(
+        'INSERT INTO books (id, title, author, year, rating) VALUES ($1, $2, $3, $4, $5)',
+        [id, title, author, year, rating],
+      )
+    }
+    for (const [id, name, books] of POSTGRES_AUTHORS) {
+      await client.query('INSERT INTO authors (id, name, books) VALUES ($1, $2, $3)', [
+        id,
+        name,
+        books,
+      ])
+    }
+    await client.query('CREATE VIEW recent_books AS SELECT * FROM books WHERE year >= 2022')
+    await client.query('ANALYZE books')
+    await client.query('ANALYZE authors')
+  } finally {
+    await client.end()
+  }
+}
+
+async function openPostgres(target: Target): Promise<Open> {
+  const dsn = process.env.POSTGRES_DSN
+  if (dsn === undefined) throw new Error('postgres target requires POSTGRES_DSN')
+  await seedPostgres(dsn)
+  const resources: PostgresResource[] = []
+  const mounts: Record<string, PostgresResource | [PostgresResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new PostgresResource({ dsn, maxReadRows: 200 })
+    resources.push(resource)
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    for (const resource of resources) await resource.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 async function openMem0(target: Target): Promise<Open> {
   const server = await startPythonServer('mem0_server.py')
   const mounts: Record<string, Mem0Resource> = {}
@@ -1009,6 +1299,12 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   onedrive: openOneDrive,
   sharepoint: openSharePoint,
   mem0: openMem0,
+  postgres: openPostgres,
+  mongodb: openMongodb,
+  chroma: openChroma,
+  qdrant: openQdrant,
+  lancedb: openLancedb,
+  notion: openNotion,
   slack: openSlack,
   trello: openTrello,
   linear: openLinear,

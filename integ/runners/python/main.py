@@ -118,6 +118,32 @@ async def main() -> None:
                 and not os.environ.get("SLACK_URL")):
             print(f"skip [{target_id}]: SLACK_URL not set", file=sys.stderr)
             continue
+        if (target.get("service") == "postgres"
+                and not os.environ.get("POSTGRES_DSN")):
+            print(f"skip [{target_id}]: POSTGRES_DSN not set", file=sys.stderr)
+            continue
+        if (target.get("service") == "mongodb"
+                and not os.environ.get("MONGODB_URI")):
+            print(f"skip [{target_id}]: MONGODB_URI not set", file=sys.stderr)
+            continue
+        if (target.get("service") == "chroma"
+                and not os.environ.get("CHROMA_HOST")):
+            print(f"skip [{target_id}]: CHROMA_HOST not set", file=sys.stderr)
+            continue
+        if (target.get("service") == "qdrant"
+                and not os.environ.get("QDRANT_HOST")):
+            print(f"skip [{target_id}]: QDRANT_HOST not set", file=sys.stderr)
+            continue
+        if (target.get("service") == "lancedb"
+                and not os.environ.get("LANCEDB_ENABLED")):
+            print(f"skip [{target_id}]: LANCEDB_ENABLED not set",
+                  file=sys.stderr)
+            continue
+        if (target.get("service") == "notion"
+                and not os.environ.get("NOTION_ENABLED")):
+            print(f"skip [{target_id}]: NOTION_ENABLED not set",
+                  file=sys.stderr)
+            continue
         await run_target(target, cases, root, report, emit)
 
     if args.emit:

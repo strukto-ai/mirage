@@ -209,6 +209,57 @@ export function searchQuery(pattern: string, fixedString: boolean): string | nul
   return extractRequiredLiteral(pattern)
 }
 
+const GREP_META: ReadonlySet<string> = new Set('.^$*+?()[]{}|\\')
+
+// True when a pattern matches as a plain substring with no regex meaning.
+// Stricter than isRegexPattern/classifyPattern (which treat "." as literal),
+// because the push-down feeds ILIKE directly with no regex re-scan.
+export function isLiteralPattern(pattern: string, fixedString: boolean): boolean {
+  if (pattern.includes('\n')) return false
+  if (fixedString) return true
+  for (const c of pattern) {
+    if (GREP_META.has(c)) return false
+  }
+  return true
+}
+
+// True when a flag alters the match set or output shape of grep/rg. A search
+// push-down prints each matching record as one whole line, so it cannot honor
+// -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h; the wrapper must defer to the
+// generic scan when any is present.
+export function hasSearchShapingFlags(flags: Record<string, string | boolean | string[]>): boolean {
+  if (
+    flags.v === true ||
+    flags.n === true ||
+    flags.c === true ||
+    flags.args_l === true ||
+    flags.l === true ||
+    flags.w === true ||
+    flags.o === true ||
+    flags.q === true ||
+    flags.H === true ||
+    flags.h === true
+  ) {
+    return true
+  }
+  return (
+    typeof flags.m === 'string' ||
+    typeof flags.A === 'string' ||
+    typeof flags.B === 'string' ||
+    typeof flags.C === 'string'
+  )
+}
+
+// True when a literal-substring push-down (ILIKE) faithfully reproduces
+// grep/rg: a literal pattern with no shaping flags. Backends that push a real
+// regex down (mongodb) gate on hasSearchShapingFlags alone instead.
+export function searchPushdownOk(
+  flags: Record<string, string | boolean | string[]>,
+  pattern: string,
+): boolean {
+  return isLiteralPattern(pattern, flags.F === true) && !hasSearchShapingFlags(flags)
+}
+
 export interface GrepLinesOptions {
   invert: boolean
   lineNumbers: boolean
