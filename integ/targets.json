@@ -719,6 +719,23 @@
       ]
     },
     {
+      "id": "github",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github",
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "github",
+          "backend": "github",
+          "repo": "integ/repo-v1",
+          "mode": "read"
+        }
+      ]
+    },
+    {
       "id": "hf-prefix",
       "hosts": [
         "python",

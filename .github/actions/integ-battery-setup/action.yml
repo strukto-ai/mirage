@@ -128,6 +128,19 @@ runs:
         cat /tmp/boxsrv.log
         echo "BOX_ENDPOINT=http://127.0.0.1:5096" >> "$GITHUB_ENV"
 
+    - name: Start fake GitHub API
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/github_server.py \
+          --port 5095 --repo integ/repo-v1=github/repo-v1 \
+          > /tmp/ghsrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "GITHUB_ENDPOINT=" /tmp/ghsrv.log && break
+          sleep 1
+        done
+        cat /tmp/ghsrv.log
+        echo "GITHUB_URL=http://127.0.0.1:5095" >> "$GITHUB_ENV"
+
     - name: Start fake Slack Web API (Prisma)
       working-directory: integ
       shell: bash

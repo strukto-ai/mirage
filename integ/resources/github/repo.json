@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "github_ls_root",
+      "seq": 530001,
+      "targets": [
+        "github"
+      ],
+      "command": "ls /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "README.md\ndocs\npyproject.toml\nsrc\ntests\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_cat_readme",
+      "seq": 530002,
+      "targets": [
+        "github"
+      ],
+      "command": "cat /repo/README.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# repo-v1\n\nFixture repository for the fake GitHub API server.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_find_name",
+      "seq": 530003,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo/docs -name '*.md'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/architecture.md\n/repo/docs/contributing.md\n/repo/docs/release.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_wc_tree",
+      "seq": 530004,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo -type f | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "119\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_grep_search_pushdown",
+      "seq": 530005,
+      "targets": [
+        "github"
+      ],
+      "command": "grep -rl wombat /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/contributing.md\n/repo/src/cache/step_2.py\n/repo/src/store/step_5.py\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_rg_search_pushdown",
+      "seq": 530006,
+      "targets": [
+        "github"
+      ],
+      "command": "rg -l wombat /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/contributing.md\n/repo/src/cache/step_2.py\n/repo/src/store/step_5.py\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_grep_search_miss",
+      "seq": 530007,
+      "targets": [
+        "github"
+      ],
+      "command": "grep -rl zzzabsent /repo",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

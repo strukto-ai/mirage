@@ -20,6 +20,7 @@ def fetch_default_branch_sync(config: GitHubConfig, owner: str,
                               repo: str) -> str:
     data = github_get_sync(config.token,
                            "/repos/{owner}/{repo}",
+                           base_url=config.base_url,
                            owner=owner,
                            repo=repo)
     return data["default_branch"]

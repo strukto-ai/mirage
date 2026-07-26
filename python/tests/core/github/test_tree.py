@@ -75,8 +75,9 @@ def test_fetch_tree_passes_params(mock_get, config):
     mock_get.assert_called_once_with(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{ref}",
+        params={"recursive": "1"},
+        base_url=None,
         owner="acme",
         repo="proj",
         ref="v1",
-        params={"recursive": "1"},
     )
