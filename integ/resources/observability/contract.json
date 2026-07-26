@@ -142,7 +142,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "echo: {mount}/__nf_new__: Operation not supported\n"
+        "stderr": "{mount}/__nf_new__: Operation not supported\n"
       }
     },
     {

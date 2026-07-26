@@ -23,6 +23,7 @@
       "gslides",
       "hf_buckets",
       "history",
+      "jaeger",
       "lancedb",
       "langfuse",
       "linear",
