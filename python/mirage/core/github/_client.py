@@ -34,15 +34,17 @@ def github_headers(token: SecretStr) -> dict[str, str]:
     }
 
 
-def github_url(path: str, **kwargs: str) -> str:
-    return API_BASE + path.format(**kwargs)
+def github_url(path: str, base_url: str | None = None, **kwargs: str) -> str:
+    return (base_url or API_BASE) + path.format(**kwargs)
 
 
 async def github_get(token: SecretStr,
                      path: str,
                      params: dict[str, Any] | None = None,
+                     *,
+                     base_url: str | None = None,
                      **kwargs: str) -> dict[str, Any]:
-    url = github_url(path, **kwargs)
+    url = github_url(path, base_url, **kwargs)
     headers = github_headers(token)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as resp:
@@ -53,8 +55,10 @@ async def github_get(token: SecretStr,
 def github_get_sync(token: SecretStr,
                     path: str,
                     params: dict[str, Any] | None = None,
+                    *,
+                    base_url: str | None = None,
                     **kwargs: str) -> dict[str, Any]:
-    url = github_url(path, **kwargs)
+    url = github_url(path, base_url, **kwargs)
     if params:
         url = f"{url}?{urlencode(params)}"
     req = Request(url, headers=github_headers(token), method="GET")

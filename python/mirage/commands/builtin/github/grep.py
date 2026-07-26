@@ -16,8 +16,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.github.narrow import (files_only_shortcircuit,
-                                                   narrow_scope)
+from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -110,14 +109,15 @@ async def grep(
             pattern,
             fixed_string=fl.as_bool("F"),
             recursive=recursive,
+            whole_word=fl.as_bool("w"),
         )
         if file_count > SCOPE_ERROR:
-            msg = f"grep: {file_count} files in scope, narrow the path\n"
+            # Push-down needs -w (see narrow_scope); without it a scope
+            # this large has no complete narrowing strategy, so say so
+            # rather than scanning thousands of blobs.
+            msg = (f"grep: {file_count} files in scope, "
+                   "narrow the path, or use -w to enable code search\n")
             return b"", IOResult(exit_code=1, stderr=msg.encode())
-        if used_search:
-            short = files_only_shortcircuit(fl, pattern, resolved, paths[0])
-            if short is not None:
-                return short
 
     return await generic_grep(
         resolved,

@@ -99,6 +99,7 @@ async def rg(
             pattern_str,
             fixed_string=fl.as_bool("F"),
             recursive=True,
+            whole_word=fl.as_bool("w"),
             exact_file_set=(fl.as_bool("v") or fl.as_str("type") is not None
                             or fl.as_str("glob") is not None),
         )

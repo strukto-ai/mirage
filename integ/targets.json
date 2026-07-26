@@ -453,6 +453,13 @@
           "backend": "dropbox",
           "bucket": "res",
           "fixture": "columnar/v1"
+        },
+        {
+          "path": "/search",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "search",
+          "fixture": "search/v1"
         }
       ]
     },
@@ -715,6 +722,30 @@
           "backend": "box",
           "folder": "res",
           "seed": "columnar/v1"
+        },
+        {
+          "path": "/search",
+          "resource": "box",
+          "backend": "box",
+          "folder": "search",
+          "seed": "search/v1"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github",
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "github",
+          "backend": "github",
+          "repo": "integ/repo-v1",
+          "mode": "read"
         }
       ]
     },

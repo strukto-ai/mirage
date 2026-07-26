@@ -58,7 +58,10 @@ async function grepCommand(
   const firstPath = paths[0]
   if (firstPath !== undefined && pattern !== null && !pattern.includes('\n')) {
     const scope = detectScope(firstPath)
-    if (scope.useNative && scope.guildId !== undefined) {
+    // Discord search matches whole words while grep matches substrings,
+    // and the native path returns search results verbatim as the output, so
+    // a bare literal would under-report. Only -w makes the two agree.
+    if (scope.useNative && scope.guildId !== undefined && opts.flags.w === true) {
       try {
         const count = maxCount ?? 100
         const raw = await searchGuild(accessor, scope.guildId, pattern, scope.channelId, count)

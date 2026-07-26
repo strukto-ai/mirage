@@ -52,10 +52,11 @@ def fetch_tree_sync(
     data = github_get_sync(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{ref}",
+        params={"recursive": "1"},
+        base_url=config.base_url,
         owner=owner,
         repo=repo,
         ref=ref,
-        params={"recursive": "1"},
     )
     return _parse_tree_response(data, owner, repo, ref)
 
@@ -73,6 +74,7 @@ async def fetch_dir_tree(
     data = await github_get(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{tree_sha}",
+        base_url=config.base_url,
         owner=owner,
         repo=repo,
         tree_sha=tree_sha,

@@ -27,6 +27,7 @@ async def read_bytes(config: GitHubConfig, owner: str, repo: str,
     data = await github_get(
         config.token,
         "/repos/{owner}/{repo}/git/blobs/{sha}",
+        base_url=config.base_url,
         owner=owner,
         repo=repo,
         sha=sha,

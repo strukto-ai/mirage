@@ -38,6 +38,7 @@ import {
   GDriveResource,
   GmailResource,
   GCSResource,
+  GitHubResource,
   GridFSResource,
   GSheetsResource,
   GSlidesResource,
@@ -935,6 +936,29 @@ async function openSlack(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+// The fake api.github.com server (integ/server/github_server.py) is external
+// and shared across both hosts, mirroring the fake Slack server. Out of
+// process is required for the python host, whose GitHubResource fetches the
+// repo tree with a blocking urlopen from its constructor.
+async function openGitHub(target: Target): Promise<Open> {
+  let base = process.env.GITHUB_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('github target requires GITHUB_URL')
+  const mounts: Record<string, GitHubResource | [GitHubResource, MountMode]> = {}
+  for (const m of target.mounts) {
+    const [owner, repo] = String(m.repo).split('/')
+    const resource = await GitHubResource.create({
+      token: 'ghp-integ',
+      owner: owner ?? '',
+      repo: repo ?? '',
+      baseUrl: base,
+    })
+    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 async function openDify(target: Target): Promise<Open> {
   const endpoint = process.env.DIFY_ENDPOINT
   if (!endpoint) throw new Error('dify target requires DIFY_ENDPOINT')
@@ -1009,6 +1033,7 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   onedrive: openOneDrive,
   sharepoint: openSharePoint,
   mem0: openMem0,
+  github: openGitHub,
   slack: openSlack,
   trello: openTrello,
   linear: openLinear,

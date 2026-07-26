@@ -50,6 +50,7 @@ async def test_grep_with_many_concrete_paths_uses_native_search():
         out, io = await grep(accessor,
                              _concrete_paths(7),
                              "hello",
+                             w=True,
                              index=RAMIndexCacheStore(),
                              i=True)
     assert fake_search.await_count == 1
@@ -70,6 +71,7 @@ async def test_rg_with_many_concrete_paths_uses_native_search():
         out, io = await rg(accessor,
                            _concrete_paths(7),
                            "hello",
+                           w=True,
                            index=RAMIndexCacheStore(),
                            i=True)
     assert fake_search.await_count == 1
@@ -108,6 +110,7 @@ async def test_grep_falls_back_when_native_search_raises():
         out, io = await grep(accessor,
                              paths,
                              "hello",
+                             w=True,
                              index=RAMIndexCacheStore(),
                              i=True)
     assert io.exit_code in (0, 1)
@@ -128,8 +131,32 @@ async def test_grep_native_empty_does_not_trigger_fallback():
         out, io = await grep(accessor,
                              _concrete_paths(7),
                              "missing",
+                             w=True,
                              index=RAMIndexCacheStore())
     assert fake_search.await_count == 1
     assert fake_read.await_count == 0
     assert io.exit_code == 1
     assert out == b""
+
+
+@pytest.mark.asyncio
+async def test_grep_without_word_flag_skips_native_search():
+    # Slack search matches whole words while grep matches substrings, and the
+    # native path returns search results verbatim as the grep output, so a
+    # bare literal would under-report. Only -w may take it.
+    accessor = AsyncMock()
+    accessor.config = AsyncMock()
+    with patch(
+            "mirage.commands.builtin.slack.grep.search_messages",
+            new=AsyncMock(return_value=b"{}"),
+    ) as fake_search:
+        # Falling through to the per-file scan is the point: the mock
+        # accessor cannot serve reads, so the scan raising proves the native
+        # path was skipped rather than silently returning search results.
+        with pytest.raises(FileNotFoundError):
+            await grep(accessor,
+                       _concrete_paths(7),
+                       "hello",
+                       index=RAMIndexCacheStore(),
+                       i=True)
+    fake_search.assert_not_awaited()

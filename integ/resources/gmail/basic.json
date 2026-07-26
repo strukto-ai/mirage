@@ -137,7 +137,7 @@
       "targets": [
         "gmail"
       ],
-      "command": "grep -r 'worker-3' /mail/INBOX | sort",
+      "command": "grep -rw 'worker-3' /mail/INBOX | sort",
       "expect": {
         "exit": 0,
         "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__msg0003.gmail.json:[ops@example.com] Server alert: worker-3 disk usage at 91 percent on worker-3\n",
@@ -150,7 +150,7 @@
       "targets": [
         "gmail"
       ],
-      "command": "grep -ri 'invoice 4471' /mail | sort",
+      "command": "grep -riw 'invoice 4471' /mail | sort",
       "expect": {
         "exit": 0,
         "stdout": "/mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json:[billing@vendor.example] Invoice 4471 invoice 4471 attached, total 240 usd\n",
@@ -228,7 +228,7 @@
       "targets": [
         "gmail"
       ],
-      "command": "rg 'forecast' /mail/INBOX",
+      "command": "rg -w 'forecast' /mail/INBOX",
       "expect": {
         "exit": 0,
         "stdout": "/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json:[marcus@example.com] Standup notes yesterday shipped the parser today reviewing the budget forecast\n",

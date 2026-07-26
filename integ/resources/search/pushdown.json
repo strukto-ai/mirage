@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "id": "search_substring_scans_all",
+      "seq": 540001,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rl wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n/search/beta.txt\n/search/gamma.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_word_uses_pushdown",
+      "seq": 540002,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rlw wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n/search/beta.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_substring_rg_scans_all",
+      "seq": 540003,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "rg -l wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n/search/beta.txt\n/search/gamma.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_word_rg_uses_pushdown",
+      "seq": 540004,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "rg -lw wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n/search/beta.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -209,6 +209,17 @@ export function searchQuery(pattern: string, fixedString: boolean): string | nul
   return extractRequiredLiteral(pattern)
 }
 
+// Whether the pattern is searched verbatim, with no regex extraction.
+// Push-down against a whole-word search index is only complete when the term
+// handed to the provider is the entire match. A regex narrowed on an extracted
+// literal fails that: `foo[0-9]` under -w matches `foo1`, but a whole-word
+// search for `foo` never returns a file whose only token is `foo1`.
+export function isLiteralPattern(pattern: string, fixedString: boolean): boolean {
+  if (fixedString) return true
+  const pt = classifyPattern(pattern, fixedString)
+  return pt === PatternType.EXACT || (pt === PatternType.SIMPLE && !pattern.includes('.'))
+}
+
 export interface GrepLinesOptions {
   invert: boolean
   lineNumbers: boolean
