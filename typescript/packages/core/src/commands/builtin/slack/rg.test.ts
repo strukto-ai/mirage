@@ -83,7 +83,7 @@ describe('slack rg', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { index: idx, transport },
     )
     expect(transport.calls[0]?.endpoint).toBe('search.messages')
@@ -106,7 +106,7 @@ describe('slack rg', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { transport },
     )
     expect(out.exitCode).toBe(1)

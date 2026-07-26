@@ -63,6 +63,7 @@ async def grep(
             pattern,
             fixed_string=fl.as_bool("F"),
             recursive=fl.as_bool("r") or fl.as_bool("R"),
+            whole_word=fl.as_bool("w"),
             exact_file_set=fl.as_bool("v") or fl.as_bool("c"),
         )
         if used_search and not resolved:

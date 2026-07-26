@@ -122,6 +122,29 @@ def extract_required_literal(pattern: str) -> str | None:
     return best if len(best) >= _MIN_SEARCH_LITERAL else None
 
 
+def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
+    """Whether the pattern is searched verbatim, with no regex extraction.
+
+    Push-down against a whole-word search index is only complete when the term
+    handed to the provider is the entire match. A regex narrowed on an
+    extracted literal fails that: ``foo[0-9]`` under -w matches ``foo1``, but a
+    whole-word search for ``foo`` never returns a file whose only token is
+    ``foo1``.
+
+    Args:
+        pattern (str): the search pattern.
+        fixed_string (bool): True if -F is set.
+
+    Returns:
+        bool: True when the pattern itself is the search term.
+    """
+    if fixed_string:
+        return True
+    pt = classify_pattern(pattern, fixed_string)
+    return pt == PatternType.EXACT or (pt == PatternType.SIMPLE
+                                       and "." not in pattern)
+
+
 def search_query(pattern: str, fixed_string: bool) -> str | None:
     """Literal to push down to a code-search API for a grep/rg pattern.
 

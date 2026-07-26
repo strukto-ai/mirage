@@ -65,6 +65,7 @@ async def run(index, **kwargs):
     defaults = {
         "fixed_string": False,
         "recursive": True,
+        "whole_word": True,
         "exact_file_set": False,
     }
     defaults.update(kwargs)
@@ -90,6 +91,7 @@ async def test_knob_off_skips_search(harness, index):
                                         "needle",
                                         fixed_string=False,
                                         recursive=True,
+                                        whole_word=True,
                                         exact_file_set=False)
     assert not used
     narrow.assert_not_awaited()
@@ -121,6 +123,7 @@ async def test_multiline_pattern_skips_search(harness, index):
                                  "foo\nbar",
                                  fixed_string=False,
                                  recursive=True,
+                                 whole_word=True,
                                  exact_file_set=False)
     assert not used
     narrow.assert_not_awaited()
@@ -134,22 +137,27 @@ async def test_regex_without_literal_skips_search(harness, index):
                                  "foo|bar",
                                  fixed_string=False,
                                  recursive=True,
+                                 whole_word=True,
                                  exact_file_set=False)
     assert not used
     narrow.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_regex_narrows_on_required_literal(harness, index):
+async def test_regex_skips_search(harness, index):
+    # A regex narrows on an extracted literal, so the searched term is only
+    # part of the match; a whole-word search for it can miss real matches.
+    # Excluded even under -w.
     _, narrow, _ = harness
     _, used = await narrow_scope(make_accessor(),
                                  index, [scope()],
                                  "import.*os",
                                  fixed_string=False,
                                  recursive=True,
+                                 whole_word=True,
                                  exact_file_set=False)
-    assert used
-    assert narrow.await_args.args[1] == "import"
+    assert not used
+    narrow.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -205,3 +213,15 @@ async def test_all_binary_narrow_stays_used_and_empty(harness, index):
     assert used
     assert resolved == []
     glob.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_without_word_flag_skips_search(harness, index):
+    # Provider search matches whole words while grep matches substrings, so
+    # narrowing on a bare literal would drop files that contain it only
+    # inside a longer word.
+    _, narrow, glob = harness
+    _resolved, used = await run(index, whole_word=False)
+    assert not used
+    narrow.assert_not_awaited()
+    glob.assert_awaited_once()

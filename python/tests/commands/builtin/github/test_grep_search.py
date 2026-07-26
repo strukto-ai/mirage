@@ -61,7 +61,7 @@ async def test_grep_root_large_tree_uses_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=narrowed)
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import", r=True, index=index)
+    await grep(accessor, [_root()], "import", r=True, w=True, index=index)
     spy.assert_awaited_once()
 
 
@@ -72,20 +72,22 @@ async def test_grep_subdir_uses_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_subdir()], "import", r=True, index=index)
+    await grep(accessor, [_subdir()], "import", r=True, w=True, index=index)
     spy.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_grep_regex_with_literal_uses_search(mock_github_api, github_env,
-                                                   monkeypatch):
+async def test_grep_regex_skips_search(mock_github_api, github_env,
+                                       monkeypatch):
+    # A regex narrows on an extracted literal, so the searched term is only
+    # part of the match: `import.*os` matches `importos` variants that a
+    # whole-word search for `import` never returns. Excluded even under -w.
     accessor, index = github_env
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import.*os", r=True, index=index)
-    spy.assert_awaited_once()
-    assert spy.await_args.args[3] == "import"
+    await grep(accessor, [_root()], "import.*os", r=True, w=True, index=index)
+    spy.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -96,7 +98,11 @@ async def test_grep_regex_without_literal_skips_search(mock_github_api,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import|export", r=True, index=index)
+    await grep(accessor, [_root()],
+               "import|export",
+               r=True,
+               w=True,
+               index=index)
     spy.assert_not_awaited()
 
 
@@ -106,7 +112,7 @@ async def test_grep_small_tree_skips_search(mock_github_api, github_env,
     accessor, index = github_env
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import", r=True, index=index)
+    await grep(accessor, [_root()], "import", r=True, w=True, index=index)
     spy.assert_not_awaited()
 
 
@@ -115,6 +121,24 @@ async def test_grep_scope_error_when_too_many_files(mock_github_api,
                                                     github_env, monkeypatch):
     accessor, index = github_env
     monkeypatch.setitem(_GLOBALS, "SCOPE_ERROR", 1)
-    stdout, io = await grep(accessor, [_root()], "import", r=True, index=index)
+    stdout, io = await grep(accessor, [_root()],
+                            "import",
+                            r=True,
+                            w=True,
+                            index=index)
     assert io.exit_code == 1
     assert b"narrow the path" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_grep_without_word_flag_skips_search(mock_github_api, github_env,
+                                                   monkeypatch):
+    # Code search matches whole words while grep matches substrings, so a
+    # bare literal would narrow to a strict subset and silently drop files
+    # that contain it only inside a longer word.
+    accessor, index = github_env
+    spy = AsyncMock(return_value=[])
+    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
+    monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
+    await grep(accessor, [_root()], "import", r=True, index=index)
+    spy.assert_not_awaited()

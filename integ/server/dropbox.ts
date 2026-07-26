@@ -155,9 +155,13 @@ class Account {
     return true
   }
 
-  // Case-insensitive substring over names and content: a superset of the
-  // real token-based matching, which is what grep/rg narrowing needs (the
-  // client still scans the candidates exactly).
+  // Case-insensitive substring over names and content: deliberately a
+  // superset of the real token-based matching. Safe only because narrowing
+  // now requires -w (see dropbox/narrow.ts): under -w the client wants whole
+  // words too, so extra candidates are filtered by the local scan. Do not
+  // rely on this fake to prove narrowing is complete for a bare literal,
+  // real Dropbox returns a strict subset there and would drop matches
+  // inside longer words.
   searchMatches(query: string, scope: string, filenameOnly: boolean): SearchMatchJson[] | null {
     if (scope !== '' && this.entryFor(scope) === null) return null
     const q = query.toLowerCase()

@@ -90,6 +90,32 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "github_grep_substring_scans_all",
+      "seq": 530008,
+      "targets": [
+        "github"
+      ],
+      "command": "grep -rl quokka /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/architecture.md\n/repo/docs/release.md\n/repo/src/auth/step_1.py\n/repo/src/route/step_3.py\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_grep_word_uses_search",
+      "seq": 530009,
+      "targets": [
+        "github"
+      ],
+      "command": "grep -rlw quokka /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/architecture.md\n/repo/src/auth/step_1.py\n/repo/src/route/step_3.py\n",
+        "stderr": ""
+      }
     }
   ]
 }
