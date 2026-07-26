@@ -16,8 +16,6 @@ import asyncio
 import shutil
 from pathlib import Path
 
-import aiofiles.os
-
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.types import PathSpec
@@ -37,6 +35,5 @@ async def copy(accessor: DiskAccessor, src_spec: PathSpec,
     root = accessor.root
     s = _resolve(root, src)
     d = _resolve(root, dst)
-    await aiofiles.os.makedirs(d.parent, exist_ok=True)
     await asyncio.to_thread(shutil.copy2, s, d)
     await invalidate_after_write(dst_spec)

@@ -307,7 +307,15 @@ export { fmtGeneric } from './commands/builtin/generic/fmt.ts'
 export { headStream } from './commands/builtin/generic/head.ts'
 export { basenameFn } from './commands/builtin/generic/basename.ts'
 export { dirnameFn } from './commands/builtin/generic/dirname.ts'
-export { gnuBasename, gnuDirname, norm, parent, posixNormpath, resolvePath } from './utils/path.ts'
+export {
+  ancestors,
+  gnuBasename,
+  gnuDirname,
+  norm,
+  parent,
+  posixNormpath,
+  resolvePath,
+} from './utils/path.ts'
 export { shlexSplit } from './utils/shlex.ts'
 export {
   DEFAULT_MAX_GLOB_MATCHES,

@@ -19,6 +19,7 @@ import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.disk.errors import disk_errors
 from mirage.observe.context import record
 from mirage.types import PathSpec
 
@@ -36,8 +37,9 @@ async def write_bytes(accessor: DiskAccessor, path_spec: PathSpec,
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
     p = _resolve(root, path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    async with aiofiles.open(p, "wb") as f:
-        await f.write(data)
+    with disk_errors(path_spec.virtual):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(p, "wb") as f:
+            await f.write(data)
     record("write", path, "disk", len(data), start_ms)
     await invalidate_after_write(path_spec)

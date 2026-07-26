@@ -12,18 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
+import { enoent, invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm, nowIso } from './utils.ts'
+import { checkDestParents } from './dest.ts'
 
 export async function copy(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.mountPath)
   const d = norm(dst.mountPath)
   const store = accessor.store
+  await checkDestParents(store, dst, d)
   const data = await store.getFile(s)
-  if (data === null) {
-    throw new Error(`file not found: ${s}`)
-  }
+  if (data === null) throw enoent(src)
   await store.setFile(d, data)
   await store.setModified(d, nowIso())
   await invalidateAfterWrite(dst)

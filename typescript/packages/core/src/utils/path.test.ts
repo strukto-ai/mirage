@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  ancestors,
   CycleError,
   expandTilde,
   globPrefixMatch,
@@ -129,5 +130,23 @@ describe('resolvePath', () => {
 
   it('normalizes .. segments', () => {
     expect(resolvePath('../file.txt', '/cwd/sub')).toBe('/cwd/file.txt')
+  })
+})
+
+describe('ancestors', () => {
+  it('lists proper parents outermost first', () => {
+    expect(ancestors('/a/b/c')).toEqual(['/a', '/a/b'])
+  })
+
+  it('a root child has none', () => {
+    expect(ancestors('/a')).toEqual([])
+  })
+
+  it('root has none', () => {
+    expect(ancestors('/')).toEqual([])
+  })
+
+  it('tolerates a trailing slash', () => {
+    expect(ancestors('/a/b/')).toEqual(['/a'])
   })
 })

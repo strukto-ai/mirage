@@ -18,6 +18,7 @@ import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.core.disk.errors import disk_errors
 from mirage.types import PathSpec
 
 
@@ -33,14 +34,15 @@ async def mkdir(accessor: DiskAccessor,
                 parents: bool = False) -> None:
     path = path_spec.mount_path
     p = _resolve(accessor.root, path)
-    if parents:
-        await aiofiles.os.makedirs(p, exist_ok=True)
-    else:
-        try:
-            await aiofiles.os.mkdir(p)
-        except FileExistsError:
-            # mkdir -p semantics: an existing directory is success
-            pass
+    with disk_errors(path_spec.virtual):
+        if parents:
+            await aiofiles.os.makedirs(p, exist_ok=True)
+        else:
+            try:
+                await aiofiles.os.mkdir(p)
+            except FileExistsError:
+                # mkdir -p semantics: an existing directory is success
+                pass
     await invalidate_after_write(path_spec)
     if parents:
         await invalidate_ancestors(path_spec)

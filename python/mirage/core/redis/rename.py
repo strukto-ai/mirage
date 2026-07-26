@@ -15,6 +15,7 @@
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
+from mirage.core.redis.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -30,6 +31,7 @@ async def rename(
     store = accessor.store
     s, d = norm(src), norm(dst)
     now = now_iso()
+    await check_dest_parents(store, dst_spec, d)
     if await store.has_file(s):
         data = await store.get_file(s) or b""
         mod = await store.get_modified(s)

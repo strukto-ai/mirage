@@ -25,13 +25,7 @@ import {
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { DEFAULT_BACKUP_SUFFIX, backupControl, siblingPath } from '../utils/backup.ts'
-import {
-  backendKeyDefault,
-  copyTargets,
-  isDirectory,
-  pathExists,
-  type BackendKeyFn,
-} from '../utils/copy.ts'
+import { backendKeyDefault, copyTargets, pathExists, type BackendKeyFn } from '../utils/copy.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
@@ -302,6 +296,7 @@ export async function mvGeneric(
   const [sources, dstOperand] = splitOperands('mv', paths, flags.targetDir, flags.noTargetDir)
   let dst: PathSpec
   let dstIsDir: boolean
+  let dstExists: boolean
   if (dstOperand === null) {
     const firstSource = sources[0]
     if (firstSource === undefined) return [null, new IOResult()]
@@ -314,12 +309,16 @@ export async function mvGeneric(
       return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
     }
     dstIsDir = true
+    dstExists = true
   } else if (flags.noTargetDir) {
     dst = dstOperand
     dstIsDir = false
+    dstExists = true
   } else {
     dst = dstOperand
-    dstIsDir = await isDirectory(stat, dst, index)
+    const probe = await entryKind(stat, dst)
+    dstExists = probe.exists
+    dstIsDir = probe.isDir
   }
   let versionReaddir = readdir
   if (versionReaddir === undefined && isPrimitiveMove(strategy)) {
@@ -335,7 +334,7 @@ export async function mvGeneric(
   const writes: Record<string, ByteSource> = {}
   const lines: string[] = []
   const errors: string[] = []
-  for (const [src, target] of copyTargets(sources, dst, dstIsDir)) {
+  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists)) {
     const { exists: srcExists, isDir: srcIsDir } = await entryKind(stat, src)
     if (!srcExists) {
       errors.push(`mv: cannot stat '${src.virtual}': No such file or directory`)
@@ -433,7 +432,19 @@ export async function mvGeneric(
       // entries it could not remove.
       if (!removedAll) continue
     } else {
-      await strategy.rename(src, target)
+      try {
+        await strategy.rename(src, target)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        // A backend rename that refuses (e.g. a destination whose parent
+        // chain is not all directories) is one failed operand, not an
+        // aborted command: GNU reports it and keeps going with the
+        // remaining sources.
+        errors.push(
+          `mv: cannot move '${src.virtual}' to '${target.virtual}': ${String(fsStrerror(err))}`,
+        )
+        continue
+      }
       writes[src.mountPath] = new Uint8Array()
       writes[target.mountPath] = new Uint8Array()
     }

@@ -13,22 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { copyFile, mkdir } from 'node:fs/promises'
-import path from 'node:path'
-import { enoent, invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
+import { copyFile } from 'node:fs/promises'
+import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
+import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
 
 export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = resolveSafe(accessor.root, src.mountPath)
   const d = resolveSafe(accessor.root, dst.mountPath)
-  await mkdir(path.dirname(d), { recursive: true })
   try {
     await copyFile(s, d)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw enoent(src)
-    }
-    throw err
+    throw diskError(err, (err as NodeJS.ErrnoException).code === 'ENOENT' ? src : dst)
   }
   await invalidateAfterWrite(dst)
 }

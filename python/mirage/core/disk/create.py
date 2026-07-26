@@ -19,6 +19,7 @@ import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.disk.errors import disk_errors
 from mirage.types import PathSpec
 
 
@@ -32,7 +33,8 @@ def _resolve(root: Path, path: str) -> Path:
 async def create(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     path = path_spec.mount_path
     p = _resolve(accessor.root, path)
-    await aiofiles.os.makedirs(p.parent, exist_ok=True)
-    async with aiofiles.open(p, "wb") as f:
-        await f.write(b"")
+    with disk_errors(path_spec.virtual):
+        await aiofiles.os.makedirs(p.parent, exist_ok=True)
+        async with aiofiles.open(p, "wb") as f:
+            await f.write(b"")
     await invalidate_after_write(path_spec)

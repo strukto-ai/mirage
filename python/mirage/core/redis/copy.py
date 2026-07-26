@@ -14,6 +14,7 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.redis.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -28,6 +29,7 @@ async def copy(
     dst = dst_spec.mount_path
     store = accessor.store
     s, d = norm(src), norm(dst)
+    await check_dest_parents(store, dst_spec, d)
     data = await store.get_file(s)
     if data is None:
         raise FileNotFoundError(s)
