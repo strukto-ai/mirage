@@ -50,7 +50,18 @@ def known_service():
 
 @pytest.mark.asyncio
 async def test_read_trace(accessor, index):
-    doc = {"traceID": TRACE_A, "spans": [{"operationName": "POST /checkout"}]}
+    doc = {
+        "traceID": TRACE_A,
+        "spans": [{
+            "operationName": "POST /checkout",
+            "processID": "p1"
+        }],
+        "processes": {
+            "p1": {
+                "serviceName": "checkout"
+            }
+        },
+    }
     with known_service():
         with patch("mirage.core.jaeger.read.fetch_trace",
                    new_callable=AsyncMock,
@@ -59,6 +70,46 @@ async def test_read_trace(accessor, index):
                              spec(f"services/checkout/traces/{TRACE_A}.json"),
                              index)
     assert json.loads(raw) == doc
+
+
+@pytest.mark.asyncio
+async def test_read_trace_rejects_foreign_service(accessor, index):
+    # stat and ls report this path absent, so cat must agree; reading by id
+    # would otherwise serve any trace through any service directory.
+    doc = {
+        "traceID": TRACE_A,
+        "spans": [{
+            "operationName": "POST /checkout",
+            "processID": "p1"
+        }],
+        "processes": {
+            "p1": {
+                "serviceName": "checkout"
+            }
+        },
+    }
+    with patch("mirage.core.jaeger.readdir.fetch_services",
+               new_callable=AsyncMock,
+               return_value=["checkout", "search"]):
+        with patch("mirage.core.jaeger.read.fetch_trace",
+                   new_callable=AsyncMock,
+                   return_value=doc):
+            with pytest.raises(FileNotFoundError):
+                await read(accessor,
+                           spec(f"services/search/traces/{TRACE_A}.json"),
+                           index)
+
+
+@pytest.mark.asyncio
+async def test_read_trace_rejects_unknown_service(accessor, index):
+    with known_service():
+        with patch("mirage.core.jaeger.read.fetch_trace",
+                   new_callable=AsyncMock,
+                   return_value={"traceID": TRACE_A}) as fetch:
+            with pytest.raises(FileNotFoundError):
+                await read(accessor,
+                           spec(f"services/nope/traces/{TRACE_A}.json"), index)
+    fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

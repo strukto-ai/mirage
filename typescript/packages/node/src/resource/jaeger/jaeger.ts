@@ -52,8 +52,9 @@ export class JaegerResource extends BaseResource implements Resource {
   constructor(config: JaegerConfig) {
     super()
     this.config = config
-    const transportOpts: { host?: string } = {}
+    const transportOpts: { host?: string; timeout?: number } = {}
     if (config.host !== undefined) transportOpts.host = config.host
+    if (config.requestTimeout !== undefined) transportOpts.timeout = config.requestTimeout
     const accessorConfig: {
       defaultTraceLimit?: number
       defaultFromTimestamp?: string

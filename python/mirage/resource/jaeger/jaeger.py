@@ -15,7 +15,9 @@
 from typing import Any
 
 from mirage.accessor.jaeger import JaegerAccessor
+from mirage.commands.builtin.jaeger import COMMANDS
 from mirage.core.jaeger.readdir import readdir
+from mirage.ops.jaeger import OPS as JAEGER_VFS_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.jaeger.config import JaegerConfig
 from mirage.resource.jaeger.prompt import PROMPT
@@ -36,9 +38,6 @@ class JaegerResource(BaseResource):
         super().__init__()
         self.config = config
         self.accessor = JaegerAccessor(self.config)
-        from mirage.commands.builtin.jaeger import COMMANDS
-        from mirage.ops.jaeger import OPS as JAEGER_VFS_OPS
-
         for command in COMMANDS:
             self.register(command)
         for op in JAEGER_VFS_OPS:

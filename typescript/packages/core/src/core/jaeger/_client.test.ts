@@ -13,7 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { JaegerApiError, fetchTraces, isTraceId, type JaegerTransport } from './_client.ts'
+import {
+  HttpJaegerTransport,
+  JaegerApiError,
+  fetchTraces,
+  isTraceId,
+  type JaegerTransport,
+} from './_client.ts'
+
+// Captures the fetch init so the request deadline can be asserted, and never
+// settles on its own so only the abort can end the request.
+class StalledTransport extends HttpJaegerTransport {
+  init: RequestInit | undefined
+  protected override readonly fetch: typeof fetch = (_url, init) => {
+    this.init = init
+    return new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new Error('aborted by deadline'))
+      })
+    })
+  }
+}
 
 class RecordingTransport implements JaegerTransport {
   readonly calls: { path: string; query?: Record<string, string | number | undefined> }[] = []
@@ -71,5 +91,13 @@ describe('jaeger fetchTraces window', () => {
   it('propagates api errors', async () => {
     const transport = new RecordingTransport(null, new JaegerApiError('bad request', 400))
     await expect(fetchTraces(transport, 'checkout')).rejects.toBeInstanceOf(JaegerApiError)
+  })
+})
+
+describe('jaeger request deadline', () => {
+  it('aborts a stalled request after the configured timeout', async () => {
+    const transport = new StalledTransport({ timeout: 0.01 })
+    await expect(transport.request('/api/services')).rejects.toThrow('aborted by deadline')
+    expect(transport.init?.signal).toBeInstanceOf(AbortSignal)
   })
 })

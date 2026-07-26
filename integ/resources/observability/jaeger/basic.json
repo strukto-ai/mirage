@@ -246,6 +246,32 @@
         "stdout": "",
         "stderr": "stat: /j/services/checkout-api/traces/00000000000000000000000000000000.json: No such file or directory\n"
       }
+    },
+    {
+      "id": "jg_foreign_service_cat",
+      "seq": 610019,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json: No such file or directory\n"
+      }
+    },
+    {
+      "id": "jg_foreign_service_stat",
+      "seq": 610020,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json: No such file or directory\n"
+      }
     }
   ]
 }

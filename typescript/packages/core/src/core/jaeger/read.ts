@@ -26,6 +26,23 @@ function toJsonBytes(data: unknown): Uint8Array {
   return ENC.encode(JSON.stringify(data, null, 2))
 }
 
+// Whether any span in the trace was emitted by the service. A trace is fetched
+// by id from the global endpoint, so the id alone does not place it under the
+// service directory it was addressed through. Membership is read from the
+// trace's own process table rather than the service listing, which is windowed
+// and limited and would hide a trace that really belongs.
+function hasService(trace: unknown, service: string): boolean {
+  if (trace === null || typeof trace !== 'object') return false
+  const processes = (trace as { processes?: unknown }).processes
+  if (processes === null || typeof processes !== 'object') return false
+  return Object.values(processes as Record<string, unknown>).some(
+    (p) =>
+      p !== null &&
+      typeof p === 'object' &&
+      (p as { serviceName?: unknown }).serviceName === service,
+  )
+}
+
 export async function read(
   accessor: JaegerAccessor,
   path: PathSpec,
@@ -44,17 +61,23 @@ export async function read(
   }
 
   if (scope.level === 'trace') {
+    const service = scope.service ?? ''
     const traceId = scope.traceId ?? ''
     // A malformed id cannot name an existing trace, so it is ENOENT rather
     // than the API's 400 "invalid length for TraceID".
     if (!isTraceId(traceId)) throw enoent(path)
+    await assertService(accessor, service, path)
+    let trace: unknown
     try {
-      const trace = await fetchTrace(accessor.transport, traceId)
-      return toJsonBytes(trace)
+      trace = await fetchTrace(accessor.transport, traceId)
     } catch (err) {
       if (err instanceof JaegerApiError && err.status === 404) throw enoent(path)
       throw err
     }
+    // Reading by id would otherwise serve any trace through any service
+    // directory, contradicting stat and ls for the same path.
+    if (!hasService(trace, service)) throw enoent(path)
+    return toJsonBytes(trace)
   }
 
   throw enoent(path)

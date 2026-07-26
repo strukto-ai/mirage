@@ -64,7 +64,11 @@ class ThrowingTransport implements JaegerTransport {
 
 describe('jaeger read', () => {
   it('renders a trace document', async () => {
-    const doc = { traceID: TRACE_A, spans: [{ operationName: 'POST /checkout' }] }
+    const doc = {
+      traceID: TRACE_A,
+      spans: [{ operationName: 'POST /checkout', processID: 'p1' }],
+      processes: { p1: { serviceName: 'checkout' } },
+    }
     const transport = new RecordingTransport({
       ...SERVICES,
       [`/api/traces/${TRACE_A}`]: { data: [doc] },
@@ -75,6 +79,41 @@ describe('jaeger read', () => {
       new RAMIndexCacheStore(),
     )
     expect(JSON.parse(DEC.decode(bytes))).toEqual(doc)
+  })
+
+  it('refuses a trace addressed through a service that did not emit it', async () => {
+    // stat and ls report this path absent, so cat must agree; reading by id
+    // would otherwise serve any trace through any service directory.
+    const doc = {
+      traceID: TRACE_A,
+      spans: [{ operationName: 'POST /checkout', processID: 'p1' }],
+      processes: { p1: { serviceName: 'checkout' } },
+    }
+    const transport = new RecordingTransport({
+      '/api/services': { data: ['checkout', 'search'] },
+      [`/api/traces/${TRACE_A}`]: { data: [doc] },
+    })
+    await expect(
+      read(
+        accessor(transport),
+        spec(`/services/search/traces/${TRACE_A}.json`),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('refuses a trace under an unknown service', async () => {
+    const transport = new RecordingTransport({
+      ...SERVICES,
+      [`/api/traces/${TRACE_A}`]: { data: [{ traceID: TRACE_A }] },
+    })
+    await expect(
+      read(
+        accessor(transport),
+        spec(`/services/nope/traces/${TRACE_A}.json`),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('renders the operations list', async () => {

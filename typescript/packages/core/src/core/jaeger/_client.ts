@@ -44,8 +44,12 @@ export interface JaegerTransport {
 
 export interface HttpJaegerTransportOptions {
   host?: string
+  // Seconds, mirroring python's JaegerConfig.request_timeout and the
+  // requestTimeout config field it is normalized from.
   timeout?: number
 }
+
+const DEFAULT_TIMEOUT_SECONDS = 30
 
 function buildUrl(
   base: string,
@@ -78,18 +82,23 @@ function errorMessage(body: unknown, status: number): string {
 export class HttpJaegerTransport implements JaegerTransport {
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
   private readonly host: string
+  private readonly timeoutSeconds: number
 
   constructor(opts: HttpJaegerTransportOptions = {}) {
     this.host = opts.host ?? 'http://localhost:16686'
+    this.timeoutSeconds = opts.timeout ?? DEFAULT_TIMEOUT_SECONDS
   }
 
   async request(
     path: string,
     query: Record<string, string | number | undefined> = {},
   ): Promise<unknown> {
+    // Without a deadline a stalled Jaeger endpoint hangs the command forever;
+    // python gets this from the httpx timeout.
     const res = await this.fetch(buildUrl(this.host, path, query), {
       method: 'GET',
       headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(this.timeoutSeconds * 1000),
     })
     let body: unknown
     try {

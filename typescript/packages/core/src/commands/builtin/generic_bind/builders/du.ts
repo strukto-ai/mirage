@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isMissingPath } from '../../../../utils/errors.ts'
 import { rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
@@ -67,7 +68,11 @@ export const DU_BUILDER: Builder = {
       try {
         await ops.stat(accessor, p, idx)
         present.push(p)
-      } catch {
+      } catch (err) {
+        // Only a genuinely absent path is an operand error. An auth failure,
+        // a transport error or a backend bug must not read back as "missing",
+        // which would print a wrong reason and a partial total.
+        if (!isMissingPath(err)) throw err
         errors.push(`du: cannot access '${p.rawPath}': No such file or directory`)
       }
     }
