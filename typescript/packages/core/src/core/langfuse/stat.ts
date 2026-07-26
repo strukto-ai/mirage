@@ -17,12 +17,13 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { readdir } from './readdir.ts'
 
 const TOP_LEVEL_DIRS = new Set(['traces', 'sessions', 'prompts', 'datasets'])
 
 function basenameOf(entry: string): string {
-  const trimmed = entry.replace(/\/+$/, '')
+  const trimmed = rstripSlash(entry)
   return trimmed.slice(trimmed.lastIndexOf('/') + 1)
 }
 
@@ -40,7 +41,7 @@ async function assertListed(
   prefix: string,
   index?: IndexCacheStore,
 ): Promise<void> {
-  const virtual = path.virtual.replace(/\/+$/, '')
+  const virtual = rstripSlash(path.virtual)
   const parentVirtual = virtual.slice(0, virtual.lastIndexOf('/')) || '/'
   const entries = await readdir(
     accessor,

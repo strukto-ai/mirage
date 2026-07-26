@@ -34,7 +34,8 @@ class JaegerAccessor(Accessor):
             )
         return self._client
 
-    async def request(self, endpoint: str,
+    async def request(self,
+                      endpoint: str,
                       params: dict[str, Any] | None = None) -> httpx.Response:
         return await self.get_client().get(endpoint, params=params)
 

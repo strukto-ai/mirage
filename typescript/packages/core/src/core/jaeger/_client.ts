@@ -68,7 +68,8 @@ function errorMessage(body: unknown, status: number): string {
     const errors = (body as Record<string, unknown>).errors
     if (Array.isArray(errors) && errors.length > 0) {
       const first = errors[0] as Record<string, unknown> | undefined
-      if (first?.msg !== undefined) return String(first.msg)
+      const msg = first?.msg
+      if (typeof msg === 'string' && msg !== '') return msg
     }
   }
   return `Jaeger API error: HTTP ${String(status)}`

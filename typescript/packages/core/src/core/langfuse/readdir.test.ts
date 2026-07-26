@@ -58,8 +58,11 @@ describe('langfuse readdir prompt versions', () => {
         ],
       },
     })
-    const entries = await readdir(accessor(transport), spec('/prompts/greeting'),
-      new RAMIndexCacheStore())
+    const entries = await readdir(
+      accessor(transport),
+      spec('/prompts/greeting'),
+      new RAMIndexCacheStore(),
+    )
     expect(entries).toEqual(['/prompts/greeting/1.json', '/prompts/greeting/2.json'])
   })
 
@@ -72,8 +75,7 @@ describe('langfuse readdir prompt versions', () => {
         ],
       },
     })
-    const entries = await readdir(accessor(transport), spec('/prompts'),
-      new RAMIndexCacheStore())
+    const entries = await readdir(accessor(transport), spec('/prompts'), new RAMIndexCacheStore())
     expect(entries).toEqual(['/prompts/greeting', '/prompts/qa-template'])
   })
 })
@@ -85,8 +87,7 @@ describe('langfuse readdir trace window', () => {
     const transport = new RecordingTransport({
       '/api/public/traces': { data: [{ id: 'trace-old' }] },
     })
-    const entries = await readdir(accessor(transport), spec('/traces'),
-      new RAMIndexCacheStore())
+    const entries = await readdir(accessor(transport), spec('/traces'), new RAMIndexCacheStore())
     expect(entries).toEqual(['/traces/trace-old.json'])
     expect(transport.calls[0]?.query).not.toHaveProperty('fromTimestamp')
   })

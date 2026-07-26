@@ -68,28 +68,40 @@ describe('jaeger stat', () => {
   })
 
   it('stats a known service', async () => {
-    const s = await stat(accessor(new RecordingTransport(SERVICES)), spec('/services/checkout'),
-      new RAMIndexCacheStore())
+    const s = await stat(
+      accessor(new RecordingTransport(SERVICES)),
+      spec('/services/checkout'),
+      new RAMIndexCacheStore(),
+    )
     expect(s.type).toBe(FileType.DIRECTORY)
     expect(s.extra.service).toBe('checkout')
   })
 
   it('raises ENOENT for an unknown service', async () => {
     await expect(
-      stat(accessor(new RecordingTransport(SERVICES)), spec('/services/nope'),
-        new RAMIndexCacheStore()),
+      stat(
+        accessor(new RecordingTransport(SERVICES)),
+        spec('/services/nope'),
+        new RAMIndexCacheStore(),
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('stats the operations file', async () => {
-    const s = await stat(accessor(new RecordingTransport(SERVICES)),
-      spec('/services/checkout/operations.json'), new RAMIndexCacheStore())
+    const s = await stat(
+      accessor(new RecordingTransport(SERVICES)),
+      spec('/services/checkout/operations.json'),
+      new RAMIndexCacheStore(),
+    )
     expect(s.type).toBe(FileType.JSON)
   })
 
   it('stats a listed trace', async () => {
-    const s = await stat(accessor(new RecordingTransport(LISTED)),
-      spec(`/services/checkout/traces/${TRACE_A}.json`), new RAMIndexCacheStore())
+    const s = await stat(
+      accessor(new RecordingTransport(LISTED)),
+      spec(`/services/checkout/traces/${TRACE_A}.json`),
+      new RAMIndexCacheStore(),
+    )
     expect(s.type).toBe(FileType.JSON)
     expect(s.extra.trace_id).toBe(TRACE_A)
   })
@@ -97,8 +109,11 @@ describe('jaeger stat', () => {
   it('raises ENOENT for a well-formed id that is not listed', async () => {
     // A well-formed id is not evidence the trace exists.
     await expect(
-      stat(accessor(new RecordingTransport(LISTED)),
-        spec(`/services/checkout/traces/${TRACE_B}.json`), new RAMIndexCacheStore()),
+      stat(
+        accessor(new RecordingTransport(LISTED)),
+        spec(`/services/checkout/traces/${TRACE_B}.json`),
+        new RAMIndexCacheStore(),
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 

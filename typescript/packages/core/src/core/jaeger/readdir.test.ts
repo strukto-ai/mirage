@@ -54,32 +54,41 @@ const SERVICES = { '/api/services': { data: ['checkout', 'search'] } }
 
 describe('jaeger readdir', () => {
   it('lists the top level', async () => {
-    const out = await readdir(accessor(new RecordingTransport({})), spec('/'),
-      new RAMIndexCacheStore())
+    const out = await readdir(
+      accessor(new RecordingTransport({})),
+      spec('/'),
+      new RAMIndexCacheStore(),
+    )
     expect(out).toEqual(['/services'])
   })
 
   it('lists services', async () => {
-    const out = await readdir(accessor(new RecordingTransport(SERVICES)), spec('/services'),
-      new RAMIndexCacheStore())
+    const out = await readdir(
+      accessor(new RecordingTransport(SERVICES)),
+      spec('/services'),
+      new RAMIndexCacheStore(),
+    )
     expect(out).toEqual(['/services/checkout', '/services/search'])
   })
 
-  it('lists a service\'s children', async () => {
-    const out = await readdir(accessor(new RecordingTransport(SERVICES)),
-      spec('/services/checkout'), new RAMIndexCacheStore())
-    expect(out).toEqual([
-      '/services/checkout/operations.json',
-      '/services/checkout/traces',
-    ])
+  it("lists a service's children", async () => {
+    const out = await readdir(
+      accessor(new RecordingTransport(SERVICES)),
+      spec('/services/checkout'),
+      new RAMIndexCacheStore(),
+    )
+    expect(out).toEqual(['/services/checkout/operations.json', '/services/checkout/traces'])
   })
 
   it('raises ENOENT for an unknown service', async () => {
     // The operations endpoint answers 200 with an empty list for a service
     // that was never seen, so existence must come from the service list.
     await expect(
-      readdir(accessor(new RecordingTransport(SERVICES)), spec('/services/nope'),
-        new RAMIndexCacheStore()),
+      readdir(
+        accessor(new RecordingTransport(SERVICES)),
+        spec('/services/nope'),
+        new RAMIndexCacheStore(),
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -88,8 +97,11 @@ describe('jaeger readdir', () => {
       ...SERVICES,
       '/api/traces': { data: [{ traceID: TRACE_A }, { traceID: TRACE_B }] },
     })
-    const out = await readdir(accessor(transport), spec('/services/checkout/traces'),
-      new RAMIndexCacheStore())
+    const out = await readdir(
+      accessor(transport),
+      spec('/services/checkout/traces'),
+      new RAMIndexCacheStore(),
+    )
     expect(out).toEqual([
       `/services/checkout/traces/${TRACE_A}.json`,
       `/services/checkout/traces/${TRACE_B}.json`,
@@ -101,8 +113,11 @@ describe('jaeger readdir', () => {
       ...SERVICES,
       '/api/traces': { data: [{ traceID: TRACE_A }, { traceID: 'not-an-id' }, {}] },
     })
-    const out = await readdir(accessor(transport), spec('/services/checkout/traces'),
-      new RAMIndexCacheStore())
+    const out = await readdir(
+      accessor(transport),
+      spec('/services/checkout/traces'),
+      new RAMIndexCacheStore(),
+    )
     expect(out).toEqual([`/services/checkout/traces/${TRACE_A}.json`])
   })
 

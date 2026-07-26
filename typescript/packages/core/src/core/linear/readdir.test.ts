@@ -35,8 +35,11 @@ describe('linear readdir unrecognized paths', () => {
     // Returning [] made `ls` and `tree` report a bogus path as real-but-empty,
     // and left `rg` without a message.
     await expect(
-      readdir(new LinearAccessor(new NoopTransport()), spec('/__nf_missing__'),
-        new RAMIndexCacheStore()),
+      readdir(
+        new LinearAccessor(new NoopTransport()),
+        spec('/__nf_missing__'),
+        new RAMIndexCacheStore(),
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 

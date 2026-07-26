@@ -35,10 +35,16 @@ TRACES = [
         "userId": "user-ana",
         "sessionId": "session-one",
         "timestamp": "2026-01-01T00:00:00.000Z",
-        "input": {"cart": "two items"},
-        "output": {"status": "confirmed"},
+        "input": {
+            "cart": "two items"
+        },
+        "output": {
+            "status": "confirmed"
+        },
         "tags": ["checkout", "prod"],
-        "metadata": {"region": "eu-west"},
+        "metadata": {
+            "region": "eu-west"
+        },
     },
     {
         "event_id": "22222222-2222-4222-8222-222222222222",
@@ -47,10 +53,16 @@ TRACES = [
         "userId": "user-bo",
         "sessionId": "session-one",
         "timestamp": "2026-01-01T00:05:00.000Z",
-        "input": {"query": "running shoes"},
-        "output": {"hits": 12},
+        "input": {
+            "query": "running shoes"
+        },
+        "output": {
+            "hits": 12
+        },
         "tags": ["search"],
-        "metadata": {"region": "us-east"},
+        "metadata": {
+            "region": "us-east"
+        },
     },
     {
         "event_id": "33333333-3333-4333-8333-333333333333",
@@ -59,10 +71,16 @@ TRACES = [
         "userId": "user-ana",
         "sessionId": "session-two",
         "timestamp": "2026-01-01T00:10:00.000Z",
-        "input": {"doc": "quarterly report"},
-        "output": {"summary": "revenue grew"},
+        "input": {
+            "doc": "quarterly report"
+        },
+        "output": {
+            "summary": "revenue grew"
+        },
         "tags": ["summarize", "prod"],
-        "metadata": {"region": "eu-west"},
+        "metadata": {
+            "region": "eu-west"
+        },
     },
 ]
 
@@ -80,8 +98,12 @@ OBSERVATIONS = [
             "name": "validate-cart",
             "startTime": "2026-01-01T00:00:01.000Z",
             "endTime": "2026-01-01T00:00:02.000Z",
-            "input": {"items": 2},
-            "output": {"valid": True},
+            "input": {
+                "items": 2
+            },
+            "output": {
+                "valid": True
+            },
             "level": "DEFAULT",
         },
     },
@@ -97,8 +119,13 @@ OBSERVATIONS = [
             "startTime": "2026-01-01T00:00:01.200Z",
             "endTime": "2026-01-01T00:00:01.800Z",
             "model": "gpt-4o-mini",
-            "input": [{"role": "user", "content": "describe the order"}],
-            "output": {"content": "two items, confirmed"},
+            "input": [{
+                "role": "user",
+                "content": "describe the order"
+            }],
+            "output": {
+                "content": "two items, confirmed"
+            },
             "level": "DEFAULT",
         },
     },
@@ -135,14 +162,23 @@ PROMPTS = [
         "version": 2,
     },
     {
-        "name": "qa-template",
-        "type": "chat",
+        "name":
+        "qa-template",
+        "type":
+        "chat",
         "prompt": [
-            {"role": "system", "content": "Answer briefly."},
-            {"role": "user", "content": "{{question}}"},
+            {
+                "role": "system",
+                "content": "Answer briefly."
+            },
+            {
+                "role": "user",
+                "content": "{{question}}"
+            },
         ],
         "labels": ["production"],
-        "version": 1,
+        "version":
+        1,
     },
 ]
 
@@ -152,14 +188,22 @@ DATASET_ITEMS = [
     {
         "id": "item-one",
         "datasetName": "eval-basic",
-        "input": {"question": "capital of france"},
-        "expectedOutput": {"answer": "paris"},
+        "input": {
+            "question": "capital of france"
+        },
+        "expectedOutput": {
+            "answer": "paris"
+        },
     },
     {
         "id": "item-two",
         "datasetName": "eval-basic",
-        "input": {"question": "capital of japan"},
-        "expectedOutput": {"answer": "tokyo"},
+        "input": {
+            "question": "capital of japan"
+        },
+        "expectedOutput": {
+            "answer": "tokyo"
+        },
     },
 ]
 
@@ -255,8 +299,10 @@ async def existing_prompt_versions(session: aiohttp.ClientSession, host: str,
         set[int]: versions present on the server.
     """
     status, body = await request(session, host, "GET",
-                                "/api/public/v2/prompts", None,
-                                {"name": name, "limit": "100"})
+                                 "/api/public/v2/prompts", None, {
+                                     "name": name,
+                                     "limit": "100"
+                                 })
     if status != 200 or not isinstance(body, dict):
         return set()
     # The list endpoint returns PromptMeta rows, which carry every version in a
@@ -366,7 +412,7 @@ async def ingest_traces(session: aiohttp.ClientSession, host: str) -> None:
             "body": extra["body"],
         })
     status, body = await request(session, host, "POST",
-                                "/api/public/ingestion", {"batch": batch})
+                                 "/api/public/ingestion", {"batch": batch})
     if status not in (200, 201, 207):
         raise RuntimeError(f"ingestion failed: {status} {body}")
     if isinstance(body, dict) and body.get("errors"):

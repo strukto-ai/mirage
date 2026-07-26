@@ -118,10 +118,7 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.resourcePath)
-  const path = (pathSpec.pattern !== undefined && pathSpec.pattern !== null
-    ? pathSpec.dir
-    : pathSpec
-  ).mountPath
+  const path = (pathSpec.pattern !== null ? pathSpec.dir : pathSpec).mountPath
   const key = stripSlash(path)
 
   if (key !== '' && key.split('/').some((p) => p.startsWith('.'))) throw enoent(pathSpec)

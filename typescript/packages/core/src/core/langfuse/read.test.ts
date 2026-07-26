@@ -132,10 +132,7 @@ describe('langfuse read dataset items', () => {
     )
     const lines = DEC.decode(bytes).trimEnd().split('\n')
     expect(lines).toHaveLength(2)
-    expect(lines.map((l) => (JSON.parse(l) as { id: string }).id)).toEqual([
-      'item-one',
-      'item-two',
-    ])
+    expect(lines.map((l) => (JSON.parse(l) as { id: string }).id)).toEqual(['item-one', 'item-two'])
   })
 
   it('renders an empty dataset as an empty file', async () => {

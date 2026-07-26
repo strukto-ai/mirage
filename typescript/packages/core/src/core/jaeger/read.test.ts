@@ -20,7 +20,6 @@ import { stripSlash } from '../../utils/slash.ts'
 import type { JaegerTransport } from './_client.ts'
 
 const TRACE_A = 'a'.repeat(32)
-const TRACE_B = 'b'.repeat(32)
 
 interface Call {
   path: string
@@ -66,41 +65,59 @@ class ThrowingTransport implements JaegerTransport {
 describe('jaeger read', () => {
   it('renders a trace document', async () => {
     const doc = { traceID: TRACE_A, spans: [{ operationName: 'POST /checkout' }] }
-    const transport = new RecordingTransport({ ...SERVICES, [`/api/traces/${TRACE_A}`]: { data: [doc] } })
-    const bytes = await read(accessor(transport), spec(`/services/checkout/traces/${TRACE_A}.json`),
-      new RAMIndexCacheStore())
+    const transport = new RecordingTransport({
+      ...SERVICES,
+      [`/api/traces/${TRACE_A}`]: { data: [doc] },
+    })
+    const bytes = await read(
+      accessor(transport),
+      spec(`/services/checkout/traces/${TRACE_A}.json`),
+      new RAMIndexCacheStore(),
+    )
     expect(JSON.parse(DEC.decode(bytes))).toEqual(doc)
   })
 
   it('renders the operations list', async () => {
     const ops = [{ name: 'POST /checkout', spanKind: 'server' }]
     const transport = new RecordingTransport({ ...SERVICES, '/api/operations': { data: ops } })
-    const bytes = await read(accessor(transport), spec('/services/checkout/operations.json'),
-      new RAMIndexCacheStore())
+    const bytes = await read(
+      accessor(transport),
+      spec('/services/checkout/operations.json'),
+      new RAMIndexCacheStore(),
+    )
     expect(JSON.parse(DEC.decode(bytes))).toEqual(ops)
   })
 
   it('treats a malformed trace id as ENOENT without calling the api', async () => {
     const transport = new RecordingTransport(SERVICES)
     await expect(
-      read(accessor(transport), spec('/services/checkout/traces/zzz.json'),
-        new RAMIndexCacheStore()),
+      read(
+        accessor(transport),
+        spec('/services/checkout/traces/zzz.json'),
+        new RAMIndexCacheStore(),
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
     expect(transport.calls.some((c) => c.path.startsWith('/api/traces/'))).toBe(false)
   })
 
   it('maps a missing trace to ENOENT', async () => {
     await expect(
-      read(accessor(new ThrowingTransport(404)), spec(`/services/checkout/traces/${TRACE_A}.json`),
-        new RAMIndexCacheStore()),
+      read(
+        accessor(new ThrowingTransport(404)),
+        spec(`/services/checkout/traces/${TRACE_A}.json`),
+        new RAMIndexCacheStore(),
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('lets a server error propagate', async () => {
     // A server fault must not read as "this trace does not exist".
     await expect(
-      read(accessor(new ThrowingTransport(500)), spec(`/services/checkout/traces/${TRACE_A}.json`),
-        new RAMIndexCacheStore()),
+      read(
+        accessor(new ThrowingTransport(500)),
+        spec(`/services/checkout/traces/${TRACE_A}.json`),
+        new RAMIndexCacheStore(),
+      ),
     ).rejects.toBeInstanceOf(JaegerApiError)
   })
 

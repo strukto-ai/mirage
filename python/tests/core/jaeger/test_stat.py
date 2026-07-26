@@ -86,8 +86,8 @@ async def test_stat_unknown_service_raises(accessor, index):
 @pytest.mark.asyncio
 async def test_stat_operations_file(accessor, index):
     with known_service():
-        result = await stat(accessor, spec("services/checkout/operations.json"),
-                            index)
+        result = await stat(accessor,
+                            spec("services/checkout/operations.json"), index)
     assert result.type == FileType.JSON
 
 

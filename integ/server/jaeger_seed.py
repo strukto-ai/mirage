@@ -46,8 +46,13 @@ def attr(key: str, value: str) -> dict:
     return {"key": key, "value": {"stringValue": value}}
 
 
-def span(trace: str, span_id: str, name: str, start: int, duration: int,
-         parent: str | None = None, attrs: list[dict] | None = None,
+def span(trace: str,
+         span_id: str,
+         name: str,
+         start: int,
+         duration: int,
+         parent: str | None = None,
+         attrs: list[dict] | None = None,
          status_code: int = 0) -> dict:
     """Build one OTLP span.
 
@@ -71,7 +76,9 @@ def span(trace: str, span_id: str, name: str, start: int, duration: int,
         "startTimeUnixNano": str(start),
         "endTimeUnixNano": str(start + duration),
         "attributes": attrs or [],
-        "status": {"code": status_code},
+        "status": {
+            "code": status_code
+        },
     }
     if parent is not None:
         out["parentSpanId"] = parent
@@ -89,10 +96,18 @@ PAYLOAD = {
                     "name": "mirage-integ"
                 },
                 "spans": [
-                    span(TRACE_CHECKOUT, "1" * 16, "POST /checkout", T0,
-                         5_000_000, attrs=[attr("http.method", "POST")]),
-                    span(TRACE_CHECKOUT, "2" * 16, "charge-card",
-                         T0 + 1_000_000, 2_000_000, parent="1" * 16),
+                    span(TRACE_CHECKOUT,
+                         "1" * 16,
+                         "POST /checkout",
+                         T0,
+                         5_000_000,
+                         attrs=[attr("http.method", "POST")]),
+                    span(TRACE_CHECKOUT,
+                         "2" * 16,
+                         "charge-card",
+                         T0 + 1_000_000,
+                         2_000_000,
+                         parent="1" * 16),
                 ],
             }],
         },
@@ -119,10 +134,18 @@ PAYLOAD = {
                     "name": "mirage-integ"
                 },
                 "spans": [
-                    span(TRACE_ORDER, "5" * 16, "POST /orders",
-                         T0 + 120_001_000_000, 6_000_000, parent="4" * 16),
-                    span(TRACE_ORDER, "6" * 16, "db.query",
-                         T0 + 120_002_000_000, 2_000_000, parent="5" * 16,
+                    span(TRACE_ORDER,
+                         "5" * 16,
+                         "POST /orders",
+                         T0 + 120_001_000_000,
+                         6_000_000,
+                         parent="4" * 16),
+                    span(TRACE_ORDER,
+                         "6" * 16,
+                         "db.query",
+                         T0 + 120_002_000_000,
+                         2_000_000,
+                         parent="5" * 16,
                          attrs=[attr("db.system", "postgresql")],
                          status_code=2),
                 ],

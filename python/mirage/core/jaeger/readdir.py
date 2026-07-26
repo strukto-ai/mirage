@@ -16,8 +16,8 @@ from mirage.accessor.jaeger import JaegerAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.jaeger._client import (fetch_services, fetch_traces,
                                         is_trace_id)
-from mirage.core.jaeger.scope import OPERATIONS_FILE, TOP_LEVEL_DIRS, \
-    detect_scope
+from mirage.core.jaeger.scope import (OPERATIONS_FILE, TOP_LEVEL_DIRS,
+                                      detect_scope)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of

@@ -68,7 +68,8 @@ def _now_micros() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1_000_000)
 
 
-async def _get(accessor: JaegerAccessor, endpoint: str,
+async def _get(accessor: JaegerAccessor,
+               endpoint: str,
                params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Call the Jaeger query API and return the decoded body.
 

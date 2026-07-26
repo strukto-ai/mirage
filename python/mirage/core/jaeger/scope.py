@@ -57,9 +57,7 @@ def detect_scope(path: PathSpec | str) -> JaegerScope:
     service = parts[1]
 
     if len(parts) == 2:
-        return JaegerScope(level="service",
-                           service=service,
-                           resource_path=raw)
+        return JaegerScope(level="service", service=service, resource_path=raw)
 
     if len(parts) == 3 and parts[2] == OPERATIONS_FILE:
         return JaegerScope(level="operations",
@@ -67,9 +65,7 @@ def detect_scope(path: PathSpec | str) -> JaegerScope:
                            resource_path=raw)
 
     if len(parts) == 3 and parts[2] == "traces":
-        return JaegerScope(level="traces",
-                           service=service,
-                           resource_path=raw)
+        return JaegerScope(level="traces", service=service, resource_path=raw)
 
     if (len(parts) == 4 and parts[2] == "traces"
             and parts[3].endswith(".json")):
