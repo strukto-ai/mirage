@@ -1007,6 +1007,12 @@ jobs:
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node build
 
+      # The typescript runner imports mirage-browser statically for the opfs
+      # target, so its dist must exist even when no browser target runs.
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
+
       # Self-hosted Langfuse needs six containers with real startup ordering
       # (web runs migrations against postgres and clickhouse), so this uses
       # compose health gates rather than a flat `services:` block.
@@ -1106,6 +1112,12 @@ jobs:
       - name: Build mirage-node
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node build
+
+      # The typescript runner imports mirage-browser statically for the opfs
+      # target, so its dist must exist even when no browser target runs.
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
 
       - name: Start fake Trello and Linear APIs
         if: matrix.facet == 'project'
