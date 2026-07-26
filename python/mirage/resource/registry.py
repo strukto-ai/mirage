@@ -152,6 +152,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "langfuse":
     ResourceEntry("mirage.resource.langfuse:LangfuseResource",
                   "mirage.resource.langfuse:LangfuseConfig"),
+    "jaeger":
+    ResourceEntry("mirage.resource.jaeger:JaegerResource",
+                  "mirage.resource.jaeger:JaegerConfig"),
     "ssh":
     ResourceEntry("mirage.resource.ssh:SSHResource",
                   "mirage.resource.ssh:SSHConfig"),

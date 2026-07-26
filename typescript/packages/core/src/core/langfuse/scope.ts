@@ -96,8 +96,11 @@ export function detectScope(path: PathSpec | string): LangfuseScope {
     }
   }
 
+  // An unrecognized path is not the mount root: falling back to 'root' made the
+  // grep/rg search push-down treat any bogus path as "search every trace",
+  // answering a missing file with the whole mount and exit 0.
   return {
-    level: 'root',
+    level: 'unknown',
     resourceType: null,
     resourceId: null,
     subResource: null,

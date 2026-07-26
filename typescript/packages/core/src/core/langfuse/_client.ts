@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../types.ts'
+import { enoent } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export class LangfuseApiError extends Error {
@@ -22,6 +24,21 @@ export class LangfuseApiError extends Error {
   ) {
     super(message)
     this.name = 'LangfuseApiError'
+  }
+}
+
+/**
+ * Await a Langfuse fetch, translating a 404 into ENOENT.
+ *
+ * Every other status stays a LangfuseApiError: only "this resource does not
+ * exist" is a filesystem-level missing file.
+ */
+export async function fetchOrEnoent<T>(pending: Promise<T>, path: PathSpec): Promise<T> {
+  try {
+    return await pending
+  } catch (err) {
+    if (err instanceof LangfuseApiError && err.status === 404) throw enoent(path)
+    throw err
   }
 }
 
@@ -235,7 +252,7 @@ export async function fetchDatasetRuns(
   opts: { limit?: number } = {},
 ): Promise<Record<string, unknown>[]> {
   const body = await transport.request(
-    `/api/public/v2/datasets/${encodeURIComponent(datasetName)}/runs`,
+    `/api/public/datasets/${encodeURIComponent(datasetName)}/runs`,
     { limit: opts.limit ?? 100 },
   )
   return getData(body)

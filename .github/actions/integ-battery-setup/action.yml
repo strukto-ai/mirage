@@ -189,6 +189,20 @@ runs:
         cat /tmp/difysrv.log
         echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
 
+    - name: Start jaeger all-in-one and seed traces over OTLP
+      shell: bash
+      run: |
+        for i in $(seq 1 5); do
+          docker pull jaegertracing/jaeger:latest && break
+          echo "docker pull failed (attempt $i), retrying"; sleep 10
+        done
+        docker run -d --name mirage-jaeger \
+          -p 16686:16686 -p 4317:4317 -p 4318:4318 \
+          jaegertracing/jaeger:latest
+        ./python/.venv/bin/python integ/server/jaeger_seed.py \
+          --host http://localhost:16686 --otlp http://localhost:4318
+        echo "JAEGER_URL=http://localhost:16686" >> "$GITHUB_ENV"
+
     - name: Start fake Databricks API
       shell: bash
       run: |

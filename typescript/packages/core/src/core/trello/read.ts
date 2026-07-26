@@ -41,7 +41,11 @@ import { splitSuffixId } from './pathing.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
-export async function readBytes(transport: TrelloTransport, path: string): Promise<Uint8Array> {
+export async function readBytes(
+  transport: TrelloTransport,
+  path: string,
+  virtual: string = path,
+): Promise<Uint8Array> {
   const key = stripSlash(path)
   const parts = key.split('/')
 
@@ -51,7 +55,7 @@ export async function readBytes(transport: TrelloTransport, path: string): Promi
     for (const ws of workspaces) {
       if (ws.id === wsId) return toJsonBytes(normalizeWorkspace(ws))
     }
-    throw enoent(path)
+    throw enoent(virtual)
   }
 
   if (
@@ -77,7 +81,7 @@ export async function readBytes(transport: TrelloTransport, path: string): Promi
     for (const member of members) {
       if (member.id === memberId) return toJsonBytes(normalizeMember(member))
     }
-    throw enoent(path)
+    throw enoent(virtual)
   }
 
   if (
@@ -92,7 +96,7 @@ export async function readBytes(transport: TrelloTransport, path: string): Promi
     for (const label of labels) {
       if (label.id === labelId) return toJsonBytes(normalizeLabel(label))
     }
-    throw enoent(path)
+    throw enoent(virtual)
   }
 
   if (
@@ -108,7 +112,7 @@ export async function readBytes(transport: TrelloTransport, path: string): Promi
     for (const lst of lists) {
       if (lst.id === listId) return toJsonBytes(normalizeList(lst))
     }
-    throw enoent(path)
+    throw enoent(virtual)
   }
 
   if (
@@ -138,7 +142,7 @@ export async function readBytes(transport: TrelloTransport, path: string): Promi
     return toJsonlBytes(rows)
   }
 
-  throw enoent(path)
+  throw enoent(virtual)
 }
 
 export async function read(
@@ -151,5 +155,5 @@ export async function read(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  return readBytes(accessor.transport, p)
+  return readBytes(accessor.transport, p, path.virtual)
 }

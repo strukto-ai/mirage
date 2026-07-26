@@ -68,11 +68,18 @@ async def run_target(target: dict, cases: list[dict], root: Path,
         for mount in target["mounts"]:
             await harness.seed_fixture(ws, mount.get("fixture"), mount["path"],
                                        root)
+        # Sessions a case can name via its "session" field. Mount grants take
+        # either the mapping form ({"/data": "read"}) or the list form
+        # (["/data"], which inherits the mount's own mode).
+        for session_id, mounts in (target.get("sessions") or {}).items():
+            ws.create_session(session_id, mounts=mounts)
+        primary = target["mounts"][0]["path"]
         for case in selected:
             if "consistency" in case:
                 continue
-            exit_code, out, err, elapsed = await harness.run_case(ws, case)
-            _emit_or_record(emit, report, target["id"], case, exit_code, out,
+            bound = harness.bind_mount(case, primary)
+            exit_code, out, err, elapsed = await harness.run_case(ws, bound)
+            _emit_or_record(emit, report, target["id"], bound, exit_code, out,
                             err, elapsed)
     finally:
         await cleanup()
@@ -84,6 +91,7 @@ async def run_target(target: dict, cases: list[dict], root: Path,
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", action="append", dest="targets")
+    parser.add_argument("--facet", dest="facet")
     parser.add_argument("--emit", dest="emit")
     args = parser.parse_args()
 
@@ -91,7 +99,18 @@ async def main() -> None:
     manifest = harness.load_targets(root)
     cases = harness.load_cases(root)
 
-    selected = args.targets or list(manifest)
+    # Targets are grouped into facets so CI can run one backend family per job;
+    # a target with no facet belongs to "core", which the shared battery runs.
+    if args.facet:
+        selected = [
+            tid for tid, t in manifest.items()
+            if (t.get("facet") or "core") == args.facet
+        ]
+        if not selected:
+            print(f"no targets in facet {args.facet!r}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        selected = args.targets or list(manifest)
     report = None if args.emit else harness.Report()
     emit: list[dict] | None = [] if args.emit else None
     for target_id in selected:
@@ -121,6 +140,14 @@ async def main() -> None:
         if (target.get("service") == "slack"
                 and not os.environ.get("SLACK_URL")):
             print(f"skip [{target_id}]: SLACK_URL not set", file=sys.stderr)
+            continue
+        if (target.get("service") == "jaeger"
+                and not os.environ.get("JAEGER_URL")):
+            print(f"skip [{target_id}]: JAEGER_URL not set", file=sys.stderr)
+            continue
+        if (target.get("service") == "langfuse"
+                and not os.environ.get("LANGFUSE_URL")):
+            print(f"skip [{target_id}]: LANGFUSE_URL not set", file=sys.stderr)
             continue
         await run_target(target, cases, root, report, emit)
 

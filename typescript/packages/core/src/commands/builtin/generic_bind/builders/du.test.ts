@@ -98,8 +98,21 @@ describe('du walk fallback (no native du op)', () => {
     expect(lines).toEqual(['3\t/db/a.txt', '2\t/db/sub', '5\ttotal'])
   })
 
-  it('missing path counts as 0', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/nope')])).toEqual(['0\t/nope'])
+  it('missing path is reported, not counted as 0', async () => {
+    // GNU: "du: cannot access 'X': No such file or directory", exit 1.
+    const result = await DU_BUILDER.fn(OPS, ACCESSOR, [PathSpec.fromStrPath('/nope')], [], {
+      stdin: null,
+      flags: {},
+      filetypeFns: null,
+      cwd: '/',
+      resource: {} as never,
+    })
+    if (result === null) throw new Error('expected a result')
+    expect(result[1].exitCode).toBe(1)
+    // stderr from this builder is always a single buffer, never a stream.
+    expect(new TextDecoder().decode(result[1].stderr as Uint8Array)).toBe(
+      "du: cannot access '/nope': No such file or directory\n",
+    )
   })
 
   it('-h renders human-readable sizes', async () => {

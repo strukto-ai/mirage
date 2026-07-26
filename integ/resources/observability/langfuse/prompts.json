@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "id": "lf_prompt_v1_text",
+      "seq": 600040,
+      "targets": ["langfuse"],
+      "command": "jq -r '.prompt' /lf/prompts/greeting/1.json",
+      "expect": { "exit": 0, "stdout": "Hello {{name}}, welcome aboard.\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_v2_text",
+      "seq": 600041,
+      "targets": ["langfuse"],
+      "command": "jq -r '.prompt' /lf/prompts/greeting/2.json",
+      "expect": { "exit": 0, "stdout": "Hi {{name}}, glad you are here.\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_version_field",
+      "seq": 600042,
+      "targets": ["langfuse"],
+      "command": "jq -r '.version' /lf/prompts/greeting/2.json",
+      "expect": { "exit": 0, "stdout": "2\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_type_text",
+      "seq": 600043,
+      "targets": ["langfuse"],
+      "command": "jq -r '.type' /lf/prompts/greeting/1.json",
+      "expect": { "exit": 0, "stdout": "text\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_type_chat",
+      "seq": 600044,
+      "targets": ["langfuse"],
+      "command": "jq -r '.type' /lf/prompts/qa-template/1.json",
+      "expect": { "exit": 0, "stdout": "chat\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_labels",
+      "seq": 600045,
+      "targets": ["langfuse"],
+      "command": "jq -r '.labels | join(\",\")' /lf/prompts/greeting/1.json",
+      "expect": { "exit": 0, "stdout": "production\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_chat_system_message",
+      "seq": 600046,
+      "targets": ["langfuse"],
+      "command": "jq -r '.prompt[0].content' /lf/prompts/qa-template/1.json",
+      "expect": { "exit": 0, "stdout": "Answer briefly.\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_chat_user_role",
+      "seq": 600047,
+      "targets": ["langfuse"],
+      "command": "jq -r '.prompt[1].role' /lf/prompts/qa-template/1.json",
+      "expect": { "exit": 0, "stdout": "user\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_name_field",
+      "seq": 600048,
+      "targets": ["langfuse"],
+      "command": "jq -r '.name' /lf/prompts/qa-template/1.json",
+      "expect": { "exit": 0, "stdout": "qa-template\n", "stderr": "" }
+    }
+  ]
+}

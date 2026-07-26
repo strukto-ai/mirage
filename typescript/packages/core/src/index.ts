@@ -758,6 +758,20 @@ export { readdir as langfuseReaddir } from './core/langfuse/readdir.ts'
 export { stat as langfuseStat } from './core/langfuse/stat.ts'
 export { LANGFUSE_PROMPT } from './resource/langfuse/prompt.ts'
 export { detectScope as langfuseDetectScope, type LangfuseScope } from './core/langfuse/scope.ts'
+export {
+  HttpJaegerTransport,
+  JaegerApiError,
+  isTraceId as jaegerIsTraceId,
+  type JaegerTransport,
+} from './core/jaeger/_client.ts'
+export { JaegerAccessor, type JaegerResourceLike } from './accessor/jaeger.ts'
+export { JAEGER_COMMANDS } from './commands/builtin/jaeger/index.ts'
+export { JAEGER_OPS } from './ops/jaeger/index.ts'
+export { read as jaegerRead } from './core/jaeger/read.ts'
+export { readdir as jaegerReaddir } from './core/jaeger/readdir.ts'
+export { stat as jaegerStat } from './core/jaeger/stat.ts'
+export { JAEGER_PROMPT } from './resource/jaeger/prompt.ts'
+export { detectScope as jaegerDetectScope, type JaegerScope } from './core/jaeger/scope.ts'
 export { read as trelloRead } from './core/trello/read.ts'
 export { readdir as trelloReaddir, type TrelloReaddirFilter } from './core/trello/readdir.ts'
 export { stat as trelloStat } from './core/trello/stat.ts'

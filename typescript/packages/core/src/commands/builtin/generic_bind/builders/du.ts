@@ -16,6 +16,7 @@ import { rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { duGeneric, duMulti } from '../../generic/du.ts'
 import { type Builder, type CommandIO, resolveGlobOf } from '../adapter.ts'
 
@@ -50,20 +51,40 @@ async function duWalk(
   return total
 }
 
+const ENC = new TextEncoder()
+
 export const DU_BUILDER: Builder = {
   name: 'du',
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const { duTotal, duAll } = ops
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    if (duTotal === undefined || duAll === undefined) {
-      return duMulti(resolved, opts, (p) => duWalk(ops, accessor, idx, p))
+    // GNU reports an operand it cannot stat and carries on with the rest,
+    // exiting 1. Walking a missing operand would report it as size 0 instead.
+    const present: PathSpec[] = []
+    const errors: string[] = []
+    for (const p of resolved) {
+      try {
+        await ops.stat(accessor, p, idx)
+        present.push(p)
+      } catch {
+        errors.push(`du: cannot access '${p.rawPath}': No such file or directory`)
+      }
     }
-    return duGeneric(
-      resolved,
-      opts,
-      (p) => duTotal(accessor, p, idx),
-      (p) => duAll(accessor, p, idx),
-    )
+    const err = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
+    if (present.length === 0) {
+      return [null, new IOResult({ exitCode: 1, ...(err !== undefined ? { stderr: err } : {}) })]
+    }
+    const result =
+      duTotal === undefined || duAll === undefined
+        ? await duMulti(present, opts, (p) => duWalk(ops, accessor, idx, p))
+        : await duGeneric(
+            present,
+            opts,
+            (p) => duTotal(accessor, p, idx),
+            (p) => duAll(accessor, p, idx),
+          )
+    if (err === undefined || result === null) return result
+    return [result[0], new IOResult({ exitCode: 1, stderr: err })]
   },
 }

@@ -30,7 +30,49 @@
           "backend": "memory",
           "mode": "read"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "/data": "read"
+        },
+        "writer": {
+          "/data": "write"
+        },
+        "lister": [
+          "/data"
+        ],
+        "capped": {
+          "/ro": "write"
+        }
+      }
+    },
+    {
+      "id": "ram-root",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ],
+      "sessions": {
+        "no_root": {
+          "/data": "write"
+        },
+        "root_ro": {
+          "/data": "write",
+          "/": "read"
+        }
+      }
     },
     {
       "id": "disk",
@@ -62,7 +104,21 @@
           "backend": "tmpdir",
           "mode": "read"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "/data": "read"
+        },
+        "writer": {
+          "/data": "write"
+        },
+        "lister": [
+          "/data"
+        ],
+        "capped": {
+          "/ro": "write"
+        }
+      }
     },
     {
       "id": "redis",
@@ -656,6 +712,7 @@
         "typescript-node"
       ],
       "service": "mem0",
+      "facet": "mem0",
       "mounts": [
         {
           "path": "/memories",
@@ -905,6 +962,7 @@
         "typescript-node"
       ],
       "service": "gws",
+      "facet": "email",
       "epoch": "2026-02-01T00:00:00Z",
       "mail": "gmail/v1",
       "mounts": [
@@ -927,6 +985,7 @@
         "typescript-node"
       ],
       "service": "email",
+      "facet": "email",
       "mail": "email/v1",
       "mounts": [
         {
@@ -948,6 +1007,7 @@
         "typescript-node"
       ],
       "service": "slack",
+      "facet": "chat",
       "mounts": [
         {
           "path": "/slack",
@@ -963,6 +1023,7 @@
         "typescript-node"
       ],
       "service": "trello",
+      "facet": "project",
       "mounts": [
         {
           "path": "/board",
@@ -983,6 +1044,7 @@
         "typescript-node"
       ],
       "service": "linear",
+      "facet": "project",
       "mounts": [
         {
           "path": "/issues",
@@ -1003,12 +1065,45 @@
         "typescript-node"
       ],
       "service": "dify",
+      "facet": "dify",
       "dataset": "kb-7f3a",
       "mounts": [
         {
           "path": "/knowledge",
           "resource": "dify",
           "backend": "dify"
+        }
+      ]
+    },
+    {
+      "id": "jaeger",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "jaeger",
+      "facet": "observability",
+      "mounts": [
+        {
+          "path": "/j",
+          "resource": "jaeger",
+          "backend": "jaeger"
+        }
+      ]
+    },
+    {
+      "id": "langfuse",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "langfuse",
+      "facet": "observability",
+      "mounts": [
+        {
+          "path": "/lf",
+          "resource": "langfuse",
+          "backend": "langfuse"
         }
       ]
     },

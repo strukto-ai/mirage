@@ -162,6 +162,7 @@ export const ResourceName = Object.freeze({
   GRIDFS: 'gridfs',
   NOTION: 'notion',
   LANGFUSE: 'langfuse',
+  JAEGER: 'jaeger',
   SSH: 'ssh',
   REDIS: 'redis',
   GITHUB_CI: 'github_ci',

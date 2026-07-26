@@ -90,8 +90,65 @@ describe('ResourceName', () => {
     expect(ResourceName.MEM0).toBe('mem0')
   })
 
-  it('contains exactly 53 entries', () => {
-    expect(Object.keys(ResourceName)).toHaveLength(53)
+  it('exposes exactly the documented resource names', () => {
+    // A count would only say "expected 54, got 53"; comparing the set names the
+    // resource that was added or removed, and needs no magic number bumped.
+    expect(Object.values(ResourceName).sort()).toEqual([
+      'aliyun',
+      'backblaze',
+      'box',
+      'ceph',
+      'chroma',
+      'databricks_volume',
+      'dify',
+      'digitalocean',
+      'discord',
+      'disk',
+      'dropbox',
+      'email',
+      'gcs',
+      'gdocs',
+      'gdrive',
+      'github',
+      'github_ci',
+      'gmail',
+      'gridfs',
+      'gsheets',
+      'gslides',
+      'hf_buckets',
+      'hf_datasets',
+      'hf_models',
+      'hf_spaces',
+      'history',
+      'jaeger',
+      'lancedb',
+      'langfuse',
+      'linear',
+      'mem0',
+      'minio',
+      'mongodb',
+      'nextcloud',
+      'notion',
+      'oci',
+      'onedrive',
+      'opfs',
+      'postgres',
+      'qdrant',
+      'qingstor',
+      'r2',
+      'ram',
+      'redis',
+      's3',
+      'scaleway',
+      'seaweedfs',
+      'sharepoint',
+      'slack',
+      'ssh',
+      'supabase',
+      'tencent',
+      'trello',
+      'wasabi',
+    ])
   })
 
   it('is frozen at runtime', () => {

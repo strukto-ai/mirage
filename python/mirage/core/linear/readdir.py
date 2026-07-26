@@ -280,4 +280,7 @@ async def readdir(
         await index.set_dir(idx_key, entries)
         return [f"{prefix}/{key}/{name}" for name, _ in entries]
 
-    return []
+    # An unrecognized path is not an empty directory: returning [] made `ls`
+    # and `tree` report a bogus path as a real-but-empty one, and left `rg`
+    # without a message.
+    raise enoent(virtual)

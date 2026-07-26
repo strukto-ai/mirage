@@ -16,6 +16,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langfuse.api.core.api_error import ApiError
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -134,3 +135,57 @@ async def test_read_session_trace(accessor, index):
 
     parsed = json.loads(result)
     assert parsed["id"] == "tid1"
+
+
+@pytest.mark.asyncio
+async def test_read_dataset_run_renders_jsonl(accessor, index):
+    # The path ends in .jsonl, so it must be one compact JSON object per line
+    # with a trailing newline, not an indented document.
+    runs = [{"name": "run-a", "metadata": {}}, {"name": "run-b"}]
+    with patch(
+            "mirage.core.langfuse.read.fetch_dataset_runs",
+            new_callable=AsyncMock,
+            return_value=runs,
+    ):
+        result = await read(
+            accessor,
+            PathSpec(resource_path="datasets/qa-eval/runs/run-a.jsonl",
+                     virtual="/datasets/qa-eval/runs/run-a.jsonl",
+                     directory="/datasets/qa-eval/runs/run-a.jsonl"), index)
+
+    text = result.decode()
+    assert text.endswith("\n")
+    assert text.count("\n") == 1
+    assert json.loads(text)["name"] == "run-a"
+
+
+@pytest.mark.asyncio
+async def test_read_trace_not_found_is_enoent(accessor, index):
+    # A 404 from the API is a missing file, not a leaked SDK error string.
+    with patch(
+            "mirage.core.langfuse.read.fetch_trace",
+            new_callable=AsyncMock,
+            side_effect=ApiError(status_code=404, body={"message": "nope"}),
+    ):
+        with pytest.raises(FileNotFoundError):
+            await read(
+                accessor,
+                PathSpec(resource_path="traces/gone.json",
+                         virtual="/traces/gone.json",
+                         directory="/traces/gone.json"), index)
+
+
+@pytest.mark.asyncio
+async def test_read_trace_server_error_propagates(accessor, index):
+    # Only 404 maps to ENOENT; a 500 must not be disguised as a missing file.
+    with patch(
+            "mirage.core.langfuse.read.fetch_trace",
+            new_callable=AsyncMock,
+            side_effect=ApiError(status_code=500, body={"message": "boom"}),
+    ):
+        with pytest.raises(ApiError):
+            await read(
+                accessor,
+                PathSpec(resource_path="traces/tid1.json",
+                         virtual="/traces/tid1.json",
+                         directory="/traces/tid1.json"), index)

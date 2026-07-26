@@ -76,3 +76,12 @@ describe('langfuse detectScope', () => {
     expect(s.subResource).toBe('run1.jsonl')
   })
 })
+
+describe('langfuse detectScope fallback', () => {
+  it('classifies an unrecognized path as unknown, not root', () => {
+    // Falling back to 'root' made the grep/rg push-down treat any bogus path
+    // as "search every trace", answering a missing file with the whole mount.
+    expect(detectScope('__nf_missing__').level).toBe('unknown')
+    expect(detectScope('traces/a/b/c/d').level).toBe('unknown')
+  })
+})

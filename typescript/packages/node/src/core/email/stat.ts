@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '@struktoai/mirage-core'
-import { FileStat, FileType, PathSpec, mountKey, mountPrefixOf } from '@struktoai/mirage-core'
+import {
+  FileStat,
+  FileType,
+  PathSpec,
+  enoent,
+  mountKey,
+  mountPrefixOf,
+} from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { listFolders } from './folders.ts'
 import { readdir } from './readdir.ts'
@@ -32,12 +39,6 @@ function guessType(name: string): FileType {
     return FileType.TEXT
   }
   return FileType.BINARY
-}
-
-function enoent(p: string): Error {
-  const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
 }
 
 export async function stat(

@@ -1,6 +1,8 @@
 import pytest
 
+from mirage import MountMode, Workspace
 from mirage.commands.builtin.generic.du import _depth, du, du_multi
+from mirage.resource.disk import DiskResource
 from mirage.types import PathSpec
 
 
@@ -271,3 +273,29 @@ def test_depth_helper_direct_child_is_one():
 
 def test_depth_helper_nested():
     assert _depth("/dir/sub/b.txt", "/dir") == 2
+
+
+@pytest.mark.asyncio
+async def test_du_missing_operand_reports_and_exits_1(tmp_path):
+    # GNU: "du: cannot access 'X': No such file or directory", exit 1. Walking
+    # a missing operand used to report it as size 0 with exit 0.
+    res = DiskResource(root=str(tmp_path))
+    ws = Workspace({"/d": res}, mode=MountMode.WRITE)
+    result = await ws.execute("du /d/__nf_missing__")
+    assert result.exit_code == 1
+    assert await result.stdout_str() == ""
+    assert (await result.stderr_str()) == (
+        "du: cannot access '/d/__nf_missing__': No such file or directory\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_partial_operands_keeps_present_output(tmp_path):
+    res = DiskResource(root=str(tmp_path))
+    ws = Workspace({"/d": res}, mode=MountMode.WRITE)
+    await ws.execute("mkdir -p /d/sub")
+    result = await ws.execute("du /d/sub /d/__nf_missing__")
+    assert result.exit_code == 1
+    assert "/d/sub" in await result.stdout_str()
+    assert "__nf_missing__" in await result.stderr_str()
+    await ws.close()

@@ -14,18 +14,55 @@
 
 import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { readdir } from './readdir.ts'
 
 const TOP_LEVEL_DIRS = new Set(['traces', 'sessions', 'prompts', 'datasets'])
+
+function basenameOf(entry: string): string {
+  const trimmed = entry.replace(/\/+$/, '')
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1)
+}
+
+/**
+ * Throw ENOENT unless the path appears in its parent's listing.
+ *
+ * Every path shape langfuse serves is recognizable from the path text alone,
+ * but a recognizable shape is not evidence that the trace, prompt, dataset or
+ * run behind it exists. The parent listing is index-cached, so validating costs
+ * one listing per directory rather than one API call per stat.
+ */
+async function assertListed(
+  accessor: LangfuseAccessor,
+  path: PathSpec,
+  prefix: string,
+  index?: IndexCacheStore,
+): Promise<void> {
+  const virtual = path.virtual.replace(/\/+$/, '')
+  const parentVirtual = virtual.slice(0, virtual.lastIndexOf('/')) || '/'
+  const entries = await readdir(
+    accessor,
+    new PathSpec({
+      virtual: parentVirtual,
+      directory: parentVirtual,
+      resolved: false,
+      resourcePath: mountKey(parentVirtual, prefix),
+    }),
+    index,
+  )
+  const names = new Set(entries.map(basenameOf))
+  if (!names.has(basenameOf(path.resourcePath))) throw enoent(path)
+}
 
 export async function stat(
   accessor: LangfuseAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
+  index?: IndexCacheStore,
 ): Promise<FileStat> {
-  void accessor
   const key = path.resourcePath
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
 
   if (key === '') {
     return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
@@ -42,53 +79,55 @@ export async function stat(
   }
 
   if (parts[0] === 'traces' && parts.length === 2 && (parts[1] ?? '').endsWith('.json')) {
-    return Promise.resolve(new FileStat({ name: parts[1] ?? '', type: FileType.JSON }))
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({ name: parts[1] ?? '', type: FileType.JSON })
   }
 
   if (parts[0] === 'sessions' && parts.length === 2) {
-    return Promise.resolve(
-      new FileStat({
-        name: parts[1] ?? '',
-        type: FileType.DIRECTORY,
-        extra: { session_id: parts[1] ?? '' },
-      }),
-    )
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({
+      name: parts[1] ?? '',
+      type: FileType.DIRECTORY,
+      extra: { session_id: parts[1] ?? '' },
+    })
   }
 
   if (parts[0] === 'sessions' && parts.length === 3 && (parts[2] ?? '').endsWith('.json')) {
-    return Promise.resolve(new FileStat({ name: parts[2] ?? '', type: FileType.JSON }))
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({ name: parts[2] ?? '', type: FileType.JSON })
   }
 
   if (parts[0] === 'prompts' && parts.length === 2) {
-    return Promise.resolve(
-      new FileStat({
-        name: parts[1] ?? '',
-        type: FileType.DIRECTORY,
-        extra: { prompt_name: parts[1] ?? '' },
-      }),
-    )
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({
+      name: parts[1] ?? '',
+      type: FileType.DIRECTORY,
+      extra: { prompt_name: parts[1] ?? '' },
+    })
   }
 
   if (parts[0] === 'prompts' && parts.length === 3 && (parts[2] ?? '').endsWith('.json')) {
-    return Promise.resolve(new FileStat({ name: parts[2] ?? '', type: FileType.JSON }))
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({ name: parts[2] ?? '', type: FileType.JSON })
   }
 
   if (parts[0] === 'datasets' && parts.length === 2) {
-    return Promise.resolve(
-      new FileStat({
-        name: parts[1] ?? '',
-        type: FileType.DIRECTORY,
-        extra: { dataset_name: parts[1] ?? '' },
-      }),
-    )
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({
+      name: parts[1] ?? '',
+      type: FileType.DIRECTORY,
+      extra: { dataset_name: parts[1] ?? '' },
+    })
   }
 
   if (parts[0] === 'datasets' && parts.length === 3 && parts[2] === 'items.jsonl') {
-    return Promise.resolve(new FileStat({ name: 'items.jsonl', type: FileType.TEXT }))
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({ name: 'items.jsonl', type: FileType.TEXT })
   }
 
   if (parts[0] === 'datasets' && parts.length === 3 && parts[2] === 'runs') {
-    return Promise.resolve(new FileStat({ name: 'runs', type: FileType.DIRECTORY }))
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({ name: 'runs', type: FileType.DIRECTORY })
   }
 
   if (
@@ -97,7 +136,8 @@ export async function stat(
     parts[2] === 'runs' &&
     (parts[3] ?? '').endsWith('.jsonl')
   ) {
-    return Promise.resolve(new FileStat({ name: parts[3] ?? '', type: FileType.TEXT }))
+    await assertListed(accessor, path, prefix, index)
+    return new FileStat({ name: parts[3] ?? '', type: FileType.TEXT })
   }
 
   throw enoent(path)

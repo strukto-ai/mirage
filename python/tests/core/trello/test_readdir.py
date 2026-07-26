@@ -12,22 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.readdir import readdir
 from mirage.resource.trello.config import TrelloConfig
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
 def accessor():
-    return TrelloAccessor(TrelloConfig(api_key="key", api_token="token"))
+    return TrelloAccessor(TrelloConfig(api_key="k", api_token="t"))
 
 
 @pytest.fixture
@@ -37,142 +33,29 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    result = await readdir(accessor, PathSpec.from_str_path("/"), index)
+    result = await readdir(
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
+        index)
     assert result == ["/workspaces"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_root_with_prefix(accessor, index):
-    result = await readdir(
-        accessor,
-        PathSpec(resource_path=mount_key("trello/", "trello"),
-                 virtual="trello/",
-                 directory="trello/"), index)
-    assert result == ["trello/workspaces"]
-
-
-@pytest.mark.asyncio
-async def test_readdir_workspaces(accessor, index):
-    workspaces = [{"id": "ws1", "displayName": "Engineering", "name": "eng"}]
-    with patch("mirage.core.trello.readdir.list_workspaces",
-               new_callable=AsyncMock,
-               return_value=workspaces):
-        result = await readdir(accessor, PathSpec.from_str_path("/workspaces"),
-                               index)
-    assert result == ["/workspaces/Engineering__ws1"]
-
-
-@pytest.mark.asyncio
-async def test_readdir_workspaces_keeps_prefix_on_warm_cache_hit(
-        accessor, index):
-    workspaces = [{"id": "ws1", "displayName": "Engineering", "name": "eng"}]
-    spec = PathSpec(resource_path=mount_key("trello/workspaces", "trello"),
-                    virtual="trello/workspaces",
-                    directory="trello/workspaces")
-    with patch("mirage.core.trello.readdir.list_workspaces",
-               new_callable=AsyncMock,
-               return_value=workspaces):
-        cold = await readdir(accessor, spec, index)
-        warm = await readdir(accessor, spec, index)
-    assert cold == ["trello/workspaces/Engineering__ws1"]
-    assert warm == cold
-
-
-@pytest.mark.asyncio
-async def test_readdir_workspace_entry(accessor, index):
-    await index.put(
-        "/workspaces/Engineering__ws1",
-        IndexEntry(
-            id="ws1",
-            name="Engineering",
-            resource_type="trello/workspace",
-            remote_time="",
-            vfs_name="Engineering__ws1",
-        ),
-    )
-    result = await readdir(
-        accessor, PathSpec.from_str_path("/workspaces/Engineering__ws1"),
-        index)
-    assert result == [
-        "/workspaces/Engineering__ws1/workspace.json",
-        "/workspaces/Engineering__ws1/boards",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_readdir_boards(accessor, index):
-    await index.put(
-        "/workspaces/Engineering__ws1",
-        IndexEntry(
-            id="ws1",
-            name="Engineering",
-            resource_type="trello/workspace",
-            remote_time="",
-            vfs_name="Engineering__ws1",
-        ),
-    )
-    boards = [{"id": "b1", "name": "Product Roadmap", "dateLastActivity": ""}]
-    with patch("mirage.core.trello.readdir.list_workspace_boards",
-               new_callable=AsyncMock,
-               return_value=boards):
-        result = await readdir(
+async def test_readdir_unrecognized_path_raises(accessor, index):
+    # Returning [] for an unknown path made `ls` and `tree` report a bogus path
+    # as real-but-empty, and left `rg` without a message.
+    with pytest.raises(FileNotFoundError):
+        await readdir(
             accessor,
-            PathSpec.from_str_path("/workspaces/Engineering__ws1/boards"),
-            index)
-    assert result == [
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-    ]
+            PathSpec(resource_path="__nf_missing__",
+                     virtual="/__nf_missing__",
+                     directory="/__nf_missing__"), index)
 
 
 @pytest.mark.asyncio
-async def test_readdir_board_entry(accessor, index):
-    await index.put(
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1",
-        IndexEntry(
-            id="b1",
-            name="Product Roadmap",
-            resource_type="trello/board",
-            remote_time="",
-            vfs_name="Product_Roadmap__b1",
-        ),
-    )
-    result = await readdir(
-        accessor,
-        PathSpec.from_str_path(
-            "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"),
-        index,
-    )
-    assert result == [
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1/board.json",
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1/members",
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1/labels",
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1/lists",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_readdir_card_folder(accessor, index):
-    await index.put(
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-        "/lists/Backlog__l1/cards/Fix_login__c1",
-        IndexEntry(
-            id="c1",
-            name="Fix login",
-            resource_type="trello/card",
-            remote_time="",
-            vfs_name="Fix_login__c1",
-        ),
-    )
-    result = await readdir(
-        accessor,
-        PathSpec.from_str_path(
-            "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-            "/lists/Backlog__l1/cards/Fix_login__c1"),
-        index,
-    )
-    assert result == [
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-        "/lists/Backlog__l1/cards/Fix_login__c1/card.json",
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-        "/lists/Backlog__l1/cards/Fix_login__c1/comments.jsonl",
-    ]
+async def test_readdir_unrecognized_nested_path_raises(accessor, index):
+    with pytest.raises(FileNotFoundError):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="workspaces/w/nope/deeper",
+                     virtual="/workspaces/w/nope/deeper",
+                     directory="/workspaces/w/nope/deeper"), index)

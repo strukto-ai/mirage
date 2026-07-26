@@ -1,0 +1,234 @@
+{
+  "cases": [
+    {
+      "id": "sess_prep",
+      "seq": 920001,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/sess /data2/sess && echo hello > /data/sess/a.txt && echo aside > /data2/sess/s.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_read_grant_reads",
+      "seq": 920002,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "reader",
+      "command": "cat /data/sess/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_read_grant_blocks_rm",
+      "seq": 920003,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "reader",
+      "command": "rm /data/sess/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rm: read-only mount at /data/\n"
+      }
+    },
+    {
+      "id": "sess_read_grant_blocks_redirect",
+      "seq": 920004,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "reader",
+      "command": "echo leak > /data/sess/new.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/sess/new.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "sess_denied_redirect_wrote_nothing",
+      "seq": 920005,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "test -e /data/sess/new.txt || echo absent",
+      "expect": {
+        "exit": 0,
+        "stdout": "absent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_ungranted_mount_denied",
+      "seq": 920006,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "reader",
+      "command": "cat /data2/sess/s.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: session 'reader' not allowed to access mount '/data2'\n"
+      }
+    },
+    {
+      "id": "sess_write_grant_writes",
+      "seq": 920007,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "writer",
+      "command": "echo w > /data/sess/w.txt && cat /data/sess/w.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "w\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_list_form_inherits_mount_mode",
+      "seq": 920008,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "lister",
+      "command": "echo l > /data/sess/l.txt && cat /data/sess/l.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "l\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_grant_cannot_widen_read_mount",
+      "seq": 920009,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "capped",
+      "command": "echo up > /ro/sess_y.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/ro/sess_y.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "sess_pathless_pipeline_still_runs",
+      "seq": 920010,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "reader",
+      "command": "echo hi | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_cleanup",
+      "seq": 920011,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "rm -r /data/sess /data2/sess",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_root_seed",
+      "seq": 920020,
+      "targets": [
+        "ram-root"
+      ],
+      "command": "echo top > /root.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_root_unlisted_denied",
+      "seq": 920021,
+      "targets": [
+        "ram-root"
+      ],
+      "session": "no_root",
+      "command": "cat /root.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: session 'no_root' not allowed to access mount '/'\n"
+      }
+    },
+    {
+      "id": "sess_root_read_grant",
+      "seq": 920022,
+      "targets": [
+        "ram-root"
+      ],
+      "session": "root_ro",
+      "command": "cat /root.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "top\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_root_write_denied",
+      "seq": 920023,
+      "targets": [
+        "ram-root"
+      ],
+      "session": "root_ro",
+      "command": "echo x > /root.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/root.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "sess_root_write_left_content",
+      "seq": 920024,
+      "targets": [
+        "ram-root"
+      ],
+      "command": "cat /root.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "top\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

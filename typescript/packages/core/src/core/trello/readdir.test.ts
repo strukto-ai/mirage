@@ -260,3 +260,21 @@ describe('trello readdir errors', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
+
+describe('trello readdir unrecognized paths', () => {
+  it('throws ENOENT rather than reporting an empty directory', async () => {
+    // Returning [] made `ls` and `tree` report a bogus path as real-but-empty,
+    // and left `rg` without a message.
+    const t = new FakeTransport(() => [])
+    await expect(
+      readdir(new TrelloAccessor(t), spec('/__nf_missing__'), new RAMIndexCacheStore()),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('throws ENOENT for an unrecognized nested path', async () => {
+    const t = new FakeTransport(() => [])
+    await expect(
+      readdir(new TrelloAccessor(t), spec('/workspaces/w/nope/deeper'), new RAMIndexCacheStore()),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
