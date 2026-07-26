@@ -1,5 +1,5 @@
-import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.formatting import _ls_mode_string
 from mirage.commands.builtin.utils.output import format_records
@@ -8,13 +8,11 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
-# GNU printf-style directive: %[flags][width][.precision]conversion, where
-# conversion is a letter (optionally H/L-prefixed for device major/minor) or
-# a literal %. Parsing flags/width/precision up front stops them being
-# mistaken for the conversion char (e.g. %04a must not read as directive "0").
-_FORMAT_RE = re.compile(r"%([#0 +-]*)(\d*)(?:\.(\d*))?([HL]?[A-Za-z%])")
-
 _STR_DIRECTIVES = frozenset("nNF")
+
+_FORMAT_FLAGS = frozenset("#0 +-")
+
+_ASCII_DIGITS = frozenset("0123456789")
 
 _TYPE_LABELS = {
     FileType.DIRECTORY: "directory",
@@ -25,6 +23,25 @@ _TYPE_LABELS = {
 }
 
 _DEFAULT_OWNER = "user"
+
+
+@dataclass(frozen=True, slots=True)
+class _FormatDirective:
+    """One parsed ``%[flags][width][.precision]conversion`` directive.
+
+    Args:
+        end (int): index just past the directive in the format string.
+        flags (str): any of ``# 0 + -``.
+        width (str): minimum field width (digits) or empty.
+        precision (str | None): precision digits, or None when absent.
+        spec (str): the conversion char, H/L-prefixed for device major/minor.
+    """
+
+    end: int
+    flags: str
+    width: str
+    precision: str | None
+    spec: str
 
 
 def _type_label(s: FileStat) -> str:
@@ -142,10 +159,75 @@ def _directive_value(spec: str, s: FileStat, name: str) -> str:
     return "?"
 
 
+def _is_conversion(char: str) -> bool:
+    return char == "%" or "A" <= char <= "Z" or "a" <= char <= "z"
+
+
+def _parse_format_directive(fmt: str, start: int) -> _FormatDirective | None:
+    """Scan one GNU printf-style directive starting at a ``%``.
+
+    Walks flags, width and precision with an explicit cursor so a long run
+    of flag/width characters that never reaches a conversion char costs
+    linear time instead of backtracking (CodeQL #247).
+
+    Args:
+        fmt (str): the whole format string.
+        start (int): index of the leading ``%``.
+    """
+    end = len(fmt)
+    cursor = start + 1
+    flags_start = cursor
+    while cursor < end and fmt[cursor] in _FORMAT_FLAGS:
+        cursor += 1
+    flags = fmt[flags_start:cursor]
+
+    width_start = cursor
+    while cursor < end and fmt[cursor] in _ASCII_DIGITS:
+        cursor += 1
+    width = fmt[width_start:cursor]
+
+    precision: str | None = None
+    if cursor < end and fmt[cursor] == ".":
+        cursor += 1
+        precision_start = cursor
+        while cursor < end and fmt[cursor] in _ASCII_DIGITS:
+            cursor += 1
+        precision = fmt[precision_start:cursor]
+
+    if cursor >= end or not _is_conversion(fmt[cursor]):
+        return None
+    spec = fmt[cursor]
+    cursor += 1
+    if spec in ("H", "L") and cursor < end and _is_conversion(fmt[cursor]):
+        spec += fmt[cursor]
+        cursor += 1
+    return _FormatDirective(end=cursor,
+                            flags=flags,
+                            width=width,
+                            precision=precision,
+                            spec=spec)
+
+
 def _format_stat(fmt: str, s: FileStat, name: str) -> str:
-    return _FORMAT_RE.sub(
-        lambda m: _apply_flags(_directive_value(m.group(4), s, name), m.group(
-            1), m.group(2), m.group(3), m.group(4)), fmt)
+    parts: list[str] = []
+    cursor = 0
+    while cursor < len(fmt):
+        start = fmt.find("%", cursor)
+        if start == -1:
+            parts.append(fmt[cursor:])
+            break
+        parts.append(fmt[cursor:start])
+        directive = _parse_format_directive(fmt, start)
+        if directive is None:
+            parts.append("%")
+            cursor = start + 1
+            continue
+        parts.append(
+            _apply_flags(_directive_value(directive.spec, s,
+                                          name), directive.flags,
+                         directive.width, directive.precision, directive.spec))
+        cursor = directive.end
+    return "".join(parts)
 
 
 async def stat(

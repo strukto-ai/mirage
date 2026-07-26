@@ -183,6 +183,12 @@ async def test_literal_percent_and_unknown_and_text():
 
 
 @pytest.mark.asyncio
+async def test_long_incomplete_directive_is_linear():
+    fmt = "%" + "0" * 10_000 + "!"
+    assert await _render(fmt, _fs()) == fmt
+
+
+@pytest.mark.asyncio
 async def test_missing_operand_raises():
     with pytest.raises(ValueError, match="missing operand"):
         await stat([], stat_fn=partial(_const_stat, _fs()), c="%n")
