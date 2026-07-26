@@ -62,11 +62,23 @@ a big orange cat
 === du_leaf ===
 79	/db/cat/big
 === du_group ===
+79	/db/cat/big
+81	/db/cat/small
 160	/db/cat
 === du_root ===
+79	/db/cat/big
+81	/db/cat/small
+160	/db/cat
+77	/db/dog/big
+83	/db/dog/small
+160	/db/dog
 320	/db
 === du_c_multi ===
+79	/db/cat/big
+81	/db/cat/small
 160	/db/cat
+77	/db/dog/big
+83	/db/dog/small
 160	/db/dog
 320	total
 === sym_ln ===

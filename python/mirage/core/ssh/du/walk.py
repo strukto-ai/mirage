@@ -39,9 +39,11 @@ async def walk(
     except asyncssh.SFTPNoSuchFile:
         raise FileNotFoundError(path)
     for entry in listing:
-        if entry.filename in (".", ".."):
+        filename = (entry.filename.decode("utf-8") if isinstance(
+            entry.filename, bytes) else entry.filename)
+        if filename in (".", ".."):
             continue
-        child = f"{path.rstrip('/')}/{entry.filename}"
+        child = f"{path.rstrip('/')}/{filename}"
         if entry.attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
             total += await walk(sftp, config, child, results)
         else:

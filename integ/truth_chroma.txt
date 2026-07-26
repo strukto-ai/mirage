@@ -122,6 +122,8 @@ Welcome to Acme. This quickstart gets you running fast.
 === du_guides ===
 370	/knowledge/guides
 === du_root ===
+370	/knowledge/guides
+270	/knowledge/policies
 730	/knowledge
 === du_c_multi ===
 370	/knowledge/guides
