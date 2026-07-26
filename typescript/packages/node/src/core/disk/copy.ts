@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { copyFile } from 'node:fs/promises'
+import { copyFile, stat } from 'node:fs/promises'
 import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
 import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
@@ -24,7 +24,18 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
   try {
     await copyFile(s, d)
   } catch (err) {
-    throw diskError(err, (err as NodeJS.ErrnoException).code === 'ENOENT' ? src : dst)
+    // copyFile reports ENOENT both for a missing source and for a missing
+    // destination parent, so the operand to blame is only knowable after
+    // the failure: probe the source to tell them apart.
+    let blame = dst
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      const srcMissing = await stat(s).then(
+        () => false,
+        () => true,
+      )
+      if (srcMissing) blame = src
+    }
+    throw diskError(err, blame)
   }
   await invalidateAfterWrite(dst)
 }

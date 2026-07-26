@@ -132,3 +132,32 @@ async def test_cp_recursive_into_missing_parent_copies_nothing(workspace):
                          b"No such file or directory\n")
     listing = await workspace.execute("find /nodir")
     assert listing.exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_cp_source_under_a_plain_file_is_not_a_directory(workspace):
+    # Backends answer stat with ENOENT for a path under a plain file, so the
+    # source probe has to walk the chain to recover GNU's errno.
+    await workspace.ops.write("/plain", b"x")
+    await workspace.ops.mkdir("/d")
+    io = await workspace.execute("cp /plain/child /d")
+    assert io.exit_code == 1
+    assert io.stderr == (b"cp: cannot stat '/plain/child': Not a directory\n")
+
+
+@pytest.mark.asyncio
+async def test_cp_source_deep_under_a_plain_file_is_not_a_directory(workspace):
+    await workspace.ops.write("/plain", b"x")
+    await workspace.ops.mkdir("/d")
+    io = await workspace.execute("cp /plain/a/b /d")
+    assert io.exit_code == 1
+    assert io.stderr == (b"cp: cannot stat '/plain/a/b': Not a directory\n")
+
+
+@pytest.mark.asyncio
+async def test_cp_absent_source_is_still_no_such_file(workspace):
+    await workspace.ops.mkdir("/d")
+    io = await workspace.execute("cp /nope /d")
+    assert io.exit_code == 1
+    assert io.stderr == (b"cp: cannot stat '/nope': "
+                         b"No such file or directory\n")

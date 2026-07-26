@@ -89,3 +89,21 @@ async def test_mv_under_a_file_reports_not_a_directory(workspace):
     assert io.stderr == (b"mv: cannot move '/a.txt' to '/plain/c.txt': "
                          b"Not a directory\n")
     assert await workspace.ops.read("/a.txt") == b"hi"
+
+
+@pytest.mark.asyncio
+async def test_mv_source_under_a_plain_file_is_not_a_directory(workspace):
+    # Same as cp: the source keeps the errno GNU reports, and the backends
+    # cannot supply it from stat alone.
+    await workspace.ops.write("/plain", b"x")
+    io = await workspace.execute("mv /plain/child /dst")
+    assert io.exit_code == 1
+    assert io.stderr == (b"mv: cannot stat '/plain/child': Not a directory\n")
+
+
+@pytest.mark.asyncio
+async def test_mv_absent_source_is_still_no_such_file(workspace):
+    io = await workspace.execute("mv /nope /dst")
+    assert io.exit_code == 1
+    assert io.stderr == (b"mv: cannot stat '/nope': "
+                         b"No such file or directory\n")

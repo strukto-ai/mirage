@@ -159,6 +159,29 @@ describe('cpGeneric guards', () => {
     expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/s/x.txt': Not a directory\n")
   })
 
+  it('a SOURCE under a plain file reports Not a directory, not ENOENT', async () => {
+    // Backends answer stat with ENOENT for a path under a plain file, so the
+    // source probe has to walk the chain to recover GNU's errno.
+    const files = new Map([['/plain', new Uint8Array([2])]])
+    const [, io] = await run(files, new Set(['/', '/d']), ['/plain/child', '/d'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/child': Not a directory\n")
+  })
+
+  it('a SOURCE deep under a plain file reports Not a directory', async () => {
+    const files = new Map([['/plain', new Uint8Array([2])]])
+    const [, io] = await run(files, new Set(['/', '/d']), ['/plain/a/b', '/d'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/a/b': Not a directory\n")
+  })
+
+  it('a genuinely absent source still reports No such file or directory', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(['/', '/d']), ['/nope', '/d'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/nope': No such file or directory\n")
+  })
+
   it('multiple sources with a missing target report No such file or directory', async () => {
     const files = new Map([
       ['/a.txt', new Uint8Array([1])],

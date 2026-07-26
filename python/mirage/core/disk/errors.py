@@ -16,6 +16,20 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 
+def disk_error(exc: OSError, virtual: str) -> OSError:
+    """Restamp one OSError against the mount path (mirrors TS ``diskError``).
+
+    Used directly by call sites that only know which operand to blame after
+    seeing the failure, such as a two-operand copy where ENOENT can mean
+    either a missing source or a missing destination parent.
+
+    Args:
+        exc (OSError): The raw error from the real filesystem.
+        virtual (str): The operand's virtual path, stamped as ``filename``.
+    """
+    return type(exc)(exc.errno, exc.strerror, virtual)
+
+
 @contextmanager
 def disk_errors(virtual: str) -> Iterator[None]:
     """Re-raise an OSError from the real filesystem against the mount path.
@@ -33,4 +47,4 @@ def disk_errors(virtual: str) -> Iterator[None]:
     try:
         yield
     except OSError as exc:
-        raise type(exc)(exc.errno, exc.strerror, virtual) from exc
+        raise disk_error(exc, virtual) from exc

@@ -303,6 +303,31 @@ export async function entryKind(
   return { exists: true, isDir: info.type === FileType.DIRECTORY }
 }
 
+// Probe a source operand, keeping the errno GNU reports: `cp /plain/child /dst`
+// is `cannot stat 'X': Not a directory`, not "No such file or directory". The
+// backends cannot supply that distinction, because stat answers ENOENT for a
+// path under a plain file just as it does for a genuinely absent one (only
+// readdir splits the two). So the chain is walked the way destParentError walks
+// a destination's: the first component that does exist decides, and a plain
+// file there means ENOTDIR. Walking happens only on the failure path.
+export async function sourceKind(
+  stat: StatFn,
+  path: PathSpec,
+): Promise<{ exists: boolean; isDir: boolean; strerror: string | null }> {
+  const probe = await entryKind(stat, path)
+  if (probe.exists) return { exists: true, isDir: probe.isDir, strerror: null }
+  let node = parent(norm(path.virtual))
+  while (node !== '/') {
+    const up = await entryKind(stat, descendantPath(path, node))
+    if (up.exists) {
+      if (!up.isDir) return { exists: false, isDir: false, strerror: 'Not a directory' }
+      break
+    }
+    node = parent(node)
+  }
+  return { exists: false, isDir: false, strerror: 'No such file or directory' }
+}
+
 // GNU dir/non-dir overwrite mismatch line, or null when compatible.
 export function overwriteTypeError(
   cmdName: string,
@@ -731,9 +756,9 @@ export async function cpGeneric(
   const lines: string[] = []
   const errors: string[] = []
   for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists)) {
-    const { exists: srcExists, isDir: srcIsDir } = await entryKind(stat, src)
+    const { exists: srcExists, isDir: srcIsDir, strerror: srcErr } = await sourceKind(stat, src)
     if (!srcExists) {
-      errors.push(`cp: cannot stat '${src.virtual}': No such file or directory`)
+      errors.push(`cp: cannot stat '${src.virtual}': ${String(srcErr)}`)
       continue
     }
     if (keyOf(src) === keyOf(target)) {

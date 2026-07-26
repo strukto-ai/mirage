@@ -29,8 +29,9 @@ from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 from mirage.commands.builtin.generic.cp import (  # isort: skip
     TransferPolicy, backup_displaces, backup_raw, copy_entries, entry_kind,
-    make_backup, overwrite_gate, overwrite_type_error, split_operands,
-    target_dir_error, target_flags, update_mode, walk, wrap_target_dir)
+    source_kind, make_backup, overwrite_gate, overwrite_type_error,
+    split_operands, target_dir_error, target_flags, update_mode, walk,
+    wrap_target_dir)
 
 _logger = logging.getLogger(__name__)
 
@@ -348,10 +349,9 @@ async def mv(
     lines: list[str] = []
     errors: list[str] = []
     for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists):
-        src_exists, src_is_dir = await entry_kind(stat, src)
+        src_exists, src_is_dir, src_err = await source_kind(stat, src)
         if not src_exists:
-            errors.append(f"mv: cannot stat '{src.virtual}': "
-                          "No such file or directory")
+            errors.append(f"mv: cannot stat '{src.virtual}': {src_err}")
             continue
         if key_of(src) == key_of(target):
             errors.append(f"mv: '{src.virtual}' and '{target.virtual}' "

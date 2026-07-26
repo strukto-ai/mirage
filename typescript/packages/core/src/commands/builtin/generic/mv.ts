@@ -34,6 +34,7 @@ import {
   copyEntries,
   cpWalk,
   entryKind,
+  sourceKind,
   firstStr,
   makeBackup,
   overwriteGate,
@@ -335,9 +336,9 @@ export async function mvGeneric(
   const lines: string[] = []
   const errors: string[] = []
   for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists)) {
-    const { exists: srcExists, isDir: srcIsDir } = await entryKind(stat, src)
+    const { exists: srcExists, isDir: srcIsDir, strerror: srcErr } = await sourceKind(stat, src)
     if (!srcExists) {
-      errors.push(`mv: cannot stat '${src.virtual}': No such file or directory`)
+      errors.push(`mv: cannot stat '${src.virtual}': ${String(srcErr)}`)
       continue
     }
     if (keyOf(src) === keyOf(target)) {

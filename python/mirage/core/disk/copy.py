@@ -16,8 +16,11 @@ import asyncio
 import shutil
 from pathlib import Path
 
+import aiofiles.os
+
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.disk.errors import disk_error
 from mirage.types import PathSpec
 
 
@@ -35,5 +38,15 @@ async def copy(accessor: DiskAccessor, src_spec: PathSpec,
     root = accessor.root
     s = _resolve(root, src)
     d = _resolve(root, dst)
-    await asyncio.to_thread(shutil.copy2, s, d)
+    try:
+        await asyncio.to_thread(shutil.copy2, s, d)
+    except OSError as exc:
+        # copy2 reports ENOENT both for a missing source and for a missing
+        # destination parent, so the operand to blame is only knowable
+        # after the failure: probe the source to tell them apart. Either
+        # way the host path never reaches the message.
+        blame_src = (isinstance(exc, FileNotFoundError)
+                     and not await aiofiles.os.path.exists(s))
+        spec = src_spec if blame_src else dst_spec
+        raise disk_error(exc, spec.virtual) from exc
     await invalidate_after_write(dst_spec)

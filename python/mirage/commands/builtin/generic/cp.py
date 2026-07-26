@@ -319,6 +319,42 @@ async def entry_kind(stat: StatFn, path: PathSpec) -> tuple[bool, bool]:
     return True, info.type == FileType.DIRECTORY
 
 
+async def source_kind(stat: StatFn,
+                      path: PathSpec) -> tuple[bool, bool, str | None]:
+    """Probe a source operand for ``(exists, is_dir, strerror)``.
+
+    A source keeps the errno GNU reports: ``cp /plain/child /dst`` is
+    ``cannot stat 'X': Not a directory``, not "No such file or directory".
+    The backends cannot supply that distinction, because ``stat`` answers
+    ENOENT for a path under a plain file just as it does for a genuinely
+    absent one (only ``readdir`` splits the two). So the chain is walked
+    the way :func:`dest_parent_error` walks a destination's: the first
+    component that does exist decides, and a plain file there means
+    ENOTDIR. Walking happens only on the failure path.
+
+    Args:
+        stat (StatFn): Stats a path; raises when missing.
+        path (PathSpec): The probed source operand.
+
+    Returns:
+        tuple[bool, bool, str | None]: Whether it exists, whether it is a
+        directory, and the GNU strerror when it does not exist.
+    """
+    exists, is_dir = await entry_kind(stat, path)
+    if exists:
+        return True, is_dir, None
+    node = parent(norm(path.virtual))
+    while node != "/":
+        node_exists, node_is_dir = await entry_kind(
+            stat, descendant_path(path, node))
+        if node_exists:
+            if not node_is_dir:
+                return False, False, "Not a directory"
+            break
+        node = parent(node)
+    return False, False, "No such file or directory"
+
+
 def overwrite_type_error(cmd_name: str, src: PathSpec, src_is_dir: bool,
                          target: PathSpec, target_exists: bool,
                          target_is_dir: bool) -> str | None:
@@ -820,10 +856,9 @@ async def cp(
     lines: list[str] = []
     errors: list[str] = []
     for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists):
-        src_exists, src_is_dir = await entry_kind(stat, src)
+        src_exists, src_is_dir, src_err = await source_kind(stat, src)
         if not src_exists:
-            errors.append(f"cp: cannot stat '{src.virtual}': "
-                          "No such file or directory")
+            errors.append(f"cp: cannot stat '{src.virtual}': {src_err}")
             continue
         if key_of(src) == key_of(target):
             errors.append(f"cp: '{src.virtual}' and '{target.virtual}' "
