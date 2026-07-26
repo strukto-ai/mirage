@@ -32,6 +32,7 @@ def test_fetch_default_branch_main(mock_get, config):
     assert result == "main"
     mock_get.assert_called_once_with(config.token,
                                      "/repos/{owner}/{repo}",
+                                     base_url=None,
                                      owner="acme",
                                      repo="proj")
 

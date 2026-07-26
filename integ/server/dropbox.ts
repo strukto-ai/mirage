@@ -87,6 +87,11 @@ function malformed(res: ServerResponse): void {
   res.end(JSON.stringify({ error_summary: 'path/malformed' }))
 }
 
+function wholeWordHit(query: string, text: string): boolean {
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`).test(text)
+}
+
 class Account {
   readonly folders = new Set<string>()
   readonly files = new Map<string, StoredFile>()
@@ -155,9 +160,12 @@ class Account {
     return true
   }
 
-  // Case-insensitive substring over names and content: a superset of the
-  // real token-based matching, which is what grep/rg narrowing needs (the
-  // client still scans the candidates exactly).
+  // Content matches whole words, mirroring real Dropbox's index, so `foo`
+  // never matches `foobar`. Modelling that is what lets the battery prove
+  // grep/rg push-down cannot silently drop substring matches; a substring
+  // fake would agree with a full scan and test nothing. Names stay
+  // substring: extra hits there only over-fetch, which the local scan
+  // filters.
   searchMatches(query: string, scope: string, filenameOnly: boolean): SearchMatchJson[] | null {
     if (scope !== '' && this.entryFor(scope) === null) return null
     const q = query.toLowerCase()
@@ -170,7 +178,7 @@ class Account {
       const nameHit = path.slice(path.lastIndexOf('/') + 1).toLowerCase().includes(q)
       const stored = this.files.get(path)
       const contentHit =
-        !filenameOnly && stored !== undefined && DEC.decode(stored.data).toLowerCase().includes(q)
+        !filenameOnly && stored !== undefined && wholeWordHit(q, DEC.decode(stored.data).toLowerCase())
       if (!nameHit && !contentHit) continue
       const tag = nameHit && contentHit ? 'filename_and_content' : nameHit ? 'filename' : 'file_content'
       out.push({

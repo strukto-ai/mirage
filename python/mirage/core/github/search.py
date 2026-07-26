@@ -40,7 +40,10 @@ async def search_code(
     q = f"{query} repo:{owner}/{repo}"
     if path_filter:
         q += f" path:{path_filter}"
-    data = await github_get(config.token, "/search/code", params={"q": q})
+    data = await github_get(config.token,
+                            "/search/code",
+                            params={"q": q},
+                            base_url=config.base_url)
     return [
         SearchResult(path=item["path"], sha=item["sha"])
         for item in data.get("items", [])

@@ -71,126 +71,21 @@ async def test_subdir_narrows_and_fetches_fewer(mock_github_api, github_env,
                                                 counting_read, monkeypatch):
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    await grep(accessor, [_subdir()], "import", r=True, index=index)
+    await grep(accessor, [_subdir()], "import", r=True, w=True, index=index)
     # /src holds 7 files; code search narrows to the import-matching subset.
     assert 0 < len(counting_read) < 7
 
 
 @pytest.mark.asyncio
-async def test_regex_narrows_via_extracted_literal(mock_github_api, github_env,
-                                                   counting_read, monkeypatch):
+async def test_regex_scans_every_file(mock_github_api, github_env,
+                                      counting_read, monkeypatch):
+    # A regex narrows on an extracted literal, so the searched term is only
+    # part of the match; a whole-word search for it can miss real matches.
+    # Excluded even under -w.
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    await grep(accessor, [_root()], "import.*os", r=True, index=index)
-    # "import" is the required literal; only files containing it are fetched.
-    assert 0 < len(counting_read) < len(MOCK_BLOBS)
-
-
-@pytest.mark.asyncio
-async def test_files_only_shortcircuit_reads_nothing(mock_github_api,
-                                                     github_env, counting_read,
-                                                     monkeypatch):
-    accessor, index = github_env
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    stdout, io = await grep(accessor, [_root()],
-                            "import",
-                            r=True,
-                            args_l=True,
-                            index=index)
-    body = (await materialize(stdout)).decode()
-    assert len(counting_read) == 0
-    assert io.exit_code == 0
-    assert "src/main.py" in body
-
-
-@pytest.mark.asyncio
-async def test_files_only_shortcircuit_matches_generic(mock_github_api,
-                                                       github_env,
-                                                       monkeypatch):
-    accessor, index = github_env
-
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 10_000)
-    out_generic, _ = await grep(accessor, [_root()],
-                                "import",
-                                r=True,
-                                args_l=True,
-                                index=index)
-    text_generic = (await materialize(out_generic)).decode()
-
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    out_short, _ = await grep(accessor, [_root()],
-                              "import",
-                              r=True,
-                              args_l=True,
-                              index=index)
-    text_short = (await materialize(out_short)).decode()
-
-    assert text_short == text_generic
-    assert text_short
-
-
-@pytest.mark.asyncio
-async def test_rg_files_only_shortcircuit_reads_nothing(
-        mock_github_api, github_env, counting_read, monkeypatch):
-    accessor, index = github_env
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    stdout, io = await rg(accessor, [_root()],
-                          "import",
-                          args_l=True,
-                          index=index)
-    body = (await materialize(stdout)).decode()
-    assert len(counting_read) == 0
-    assert io.exit_code == 0
-    assert "src/main.py" in body
-
-
-@pytest.mark.asyncio
-async def test_rg_files_only_shortcircuit_matches_generic(
-        mock_github_api, github_env, monkeypatch):
-    accessor, index = github_env
-
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 10_000)
-    out_generic, _ = await rg(accessor, [_root()],
-                              "import",
-                              args_l=True,
-                              index=index)
-    text_generic = (await materialize(out_generic)).decode()
-
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    out_short, _ = await rg(accessor, [_root()],
-                            "import",
-                            args_l=True,
-                            index=index)
-    text_short = (await materialize(out_short)).decode()
-
-    assert text_short == text_generic
-    assert text_short
-
-
-@pytest.mark.asyncio
-async def test_rg_files_only_shortcircuit_respects_glob(
-        mock_github_api, github_env, monkeypatch):
-    accessor, index = github_env
-
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 10_000)
-    out_generic, _ = await rg(accessor, [_root()],
-                              "import",
-                              args_l=True,
-                              glob="main*.py",
-                              index=index)
-    text_generic = (await materialize(out_generic)).decode()
-
-    monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    out_short, _ = await rg(accessor, [_root()],
-                            "import",
-                            args_l=True,
-                            glob="main*.py",
-                            index=index)
-    text_short = (await materialize(out_short)).decode()
-
-    assert text_short == text_generic
-    assert "main.py" in text_short
-    assert "utils.py" not in text_short
+    await grep(accessor, [_root()], "import.*os", r=True, w=True, index=index)
+    assert len(counting_read) == len(MOCK_BLOBS)
 
 
 @pytest.mark.asyncio
@@ -202,6 +97,7 @@ async def test_rg_shortcircuit_no_match_exit_1(mock_github_api, github_env,
                           "import",
                           args_l=True,
                           glob="*.nomatch",
+                          w=True,
                           index=index)
     body = (await materialize(stdout)).decode()
     assert io.exit_code == 1

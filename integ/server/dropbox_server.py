@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import re
 import time
 
 from aiohttp import web
@@ -22,6 +23,14 @@ def _now_stamp() -> str:
     # Uploads stamp the real clock (find -mtime expects fresh writes to
     # look fresh, like MinIO/moto in the s3 targets).
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _content_hit(query: str, text: str) -> bool:
+    # Real Dropbox indexes content by whole words, so `foo` never matches
+    # `foobar`. See integ/server/box_server.py for why the fake models that
+    # instead of doing a substring scan.
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(query)}(?![A-Za-z0-9_])",
+                     text) is not None
 
 
 class FakeDropbox:
@@ -219,9 +228,13 @@ class FakeDropbox:
 
     def _search_matches(self, query: str, scope: str,
                         filename_only: bool) -> list[dict] | None:
-        # Case-insensitive substring over names and content: a superset of
-        # the real token-based matching, which is what grep/rg narrowing
-        # needs (the client still scans the candidates exactly).
+        # Case-insensitive substring over names and content: deliberately a
+        # superset of the real token-based matching. Safe only because
+        # narrowing now requires -w (see dropbox/narrow.py): under -w the
+        # client wants whole words too, so extra candidates are filtered by
+        # the local scan. Do not rely on this fake to prove narrowing is
+        # complete for a bare literal, real Dropbox returns a strict subset
+        # there and would drop matches inside longer words.
         if scope and self._entry_for(scope) is None:
             return None
         q = query.lower()
@@ -236,7 +249,8 @@ class FakeDropbox:
             name_hit = q in path.rsplit("/", 1)[1].lower()
             stored = self.files.get(path)
             content_hit = (not filename_only and stored is not None
-                           and q in stored[0].decode(errors="replace").lower())
+                           and _content_hit(
+                               q, stored[0].decode(errors="replace").lower()))
             if not name_hit and not content_hit:
                 continue
             tag = ("filename_and_content" if name_hit and content_hit else
