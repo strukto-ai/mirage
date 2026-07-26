@@ -16,9 +16,7 @@ from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.du import du as generic_du
-from mirage.commands.builtin.generic.du import (du_has_content, du_operands,
-                                                parse_flags)
+from mirage.commands.builtin.generic.du import run_du
 from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.builtin.github.io import IO, resolve_glob
 from mirage.commands.registry import command
@@ -76,24 +74,18 @@ async def du(
     cwd: PathSpec | str = "/",
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    flags = parse_flags(s=s,
-                        a=a,
-                        h=h,
-                        c=c,
-                        max_depth=max_depth if max_depth is not None else d)
-    present, missing = await du_operands(
+    out = await run_du(
         paths,
         cwd,
         lambda targets: resolve_glob(accessor, targets, index),
         lambda path: IO.stat(accessor, path, index),
-        partial(du_has_content, partial(_du_size, index),
-                partial(_du_entries, index)),
-    )
-    out = await generic_du(
-        present,
-        compute_size=partial(_du_size, index),
-        compute_entries=partial(_du_entries, index),
-        flags=flags,
-        missing=missing,
+        partial(_du_size, index),
+        partial(_du_entries, index),
+        s=s,
+        a=a,
+        h=h,
+        c=c,
+        max_depth=max_depth,
+        d=d,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

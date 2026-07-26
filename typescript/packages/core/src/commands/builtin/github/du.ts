@@ -20,7 +20,7 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { IOResult } from '../../../io/types.ts'
-import { duGeneric, duHasContent, duOperands, parseDuFlags } from '../generic/du.ts'
+import { runDu } from '../generic/du.ts'
 
 const resolveGlob = resolveGlobOf(GITHUB_IO)
 
@@ -30,26 +30,14 @@ async function duCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const flags = parseDuFlags(opts)
   const idx = opts.index ?? undefined
-  const { present, missing } = await duOperands(
+  const out = await runDu(
     paths,
-    opts.cwd,
+    opts,
     (targets) => resolveGlob(accessor, targets, idx),
     (p) => GITHUB_IO.stat(accessor, p, idx),
-    (p) =>
-      duHasContent(
-        (x) => githubDu(accessor, x, idx),
-        (x) => githubDuAll(accessor, x, idx),
-        p,
-      ),
-  )
-  const out = await duGeneric(
-    present,
-    flags,
     (p) => githubDu(accessor, p, idx),
     (p) => githubDuAll(accessor, p, idx),
-    missing,
   )
   return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }

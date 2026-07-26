@@ -22,10 +22,7 @@ import {
   type ComputeEntries,
   type ComputeSize,
   type DuEntries,
-  duGeneric,
-  duHasContent,
-  duOperands,
-  parseDuFlags,
+  runDu,
 } from '../../generic/du.ts'
 import { type Builder, type CommandIO, resolveGlobOf } from '../adapter.ts'
 
@@ -119,8 +116,6 @@ export const DU_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const { duSize, duEntries } = ops
-    // GNU rejects a bad option combination before it stats anything.
-    const flags = parseDuFlags(opts)
     const budget = new WalkBudget(ops.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
     const computeSize: ComputeSize =
       duSize === undefined
@@ -133,19 +128,13 @@ export const DU_BUILDER: Builder = {
           ? undefined
           : (p) => duEntries(accessor, p, idx)
 
-    const { present, missing } = await duOperands(
+    const out = await runDu(
       paths,
-      opts.cwd,
+      opts,
       (targets) => resolveGlobOf(ops)(accessor, targets, idx),
       (p) => ops.stat(accessor, p, idx),
-      (p) => duHasContent(computeSize, computeEntries, p),
-    )
-    const out = await duGeneric(
-      present,
-      flags,
       computeSize,
       computeEntries,
-      missing,
       () => budget.hit,
     )
     return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]

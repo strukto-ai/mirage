@@ -18,10 +18,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import (ComputeEntries, ComputeSize,
-                                                DuEntries)
-from mirage.commands.builtin.generic.du import du as generic_du
-from mirage.commands.builtin.generic.du import (du_has_content, du_operands,
-                                                parse_flags)
+                                                DuEntries, run_du)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           OperationFn)
 from mirage.io.types import ByteSource, IOResult
@@ -156,13 +153,6 @@ async def du(
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("du: no resource")
-    # GNU rejects a bad option combination before it stats anything, and
-    # -d is only another spelling of --max-depth.
-    flags = parse_flags(s=s,
-                        a=a,
-                        h=h,
-                        c=c,
-                        max_depth=max_depth if max_depth is not None else d)
     budget = WalkBudget(ops.max_du_entries)
     size_op = ops.du_size
     entries_op = ops.du_entries
@@ -176,19 +166,19 @@ async def du(
         compute_entries = (partial(_op_entries, entries_op, accessor, index)
                            if entries_op is not None else None)
 
-    present, missing = await du_operands(
+    out = await run_du(
         paths,
         cwd,
         lambda targets: ops.resolve_glob(accessor, targets, index),
         lambda path: ops.stat(accessor, path, index),
-        partial(du_has_content, compute_size, compute_entries),
-    )
-    out = await generic_du(
-        present,
-        compute_size=compute_size,
-        compute_entries=compute_entries,
-        flags=flags,
-        missing=missing,
+        compute_size,
+        compute_entries,
+        s=s,
+        a=a,
+        h=h,
+        c=c,
+        max_depth=max_depth,
+        d=d,
         truncated=lambda: budget.hit,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

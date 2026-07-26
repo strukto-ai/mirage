@@ -12,16 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  IOResult,
-  ResourceName,
-  command,
-  duGeneric,
-  duHasContent,
-  duOperands,
-  parseDuFlags,
-  specOf,
-} from '@struktoai/mirage-core'
+import { IOResult, ResourceName, command, runDu, specOf } from '@struktoai/mirage-core'
 import { size as opfsDu, entries as opfsDuAll } from '../../../core/opfs/du/index.ts'
 import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
@@ -31,25 +22,13 @@ export const OPFS_DU = command({
   resource: ResourceName.OPFS,
   spec: specOf('du'),
   fn: async (accessor: OPFSAccessor, paths, _texts, opts) => {
-    const flags = parseDuFlags(opts)
-    const { present, missing } = await duOperands(
+    const out = await runDu(
       paths,
-      opts.cwd,
+      opts,
       (targets) => Promise.resolve(targets),
       (p) => opfsStat(accessor, p),
-      (p) =>
-        duHasContent(
-          (x) => opfsDu(accessor, x),
-          (x) => opfsDuAll(accessor, x),
-          p,
-        ),
-    )
-    const out = await duGeneric(
-      present,
-      flags,
       (p) => opfsDu(accessor, p),
       (p) => opfsDuAll(accessor, p),
-      missing,
     )
     return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
   },

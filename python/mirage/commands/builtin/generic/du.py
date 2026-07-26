@@ -1,6 +1,7 @@
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 
 from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.commands.builtin.utils.output import format_records
@@ -336,6 +337,63 @@ async def _du_one(
     ]
     lines.append(_line(total, flags.h, label))
     return lines, total
+
+
+async def run_du(
+    paths: list[PathSpec],
+    cwd: PathSpec | str,
+    resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    compute_size: ComputeSize,
+    compute_entries: ComputeEntries | None = None,
+    *,
+    s: bool = False,
+    a: bool = False,
+    h: bool = False,
+    c: bool = False,
+    max_depth: str | None = None,
+    d: str | None = None,
+    truncated: Callable[[], bool] | None = None,
+) -> DuOutput:
+    """Run one whole ``du`` invocation, from raw flags to rendered bytes.
+
+    Every caller needs the same three steps in the same order: validate
+    the flags before touching I/O, split the operands into readable and
+    unreadable, then render. Keeping them here means a backend wrapper is
+    wiring only, and the three steps cannot drift apart per backend.
+
+    Args:
+        paths (list[PathSpec]): the operands as parsed, possibly empty.
+        cwd (PathSpec | str): working directory, measured when empty.
+        resolve_glob (Callable): expands globs against the backend.
+        stat (Callable): raises when an operand cannot be read.
+        compute_size (ComputeSize): recursive byte size of one operand.
+        compute_entries (ComputeEntries | None): per-file breakdown.
+        s (bool): -s.
+        a (bool): -a.
+        h (bool): -h.
+        c (bool): -c.
+        max_depth (str | None): raw --max-depth text.
+        d (str | None): raw -d text, the short spelling of --max-depth.
+        truncated (Callable[[], bool] | None): whether a walk was cut off.
+
+    Raises:
+        UsageError: on a bad depth or a conflicting flag combination.
+    """
+    flags = parse_flags(s=s,
+                        a=a,
+                        h=h,
+                        c=c,
+                        max_depth=max_depth if max_depth is not None else d)
+    present, missing = await du_operands(
+        paths, cwd, resolve_glob, stat,
+        partial(du_has_content, compute_size, compute_entries))
+    return await du(present,
+                    compute_size=compute_size,
+                    compute_entries=compute_entries,
+                    flags=flags,
+                    missing=missing,
+                    truncated=truncated)
 
 
 async def du(

@@ -121,7 +121,7 @@ function cwdSpec(cwd: string): PathSpec {
 /**
  * Whether an operand holds anything, for the unstattable case.
  */
-export async function duHasContent(
+async function duHasContent(
   computeSize: ComputeSize,
   computeEntries: ComputeEntries | undefined,
   path: PathSpec,
@@ -144,7 +144,7 @@ export async function duHasContent(
  * even though the subtree is full. `hasContent` is the second opinion: only an
  * operand that neither stats nor holds anything is reported missing.
  */
-export async function duOperands(
+async function duOperands(
   paths: PathSpec[],
   cwd: string,
   resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
@@ -305,6 +305,30 @@ async function duOne(
   const lines = rows.map(([, size], i) => `${fmt(size)}\t${shown[i] ?? ''}`)
   lines.push(`${fmt(total)}\t${label}`)
   return [lines, total]
+}
+
+/**
+ * Run one whole `du` invocation, from raw flags to rendered bytes.
+ *
+ * Every caller needs the same three steps in the same order: validate the
+ * flags before touching I/O, split the operands into readable and unreadable,
+ * then render. Keeping them here means a backend wrapper is wiring only, and
+ * the three steps cannot drift apart per backend.
+ */
+export async function runDu(
+  paths: PathSpec[],
+  opts: CommandOpts,
+  resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
+  stat: (p: PathSpec) => Promise<unknown>,
+  computeSize: ComputeSize,
+  computeEntries?: ComputeEntries,
+  truncated?: () => boolean,
+): Promise<DuOutput> {
+  const flags = parseDuFlags(opts)
+  const { present, missing } = await duOperands(paths, opts.cwd, resolveGlob, stat, (p) =>
+    duHasContent(computeSize, computeEntries, p),
+  )
+  return duGeneric(present, flags, computeSize, computeEntries, missing, truncated)
 }
 
 /**
