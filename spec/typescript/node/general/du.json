@@ -81,7 +81,7 @@
       "long": "--max-depth",
       "numeric_shorthand": false,
       "repeatable": false,
-      "short": null,
+      "short": "-d",
       "short_value": true,
       "value_kind": "text",
       "value_optional": false

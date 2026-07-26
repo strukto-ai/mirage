@@ -19,15 +19,8 @@ from mirage.commands.builtin.onedrive._provision import \
 from mirage.commands.builtin.onedrive.io import IO as _IO
 from mirage.core.onedrive.read import read_bytes as _read
 
-# total) tuple, matching the s3 override.
-_ONEDRIVE_OVERRIDES = {"du"}
-
 COMMANDS = [
     *make_filetype_commands(
         "onedrive", _IO.resolve_glob, _read, provision=_ft_provision),
-    *make_generic_commands(
-        "onedrive",
-        _IO,
-        overrides=_ONEDRIVE_OVERRIDES,
-    ),
+    *make_generic_commands("onedrive", _IO),
 ]
