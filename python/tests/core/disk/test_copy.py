@@ -53,8 +53,7 @@ async def test_copy_blames_the_destination_when_its_parent_is_missing(
 
 
 @pytest.mark.asyncio
-async def test_copy_blames_the_source_when_it_is_the_missing_operand(
-        accessor):
+async def test_copy_blames_the_source_when_it_is_the_missing_operand(accessor):
     with pytest.raises(FileNotFoundError) as excinfo:
         await copy(accessor, PathSpec.from_str_path("/nope"),
                    PathSpec.from_str_path("/dst"))
