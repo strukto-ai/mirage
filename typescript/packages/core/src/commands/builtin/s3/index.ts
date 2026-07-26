@@ -19,7 +19,6 @@ import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { S3_DU } from './du.ts'
 import { S3_MKDIR } from './mkdir.ts'
 import { S3_RM } from './rm.ts'
 import { S3_STAT } from './stat.ts'
@@ -27,7 +26,7 @@ import { S3_TEE } from './tee.ts'
 import { S3_TOUCH } from './touch.ts'
 import { S3_IO } from './io.ts'
 
-const S3_OVERRIDES = new Set(['stat', 'du', 'rm', 'mkdir', 'tee', 'touch'])
+const S3_OVERRIDES = new Set(['stat', 'rm', 'mkdir', 'tee', 'touch'])
 
 export const S3_COMMANDS: readonly RegisteredCommand[] = [
   ...makeFiletypeCommands<S3Accessor>({
@@ -39,7 +38,6 @@ export const S3_COMMANDS: readonly RegisteredCommand[] = [
     overrides: S3_OVERRIDES,
   }),
   ...S3_STAT,
-  ...S3_DU,
   ...S3_RM,
   ...S3_MKDIR,
   ...S3_TEE,

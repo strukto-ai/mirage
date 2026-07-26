@@ -20,11 +20,10 @@ import {
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { read as hfRead } from '../../../core/hf/read.ts'
 import { stat as hfStat } from '../../../core/hf/stat.ts'
-import { HF_DU } from './du.ts'
 import { HF_FIND } from './find.ts'
 import { HF_IO } from './io.ts'
 
-const HF_OVERRIDES = new Set(['cp', 'mv', 'du', 'find'])
+const HF_OVERRIDES = new Set(['cp', 'mv', 'find'])
 
 export const HF_COMMANDS: readonly RegisteredCommand[] = [
   ...HF_RESOURCES.flatMap((resource) =>
@@ -39,6 +38,5 @@ export const HF_COMMANDS: readonly RegisteredCommand[] = [
       overrides: HF_OVERRIDES,
     }),
   ),
-  ...HF_DU,
   ...HF_FIND,
 ]
