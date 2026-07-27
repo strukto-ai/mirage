@@ -55,7 +55,7 @@ function buildConfig(): SSHConfig {
 async function main(): Promise<void> {
   const resource = new SSHResource(buildConfig());
   const ws = new Workspace({
-    "/ssh": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/ssh": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

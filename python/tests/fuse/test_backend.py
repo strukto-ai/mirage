@@ -47,7 +47,13 @@ def test_resolve_backend_rejects_unknown():
 def test_no_auto_backend():
     # Deliberate: auto-selecting fskit would silently break every API-backed
     # mount, so the only safe value is also the default.
-    assert [b.value for b in MountBackend] == ["fuse", "fskit"]
+    assert [b.value for b in MountBackend] == ["vfs", "fuse", "fskit"]
+
+
+def test_resolve_backend_rejects_vfs():
+    # vfs registers nothing with the kernel, so it is not a mount target.
+    with pytest.raises(ValueError, match="does not register a mountpoint"):
+        resolve_backend("vfs")
 
 
 def test_check_platform_allows_fuse_everywhere(monkeypatch):

@@ -16,7 +16,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.hf_spaces import HfSpacesConfig, HfSpacesResource
 
 load_dotenv(".env.development")
@@ -27,7 +27,9 @@ config = HfSpacesConfig(
 )
 resource = HfSpacesResource(config)
 
-with Workspace({"/s/": Mount(resource, mode=MountMode.READ, fuse=True)}) as ws:
+with Workspace(
+    {"/s/": Mount(resource, mode=MountMode.READ,
+                  backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
 

@@ -16,7 +16,7 @@
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.commands.registry import command
-from mirage.types import FileStat, MountMode
+from mirage.types import FileStat, MountBackend, MountMode
 from mirage.workspace import (ExecutionNode, Workspace, WorkspaceRunner)
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount.spec import Mount
@@ -35,6 +35,7 @@ __all__ = [
     "FileStat",
     "FuseManager",
     "Mount",
+    "MountBackend",
     "MountMode",
     "command",
     "new_session_id",

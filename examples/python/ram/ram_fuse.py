@@ -15,7 +15,7 @@
 import os
 from pathlib import Path
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -35,8 +35,10 @@ for name in sorted(store.files):
     size = len(store.files[name])
     print(f"  {name} ({size:,} bytes)")
 
-with Workspace({"/data/": Mount(resource, mode=MountMode.WRITE,
-                                fuse=True)}) as ws:
+with Workspace({
+        "/data/":
+        Mount(resource, mode=MountMode.WRITE, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"\n=== FUSE MODE: mounted at {mp} ===\n")

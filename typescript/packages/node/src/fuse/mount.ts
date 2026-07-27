@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Session, Workspace } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../optional_peer.ts'
+import type { MountBackend } from '@struktoai/mirage-core'
 import { checkMountpoint, checkPlatform, checkSizes, resolveBackend } from './backend.ts'
 import { MirageFS } from './fs.ts'
 
@@ -54,7 +55,7 @@ export interface MountOptions {
    * See backend.ts — 'fskit' currently throws in TypeScript, because
    * `@zkochan/fuse-native` cannot reach the FSKit shim.
    */
-  backend?: string
+  backend?: MountBackend
 }
 
 interface FuseInstance {

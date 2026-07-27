@@ -20,7 +20,7 @@ See [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDepen
 import { Mount, MountMode, RAMResource, S3Resource, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
-  '/': new Mount(new RAMResource(), { mode: MountMode.WRITE, fuse: true }),
+  '/': new Mount(new RAMResource(), { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
   '/s3/': new Mount(new S3Resource({ bucket: 'my-bucket', /* ... */ }), { mode: MountMode.READ }),
 })
 await ws.fuseReady()

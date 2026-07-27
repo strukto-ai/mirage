@@ -16,7 +16,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.redis import RedisResource
 
 load_dotenv(".env.development")
@@ -32,7 +32,7 @@ resource = RedisResource(
 # fetching content, so every file has a known size and FSKit can serve it.
 with Workspace({
         "/kv/":
-        Mount(resource, mode=MountMode.WRITE, fuse=True, fuse_backend="fskit")
+        Mount(resource, mode=MountMode.WRITE, backend=MountBackend.FSKIT)
 }) as ws:
     mp = ws.fuse_mountpoint
 

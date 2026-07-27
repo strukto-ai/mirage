@@ -17,7 +17,7 @@ import subprocess
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.s3 import S3Config, S3Resource
 
 load_dotenv(".env.development")
@@ -33,10 +33,9 @@ resource = S3Resource(config)
 # S3 is remote but still a byte store: ListObjectsV2 and HeadObject both
 # carry ContentLength, so stat() sizes a key without downloading it. That is
 # the property FSKit needs, not locality.
-with Workspace({
-        "/s3/":
-        Mount(resource, mode=MountMode.READ, fuse=True, fuse_backend="fskit")
-}) as ws:
+with Workspace(
+    {"/s3/": Mount(resource, mode=MountMode.READ,
+                   backend=MountBackend.FSKIT)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FSKIT MODE: mounted at {mp} ===\n")

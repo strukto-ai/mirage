@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CLI end-to-end FUSE parity. Drives the daemon-backed CLI to create a workspace
 # with TWO per-mount FUSE subtrees pinned to known OS paths plus ONE generated
-# mount (fuse: true), writes content through the VFS, then reads it back THROUGH
+# mount (backend: fuse), writes content through the VFS, then reads it back THROUGH
 # the kernel mountpoints. The daemon hosts the mounts in its own process, so the
 # reading shell never deadlocks. Proves the CLI really mounts each subtree on
 # both languages, and that close() cleanup is ownership-aware: caller-owned
@@ -39,7 +39,7 @@ mounts:
     fuse: $lmnt
   /auto:
     resource: ram
-    fuse: true
+    backend: fuse
 YML
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true

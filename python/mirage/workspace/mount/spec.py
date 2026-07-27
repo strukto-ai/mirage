@@ -16,17 +16,18 @@ from dataclasses import dataclass, field
 
 from mirage.commands.safeguard import CommandSafeguard
 from mirage.resource.base import BaseResource
-from mirage.types import MountMode
+from mirage.types import MountBackend, MountMode
 
 
 @dataclass(frozen=True)
 class Mount:
     resource: BaseResource
     mode: MountMode | None = None
-    fuse: bool | str = False
-    # Which kernel interface serves the FUSE mount: "fuse" (default,
-    # everywhere) or "fskit" (macOS 15.4+ with macFUSE 5.x, no kernel
-    # extension). Ignored when fuse is False. See mirage.fuse.backend.
-    fuse_backend: str = "fuse"
+    # How the mount is exposed. VFS (the default) keeps it inside mirage's
+    # own filesystem; FUSE and FSKIT also register a real mountpoint.
+    backend: MountBackend = MountBackend.VFS
+    # Where to mount, for the kernel backends. None picks a temporary
+    # directory appropriate for the backend. Ignored when backend is VFS.
+    mountpoint: str | None = None
     command_safeguards: dict[str,
                              CommandSafeguard] = field(default_factory=dict)

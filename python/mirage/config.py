@@ -26,7 +26,8 @@ from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime, ScriptSource
 from mirage.runtime.table import build_runtime
-from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
+from mirage.types import (KERNEL_BACKENDS, CommandSafeguard, ConsistencyPolicy,
+                          MountBackend, MountMode)
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import (DEFAULT_STATE_ROOT,
                                     DiskWorkspaceStateStore,
@@ -228,7 +229,10 @@ class MountBlock(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     command_safeguards: dict[str,
                              CommandSafeguard] = Field(default_factory=dict)
-    fuse: bool | str = False
+    # How the mount is exposed: vfs (default, mirage's own filesystem only),
+    # fuse, or fskit. mountpoint is honored by the kernel backends.
+    backend: MountBackend = MountBackend.VFS
+    mountpoint: str | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -399,16 +403,21 @@ class WorkspaceConfig(BaseModel):
             kwargs["route"] = _load_script_source(self.route)
         return kwargs
 
-    def fuse_mounts(self) -> dict[str, bool | str]:
-        """Declarative FUSE mounts keyed by mount prefix.
+    def kernel_mounts(self) -> dict[str, tuple[MountBackend, str | None]]:
+        """Declarative kernel mounts keyed by mount prefix.
+
+        Mounts left on the default ``vfs`` backend are absent: they are
+        served inside mirage's own filesystem and register nothing with the
+        kernel.
 
         Returns:
-            dict[str, bool | str]: prefix to ``fuse`` block value (a
-                mountpoint path or ``True``) for mounts that request FUSE.
+            dict[str, tuple[MountBackend, str | None]]: prefix to
+                (backend, mountpoint) for mounts that request one.
         """
         return {
-            prefix: block.fuse
-            for prefix, block in self.mounts.items() if block.fuse
+            prefix: (block.backend, block.mountpoint)
+            for prefix, block in self.mounts.items()
+            if block.backend in KERNEL_BACKENDS
         }
 
 

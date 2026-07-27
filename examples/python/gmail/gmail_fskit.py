@@ -16,7 +16,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.gmail import GmailConfig, GmailResource
 from mirage.resource.ram import RAMResource
 
@@ -39,8 +39,7 @@ try:
             "/gmail/":
             Mount(GmailResource(config=config),
                   mode=MountMode.READ,
-                  fuse=True,
-                  fuse_backend="fskit")
+                  backend=MountBackend.FSKIT)
     }):
         print("  unexpectedly mounted")
 except RuntimeError as err:
@@ -54,8 +53,7 @@ try:
             "/ram/":
             Mount(RAMResource(),
                   mode=MountMode.WRITE,
-                  fuse=True,
-                  fuse_backend="fskit"),
+                  backend=MountBackend.FSKIT),
             "/gmail/":
             Mount(GmailResource(config=config), mode=MountMode.READ),
     }):
@@ -69,10 +67,7 @@ except RuntimeError as err:
 print("=== part 3: scoping fskit to the byte-store subtree ===\n")
 with Workspace({
         "/ram/":
-        Mount(RAMResource(),
-              mode=MountMode.WRITE,
-              fuse=True,
-              fuse_backend="fskit"),
+        Mount(RAMResource(), mode=MountMode.WRITE, backend=MountBackend.FSKIT),
         "/gmail/":
         Mount(GmailResource(config=config), mode=MountMode.READ),
 }) as ws:

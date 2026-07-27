@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource } from '@struktoai/mirage-core'
+import { MountBackend, MountMode, RAMResource } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import {
@@ -20,7 +20,6 @@ import {
   checkPlatform,
   checkSizes,
   FSKIT_MOUNT_ROOT,
-  MountBackend,
   resolveBackend,
   unsizedMounts,
 } from './backend.ts'
@@ -44,7 +43,11 @@ describe('resolveBackend', () => {
   it('offers no auto backend', () => {
     // Deliberate: auto-selecting fskit would silently break every API-backed
     // mount, so the only safe value is also the default.
-    expect(Object.values(MountBackend)).toEqual(['fuse', 'fskit'])
+    expect(Object.values(MountBackend)).toEqual(['vfs', 'fuse', 'fskit'])
+  })
+
+  it('rejects vfs: it registers nothing with the kernel', () => {
+    expect(() => resolveBackend('vfs')).toThrow(/does not register a mountpoint/)
   })
 })
 

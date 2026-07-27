@@ -16,7 +16,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.s3 import S3Config, S3Resource
 
 load_dotenv(".env.development")
@@ -40,8 +40,10 @@ resource = S3Resource(config)
 deep_resource = S3Resource(deep_config)
 
 with Workspace({
-        "/s3/": Mount(resource, mode=MountMode.READ, fuse=True),
-        "/deep/": deep_resource
+        "/s3/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE),
+        "/deep/":
+        deep_resource
 }) as ws:
     mp = ws.fuse_mountpoint
 

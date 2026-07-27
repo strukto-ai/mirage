@@ -19,6 +19,8 @@ import {
   createShellParser,
   type ExecuteOptions,
   type ExecuteResult,
+  KERNEL_BACKENDS,
+  MountBackend,
   type MountSpec,
   type ProvisionResult,
   type ShellParser,
@@ -56,15 +58,16 @@ export class Workspace extends CoreWorkspace {
     const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {
       ...(options.commandSafeguards ?? {}),
     }
-    const fuseTargets: [string, boolean | string][] = []
+    const mountTargets: [string, MountBackend, string | undefined][] = []
     for (const [prefix, value] of Object.entries(resources)) {
       if (value instanceof Mount) {
         specs[prefix] =
           value.options.mode !== undefined ? [value.resource, value.options.mode] : value.resource
         if (value.options.commandSafeguards !== undefined)
           commandSafeguards[prefix] = value.options.commandSafeguards
-        if (value.options.fuse !== undefined && value.options.fuse !== false)
-          fuseTargets.push([prefix, value.options.fuse])
+        const backend = value.options.backend ?? MountBackend.VFS
+        if (KERNEL_BACKENDS.includes(backend))
+          mountTargets.push([prefix, backend, value.options.mountpoint])
       } else {
         specs[prefix] = value
       }
@@ -74,7 +77,7 @@ export class Workspace extends CoreWorkspace {
       ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
       shellParserFactory: options.shellParserFactory ?? loadShellParser,
     })
-    if (fuseTargets.length > 0) {
+    if (mountTargets.length > 0) {
       // Kick off mounts eagerly; await inside fuseReady() / execute() / close()
       // so callers don't need to await the constructor (Python mirrors this).
       //
@@ -83,8 +86,8 @@ export class Workspace extends CoreWorkspace {
       // runs on a daemon thread so its failure never reaches the main process.
       // On Node's single event loop we swallow it here, otherwise the unhandled
       // rejection would terminate the process under Node's default policy.
-      const setups = fuseTargets.map(([prefix, target]) =>
-        this.addFuseMount(prefix, typeof target === 'string' ? target : undefined).then(
+      const setups = mountTargets.map(([prefix, backend, mountpoint]) =>
+        this.addFuseMount(prefix, mountpoint, undefined, backend).then(
           () => undefined,
           (err: unknown) => {
             process.stderr.write(
@@ -121,7 +124,12 @@ export class Workspace extends CoreWorkspace {
    * into a container and the narrowing travels with it); it is keyed
    * separately so the same prefix can also be exposed unbound.
    */
-  async addFuseMount(prefix: string, mountpoint?: string, sessionId?: string): Promise<string> {
+  async addFuseMount(
+    prefix: string,
+    mountpoint?: string,
+    sessionId?: string,
+    backend?: MountBackend,
+  ): Promise<string> {
     const session = sessionId !== undefined ? this.getSession(sessionId) : undefined
     const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
     if (mountpoint !== undefined) this.registerFuseMount(key, mountpoint)
@@ -132,6 +140,7 @@ export class Workspace extends CoreWorkspace {
         rootPrefix: prefix,
         ...(mountpoint !== undefined ? { mountpoint } : {}),
         ...(session !== undefined ? { session } : {}),
+        ...(backend !== undefined ? { backend } : {}),
       })
       if (mountpoint === undefined) this.registerFuseMount(key, mp)
       return mp

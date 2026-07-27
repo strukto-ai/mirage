@@ -18,7 +18,7 @@ import subprocess
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.slack import SlackConfig, SlackResource
 
 load_dotenv(".env.development")
@@ -29,8 +29,10 @@ config = SlackConfig(
 )
 resource = SlackResource(config=config)
 
-with Workspace({"/slack/": Mount(resource, mode=MountMode.READ,
-                                 fuse=True)}) as ws:
+with Workspace({
+        "/slack/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

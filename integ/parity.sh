@@ -29,7 +29,7 @@ mode: WRITE
 mounts:
   /:
     resource: ram
-    fuse: true
+    backend: fuse
 YML
 
 MODES_YAML=/tmp/parity-modes.yaml

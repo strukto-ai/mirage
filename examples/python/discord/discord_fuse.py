@@ -18,7 +18,7 @@ import subprocess
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.discord import DiscordConfig, DiscordResource
 
 load_dotenv(".env.development")
@@ -26,8 +26,10 @@ load_dotenv(".env.development")
 config = DiscordConfig(token=os.environ["DISCORD_BOT_TOKEN"])
 resource = DiscordResource(config=config)
 
-with Workspace({"/discord/": Mount(resource, mode=MountMode.READ,
-                                   fuse=True)}) as ws:
+with Workspace({
+        "/discord/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

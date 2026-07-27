@@ -17,7 +17,7 @@ import subprocess
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.slack import SlackConfig, SlackResource
 
 load_dotenv(".env.development")
@@ -42,8 +42,7 @@ try:
             "/slack/":
             Mount(SlackResource(config=config),
                   mode=MountMode.READ,
-                  fuse=True,
-                  fuse_backend="fskit")
+                  backend=MountBackend.FSKIT)
     }):
         print("  unexpectedly mounted")
 except RuntimeError as err:
@@ -54,7 +53,9 @@ except RuntimeError as err:
 print("=== part 2: the same mount over backend='fuse' ===\n")
 with Workspace({
         "/slack/":
-        Mount(SlackResource(config=config), mode=MountMode.READ, fuse=True)
+        Mount(SlackResource(config=config),
+              mode=MountMode.READ,
+              backend=MountBackend.FUSE)
 }) as ws:
     mp = ws.fuse_mountpoint
     print(f"mounted at {mp}\n")

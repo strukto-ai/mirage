@@ -66,7 +66,6 @@ export {
   checkPlatform,
   checkSizes,
   FSKIT_MOUNT_ROOT,
-  MountBackend,
   resolveBackend,
   unsizedMounts,
 } from './fuse/backend.ts'

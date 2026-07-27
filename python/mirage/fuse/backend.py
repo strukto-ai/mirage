@@ -14,9 +14,9 @@
 
 import posixpath
 import sys
-from enum import Enum
 
 from mirage.ops import Ops
+from mirage.types import KERNEL_BACKENDS, MountBackend
 
 # FSKit mounts only under /Volumes. Anywhere else the mount fails with an
 # opaque driver error, so the rule is enforced here rather than discovered
@@ -24,46 +24,34 @@ from mirage.ops import Ops
 FSKIT_MOUNT_ROOT = "/Volumes"
 
 
-class MountBackend(str, Enum):
-    """Which kernel interface serves a mount.
-
-    FUSE is the default everywhere and the only backend on Linux and
-    Windows. FSKIT routes through macFUSE 5.x's FSKit shim, which needs no
-    kernel extension but has no ``direct_io`` equivalent, so it can only
-    serve resources whose files always have a known size.
-
-    There is deliberately no ``auto``: auto-selecting fskit would silently
-    break every API-backed mount, and an option whose safe value is always
-    the default is a trap.
-    """
-
-    FUSE = "fuse"
-    FSKIT = "fskit"
-
-
 def resolve_backend(value: "str | MountBackend | None") -> MountBackend:
-    """Coerce a user-supplied backend name into a MountBackend.
+    """Coerce a user-supplied backend name into a kernel MountBackend.
 
     Args:
         value (str | MountBackend | None): the requested backend; None and
-            the empty string mean the default.
+            the empty string mean FUSE, because reaching this function at
+            all means a kernel mount was asked for.
 
     Returns:
-        MountBackend: the resolved backend.
+        MountBackend: the resolved backend, never VFS.
 
     Raises:
-        ValueError: the name is not a known backend.
+        ValueError: the name is not a known backend, or is VFS.
     """
     if value is None or value == "":
         return MountBackend.FUSE
-    if isinstance(value, MountBackend):
-        return value
     try:
-        return MountBackend(value.lower())
+        backend = MountBackend(str(value).lower())
     except ValueError:
-        known = ", ".join(b.value for b in MountBackend)
+        known = ", ".join(b.value for b in KERNEL_BACKENDS)
         raise ValueError(
             f"unknown mount backend {value!r}; expected one of: {known}")
+    if backend not in KERNEL_BACKENDS:
+        raise ValueError(
+            f"backend {backend.value!r} does not register a mountpoint; it "
+            "is served inside mirage's own filesystem, so there is nothing "
+            "to mount")
+    return backend
 
 
 def check_platform(backend: MountBackend) -> None:

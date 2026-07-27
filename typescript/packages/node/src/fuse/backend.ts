@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { posix } from 'node:path'
-import { sizesAlwaysKnown, type Workspace } from '@struktoai/mirage-core'
+import {
+  KERNEL_BACKENDS,
+  MountBackend,
+  sizesAlwaysKnown,
+  type Workspace,
+} from '@struktoai/mirage-core'
 
 /**
  * FSKit mounts only under /Volumes. Anywhere else the mount fails with an
@@ -23,36 +28,25 @@ import { sizesAlwaysKnown, type Workspace } from '@struktoai/mirage-core'
 export const FSKIT_MOUNT_ROOT = '/Volumes'
 
 /**
- * Which kernel interface serves a mount.
- *
- * `fuse` is the default everywhere and the only backend on Linux and
- * Windows. `fskit` routes through macFUSE 5.x's FSKit shim, which needs no
- * kernel extension but has no `direct_io` equivalent, so it can only serve
- * resources whose files always have a known size.
- *
- * There is deliberately no `auto`: auto-selecting fskit would silently
- * break every API-backed mount, and an option whose safe value is always
- * the default is a trap.
+ * Coerce a user-supplied backend name into a kernel backend. undefined and
+ * '' mean fuse, because reaching this function at all means a kernel mount
+ * was asked for. Never returns vfs.
  */
-export const MountBackend = {
-  FUSE: 'fuse',
-  FSKIT: 'fskit',
-} as const
-
-export type MountBackend = (typeof MountBackend)[keyof typeof MountBackend]
-
-const BACKENDS: string[] = Object.values(MountBackend)
-
-/** Coerce a user-supplied backend name; undefined and '' mean the default. */
 export function resolveBackend(value?: string | null): MountBackend {
   if (value === undefined || value === null || value === '') return MountBackend.FUSE
-  const lowered = value.toLowerCase()
-  if (!BACKENDS.includes(lowered)) {
+  const lowered = value.toLowerCase() as MountBackend
+  if (!Object.values(MountBackend).includes(lowered)) {
     throw new Error(
-      `unknown mount backend ${JSON.stringify(value)}; expected one of: ${BACKENDS.join(', ')}`,
+      `unknown mount backend ${JSON.stringify(value)}; expected one of: ${KERNEL_BACKENDS.join(', ')}`,
     )
   }
-  return lowered as MountBackend
+  if (!KERNEL_BACKENDS.includes(lowered)) {
+    throw new Error(
+      `backend ${JSON.stringify(lowered)} does not register a mountpoint; it is served inside ` +
+        "mirage's own filesystem, so there is nothing to mount",
+    )
+  }
+  return lowered
 }
 
 /**

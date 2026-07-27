@@ -11,7 +11,8 @@ mounts:
   /:
     resource: ram
     mode: WRITE
-    fuse: /tmp/mirage-fuse-full
+    backend: fuse
+    mountpoint: /tmp/mirage-fuse-full
   /s3:
     resource: s3
     mode: READ

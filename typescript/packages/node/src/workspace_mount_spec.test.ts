@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource } from '@struktoai/mirage-core'
+import { MountBackend, MountMode, RAMResource } from '@struktoai/mirage-core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Mount } from './workspace/mount_spec.ts'
 import { Workspace } from './workspace.ts'
@@ -43,7 +43,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('exposes a lone fuse Mount as fuseMountpoint after fuseReady', async () => {
-    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { fuse: true }) })
+    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
     await ws.fuseReady()
 
     expect(ws.fuseMountpoint).toBe('/tmp/fake-_a')
@@ -53,7 +53,9 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('pins the mountpoint when fuse is a string', async () => {
-    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { fuse: '/tmp/pinned' }) })
+    const ws = new Workspace({
+      '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE, mountpoint: '/tmp/pinned' }),
+    })
     await ws.fuseReady()
 
     expect(mocks.mount).toHaveBeenCalledWith(
@@ -67,8 +69,8 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
 
   it('exposes multiple fuse Mounts via fuseMountpoints; fuseMountpoint throws', async () => {
     const ws = new Workspace({
-      '/a': new Mount(new RAMResource(), { fuse: true }),
-      '/b': new Mount(new RAMResource(), { fuse: true }),
+      '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE }),
+      '/b': new Mount(new RAMResource(), { backend: MountBackend.FUSE }),
     })
     await ws.fuseReady()
 
@@ -106,7 +108,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('unmounts on close so fuseMountpoints empties', async () => {
-    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { fuse: true }) })
+    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
     await ws.fuseReady()
     expect(ws.fuseMountpoints).toEqual({ '/a': '/tmp/fake-_a' })
 

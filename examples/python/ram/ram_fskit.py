@@ -16,7 +16,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -39,7 +39,7 @@ print(f"Loaded {len(store.files)} files from {DATA_DIR}")
 # FSKit has no direct_io, so it reads exactly as many bytes as stat reports.
 with Workspace({
         "/data/":
-        Mount(resource, mode=MountMode.WRITE, fuse=True, fuse_backend="fskit")
+        Mount(resource, mode=MountMode.WRITE, backend=MountBackend.FSKIT)
 }) as ws:
     mp = ws.fuse_mountpoint
 

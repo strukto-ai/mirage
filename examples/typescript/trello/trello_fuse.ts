@@ -43,7 +43,7 @@ function buildConfig(): TrelloConfig {
 async function main(): Promise<void> {
   const resource = new TrelloResource(buildConfig());
   const ws = new Workspace({
-    "/trello": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/trello": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

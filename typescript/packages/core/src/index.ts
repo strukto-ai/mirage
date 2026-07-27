@@ -33,6 +33,8 @@ export {
   type FileStatInit,
   FileType,
   type FindFn,
+  KERNEL_BACKENDS,
+  MountBackend,
   MountMode,
   type MoveFn,
   type MoveStrategy,

@@ -16,7 +16,7 @@ import subprocess
 
 import pytest
 
-from mirage import FuseManager, Mount, MountMode, Workspace
+from mirage import FuseManager, Mount, MountBackend, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 
@@ -98,8 +98,9 @@ def test_double_unmount_is_idempotent(monkeypatch):
 
 def test_mount_spec_fuse_true_single(monkeypatch):
     _fake_mount(monkeypatch)
-    ws = Workspace({"/gdocs/": Mount(RAMResource(), fuse=True)},
-                   mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/gdocs/": Mount(RAMResource(), backend=MountBackend.FUSE)},
+        mode=MountMode.WRITE)
     mps = ws.fuse_mountpoints
     assert set(mps) == {"/gdocs/"}
     assert mps["/gdocs/"]
@@ -108,8 +109,14 @@ def test_mount_spec_fuse_true_single(monkeypatch):
 
 def test_mount_spec_fuse_pinned_path(monkeypatch):
     _fake_mount(monkeypatch)
-    ws = Workspace({"/whatever/": Mount(RAMResource(), fuse="/tmp/pinned-x")},
-                   mode=MountMode.WRITE)
+    ws = Workspace(
+        {
+            "/whatever/":
+            Mount(RAMResource(),
+                  backend=MountBackend.FUSE,
+                  mountpoint="/tmp/pinned-x")
+        },
+        mode=MountMode.WRITE)
     assert ws.fuse_mountpoints["/whatever/"] == "/tmp/pinned-x"
 
 
@@ -117,8 +124,8 @@ def test_mount_spec_fuse_each_of_multiple(monkeypatch):
     _fake_mount(monkeypatch)
     ws = Workspace(
         {
-            "/a/": Mount(RAMResource(), fuse=True),
-            "/b/": Mount(RAMResource(), fuse=True)
+            "/a/": Mount(RAMResource(), backend=MountBackend.FUSE),
+            "/b/": Mount(RAMResource(), backend=MountBackend.FUSE)
         },
         mode=MountMode.WRITE)
     assert set(ws.fuse_mountpoints) == {"/a/", "/b/"}
@@ -151,7 +158,8 @@ def test_no_fuse_when_bare_or_tuple(monkeypatch):
 
 def test_mount_spec_fuse_unmounts_on_close(monkeypatch):
     _fake_mount(monkeypatch)
-    with Workspace({"/gdocs/": Mount(RAMResource(), fuse=True)},
-                   mode=MountMode.WRITE) as ws:
+    with Workspace(
+        {"/gdocs/": Mount(RAMResource(), backend=MountBackend.FUSE)},
+            mode=MountMode.WRITE) as ws:
         assert set(ws.fuse_mountpoints) == {"/gdocs/"}
     assert ws.fuse_mountpoints == {}

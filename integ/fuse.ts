@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   // /logs gets a generated mountpoint and inherits the default READ.
   const ws = new Workspace({
     "/data": new Mount(data, { mode: MountMode.WRITE, fuse: pinned }),
-    "/logs": new Mount(logs, { fuse: true }),
+    "/logs": new Mount(logs, { backend: MountBackend.FUSE }),
   });
   try {
     await ws.fuseReady();

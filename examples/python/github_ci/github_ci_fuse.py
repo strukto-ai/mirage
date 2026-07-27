@@ -17,7 +17,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.github_ci import GitHubCIConfig, GitHubCIResource
 
 load_dotenv(".env.development")
@@ -30,8 +30,9 @@ config = GitHubCIConfig(
 )
 resource = GitHubCIResource(config=config)
 
-with Workspace({"/ci/": Mount(resource, mode=MountMode.READ,
-                              fuse=True)}) as ws:
+with Workspace(
+    {"/ci/": Mount(resource, mode=MountMode.READ,
+                   backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

@@ -150,7 +150,7 @@ workspace under FUSE:
 ```ts
 import { DropboxResource, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/dropbox': new Mount(dropbox, { mode: MountMode.READ, fuse: true }) })
+const ws = new Workspace({ '/dropbox': new Mount(dropbox, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
 await ws.fuseReady()
 const mp = ws.fuseMountpoint
 
