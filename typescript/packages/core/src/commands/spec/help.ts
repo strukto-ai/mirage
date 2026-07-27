@@ -59,5 +59,10 @@ export function renderHelp(name: string, spec: CommandSpec): string {
     }
   }
 
+  if (spec.epilog !== null && spec.epilog !== '') {
+    lines.push('')
+    lines.push(spec.epilog.replace(/\n+$/, ''))
+  }
+
   return lines.join('\n') + '\n'
 }

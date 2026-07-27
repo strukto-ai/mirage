@@ -97,6 +97,99 @@ describe('gws api factory', () => {
     expect(call?.[2]).toEqual({ q: 'trashed=false', pageSize: '10' })
   })
 
+  it('files list follows nextPageToken by default', async () => {
+    vi.mocked(client.googleGet)
+      .mockReset()
+      .mockResolvedValueOnce({ files: [{ id: 'a' }], nextPageToken: 't1' })
+      .mockResolvedValueOnce({ files: [{ id: 'b' }], nextPageToken: 't2' })
+      .mockResolvedValueOnce({ files: [{ id: 'c' }] })
+    const result = await runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], makeOpts({}))
+    if (result === null) throw new Error('expected result')
+    expect(result[1].exitCode).toBe(0)
+    const calls = vi.mocked(client.googleGet).mock.calls
+    expect(calls.length).toBe(3)
+    expect(calls.map((c) => (c[2] as Record<string, string> | undefined)?.pageToken)).toEqual([
+      undefined,
+      't1',
+      't2',
+    ])
+    const lines = DEC.decode(result[0] as Uint8Array)
+      .trimEnd()
+      .split('\n')
+    expect(lines.map((l) => (JSON.parse(l) as { files: { id: string }[] }).files[0]?.id)).toEqual([
+      'a',
+      'b',
+      'c',
+    ])
+  })
+
+  it('multi-page output is newline-terminated NDJSON', async () => {
+    vi.mocked(client.googleGet)
+      .mockReset()
+      .mockResolvedValueOnce({ files: [], nextPageToken: 't1' })
+      .mockResolvedValueOnce({ files: [] })
+    const result = await runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], makeOpts({}))
+    if (result === null) throw new Error('expected result')
+    expect(DEC.decode(result[0] as Uint8Array)).toBe(
+      '{"files":[],"nextPageToken":"t1"}\n{"files":[]}\n',
+    )
+  })
+
+  it('single-page output has no trailing newline', async () => {
+    vi.mocked(client.googleGet).mockReset().mockResolvedValue({ files: [] })
+    const result = await runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], makeOpts({}))
+    if (result === null) throw new Error('expected result')
+    expect(DEC.decode(result[0] as Uint8Array)).toBe('{"files":[]}')
+  })
+
+  it('--page-limit stops early', async () => {
+    vi.mocked(client.googleGet)
+      .mockReset()
+      .mockResolvedValueOnce({ files: [], nextPageToken: 't1' })
+      .mockResolvedValueOnce({ files: [], nextPageToken: 't2' })
+      .mockResolvedValueOnce({ files: [] })
+    const result = await runGwsMethod(
+      method('drive.files.list'),
+      ACCESSOR,
+      [],
+      [],
+      makeOpts({ page_limit: '2' }),
+    )
+    if (result === null) throw new Error('expected result')
+    expect(vi.mocked(client.googleGet).mock.calls.length).toBe(2)
+    expect(
+      DEC.decode(result[0] as Uint8Array)
+        .trimEnd()
+        .split('\n').length,
+    ).toBe(2)
+  })
+
+  it('rejects a non-numeric --page-limit', async () => {
+    const result = await runGwsMethod(
+      method('drive.files.list'),
+      ACCESSOR,
+      [],
+      [],
+      makeOpts({ page_limit: 'x' }),
+    )
+    if (result === null) throw new Error('expected result')
+    expect(result[1].exitCode).toBe(2)
+  })
+
+  it('a non-list GET is fetched exactly once', async () => {
+    vi.mocked(client.googleGet).mockReset().mockResolvedValue({ documentId: 'd1' })
+    const result = await runGwsMethod(
+      method('docs.documents.get'),
+      ACCESSOR,
+      [],
+      [],
+      makeOpts({ params: '{"documentId": "d1"}' }),
+    )
+    if (result === null) throw new Error('expected result')
+    expect(vi.mocked(client.googleGet).mock.calls.length).toBe(1)
+    expect(DEC.decode(result[0] as Uint8Array)).toBe('{"documentId":"d1"}')
+  })
+
   it('files delete outputs nothing', async () => {
     vi.mocked(client.googleDelete).mockResolvedValue(undefined)
     const result = await runGwsMethod(

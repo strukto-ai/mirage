@@ -292,6 +292,44 @@ request body, and the output is the compact API response JSON.
 Helpers (`+write`, `+read`, `+append`) wrap the common operations
 in plain flags.
 
+The whole surface is discoverable from the shell:
+
+```bash
+gws --help                  # the services, and how many API methods each has
+gws drive --help            # that service's methods and + helpers
+gws drive files list --help # one command's flags
+```
+
+### Pagination
+
+Google list methods return a capped page plus a `nextPageToken`. **Every
+`GET` follows that token to the end by default**, and each page prints as
+one JSON response on its own line (newline-delimited JSON):
+
+```bash
+# All files, however many pages that takes
+gws drive files list
+
+# One JSON object per page -- jq evaluates the program per document
+gws drive files list | jq -r '.files[].name'
+
+# Stop after the first two pages
+gws drive files list --page-limit 2
+```
+
+A response that fits in one page prints exactly the bytes an unpaginated
+call would have produced, with no trailing newline, so single-page GETs
+are unchanged and `jq -c '.files'` still works on them directly.
+
+<Note>
+This is a deliberate divergence from the official
+[googleworkspace/cli](https://github.com/googleworkspace/cli), which
+stops at the first page unless you pass `--page-all`. A truncated listing
+is indistinguishable from a complete one, so mirage follows the token by
+default and `--page-limit N` is how you opt out. `--page-all` is still
+accepted and is a no-op.
+</Note>
+
 ### `gws docs documents create`
 
 Create a new Google Doc.
@@ -458,7 +496,7 @@ same passthrough shape:
 
 | Command                        | Description                                    |
 | ------------------------------ | ---------------------------------------------- |
-| `gws drive files list`         | List files (`--params` supports `q`, `pageSize`) |
+| `gws drive files list`         | List files, all pages (`--params` supports `q`, `pageSize`) |
 | `gws drive files get`          | Get file metadata by `fileId`                  |
 | `gws drive files create`       | Create a file (`--json` metadata)              |
 | `gws drive files update`       | Update file metadata                           |
@@ -473,6 +511,7 @@ Examples:
 
 ```bash
 gws drive files list --params '{"q": "name = '"'"'report.pdf'"'"'"}'
+gws drive files list --params '{"pageSize": 200}' | jq -r '.files[].id'
 gws drive files export --params '{"fileId": "DOC_ID", "mimeType": "text/plain"}'
 gws drive permissions create \
   --params '{"fileId": "FILE_ID"}' \

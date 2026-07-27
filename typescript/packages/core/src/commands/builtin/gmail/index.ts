@@ -16,7 +16,11 @@ import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GWS_GMAIL_API_COMMANDS } from '../gws/index.ts'
+import {
+  GWS_GMAIL_API_COMMANDS,
+  GWS_ROOT_COMMANDS,
+  GWS_SERVICE_HELP_COMMANDS,
+} from '../gws/index.ts'
 import { GMAIL_GREP } from './grep.ts'
 import { GMAIL_GWS_FORWARD } from './gws_gmail_forward.ts'
 import { GMAIL_GWS_READ } from './gws_gmail_read.ts'
@@ -46,4 +50,6 @@ export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...GMAIL_GWS_TRIAGE,
   ...GMAIL_GWS_READ,
   ...GWS_GMAIL_API_COMMANDS,
+  ...GWS_ROOT_COMMANDS.filter((c) => c.resource === ResourceName.GMAIL),
+  ...GWS_SERVICE_HELP_COMMANDS.filter((c) => c.resource === ResourceName.GMAIL),
 ]

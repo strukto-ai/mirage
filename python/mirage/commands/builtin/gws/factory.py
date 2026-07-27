@@ -144,17 +144,29 @@ async def run_gws_method(
         # indistinguishable from a complete one, so mirage follows the
         # token by default and --page-limit is how you opt out.
         out = await _paginate(method, token_manager, url, body, query_params,
-                              fl.as_int("page_limit"))
+                              _parse_page_limit(fl.as_str("page_limit")))
         return yield_bytes(out), IOResult()
     result = await _CALLERS[method.http](token_manager, url, body,
                                          query_params)
-    if method.http != "GET":
-        await invalidate_mount_listing()
+    await invalidate_mount_listing()
     if result is _NO_CONTENT:
         return None, IOResult()
     out = json_lib.dumps(result, ensure_ascii=False,
                          separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()
+
+
+def _parse_page_limit(raw: str | None) -> int | None:
+    """Read --page-limit as a page count, or None for every page.
+
+    Args:
+        raw (str | None): the flag value as typed, or None when absent.
+    """
+    if raw is None or raw == "":
+        return None
+    if not raw.isdigit():
+        raise ValueError(f"--page-limit must be a whole number, got '{raw}'")
+    return int(raw)
 
 
 async def _paginate(
@@ -183,9 +195,14 @@ async def _paginate(
         bytes: newline-delimited page responses.
     """
     pages: list[bytes] = []
-    params = dict(query)
+    token: str | None = None
     fetched = 0
     while True:
+        # A fresh dict per page: the callers keep the mapping they are
+        # handed, so a mutated one would let a later token leak backwards.
+        params = dict(query)
+        if token is not None:
+            params["pageToken"] = token
         result = await _CALLERS[method.http](token_manager, url, body, params)
         if result is _NO_CONTENT:
             break
@@ -195,11 +212,12 @@ async def _paginate(
         fetched += 1
         if page_limit is not None and fetched >= page_limit:
             break
-        token = result.get("nextPageToken") if isinstance(result,
-                                                          dict) else None
-        if not token:
+        nxt = result.get("nextPageToken") if isinstance(result, dict) else None
+        # Google always sends a string token; anything else is not one, and
+        # stringifying it would send a request that can only 400.
+        if not isinstance(nxt, (str, int, float)) or not nxt:
             break
-        params["pageToken"] = str(token)
+        token = str(nxt)
     # A single response keeps the exact bytes an unpaginated call produced,
     # so every non-list GET is unchanged. Only a real multi-page stream is
     # newline-terminated, per the NDJSON convention.

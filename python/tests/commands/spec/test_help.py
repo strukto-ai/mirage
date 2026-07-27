@@ -40,3 +40,19 @@ def test_falls_back_to_bare_name_without_description():
     spec = CommandSpec()
     out = render_help("foo", spec)
     assert out.splitlines()[0] == "foo"
+
+
+def test_epilog_trails_the_flag_table_after_a_blank_line():
+    spec = CommandSpec(
+        options=(Option(long="--help",
+                        value_kind=OperandKind.NONE,
+                        description="Show help"), ),
+        epilog="Services:\n  drive\n",
+    )
+    out = render_help("gws", spec)
+    assert out.endswith("\n  --help  Show help\n\nServices:\n  drive\n")
+
+
+def test_epilog_is_omitted_when_absent():
+    out = render_help("foo", CommandSpec())
+    assert out == "foo\n\nUsage: foo\n"

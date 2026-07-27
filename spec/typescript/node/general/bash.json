@@ -7,6 +7,7 @@
     "resources": []
   },
   "description": "Run a command string through Mirage's shell. Only `-c` is meaningful; other flags are accepted and ignored. `bash` and `sh` are aliases.",
+  "epilog": null,
   "ignore_tokens": [],
   "options": [
     {

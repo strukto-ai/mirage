@@ -15,6 +15,8 @@
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGwsApiCommands } from './factory.ts'
 
+export { GWS_ROOT_COMMANDS, GWS_SERVICE_HELP_COMMANDS } from './help.ts'
+
 export const GWS_DRIVE_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCommands('drive')
 export const GWS_DOCS_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCommands('docs')
 export const GWS_SHEETS_API_COMMANDS: readonly RegisteredCommand[] = makeGwsApiCommands('sheets')

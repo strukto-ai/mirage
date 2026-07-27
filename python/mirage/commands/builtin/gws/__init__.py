@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.gws.factory import make_gws_api_commands
+from mirage.commands.builtin.gws.help import (GWS_SERVICE_HELP_COMMANDS,
+                                              gws_root)
 from mirage.commands.builtin.gws.methods import GWS_METHODS, GwsMethod
 
 GWS_DRIVE_API_COMMANDS = make_gws_api_commands("drive")
@@ -29,5 +31,7 @@ __all__ = [
     "GWS_SHEETS_API_COMMANDS",
     "GWS_SLIDES_API_COMMANDS",
     "GWS_GMAIL_API_COMMANDS",
+    "GWS_SERVICE_HELP_COMMANDS",
+    "gws_root",
     "make_gws_api_commands",
 ]

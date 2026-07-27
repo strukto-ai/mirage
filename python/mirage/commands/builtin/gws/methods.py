@@ -128,17 +128,12 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               "/users/{userId}/messages/{messageId}/attachments/{id}"),
 )
 
-GWS_API_SPEC = CommandSpec(options=(
-    Option(long="--params", value_kind=OperandKind.TEXT),
-    Option(long="--json", value_kind=OperandKind.TEXT),
-), )
-
-PARAMS_HELP = ("JSON object of path and query parameters, e.g. "
-               "'{\"fileId\":\"abc\"}'")
-JSON_HELP = "JSON request body, the API resource for this method"
-PAGE_ALL_HELP = ("Follow nextPageToken to the end (the default); pages "
-                 "print as one JSON response per line")
-PAGE_LIMIT_HELP = "Stop after this many pages instead of reading them all"
+_PARAMS_HELP = ("JSON object of path and query parameters, e.g. "
+                "'{\"fileId\":\"abc\"}'")
+_JSON_HELP = "JSON request body, the API resource for this method"
+_PAGE_ALL_HELP = ("Follow nextPageToken to the end (the default); pages "
+                  "print as one JSON response per line")
+_PAGE_LIMIT_HELP = "Stop after this many pages instead of reading them all"
 
 BESPOKE_COMMANDS: tuple[tuple[str, str], ...] = (
     ("gws sheets +read", "Read a cell range: --spreadsheet <id> --range <A1>"),
@@ -178,14 +173,14 @@ def gws_method_spec(method: GwsMethod) -> CommandSpec:
         options=(
             Option(long="--params",
                    value_kind=OperandKind.TEXT,
-                   description=PARAMS_HELP),
+                   description=_PARAMS_HELP),
             Option(long="--json",
                    value_kind=OperandKind.TEXT,
-                   description=JSON_HELP),
-            Option(long="--page-all", description=PAGE_ALL_HELP),
+                   description=_JSON_HELP),
+            Option(long="--page-all", description=_PAGE_ALL_HELP),
             Option(long="--page-limit",
                    value_kind=OperandKind.TEXT,
-                   description=PAGE_LIMIT_HELP),
+                   description=_PAGE_LIMIT_HELP),
         ),
         description=gws_method_description(method),
     )

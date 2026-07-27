@@ -22,7 +22,11 @@ import { GDOCS_COMMANDS } from '../gdocs/index.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GSHEETS_COMMANDS } from '../gsheets/index.ts'
 import { GSLIDES_COMMANDS } from '../gslides/index.ts'
-import { GWS_DRIVE_API_COMMANDS } from '../gws/index.ts'
+import {
+  GWS_DRIVE_API_COMMANDS,
+  GWS_ROOT_COMMANDS,
+  GWS_SERVICE_HELP_COMMANDS,
+} from '../gws/index.ts'
 import { GDRIVE_IO } from './io.ts'
 
 const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
@@ -30,6 +34,8 @@ const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
   ...GSHEETS_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
   ...GSLIDES_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
   ...GWS_DRIVE_API_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
+  ...GWS_ROOT_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
+  ...GWS_SERVICE_HELP_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
 ]
 
 export const GDRIVE_COMMANDS: readonly RegisteredCommand[] = [

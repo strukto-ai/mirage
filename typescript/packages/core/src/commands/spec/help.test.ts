@@ -38,4 +38,19 @@ describe('renderHelp', () => {
     const out = renderHelp('foo', spec)
     expect(out.split('\n')[0]).toBe('foo')
   })
+
+  it('trails the epilog after the flag table, one blank line apart', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--help', valueKind: OperandKind.NONE, description: 'Show help' }),
+      ],
+      epilog: 'Services:\n  drive\n',
+    })
+    const out = renderHelp('gws', spec)
+    expect(out.endsWith('\n  --help  Show help\n\nServices:\n  drive\n')).toBe(true)
+  })
+
+  it('omits the epilog when absent', () => {
+    expect(renderHelp('foo', new CommandSpec())).toBe('foo\n\nUsage: foo\n')
+  })
 })
