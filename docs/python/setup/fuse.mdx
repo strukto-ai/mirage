@@ -158,9 +158,13 @@ default is a trap. `MountBackend.FSKIT` is macOS-only and raises elsewhere.
   byte-store subtree, and reach the rest through the mirage command surface.
 </Warning>
 
-Examples: `examples/python/ram/ram_fskit.py`, `redis/redis_fskit.py` and
-`s3/s3_fskit.py` mount successfully; `slack/slack_fskit.py` and
-`gmail/gmail_fskit.py` show the refusal and the supported workarounds.
+`examples/python/fuse/fskit.py` runs all of this end to end: the size guard
+refusing a resource that cannot size its files, a live mount with reads
+matching their stat size, and each write op with the errno it returns.
+
+TypeScript has no FSKit path at all; `examples/typescript/fuse/fskit.ts`
+shows the refusal and the two alternatives (`backend: 'fuse'` there, or the
+Python package for a kext-free mount).
 
 ## Size semantics for API-backed files
 
