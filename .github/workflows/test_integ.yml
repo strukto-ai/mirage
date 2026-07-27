@@ -462,6 +462,12 @@ jobs:
           ./python/.venv/bin/python integ/runners/parity.py
           ram disk redis ram-history
 
+  # One job per backend family with both hosts inside it. The postgres, chroma,
+  # qdrant and mongodb fleet is the expensive part and was being started twice,
+  # once for the python battery and once for the typescript one. This mirrors
+  # integ-observability and integ-facets, which already drive both hosts against
+  # a single fleet. The typescript step runs even when the python one fails so a
+  # single-language regression still reports both languages.
   integ-database:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
@@ -491,6 +497,10 @@ jobs:
     env:
       MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
       POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
+      CHROMA_HOST: localhost
+      CHROMA_PORT: "8000"
+      QDRANT_HOST: localhost
+      QDRANT_PORT: "6333"
     steps:
       - uses: actions/checkout@v7
 
@@ -507,89 +517,6 @@ jobs:
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
-
-      - name: Wait for ChromaDB OSS
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:8000/api/v2/heartbeat && exit 0
-            sleep 1
-          done
-          echo "ChromaDB did not become healthy" >&2
-          exit 1
-
-      - name: Wait for Qdrant
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:6333/readyz && exit 0
-            sleep 1
-          done
-          echo "Qdrant did not become healthy" >&2
-          exit 1
-
-      - name: Start MongoDB replica set
-        run: |
-          docker run -d --name mongo -p 27017:27017 mongo:8 \
-            mongod --replSet rs0 --bind_ip_all
-          for i in $(seq 1 30); do
-            docker exec mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break
-            sleep 1
-          done
-          docker exec mongo mongosh --quiet --eval \
-            "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
-          for i in $(seq 1 30); do
-            [ "$(docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null)" = "true" ] && break
-            sleep 1
-          done
-
-      - name: Run MongoDB backend (JSON harness)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target mongodb
-
-      - name: Run Postgres backend (JSON harness)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target postgres
-
-      - name: Run chroma integ (ChromaDB OSS, JSON harness)
-        env:
-          CHROMA_HOST: localhost
-          CHROMA_PORT: "8000"
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target chroma
-
-      - name: Run qdrant integ (JSON harness)
-        env:
-          QDRANT_HOST: localhost
-          QDRANT_PORT: "6333"
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target qdrant
-
-  integ-database-ts:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: mirage
-          POSTGRES_PASSWORD: mirage
-          POSTGRES_DB: mirage_integ
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      chroma:
-        image: chromadb/chroma:latest
-        ports:
-          - 8000:8000
-      qdrant:
-        image: qdrant/qdrant:latest
-        ports:
-          - 6333:6333
-    env:
-      MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
-      POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
-    steps:
-      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -613,6 +540,8 @@ jobs:
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node build
 
+      # The typescript runner imports mirage-browser statically for the opfs
+      # target, so its dist must exist even when no browser target runs.
       - name: Build mirage-browser
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-browser build
@@ -626,6 +555,17 @@ jobs:
           echo "ChromaDB did not become healthy" >&2
           exit 1
 
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/readyz && exit 0
+            sleep 1
+          done
+          echo "Qdrant did not become healthy" >&2
+          exit 1
+
+      # mongodb needs a replica set for change streams, which a flat services:
+      # block cannot express, so it is started and initiated by hand.
       - name: Start MongoDB replica set
         run: |
           docker run -d --name mongo -p 27017:27017 mongo:8 \
@@ -641,36 +581,17 @@ jobs:
             sleep 1
           done
 
-      - name: Wait for Qdrant
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:6333/readyz && exit 0
-            sleep 1
-          done
-          echo "Qdrant did not become healthy" >&2
-          exit 1
+      - name: Run database battery (python host)
+        run: >-
+          ./python/.venv/bin/python integ/runners/python/main.py
+          --target mongodb --target postgres --target chroma --target qdrant
 
-      - name: Run MongoDB backend (TS, JSON harness)
+      - name: Run database battery (typescript host)
+        if: ${{ !cancelled() }}
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --target mongodb
-
-      - name: Run Postgres backend (TS, JSON harness)
-        working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --target postgres
-
-      - name: Run TS chroma integ (ChromaDB OSS, JSON harness)
-        working-directory: integ
-        env:
-          CHROMA_HOST: localhost
-          CHROMA_PORT: "8000"
-        run: pnpm exec tsx runners/typescript/main.ts --target chroma
-
-      - name: Run TS qdrant integ (JSON harness)
-        working-directory: integ
-        env:
-          QDRANT_HOST: localhost
-          QDRANT_PORT: "6333"
-        run: pnpm exec tsx runners/typescript/main.ts --target qdrant
+        run: >-
+          pnpm exec tsx runners/typescript/main.ts
+          --target mongodb --target postgres --target chroma --target qdrant
 
   integ-data:
     needs: changes
@@ -1179,7 +1100,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-database-ts, integ-data, integ-fuse, integ-observability, integ-facets, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, runtime-py, runtime-ts]
     if: always()
     steps:
       - name: Check required jobs
