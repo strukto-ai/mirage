@@ -26,7 +26,8 @@ from mirage.commands.builtin.utils.http import HttpConnectError, HttpResponse
 from mirage.commands.errors import UsageError
 
 
-def _ok(body: bytes = b"file-body", status: int = 200,
+def _ok(body: bytes = b"file-body",
+        status: int = 200,
         reason: str = "OK") -> HttpResponse:
     return HttpResponse(status=status,
                         reason=reason,
@@ -133,7 +134,9 @@ def test_write_failure_is_exit_1_naming_the_path(monkeypatch):
     async def boom(op, scope, **kwargs):
         raise FileNotFoundError("/tmp/nope/w.txt")
 
-    _body, io = _run("http://x.test/f", args_O="/tmp/nope/w.txt", dispatch=boom)
+    _body, io = _run("http://x.test/f",
+                     args_O="/tmp/nope/w.txt",
+                     dispatch=boom)
     assert io.exit_code == 1
     assert b"/tmp/nope/w.txt" in io.stderr
 

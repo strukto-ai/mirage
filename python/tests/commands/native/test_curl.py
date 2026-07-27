@@ -26,7 +26,8 @@ from mirage.commands.builtin.utils.http import HttpConnectError, HttpResponse
 from mirage.commands.errors import UsageError
 
 
-def _ok(body: bytes = b"hello body", status: int = 200,
+def _ok(body: bytes = b"hello body",
+        status: int = 200,
         reason: str = "OK") -> HttpResponse:
     return HttpResponse(status=status,
                         reason=reason,
@@ -37,7 +38,11 @@ def _ok(body: bytes = b"hello body", status: int = 200,
 def _stub(monkeypatch, resp=None, exc=None) -> list[dict]:
     calls: list[dict] = []
 
-    def fake(url, method="GET", headers=None, data=None, timeout=30,
+    def fake(url,
+             method="GET",
+             headers=None,
+             data=None,
+             timeout=30,
              follow_redirects=False):
         calls.append({
             "url": url,
@@ -159,11 +164,10 @@ def test_write_failure_is_exit_23_with_strerror(monkeypatch):
     async def boom(op, scope, **kwargs):
         raise FileNotFoundError("/tmp/nope/out.txt")
 
-    _body, io = _run("http://x.test/f",
-                     o="/tmp/nope/out.txt",
-                     dispatch=boom)
+    _body, io = _run("http://x.test/f", o="/tmp/nope/out.txt", dispatch=boom)
     assert io.exit_code == 23
-    assert b"curl: (23) /tmp/nope/out.txt: No such file or directory" in io.stderr
+    expected = b"curl: (23) /tmp/nope/out.txt: No such file or directory"
+    assert expected in io.stderr
 
 
 def test_write_failure_keeps_read_only_wording(monkeypatch):
@@ -194,7 +198,11 @@ def test_write_failure_silenced_by_s(monkeypatch):
 def test_form_field_uses_the_form_helper(monkeypatch):
     calls: list[dict] = []
 
-    def fake_form(url, method="POST", form_data=None, headers=None, timeout=30,
+    def fake_form(url,
+                  method="POST",
+                  form_data=None,
+                  headers=None,
+                  timeout=30,
                   follow_redirects=False):
         calls.append({"url": url, "method": method, "form_data": form_data})
         return _ok(b"form ok")

@@ -71,7 +71,7 @@ async function runCurl(
         : await materialize(out as AsyncIterable<Uint8Array>)
   return {
     out: DEC.decode(buf),
-    err: DEC.decode(ioResult.stderr ?? new Uint8Array()),
+    err: await ioResult.stderrStr(),
     exitCode: ioResult.exitCode,
     writes: ioResult.writes,
   }
