@@ -873,7 +873,12 @@ jobs:
           pluginkit -m -v -p com.apple.fskit.fsmodule || true
 
       - name: Confirm no kext is loaded
-        run: kextstat | grep -i fuse || echo "no macFUSE kext (expected)"
+        run: |
+          kextstat | grep -i fuse || echo "no macFUSE kext (expected)"
+          echo "--- /dev/macfuse* (kext devices, absent without the kext) ---"
+          ls -la /dev/macfuse* 2>&1 || true
+          echo "--- systemextensionsctl ---"
+          systemextensionsctl list 2>&1 || true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -909,10 +914,14 @@ jobs:
           pluginkit -m -v -p com.apple.fskit.fsmodule || true
           echo "--- macFUSE bundle ---"
           ls -la /Library/Filesystems/ || true
-          echo "--- recent fskit/macfuse log ---"
+          echo "--- macfuse-only log (what the mount attempt did) ---"
           log show --last 3m --style compact \
-            --predicate 'eventMessage CONTAINS[c] "fskit" OR eventMessage CONTAINS[c] "macfuse"' \
-            2>/dev/null | tail -50 || true
+            --predicate 'eventMessage CONTAINS[c] "macfuse" OR senderImagePath CONTAINS[c] "macfuse"' \
+            2>/dev/null | tail -80 || true
+          echo "--- fskitd/fskit_agent errors ---"
+          log show --last 3m --style compact \
+            --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
+            2>/dev/null | tail -40 || true
 
   runtime-py:
     needs: changes
