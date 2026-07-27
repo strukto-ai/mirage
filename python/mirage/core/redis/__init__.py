@@ -15,7 +15,8 @@
 from mirage.core.redis.append import append_bytes
 from mirage.core.redis.copy import copy
 from mirage.core.redis.create import create
-from mirage.core.redis.du import du, du_all
+from mirage.core.redis.du import entries as du_entries
+from mirage.core.redis.du import size as du_size
 from mirage.core.redis.exists import exists
 from mirage.core.redis.find import find
 from mirage.core.redis.mkdir import mkdir
@@ -35,8 +36,8 @@ __all__ = [
     "append_bytes",
     "copy",
     "create",
-    "du",
-    "du_all",
+    "du_size",
+    "du_entries",
     "exists",
     "find",
     "mkdir",

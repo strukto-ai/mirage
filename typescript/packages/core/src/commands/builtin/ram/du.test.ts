@@ -66,15 +66,14 @@ describe('du', () => {
     resource.store.files.set('/tmp/sub/b.txt', ENC.encode('bb'))
     const r = await runDu(resource, [PathSpec.fromStrPath('/tmp')])
     expect(r.exitCode).toBe(0)
-    expect(r.lines).toEqual(['5\t/tmp'])
+    expect(r.lines).toEqual(['2\t/tmp/sub', '5\t/tmp'])
   })
 
-  it('missing path is reported, not counted as 0', async () => {
-    // GNU: "du: cannot access 'X': No such file or directory", exit 1.
+  it('reports a missing path and exits 1, like GNU', async () => {
     const resource = new RAMResource()
     const r = await runDu(resource, [PathSpec.fromStrPath('/nonexistent')])
-    expect(r.exitCode).toBe(1)
     expect(r.lines).toEqual([])
+    expect(r.exitCode).toBe(1)
   })
 
   it('empty directory returns 0', async () => {

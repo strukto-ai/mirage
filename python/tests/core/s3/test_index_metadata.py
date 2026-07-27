@@ -21,7 +21,7 @@ from mirage.core.s3.readdir import readdir
 from mirage.core.s3.stat import stat
 from mirage.resource.s3 import S3Config
 from mirage.types import FileType, PathSpec
-from tests.integration.s3_mock import patch_s3_multi
+from tests.e2e.s3_mock import patch_s3_multi
 
 EXPECTED_MODIFIED = "2026-03-31T00:00:00Z"
 

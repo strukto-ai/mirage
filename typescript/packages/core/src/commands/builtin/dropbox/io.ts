@@ -15,7 +15,7 @@
 import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { copy as dropboxCopy } from '../../../core/dropbox/copy.ts'
 import { create as dropboxCreate } from '../../../core/dropbox/create.ts'
-import { du as dropboxDu, duAll as dropboxDuAll } from '../../../core/dropbox/du.ts'
+import { size as dropboxDu, entries as dropboxDuAll } from '../../../core/dropbox/du/index.ts'
 import { exists as dropboxExists } from '../../../core/dropbox/exists.ts'
 import { find as dropboxFind } from '../../../core/dropbox/find.ts'
 import { mkdir as dropboxMkdir } from '../../../core/dropbox/mkdir.ts'
@@ -37,8 +37,8 @@ export const DROPBOX_IO: CommandIO<DropboxAccessor> = {
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),
   local: false,
-  duTotal: dropboxDu,
-  duAll: dropboxDuAll,
+  duSize: dropboxDu,
+  duEntries: dropboxDuAll,
   write: dropboxWrite,
   exists: dropboxExists,
   mkdir: (accessor, path, parents) => dropboxMkdir(accessor, path, parents),

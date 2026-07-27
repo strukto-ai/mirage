@@ -91,7 +91,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-h' }),
       new Option({ short: '-s' }),
       new Option({ short: '-a' }),
-      new Option({ long: '--max-depth', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-d', long: '--max-depth', valueKind: OperandKind.TEXT }),
       new Option({ short: '-c' }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),

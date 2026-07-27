@@ -16,6 +16,7 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.core.slack.constants import DU_MAX_ENTRIES
 from mirage.core.slack.read import read as _read
 from mirage.core.slack.readdir import is_dir_name as _is_dir_name
 from mirage.core.slack.readdir import readdir as _readdir
@@ -33,6 +34,7 @@ IO = CommandIO(
     is_mounted=lambda a: True,
     is_dir_name=lambda a, name: _is_dir_name(name),
     local=False,
+    max_du_entries=DU_MAX_ENTRIES,
 )
 
 resolve_glob = IO.resolve_glob

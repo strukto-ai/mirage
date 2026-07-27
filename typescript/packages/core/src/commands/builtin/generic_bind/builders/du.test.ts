@@ -60,12 +60,13 @@ const ACCESSOR = {} as Accessor
 async function runDu(
   paths: PathSpec[],
   flags: Record<string, string | boolean | string[]> = {},
+  cwd = '/',
 ): Promise<string[]> {
   const result = await DU_BUILDER.fn(OPS, ACCESSOR, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
-    cwd: '/',
+    cwd,
     resource: {} as never,
   })
   if (result === null) return []
@@ -81,16 +82,36 @@ async function runDu(
 }
 
 describe('du walk fallback (no native du op)', () => {
-  it('sums a directory tree recursively', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')])).toEqual(['5\t/db'])
+  it('sums a directory tree recursively, one line per directory', async () => {
+    expect(await runDu([PathSpec.fromStrPath('/db')])).toEqual(['2\t/db/sub', '5\t/db'])
   })
 
   it('returns a single file size', async () => {
     expect(await runDu([PathSpec.fromStrPath('/db/a.txt')])).toEqual(['3\t/db/a.txt'])
   })
 
-  it('-a collapses to the directory total (compute_all=None path)', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { a: true })).toEqual(['5\t/db'])
+  it('-a lists every file, then every directory, then the operand', async () => {
+    expect(await runDu([PathSpec.fromStrPath('/db')], { a: true })).toEqual([
+      '3\t/db/a.txt',
+      '2\t/db/sub/b.txt',
+      '2\t/db/sub',
+      '5\t/db',
+    ])
+  })
+
+  it('stops the walk and exits 1 once the entry budget is spent', async () => {
+    const bounded: CommandIO = { ...OPS, maxDuEntries: 1 }
+    const result = await DU_BUILDER.fn(bounded, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
+      stdin: null,
+      flags: {},
+      filetypeFns: null,
+      cwd: '/',
+      resource: {} as never,
+    })
+    expect(result).not.toBeNull()
+    const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
+    expect(io.exitCode).toBe(1)
+    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('incomplete')
   })
 
   it('-c appends a grand total across operands', async () => {
@@ -101,20 +122,35 @@ describe('du walk fallback (no native du op)', () => {
     expect(lines).toEqual(['3\t/db/a.txt', '2\t/db/sub', '5\ttotal'])
   })
 
-  it('missing path is reported, not counted as 0', async () => {
-    // GNU: "du: cannot access 'X': No such file or directory", exit 1.
-    const result = await DU_BUILDER.fn(OPS, ACCESSOR, [PathSpec.fromStrPath('/nope')], [], {
-      stdin: null,
-      flags: {},
-      filetypeFns: null,
-      cwd: '/',
-      resource: {} as never,
-    })
-    if (result === null) throw new Error('expected a result')
-    expect(result[1].exitCode).toBe(1)
-    // stderr from this builder is always a single buffer, never a stream.
-    expect(new TextDecoder().decode(result[1].stderr as Uint8Array)).toBe(
+  it('reports an unreadable operand and exits 1, like GNU', async () => {
+    const result = await DU_BUILDER.fn(
+      OPS,
+      ACCESSOR,
+      [PathSpec.fromStrPath('/nope'), PathSpec.fromStrPath('/db')],
+      [],
+      { stdin: null, flags: {}, filetypeFns: null, cwd: '/', resource: {} as never },
+    )
+    expect(result).not.toBeNull()
+    const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
+    expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
+    expect(io.exitCode).toBe(1)
+    expect(DEC.decode(io.stderr ?? new Uint8Array())).toBe(
       "du: cannot access '/nope': No such file or directory\n",
+    )
+  })
+
+  it('measures the working directory when no operand is given', async () => {
+    expect(await runDu([], {}, '/db')).toEqual(['2\t/db/sub', '5\t/db'])
+  })
+
+  it('-d is another spelling of --max-depth', async () => {
+    expect(await runDu([PathSpec.fromStrPath('/db')], { d: '0' })).toEqual(['5\t/db'])
+    expect(await runDu([PathSpec.fromStrPath('/db')], { max_depth: '0' })).toEqual(['5\t/db'])
+  })
+
+  it('rejects -s with -a before doing any work', async () => {
+    await expect(runDu([PathSpec.fromStrPath('/db')], { s: true, a: true })).rejects.toThrow(
+      /cannot both summarize/,
     )
   })
 
@@ -135,6 +171,9 @@ describe('du walk fallback (no native du op)', () => {
   })
 
   it('-h renders human-readable sizes', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { h: true })).toEqual(['5B\t/db'])
+    expect(await runDu([PathSpec.fromStrPath('/db')], { h: true })).toEqual([
+      '2B\t/db/sub',
+      '5B\t/db',
+    ])
   })
 })

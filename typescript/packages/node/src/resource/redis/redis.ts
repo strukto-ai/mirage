@@ -33,7 +33,7 @@ import { appendBytes } from '../../core/redis/append.ts'
 import { SCOPE_ERROR } from '../../core/redis/constants.ts'
 import { copy as copyCore } from '../../core/redis/copy.ts'
 import { create as createCore } from '../../core/redis/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/redis/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/redis/du/index.ts'
 import { exists as existsCore } from '../../core/redis/exists.ts'
 import { find as findCore, type FindOptions as RedisFindOptions } from '../../core/redis/find.ts'
 import { mkdir as mkdirCore } from '../../core/redis/mkdir.ts'
@@ -98,8 +98,8 @@ export class RedisResource extends BaseResource implements Resource {
     mkdir: mkdirCore,
     read_stream: streamCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -196,7 +196,7 @@ export class RedisResource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

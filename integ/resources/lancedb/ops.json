@@ -360,7 +360,7 @@
       "command": "du /db/animals/cat",
       "expect": {
         "exit": 0,
-        "stdout": "142\t/db/animals/cat\n",
+        "stdout": "70\t/db/animals/cat/big\n72\t/db/animals/cat/small\n142\t/db/animals/cat\n",
         "stderr": ""
       }
     },
@@ -373,7 +373,7 @@
       "command": "du /db/animals",
       "expect": {
         "exit": 0,
-        "stdout": "284\t/db/animals\n",
+        "stdout": "70\t/db/animals/cat/big\n72\t/db/animals/cat/small\n142\t/db/animals/cat\n68\t/db/animals/dog/big\n74\t/db/animals/dog/small\n142\t/db/animals/dog\n284\t/db/animals\n",
         "stderr": ""
       }
     },
@@ -386,7 +386,7 @@
       "command": "du -c /db/animals/cat /db/animals/dog",
       "expect": {
         "exit": 0,
-        "stdout": "142\t/db/animals/cat\n142\t/db/animals/dog\n284\ttotal\n",
+        "stdout": "70\t/db/animals/cat/big\n72\t/db/animals/cat/small\n142\t/db/animals/cat\n68\t/db/animals/dog/big\n74\t/db/animals/dog/small\n142\t/db/animals/dog\n284\ttotal\n",
         "stderr": ""
       }
     },

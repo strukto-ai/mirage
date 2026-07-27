@@ -42,7 +42,7 @@ import { appendBytes as appendCore } from '../../core/disk/append.ts'
 import { SCOPE_ERROR } from '../../core/disk/constants.ts'
 import { copy as copyCore } from '../../core/disk/copy.ts'
 import { create as createCore } from '../../core/disk/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/disk/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/disk/du/index.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { find as findCore, type FindOptions as DiskFindOptions } from '../../core/disk/find.ts'
 import { mkdir as mkdirCore } from '../../core/disk/mkdir.ts'
@@ -103,8 +103,8 @@ export class DiskResource extends BaseResource implements Resource {
     mkdir: mkdirCore,
     read_stream: streamCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -207,7 +207,7 @@ export class DiskResource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

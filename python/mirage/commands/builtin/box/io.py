@@ -30,9 +30,7 @@ from mirage.core.box.unlink import unlink as _unlink
 from mirage.core.box.write import write_bytes as _write
 
 # Box exposes the full write surface (upload/overwrite, mkdir, unlink, rmdir,
-# mv, cp) alongside reads. du keeps a bespoke wrapper (like onedrive/hf)
-# because box path->id resolution needs the dispatcher-injected index and its
-# du_all follows the flat du_multi contract.
+# mv, cp) alongside reads.
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,

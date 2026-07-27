@@ -32,6 +32,7 @@ import { eisdir } from '../../../utils/errors.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
+import type { DuEntries } from '../generic/du.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<
@@ -76,17 +77,17 @@ type FindOp<A extends Accessor = Accessor> = FindFn<
 
 type IsDirNameOp<A extends Accessor = Accessor> = (accessor: A, child: string) => boolean | null
 
-type DuTotalOp<A extends Accessor = Accessor> = (
+type DuSizeOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ) => Promise<number>
 
-type DuAllOp<A extends Accessor = Accessor> = (
+type DuEntriesOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
-) => Promise<[[string, number][], number]>
+) => Promise<DuEntries>
 
 export type ResolveGlobOp<A extends Accessor = Accessor> = (
   accessor: A,
@@ -123,8 +124,9 @@ export interface CommandIO<A extends Accessor = Accessor> {
   truncate?: (accessor: A, path: PathSpec, length: number) => Promise<void>
   find?: FindOp<A>
   isDirName?: IsDirNameOp<A>
-  duTotal?: DuTotalOp<A>
-  duAll?: DuAllOp<A>
+  duSize?: DuSizeOp<A>
+  duEntries?: DuEntriesOp<A>
+  maxDuEntries?: number
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   append?: (...args: any[]) => unknown
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

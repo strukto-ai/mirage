@@ -33,7 +33,7 @@ class GenericResource(BaseResource):
     minimum), and the whole generic command set — plus glob resolution —
     is wired automatically. Optional fields on the table unlock more
     surface (``write`` enables the byte-mutation family, ``find`` and
-    ``du_total`` become native fast paths), and the escape hatches
+    ``du_size`` become native fast paths), and the escape hatches
     mirror what builtin backends use: ``overrides`` suppresses generic
     commands the backend replaces, ``commands`` appends bespoke
     ``@command`` verbs, and ``ops`` registers ``@op`` handlers for FUSE

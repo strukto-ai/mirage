@@ -26,7 +26,7 @@ import { appendBytes } from './append.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { copy } from './copy.ts'
 import { create } from './create.ts'
-import { du, duAll } from './du.ts'
+import { size, entries } from './du/index.ts'
 import { exists } from './exists.ts'
 import { find } from './find.ts'
 import { mkdir } from './mkdir.ts'
@@ -182,9 +182,9 @@ describe.skipIf(skip)('core/redis ops', () => {
     await mkdir(acc, spec('/d'))
     await writeBytes(acc, spec('/d/a'), ENC.encode('abc'))
     await writeBytes(acc, spec('/d/b'), ENC.encode('defg'))
-    expect(await du(acc, spec('/d'))).toBe(7)
-    const { entries, total } = await duAll(acc, spec('/d'))
-    expect(entries).toHaveLength(2)
+    expect(await size(acc, spec('/d'))).toBe(7)
+    const [found, total] = await entries(acc, spec('/d'))
+    expect(found).toHaveLength(2)
     expect(total).toBe(7)
   })
 

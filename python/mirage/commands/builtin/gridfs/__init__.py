@@ -16,7 +16,6 @@ from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gridfs._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.gridfs.du import du
 from mirage.commands.builtin.gridfs.io import IO as _IO
 from mirage.commands.builtin.gridfs.mkdir import mkdir
 from mirage.commands.builtin.gridfs.rm import rm
@@ -26,10 +25,10 @@ from mirage.commands.builtin.gridfs.touch import touch
 from mirage.core.gridfs.read import read_bytes as _read
 
 # gridfs-specific behaviours kept as overrides: no real directories (mkdir -p,
-# rm not-empty), write-tracking (touch/tee), du_multi aggregation, and the
+# rm not-empty), write-tracking (touch/tee), and the
 # index-threaded, missing-operand stat. patch is generic (the factory builder
 # delegates to the shared generic patch).
-_GRIDFS_OVERRIDES = {"stat", "du", "rm", "mkdir", "tee", "touch"}
+_GRIDFS_OVERRIDES = {"stat", "rm", "mkdir", "tee", "touch"}
 
 COMMANDS = [
     *make_filetype_commands(
@@ -39,7 +38,6 @@ COMMANDS = [
         _IO,
         overrides=_GRIDFS_OVERRIDES,
     ),
-    du,
     mkdir,
     rm,
     stat,

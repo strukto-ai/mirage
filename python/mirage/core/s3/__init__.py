@@ -14,7 +14,8 @@
 
 from mirage.core.s3.copy import copy
 from mirage.core.s3.create import create
-from mirage.core.s3.du import du, du_all
+from mirage.core.s3.du import entries as du_entries
+from mirage.core.s3.du import size as du_size
 from mirage.core.s3.exists import exists
 from mirage.core.s3.find import find
 from mirage.core.s3.mkdir import mkdir
@@ -32,8 +33,8 @@ from mirage.core.s3.write import write_bytes
 __all__ = [
     "copy",
     "create",
-    "du",
-    "du_all",
+    "du_size",
+    "du_entries",
     "exists",
     "find",
     "mkdir",

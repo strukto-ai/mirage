@@ -321,7 +321,7 @@
       "command": "du /db/cat",
       "expect": {
         "exit": 0,
-        "stdout": "160\t/db/cat\n",
+        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n",
         "stderr": ""
       }
     },
@@ -334,7 +334,7 @@
       "command": "du /db/",
       "expect": {
         "exit": 0,
-        "stdout": "320\t/db\n",
+        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n77\t/db/dog/big\n83\t/db/dog/small\n160\t/db/dog\n320\t/db\n",
         "stderr": ""
       }
     },
@@ -347,7 +347,7 @@
       "command": "du -c /db/cat /db/dog",
       "expect": {
         "exit": 0,
-        "stdout": "160\t/db/cat\n160\t/db/dog\n320\ttotal\n",
+        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n77\t/db/dog/big\n83\t/db/dog/small\n160\t/db/dog\n320\ttotal\n",
         "stderr": ""
       }
     },

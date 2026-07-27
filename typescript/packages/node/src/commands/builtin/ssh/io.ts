@@ -18,7 +18,7 @@ import { appendBytes as sshAppend } from '../../../core/ssh/append.ts'
 import { SCOPE_ERROR } from '../../../core/ssh/constants.ts'
 import { copy as sshCopy } from '../../../core/ssh/copy.ts'
 import { create as sshCreate } from '../../../core/ssh/create.ts'
-import { du as sshDu, duAll as sshDuAll } from '../../../core/ssh/du.ts'
+import { size as sshDu, entries as sshDuAll } from '../../../core/ssh/du/index.ts'
 import { exists as sshExists } from '../../../core/ssh/exists.ts'
 import { find as sshFind } from '../../../core/ssh/find.ts'
 import { mkdir as sshMkdir } from '../../../core/ssh/mkdir.ts'
@@ -53,6 +53,6 @@ export const SSH_IO: CommandIO<SSHAccessor> = {
   truncate: sshTruncate,
   append: sshAppend,
   find: sshFind,
-  duTotal: sshDu,
-  duAll: sshDuAll,
+  duSize: sshDu,
+  duEntries: sshDuAll,
 }

@@ -15,12 +15,11 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (make_file_read_provision,
                                                   make_generic_commands)
-from mirage.commands.builtin.hf_buckets.du import du
 from mirage.commands.builtin.hf_buckets.io import IO as _IO
 from mirage.core.hf_buckets.read import read_bytes as _read
 from mirage.core.hf_buckets.stat import stat as _stat
 
-_HF_BUCKETS_OVERRIDES = {"cp", "du", "mv"}
+_HF_BUCKETS_OVERRIDES = {"cp", "mv"}
 
 COMMANDS = [
     *make_filetype_commands("hf_buckets",
@@ -33,5 +32,4 @@ COMMANDS = [
         _IO,
         overrides=_HF_BUCKETS_OVERRIDES,
     ),
-    du,
 ]

@@ -16,8 +16,8 @@ from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
 from mirage.core.s3.create import create as _create
-from mirage.core.s3.du import du as _du
-from mirage.core.s3.du import du_all as _du_all
+from mirage.core.s3.du import entries as _du_entries
+from mirage.core.s3.du import size as _du_size
 from mirage.core.s3.exists import exists as _exists
 from mirage.core.s3.find import find as _find
 from mirage.core.s3.mkdir import mkdir as _mkdir
@@ -50,8 +50,8 @@ IO = CommandIO(
     copy=_copy,
     create=_create,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du_size=_du_size,
+    du_entries=_du_entries,
     truncate=_truncate,
 )
 
