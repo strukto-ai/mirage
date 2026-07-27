@@ -164,7 +164,10 @@ def _parse_page_limit(raw: str | None) -> int | None:
     """
     if raw is None or raw == "":
         return None
-    if not raw.isdigit():
+    # isascii() as well as isdigit(): bare isdigit() accepts non-ASCII digits
+    # that TypeScript's /^\d+$/ rejects, and superscripts that int() cannot
+    # parse at all.
+    if not (raw.isascii() and raw.isdigit()):
         raise ValueError(f"--page-limit must be a whole number, got '{raw}'")
     return int(raw)
 

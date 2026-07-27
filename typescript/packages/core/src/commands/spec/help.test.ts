@@ -53,4 +53,12 @@ describe('renderHelp', () => {
   it('omits the epilog when absent', () => {
     expect(renderHelp('foo', new CommandSpec())).toBe('foo\n\nUsage: foo\n')
   })
+
+  it('trims a long run of trailing newlines in linear time', () => {
+    const spec = new CommandSpec({ epilog: 'Services:' + '\n'.repeat(100_000) })
+    const started = performance.now()
+    const out = renderHelp('gws', spec)
+    expect(out).toBe('gws\n\nUsage: gws\n\nServices:\n')
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
 })

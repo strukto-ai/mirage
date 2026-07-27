@@ -164,13 +164,15 @@ describe('gws api factory', () => {
     ).toBe(2)
   })
 
-  it('rejects a non-numeric --page-limit', async () => {
+  // Non-ASCII digits are rejected too, so the flag accepts exactly what
+  // Python's isascii() + isdigit() accepts.
+  it.each(['x', '-1', '1.5', '١٢', '²'])('rejects --page-limit %s', async (raw) => {
     const result = await runGwsMethod(
       method('drive.files.list'),
       ACCESSOR,
       [],
       [],
-      makeOpts({ page_limit: 'x' }),
+      makeOpts({ page_limit: raw }),
     )
     if (result === null) throw new Error('expected result')
     expect(result[1].exitCode).toBe(2)

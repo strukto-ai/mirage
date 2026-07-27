@@ -176,11 +176,14 @@ async def test_page_limit_stops_early(accessor):
 
 
 @pytest.mark.asyncio
-async def test_rejects_a_non_numeric_page_limit(accessor):
+@pytest.mark.parametrize("raw", ["x", "-1", "1.5", "١٢", "²"])
+async def test_rejects_a_non_numeric_page_limit(accessor, raw):
+    # Non-ASCII digits are rejected too, so the flag accepts exactly what
+    # TypeScript's /^\d+$/ accepts.
     method = METHODS[("drive", "files", "list")]
     with pytest.raises(ValueError,
                        match="--page-limit must be a whole number"):
-        await run_gws_method(method, accessor, [], page_limit="x")
+        await run_gws_method(method, accessor, [], page_limit=raw)
 
 
 @pytest.mark.asyncio
