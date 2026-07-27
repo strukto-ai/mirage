@@ -273,9 +273,9 @@ async def test_open_returns_unique_handles(seed_ws):
 async def test_release_cleans_handles(seed_ws):
     fs = MirageFS(seed_ws.ops)
     fh = fs.open("/a.txt", os.O_RDONLY)
-    assert fh in fs._handles
+    assert fh in fs.core._handles
     fs.release("/a.txt", fh)
-    assert fh not in fs._handles
+    assert fh not in fs.core._handles
 
 
 @pytest.mark.asyncio
@@ -339,7 +339,7 @@ async def test_total_ops_persists_across_drains(seed_ws):
 async def test_total_ops_counts_reads_and_writes(rw_ws):
     await rw_ws.execute("tee /f.txt", stdin=b"x")
     fs = MirageFS(rw_ws.ops)
-    fs._ops.records.clear()
+    fs.core._ops.records.clear()
     fh = fs.open("/f.txt", os.O_RDONLY)
     fs.read("/f.txt", 1024, 0, fh)
     fh2 = fs.create("/g.txt", 0o644)
@@ -359,7 +359,7 @@ def test_permission_error_logged_on_create():
 def test_permission_error_not_counted_as_op():
     ro_ws = Workspace({"/": RAMResource()}, mode=MountMode.READ)
     fs = MirageFS(ro_ws.ops)
-    fs._ops.records.clear()
+    fs.core._ops.records.clear()
     with pytest.raises(Exception):
         fs.create("/new.txt", 0o644)
     ops = fs.drain_ops()
@@ -450,7 +450,7 @@ async def test_xattr_cleared_on_unlink(seed_ws):
     fs.setxattr("/a.txt", "user.keep", b"v", 0)
     fs.unlink("/a.txt")
     assert fs.listxattr("/sub") == []
-    assert "/a.txt" not in fs._xattrs
+    assert "/a.txt" not in fs.core._xattrs
 
 
 @pytest.mark.asyncio
@@ -459,7 +459,7 @@ async def test_xattr_follows_rename(seed_ws):
     fs.setxattr("/a.txt", "user.keep", b"v", 0)
     fs.rename("/a.txt", "/renamed.txt")
     assert fs.getxattr("/renamed.txt", "user.keep") == b"v"
-    assert "/a.txt" not in fs._xattrs
+    assert "/a.txt" not in fs.core._xattrs
 
 
 class _SizelessOps:
@@ -530,11 +530,11 @@ async def test_prefetch_expires_after_ttl(sizeless_fs):
     fs, _ = sizeless_fs
     fh = fs.open("/u.json", os.O_RDONLY)
     fs.release("/u.json", fh)
-    data, _ = fs._prefetch["/u.json"]
-    fs._prefetch["/u.json"] = (data, 0.0)
+    data, _ = fs.core._prefetch["/u.json"]
+    fs.core._prefetch["/u.json"] = (data, 0.0)
     attrs = fs.getattr("/u.json")
     assert attrs["st_size"] == 0
-    assert "/u.json" not in fs._prefetch
+    assert "/u.json" not in fs.core._prefetch
 
 
 @pytest.mark.asyncio
@@ -550,10 +550,10 @@ async def test_open_then_read_does_not_refetch(sizeless_fs):
 async def test_flush_drops_prefetch(sizeless_fs):
     fs, _ = sizeless_fs
     fh = fs.open("/u.json", os.O_RDWR)
-    assert "/u.json" in fs._prefetch
+    assert "/u.json" in fs.core._prefetch
     fs.write("/u.json", b"NEW", 0, fh)
     fs.flush("/u.json", fh)
-    assert "/u.json" not in fs._prefetch
+    assert "/u.json" not in fs.core._prefetch
 
 
 @pytest.mark.asyncio
@@ -562,7 +562,7 @@ async def test_unlink_drops_prefetch(sizeless_fs):
     fh = fs.open("/u.json", os.O_RDONLY)
     fs.release("/u.json", fh)
     fs.unlink("/u.json")
-    assert "/u.json" not in fs._prefetch
+    assert "/u.json" not in fs.core._prefetch
 
 
 @pytest.mark.asyncio
