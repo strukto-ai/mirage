@@ -25,6 +25,7 @@
       "hf_datasets",
       "hf_models",
       "hf_spaces",
+      "jaeger",
       "lancedb",
       "langfuse",
       "linear",

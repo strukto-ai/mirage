@@ -14,6 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.ram.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -25,6 +26,7 @@ async def copy(accessor: RAMAccessor, src_spec: PathSpec,
     dst = dst_spec.mount_path
     store = accessor.store
     s, d = norm(src), norm(dst)
+    check_dest_parents(store, dst_spec, d)
     if s not in store.files:
         raise FileNotFoundError(s)
     store.files[d] = store.files[s]

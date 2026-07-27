@@ -59,15 +59,40 @@ async def test_mkdir(mk_store):
 @pytest.mark.asyncio
 async def test_mkdir_parent_not_found(mk_store):
     a = await mk_store("test:mkdir:2:")
-    with pytest.raises(
-            FileNotFoundError,
-            match="parent directory does not exist",
-    ):
+    # The operand is what a GNU stderr line names, so the error carries the
+    # virtual path, not the internal "parent does not exist" phrasing.
+    with pytest.raises(FileNotFoundError, match="/no/parent"):
         await mkdir(
             a,
             PathSpec(resource_path="no/parent",
                      virtual="/no/parent",
                      directory="/no/parent"))
+    assert not await a.store.has_dir("/no/parent")
+
+
+@pytest.mark.asyncio
+async def test_mkdir_under_a_plain_file_is_not_a_directory(mk_store):
+    a = await mk_store("test:mkdir:notdir:")
+    await a.store.set_file("/plain", b"x")
+    with pytest.raises(NotADirectoryError):
+        await mkdir(
+            a,
+            PathSpec(resource_path="plain/sub",
+                     virtual="/plain/sub",
+                     directory="/plain/sub"))
+    assert not await a.store.has_dir("/plain/sub")
+
+
+@pytest.mark.asyncio
+async def test_mkdir_deep_under_a_plain_file_is_not_a_directory(mk_store):
+    a = await mk_store("test:mkdir:notdir2:")
+    await a.store.set_file("/plain", b"x")
+    with pytest.raises(NotADirectoryError):
+        await mkdir(
+            a,
+            PathSpec(resource_path="plain/sub/deeper",
+                     virtual="/plain/sub/deeper",
+                     directory="/plain/sub/deeper"))
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "id": "guard_touch_into_missing_parent",
+      "seq": 625,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "touch /data/guard/nodir/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "touch: cannot touch '/data/guard/nodir/f.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_touch_under_a_file",
+      "seq": 626,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "touch /data/guard/g.txt/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "touch: cannot touch '/data/guard/g.txt/f.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "guard_touch_keeps_going",
+      "seq": 627,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "touch /data/guard/t1.txt /data/guard/nodir/f.txt /data/guard/t2.txt; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": "touch: cannot touch '/data/guard/nodir/f.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_mkdir_into_missing_parent",
+      "seq": 628,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "mkdir /data/guard/nodir/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/guard/nodir/sub': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_mkdir_under_a_file",
+      "seq": 629,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "mkdir /data/guard/g.txt/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/guard/g.txt/sub': Not a directory\n"
+      }
+    },
+    {
+      "id": "guard_redirect_into_missing_parent",
+      "seq": 630,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "echo hi > /data/guard/nodir/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/guard/nodir/f.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_append_into_missing_parent",
+      "seq": 631,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "echo hi >> /data/guard/nodir/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/guard/nodir/f.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_tee_into_missing_parent",
+      "seq": 632,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "echo hi | tee /data/guard/nodir/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "hi\n",
+        "stderr": "tee: /data/guard/nodir/f.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_write_refusals_left_no_orphans",
+      "seq": 633,
+      "targets": ["ram", "disk", "redis", "opfs"],
+      "command": "find /data/guard -type f; ls /data/guard/nodir; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n/data/guard/t1.txt\n/data/guard/t2.txt\ncode=2\n",
+        "stderr": "ls: cannot access '/data/guard/nodir': No such file or directory\n"
+      }
+    }
+  ]
+}

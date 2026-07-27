@@ -78,9 +78,12 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('writeBytes fails when parent is missing', async () => {
-    await expect(writeBytes(acc, spec('/missing/x.txt'), ENC.encode('.'))).rejects.toThrow(
-      /parent directory does not exist/,
-    )
+    // The operand is what a GNU stderr line names, so the error carries the
+    // virtual path and an errno, not the internal parent phrasing.
+    await expect(writeBytes(acc, spec('/missing/x.txt'), ENC.encode('.'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/missing/x.txt',
+    })
   })
 
   it('appendBytes creates then extends', async () => {
@@ -103,7 +106,7 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('mkdir requires existing parent', async () => {
-    await expect(mkdir(acc, spec('/foo/bar'))).rejects.toThrow(/parent directory does not exist/)
+    await expect(mkdir(acc, spec('/foo/bar'))).rejects.toMatchObject({ code: 'ENOENT' })
     await mkdir(acc, spec('/foo'))
     await mkdir(acc, spec('/foo/bar'))
     expect(await exists(acc, spec('/foo/bar'))).toBe(true)

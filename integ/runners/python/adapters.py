@@ -75,7 +75,9 @@ from mirage.resource.gsheets.gsheets import GSheetsResource
 from mirage.resource.gslides.config import GSlidesConfig
 from mirage.resource.gslides.gslides import GSlidesResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+from mirage.resource.jaeger import JaegerConfig, JaegerResource
 from mirage.resource.lancedb import LanceDBConfig, LanceDBResource
+from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
 from mirage.resource.linear import LinearConfig, LinearResource
 from mirage.resource.mem0 import Mem0Config, Mem0Resource
 from mirage.resource.minio import MinIOConfig, MinIOResource
@@ -1004,6 +1006,58 @@ def _clear_sharepoint_caches() -> None:
     sharepoint_resolver._drive_cache.clear()
 
 
+class JaegerService:
+    """Points jaeger mounts at a real jaeger all-in-one container.
+
+    The container is external and seeded over OTLP by
+    integ/server/jaeger_seed.py, so trace ids and timestamps are fixed.
+    """
+
+    def __init__(self, host: str) -> None:
+        self.host = host
+
+    @classmethod
+    async def create(cls) -> "JaegerService":
+        return cls(os.environ["JAEGER_URL"])
+
+    def resource(self, mount: dict) -> JaegerResource:
+        return JaegerResource(JaegerConfig(host=self.host))
+
+    async def teardown(self) -> None:
+        return None
+
+
+class LangfuseService:
+    """Points langfuse mounts at a real self-hosted Langfuse instance.
+
+    The stack (web + worker + postgres + clickhouse + redis + blob store) is
+    external, brought up from integ/server/langfuse_compose.yml and seeded by
+    integ/server/langfuse_seed.py, so the project keys are fixed constants.
+    """
+
+    def __init__(self, host: str, public_key: str, secret_key: str) -> None:
+        self.host = host
+        self.public_key = public_key
+        self.secret_key = secret_key
+
+    @classmethod
+    async def create(cls) -> "LangfuseService":
+        return cls(
+            os.environ["LANGFUSE_URL"],
+            os.environ.get("LANGFUSE_PUBLIC_KEY", "pk-lf-mirage-integ"),
+            os.environ.get("LANGFUSE_SECRET_KEY", "sk-lf-mirage-integ"),
+        )
+
+    def resource(self, mount: dict) -> LangfuseResource:
+        return LangfuseResource(
+            LangfuseConfig(public_key=self.public_key,
+                           secret_key=self.secret_key,
+                           host=self.host))
+
+    async def teardown(self) -> None:
+        return None
+
+
 class SharePointService:
 
     def __init__(self, server, runner) -> None:
@@ -1392,7 +1446,8 @@ Service = (S3Service | OneDriveService | SharePointService | Mem0Service
            | QdrantService | LanceDBService | NotionService
            | NextcloudService | GwsService | HfService | BoxService
            | DropboxService | GridFSService | SlackService | TrelloService
-           | LinearService | DifyService | DatabricksVolumeService)
+           | LinearService | DifyService | DatabricksVolumeService
+           | LangfuseService | JaegerService)
 
 
 def build_ram(
@@ -1550,6 +1605,20 @@ def build_linear(
     return service.resource(mount), _noop
 
 
+def build_jaeger(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, JaegerService)
+    return service.resource(mount), _noop
+
+
+def build_langfuse(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, LangfuseService)
+    return service.resource(mount), _noop
+
+
 def build_ssh(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -1665,6 +1734,8 @@ BUILDERS = {
     "slack": build_slack,
     "trello": build_trello,
     "linear": build_linear,
+    "langfuse": build_langfuse,
+    "jaeger": build_jaeger,
     "dify": build_dify,
 }
 
@@ -1718,6 +1789,10 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await LinearService.create()
     if target.get("service") == "dify":
         return await DifyService.create(target)
+    if target.get("service") == "langfuse":
+        return await LangfuseService.create()
+    if target.get("service") == "jaeger":
+        return await JaegerService.create()
     return None
 
 

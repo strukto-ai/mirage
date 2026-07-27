@@ -6,6 +6,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import fs_error_line, fs_strerror
 
 OUTPUT_ERROR_MODES = ("warn", "warn-nopipe", "exit", "exit-nopipe")
 
@@ -38,8 +39,14 @@ async def write_output(
     except OSError as exc:
         # GNU tee still copies stdin to stdout on a write error, prints a
         # diagnostic, and exits non-zero. With a single output sink the
-        # --output-error modes (warn/exit/*-nopipe) collapse to this.
-        err = f"tee: {path.mount_path}: {exc}\n".encode()
+        # --output-error modes (warn/exit/*-nopipe) collapse to this. A
+        # recognized filesystem refusal reads like GNU (operand as typed,
+        # shared strerror); anything else keeps its own message, which is
+        # the only description of the cause a transport error has.
+        if fs_strerror(exc) is not None:
+            err = fs_error_line("tee", path, exc).encode()
+        else:
+            err = f"tee: {path.mount_path}: {exc}\n".encode()
         return passthrough, IOResult(exit_code=1, stderr=err)
     return passthrough, IOResult(writes={path.mount_path: data},
                                  cache=[path.mount_path])

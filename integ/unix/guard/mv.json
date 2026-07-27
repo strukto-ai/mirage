@@ -99,6 +99,22 @@
       }
     },
     {
+      "id": "guard_mv_into_missing_parent",
+      "seq": 615,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mv /data/guard/g.txt /data/guard/nodir/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data/guard/g.txt' to '/data/guard/nodir/g.txt': No such file or directory\n"
+      }
+    },
+    {
       "id": "guard_mv_dir_into_own_subtree",
       "seq": 616,
       "targets": [

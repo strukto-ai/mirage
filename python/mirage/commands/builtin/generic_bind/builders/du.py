@@ -66,6 +66,22 @@ async def du(
     paths = await ops.resolve_glob(accessor, paths, index)
     if not paths:
         raise ValueError("du: missing operand")
+    # GNU reports an operand it cannot stat and carries on with the rest,
+    # exiting 1. Walking a missing operand would otherwise report it as size 0.
+    present: list[PathSpec] = []
+    errors: list[str] = []
+    for p in paths:
+        try:
+            await ops.stat(accessor, p, index)
+        except (FileNotFoundError, ValueError):
+            errors.append(
+                f"du: cannot access '{p.raw_path}': No such file or directory")
+        else:
+            present.append(p)
+    err = ("\n".join(errors) + "\n").encode() if errors else None
+    if not present:
+        return None, IOResult(exit_code=1, stderr=err)
+    paths = present
     depth = int(max_depth) if max_depth is not None else None
     if ops.du_total is None or ops.du_all is None:
         out = await du_multi(paths,
@@ -76,7 +92,7 @@ async def du(
                              a=a,
                              max_depth=depth,
                              c=c)
-        return out, IOResult()
+        return out, IOResult(exit_code=1 if err else 0, stderr=err)
     text = await generic_du(
         paths,
         compute_total=partial(ops.du_total, accessor),
@@ -87,7 +103,7 @@ async def du(
         max_depth=depth,
         c=c,
     )
-    return text.encode(), IOResult()
+    return text.encode(), IOResult(exit_code=1 if err else 0, stderr=err)
 
 
 BUILDER = Builder('du', du, None, False, None)

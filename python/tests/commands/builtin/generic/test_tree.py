@@ -208,7 +208,9 @@ async def test_tree_missing_path_marks_error_and_exits_2():
         "/nowhere  [error opening dir]", "", "0 directories, 0 files"
     ]
     assert io.exit_code == 2
-    assert b"nowhere" in (io.stderr or b"")
+    # GNU signals this with the inline marker and exit 2 and writes nothing to
+    # stderr; TypeScript already behaved this way.
+    assert io.stderr is None
 
 
 @pytest.mark.asyncio

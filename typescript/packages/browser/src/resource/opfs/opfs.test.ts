@@ -93,6 +93,7 @@ describe('OPFSResource — fs methods', () => {
   })
 
   it('truncate / streamPath / du', async () => {
+    await res.mkdir(spec('/d'))
     await res.writeFile(spec('/d/a'), new Uint8Array([1, 2, 3]))
     await res.writeFile(spec('/d/b'), new Uint8Array([4, 5]))
     expect(await res.du(spec('/d'))).toBe(5)
@@ -104,6 +105,7 @@ describe('OPFSResource — fs methods', () => {
   })
 
   it('rmR removes recursively', async () => {
+    await res.mkdir(spec('/d'))
     await res.writeFile(spec('/d/x'), new TextEncoder().encode('x'))
     await res.rmR(spec('/d'))
     expect(await res.exists(spec('/d'))).toBe(false)

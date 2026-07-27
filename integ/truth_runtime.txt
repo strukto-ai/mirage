@@ -44,9 +44,11 @@ cold-bytes
 cold-bytes
 === sbx_link_guard ===
 01234567
-=== xmount_rename ===
-moved-bytes
+=== xmount_rename_refused ===
+errno=ENOENT
 === xmount_rename_src ===
+moved-bytes
+=== xmount_rename_orphan ===
 exit_code=1
 === xmount_rename_dst_mount ===
 exit_code=1

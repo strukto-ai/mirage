@@ -269,19 +269,26 @@ async def main() -> None:
         await ws_link.close()
 
         # Cross-mount rename through dispatch: both languages address
-        # the dst against the source mount, so the file lands on the
-        # source backend under the dst's virtual path (EXDEV follow-up).
+        # the dst against the source mount, so "/b/y.txt" means "b/y.txt"
+        # inside /a, a directory that does not exist there. The store
+        # refuses (rename(2) ENOENT) rather than growing an orphan key
+        # under a directory it never recorded (EXDEV follow-up).
         ws_mv = Workspace({
             "/a": RAMResource(),
             "/b": RAMResource()
         },
                           mode=MountMode.EXEC)
         await ws_mv.execute("echo moved-bytes > /a/x.txt")
-        await ws_mv.dispatch("rename",
-                             PathSpec.from_str_path("/a/x.txt"),
-                             dst=PathSpec.from_str_path("/b/y.txt"))
-        await _run(ws_mv, "xmount_rename", "cat /a/b/y.txt")
-        await _run_error(ws_mv, "xmount_rename_src", "cat /a/x.txt")
+        print("=== xmount_rename_refused ===")
+        try:
+            await ws_mv.dispatch("rename",
+                                 PathSpec.from_str_path("/a/x.txt"),
+                                 dst=PathSpec.from_str_path("/b/y.txt"))
+            print("errno=NONE")
+        except FileNotFoundError:
+            print("errno=ENOENT")
+        await _run(ws_mv, "xmount_rename_src", "cat /a/x.txt")
+        await _run_error(ws_mv, "xmount_rename_orphan", "cat /a/b/y.txt")
         await _run_error(ws_mv, "xmount_rename_dst_mount", "cat /b/y.txt")
         await ws_mv.close()
 

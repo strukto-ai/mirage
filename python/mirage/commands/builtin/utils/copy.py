@@ -28,24 +28,32 @@ def backend_key_default(path: PathSpec) -> str:
     return path.mount_path.rstrip("/")
 
 
-def copy_targets(sources: list[PathSpec], dst: PathSpec,
-                 dst_is_dir: bool) -> list[tuple[PathSpec, PathSpec]]:
+def copy_targets(sources: list[PathSpec],
+                 dst: PathSpec,
+                 dst_is_dir: bool,
+                 dst_exists: bool = True) -> list[tuple[PathSpec, PathSpec]]:
     """Map copy or move sources to their destination paths.
 
     Follows POSIX operand semantics: when the destination is an existing
     directory each source maps to ``destination/basename``; otherwise a
     single source maps directly to the destination. Multiple sources require
-    the directory form.
+    the directory form, and GNU distinguishes why it is unusable: an absent
+    target is ``No such file or directory``, an existing non-directory is
+    ``Not a directory`` (identical wording in cp and mv).
 
     Args:
         sources (list[PathSpec]): Source operands.
         dst (PathSpec): Final operand, the destination.
         dst_is_dir (bool): Whether the destination is an existing directory.
+        dst_exists (bool): Whether the destination exists at all; False
+            picks GNU's ENOENT wording over ENOTDIR.
 
     Returns:
         list[tuple[PathSpec, PathSpec]]: Source-to-target pairs.
     """
     if len(sources) > 1 and not dst_is_dir:
+        if not dst_exists:
+            raise FileNotFoundError(f"target '{dst.virtual}'")
         raise NotADirectoryError(f"target '{dst.virtual}'")
     if not dst_is_dir:
         return [(sources[0], dst)]

@@ -93,8 +93,8 @@ async def test_curl_o_missing_parent_dir_fails(multi_mount_ws, mock_http):
         "curl -s https://x.test/file -o /nope/foo.bin")
     assert io.exit_code == 1
     err = (io.stderr or b"").decode()
-    assert "parent directory does not exist" in err
-    assert "/nope" in err
+    assert "No such file or directory" in err
+    assert "/nope/foo.bin" in err
 
 
 @pytest.mark.asyncio

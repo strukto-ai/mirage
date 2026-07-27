@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -37,8 +37,17 @@ describe('core/disk/write', () => {
     expect(out).toBe('hi')
   })
 
-  it('creates parent directories recursively', async () => {
-    await writeBytes(accessor, spec('/a/b/c.txt'), new TextEncoder().encode('deep'))
-    expect(await readFile(join(root, 'a/b/c.txt'), 'utf-8')).toBe('deep')
+  it('does not create parent directories', async () => {
+    // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent.
+    await expect(
+      writeBytes(accessor, spec('/a/b/c.txt'), new TextEncoder().encode('deep')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('a parent that is a plain file is ENOTDIR', async () => {
+    await writeFile(join(root, 'plain'), 'y')
+    await expect(
+      writeBytes(accessor, spec('/plain/c.txt'), new TextEncoder().encode('deep')),
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })

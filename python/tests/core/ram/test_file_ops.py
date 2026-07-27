@@ -234,6 +234,36 @@ async def test_append_to_new():
 
 
 @pytest.mark.asyncio
+async def test_append_into_missing_parent_leaves_no_orphan():
+    # `>>` is not `mkdir -p` either: GNU reports ENOENT on the operand.
+    s = RAMStore()
+
+    a = RAMAccessor(s)
+    with pytest.raises(FileNotFoundError):
+        await append_bytes(
+            a,
+            PathSpec(resource_path="missing/new.txt",
+                     virtual="/missing/new.txt",
+                     directory="/missing/new.txt"), b"data")
+    assert "/missing/new.txt" not in s.files
+
+
+@pytest.mark.asyncio
+async def test_append_under_a_plain_file_is_not_a_directory():
+    s = RAMStore()
+    s.files["/plain"] = b"x"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await append_bytes(
+            a,
+            PathSpec(resource_path="plain/new.txt",
+                     virtual="/plain/new.txt",
+                     directory="/plain/new.txt"), b"data")
+    assert "/plain/new.txt" not in s.files
+
+
+@pytest.mark.asyncio
 async def test_append_multiple():
     s = RAMStore()
 

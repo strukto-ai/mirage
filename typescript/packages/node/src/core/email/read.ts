@@ -15,21 +15,9 @@
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchAttachment, fetchMessage } from './_client.ts'
-import { gnuDirname, mountPrefixOf, stripSlash } from '@struktoai/mirage-core'
+import { eisdir, enoent, gnuDirname, mountPrefixOf, stripSlash } from '@struktoai/mirage-core'
 
 const ENC = new TextEncoder()
-
-function enoent(p: string): Error {
-  const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
-}
-
-function eisdir(p: string): Error {
-  const e = new Error(`EISDIR: ${p}`) as Error & { code: string }
-  e.code = 'EISDIR'
-  return e
-}
 
 export async function read(
   accessor: EmailAccessor,

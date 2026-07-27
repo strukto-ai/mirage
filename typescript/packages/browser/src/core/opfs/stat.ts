@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType, guessType, type PathSpec } from '@struktoai/mirage-core'
-import { enoent } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import {
+  destError,
   isNotFound,
   iterEntries,
   resolveDirHandle,
@@ -42,8 +42,10 @@ export async function stat(accessor: OPFSAccessor, p: PathSpec): Promise<FileSta
   try {
     ;[parentDir, entryName] = await resolveParentDirHandle(root, virtual, { create: false })
   } catch (err) {
-    if (isNotFound(err)) throw enoent(p)
-    throw err
+    // A plain file partway down the chain is ENOTDIR, not ENOENT: the
+    // read-family commands report "Not a directory" for it, the way the
+    // kernel does.
+    throw destError(err, p)
   }
   try {
     const fileHandle = await parentDir.getFileHandle(entryName, { create: false })
@@ -65,8 +67,10 @@ export async function stat(accessor: OPFSAccessor, p: PathSpec): Promise<FileSta
   try {
     dirHandle = await resolveDirHandle(root, virtual, { create: false })
   } catch (err) {
-    if (isNotFound(err)) throw enoent(p)
-    throw err
+    // A plain file partway down the chain is ENOTDIR, not ENOENT: the
+    // read-family commands report "Not a directory" for it, the way the
+    // kernel does.
+    throw destError(err, p)
   }
   // OPFS exposes no directory timestamp, so derive one from the newest file
   // child's lastModified (null when the directory holds no files).

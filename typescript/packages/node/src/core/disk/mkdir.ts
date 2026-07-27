@@ -15,6 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { mkdir as fsMkdir } from 'node:fs/promises'
 import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
+import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
 
 export async function mkdir(
@@ -33,10 +34,11 @@ export async function mkdir(
     await fsMkdir(full)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') {
-      throw new Error(`parent directory does not exist: ${path.mountPath}`)
-    }
-    if (code !== 'EEXIST') throw err
+    // An existing directory stays a no-op here: cp -r mirrors a tree
+    // through this op and must reuse the directories already there. The
+    // rest keep the kernel's errno, restamped against the mount so only
+    // the virtual path reaches a stderr line.
+    if (code !== 'EEXIST') throw diskError(err, path)
   }
   await invalidateAfterWrite(path)
 }

@@ -36,8 +36,13 @@ describe('core/disk/mkdir', () => {
     expect((await stat(join(root, 'd'))).isDirectory()).toBe(true)
   })
 
-  it('throws "parent directory does not exist" when parent missing and parents=false', async () => {
-    await expect(mkdir(accessor, spec('/a/b'))).rejects.toThrow(/parent directory does not exist/)
+  it('is ENOENT when the parent is missing and parents=false', async () => {
+    // The kernel's errno is kept and restamped against the mount, so the
+    // command layer can render the GNU strerror and no host path leaks.
+    await expect(mkdir(accessor, spec('/a/b'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/a/b',
+    })
   })
 
   it('creates nested directories with parents=true', async () => {

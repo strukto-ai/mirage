@@ -272,16 +272,24 @@ async function main(): Promise<void> {
   await wsLink.close();
 
   // Cross-mount rename through dispatch: both languages address the dst
-  // against the source mount, so the file lands on the source backend
-  // under the dst's virtual path (EXDEV follow-up).
+  // against the source mount, so "/b/y.txt" means "b/y.txt" inside /a, a
+  // directory that does not exist there. The store refuses (rename(2)
+  // ENOENT) rather than growing an orphan key under a directory it never
+  // recorded (EXDEV follow-up).
   const wsMv = new Workspace(
     { "/a": new RAMResource(), "/b": new RAMResource() },
     { mode: MountMode.EXEC, runtimes: ["monty", "vfs"] },
   );
   await wsMv.execute("echo moved-bytes > /a/x.txt");
-  await wsMv.dispatch("rename", "/a/x.txt", [PathSpec.fromStrPath("/b/y.txt")]);
-  await run(wsMv, "xmount_rename", "cat /a/b/y.txt");
-  await runError(wsMv, "xmount_rename_src", "cat /a/x.txt");
+  console.log("=== xmount_rename_refused ===");
+  try {
+    await wsMv.dispatch("rename", "/a/x.txt", [PathSpec.fromStrPath("/b/y.txt")]);
+    console.log("errno=NONE");
+  } catch (err) {
+    console.log(`errno=${(err as { code?: string }).code ?? "NONE"}`);
+  }
+  await run(wsMv, "xmount_rename_src", "cat /a/x.txt");
+  await runError(wsMv, "xmount_rename_orphan", "cat /a/b/y.txt");
   await runError(wsMv, "xmount_rename_dst_mount", "cat /b/y.txt");
   await wsMv.close();
 

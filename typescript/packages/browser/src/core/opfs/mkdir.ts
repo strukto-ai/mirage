@@ -14,7 +14,13 @@
 
 import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, resolveDirHandle, resolveParentDirHandle, splitSegments } from './utils.ts'
+import {
+  destError,
+  isNotFound,
+  resolveDirHandle,
+  resolveParentDirHandle,
+  splitSegments,
+} from './utils.ts'
 
 export async function mkdir(
   accessor: OPFSAccessor,
@@ -36,10 +42,9 @@ export async function mkdir(
   try {
     ;[parentDir, name] = await resolveParentDirHandle(root, virtual, { create: false })
   } catch (err) {
-    if (isNotFound(err)) {
-      throw new Error(`parent directory does not exist: ${virtual}`)
-    }
-    throw err
+    // A bare Error here would not be classified as a filesystem failure,
+    // so the command layer could not report it with a GNU strerror.
+    throw destError(err, path)
   }
   try {
     await parentDir.getDirectoryHandle(name, { create: false })

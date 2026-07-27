@@ -69,10 +69,12 @@ describe('du', () => {
     expect(r.lines).toEqual(['5\t/tmp'])
   })
 
-  it('missing path returns 0', async () => {
+  it('missing path is reported, not counted as 0', async () => {
+    // GNU: "du: cannot access 'X': No such file or directory", exit 1.
     const resource = new RAMResource()
     const r = await runDu(resource, [PathSpec.fromStrPath('/nonexistent')])
-    expect(r.lines).toEqual(['0\t/nonexistent'])
+    expect(r.exitCode).toBe(1)
+    expect(r.lines).toEqual([])
   })
 
   it('empty directory returns 0', async () => {

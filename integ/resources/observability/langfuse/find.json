@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "lf_find_top_dirs",
+      "seq": 600080,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "find /lf -maxdepth 1 -type d | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf\n/lf/datasets\n/lf/prompts\n/lf/sessions\n/lf/traces\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_find_trace_files",
+      "seq": 600081,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "find /lf/traces -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/traces/trace-alpha.json\n/lf/traces/trace-beta.json\n/lf/traces/trace-gamma.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_find_prompt_files",
+      "seq": 600082,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "find /lf/prompts -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/prompts/greeting/1.json\n/lf/prompts/greeting/2.json\n/lf/prompts/qa-template/1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_find_name_glob",
+      "seq": 600083,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "find /lf/traces -name 'trace-b*' | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/traces/trace-beta.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_find_jsonl",
+      "seq": 600084,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "find /lf/datasets -type f -name '*.jsonl' | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/datasets/eval-basic/items.jsonl\n/lf/datasets/eval-basic/runs/run-alpha.jsonl\n/lf/datasets/eval-empty/items.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_find_maxdepth_sessions",
+      "seq": 600085,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "find /lf/sessions -maxdepth 1 -type d | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/sessions\n/lf/sessions/session-one\n/lf/sessions/session-two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_tree_prompts",
+      "seq": 600086,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "tree /lf/prompts",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/prompts\n|-- greeting\n|   |-- 1.json\n|   `-- 2.json\n`-- qa-template\n    `-- 1.json\n\n3 directories, 3 files\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

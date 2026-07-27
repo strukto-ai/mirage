@@ -16,6 +16,8 @@ import {
   IOResult,
   ResourceName,
   command,
+  fsStrerror,
+  isFsError,
   specOf,
   type CommandFnResult,
   type CommandOpts,
@@ -37,13 +39,21 @@ async function touchCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('touch: missing operand\n') })]
   }
   const createOnly = opts.flags.c === true
+  const errors: string[] = []
   for (const p of paths) {
     if (createOnly) continue
-    if (!(await opfsExists(accessor, p))) {
+    if (await opfsExists(accessor, p)) continue
+    try {
       await opfsWrite(accessor, p, new Uint8Array(0))
+    } catch (err) {
+      // Mirrors the generic builder: one unusable operand is reported and
+      // the rest still get touched.
+      if (!isFsError(err)) throw err
+      errors.push(`touch: cannot touch '${p.virtual}': ${String(fsStrerror(err))}`)
     }
   }
-  return [null, new IOResult()]
+  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
+  return [null, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
 }
 
 export const OPFS_TOUCH = command({

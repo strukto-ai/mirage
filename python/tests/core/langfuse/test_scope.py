@@ -125,3 +125,10 @@ def test_glob_scope_file():
     assert scope.level == "file"
     assert scope.resource_type == "traces"
     assert scope.resource_id == "abc"
+
+
+def test_unrecognized_path_is_not_root():
+    # Falling back to "root" made the grep/rg push-down treat any bogus path
+    # as "search every trace", answering a missing file with the whole mount.
+    assert detect_scope("__nf_missing__").level == "unknown"
+    assert detect_scope("traces/a/b/c/d").level == "unknown"

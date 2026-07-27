@@ -12,11 +12,49 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from collections.abc import Awaitable
+from datetime import datetime
+from typing import Any, TypeVar
 
 from langfuse.api.client import AsyncLangfuseAPI
+from langfuse.api.core.api_error import ApiError
+
+from mirage.utils.errors import enoent
+
+T = TypeVar("T")
 
 
+async def fetch_or_enoent(pending: Awaitable[T], virtual: str) -> T:
+    """Await a Langfuse fetch, translating a 404 into ENOENT.
+
+    Every other status stays an ApiError: only "this resource does not exist"
+    is a filesystem-level missing file.
+
+    Args:
+        pending (Awaitable[T]): pending Langfuse API call.
+        virtual (str): virtual path named in the ENOENT message.
+
+    Returns:
+        T: the API result.
+
+    Raises:
+        FileNotFoundError: Langfuse reported 404 for this resource.
+    """
+    try:
+        return await pending
+    except ApiError as exc:
+        if exc.status_code == 404:
+            raise enoent(virtual) from exc
+        raise
+
+
+# mode="json" is load-bearing: the SDK's models only apply their field
+# aliases (createdAt, userId, expectedOutput, ...) and datetime serialization
+# inside a json-mode serializer. A python-mode dump returns snake_case keys,
+# and by_alias does not restore them. The cost is that timestamps carry
+# microsecond precision where the API sent milliseconds, a rendering
+# divergence from TypeScript that is documented rather than papered over with
+# string rewriting that could alter trace content.
 def _to_dict(obj) -> dict[str, Any]:
     if hasattr(obj, "model_dump"):
         return obj.model_dump(mode="json")
@@ -32,6 +70,7 @@ async def fetch_traces(
     user_id: str | None = None,
     session_id: str | None = None,
     order_by: str | None = None,
+    from_timestamp: str | None = None,
 ) -> list[dict[str, Any]]:
     kwargs: dict[str, Any] = {"limit": limit}
     if name:
@@ -42,6 +81,9 @@ async def fetch_traces(
         kwargs["session_id"] = session_id
     if order_by:
         kwargs["order_by"] = order_by
+    if from_timestamp:
+        kwargs["from_timestamp"] = datetime.fromisoformat(
+            from_timestamp.replace("Z", "+00:00"))
     result = await api.trace.list(**kwargs)
     return [_to_dict(t) for t in result.data]
 

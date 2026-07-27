@@ -20,6 +20,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_mode
 
 
@@ -54,8 +55,16 @@ async def mkdir(
     mkdir_fn = ops.require(Operation.MKDIR)
     paths = await ops.resolve_glob(accessor, paths, index)
     lines: list[str] = []
+    errors: list[str] = []
     for path in paths:
-        await mkdir_fn(accessor, path, parents=parents)
+        try:
+            await mkdir_fn(accessor, path, parents=parents)
+        except FS_ERRORS as exc:
+            # One unusable operand is not an aborted command: GNU reports
+            # it and still makes the remaining directories.
+            errors.append(f"mkdir: cannot create directory "
+                          f"'{path.virtual}': {fs_strerror(exc)}")
+            continue
         if mode is not None and ops.set_attrs is not None:
             # -m applies to the named directory only; any parents made by
             # -p keep the default mode (GNU).
@@ -63,7 +72,8 @@ async def mkdir(
         if verbose:
             lines.append(f"mkdir: created directory '{path.virtual}'")
     output = ("\n".join(lines) + "\n").encode() if lines else None
-    return output, IOResult()
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
 
 
 BUILDER = Builder('mkdir',

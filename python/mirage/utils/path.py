@@ -70,6 +70,26 @@ def parent(path: str) -> str:
     return path[:i] if i > 0 else "/"
 
 
+def ancestors(path: str) -> list[str]:
+    """Return the proper ancestors of a normalized key, outermost first.
+
+    ``"/"`` is left out: every store treats the mount root as an existing
+    directory, so it is never a component worth probing. Used by the
+    store-backed backends (ram, redis) to walk a destination's parent
+    chain the way ``rename(2)`` resolves it.
+
+    Args:
+        path (str): A normalized virtual path (leading slash, no trailing
+            slash).
+
+    Returns:
+        list[str]: ``"/a/b/c"`` -> ``["/a", "/a/b"]``; ``"/a"`` and ``"/"``
+        -> ``[]``.
+    """
+    parts = path.strip("/").split("/")
+    return ["/" + "/".join(parts[:i]) for i in range(1, len(parts))]
+
+
 def resolve_path(path: str, cwd: str) -> str:
     """Resolve a relative path against cwd.
 

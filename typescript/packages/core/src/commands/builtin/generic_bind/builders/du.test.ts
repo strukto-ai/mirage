@@ -16,6 +16,7 @@ import { DU_BUILDER } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { enoent } from '../../../../utils/errors.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandIO } from '../adapter.ts'
 
@@ -40,7 +41,9 @@ const OPS: CommandIO = {
   readStream: () => emptyStream(),
   stat: (_a, p) => {
     const node = TREE[p.virtual]
-    if (node === undefined) return Promise.reject(new Error('ENOENT'))
+    // A stamped FsError, as every real backend raises: the builder tells a
+    // missing operand from a backend failure by the code, not the message.
+    if (node === undefined) return Promise.reject(enoent(p.virtual))
     return Promise.resolve(
       new FileStat({
         name: p.virtual,
@@ -98,8 +101,37 @@ describe('du walk fallback (no native du op)', () => {
     expect(lines).toEqual(['3\t/db/a.txt', '2\t/db/sub', '5\ttotal'])
   })
 
-  it('missing path counts as 0', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/nope')])).toEqual(['0\t/nope'])
+  it('missing path is reported, not counted as 0', async () => {
+    // GNU: "du: cannot access 'X': No such file or directory", exit 1.
+    const result = await DU_BUILDER.fn(OPS, ACCESSOR, [PathSpec.fromStrPath('/nope')], [], {
+      stdin: null,
+      flags: {},
+      filetypeFns: null,
+      cwd: '/',
+      resource: {} as never,
+    })
+    if (result === null) throw new Error('expected a result')
+    expect(result[1].exitCode).toBe(1)
+    // stderr from this builder is always a single buffer, never a stream.
+    expect(new TextDecoder().decode(result[1].stderr as Uint8Array)).toBe(
+      "du: cannot access '/nope': No such file or directory\n",
+    )
+  })
+
+  it('a backend failure propagates instead of reading as a missing operand', async () => {
+    const failing: CommandIO = {
+      ...OPS,
+      stat: () => Promise.reject(new Error('403 Forbidden')),
+    }
+    await expect(
+      DU_BUILDER.fn(failing, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
+        stdin: null,
+        flags: {},
+        filetypeFns: null,
+        cwd: '/',
+        resource: {} as never,
+      }),
+    ).rejects.toThrow('403 Forbidden')
   })
 
   it('-h renders human-readable sizes', async () => {

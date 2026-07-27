@@ -128,6 +128,81 @@ describe('cpGeneric guards', () => {
     expect(files.has('/d/b.txt')).toBe(true)
   })
 
+  it('into a missing parent reports cannot create regular file', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(['/']), ['/a.txt', '/nodir/x.txt'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "cp: cannot create regular file '/nodir/x.txt': No such file or directory\n",
+    )
+    expect(files.has('/nodir/x.txt')).toBe(false)
+  })
+
+  it('under a plain file reports cannot stat Not a directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/plain', new Uint8Array([2])],
+    ])
+    const [, io] = await run(files, new Set(['/']), ['/a.txt', '/plain/x.txt'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/x.txt': Not a directory\n")
+    expect(files.has('/plain/x.txt')).toBe(false)
+  })
+
+  it('deep under a plain file still reports Not a directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/plain', new Uint8Array([2])],
+    ])
+    const [, io] = await run(files, new Set(['/']), ['/a.txt', '/plain/s/x.txt'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/s/x.txt': Not a directory\n")
+  })
+
+  it('a SOURCE under a plain file reports Not a directory, not ENOENT', async () => {
+    // Backends answer stat with ENOENT for a path under a plain file, so the
+    // source probe has to walk the chain to recover GNU's errno.
+    const files = new Map([['/plain', new Uint8Array([2])]])
+    const [, io] = await run(files, new Set(['/', '/d']), ['/plain/child', '/d'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/child': Not a directory\n")
+  })
+
+  it('a SOURCE deep under a plain file reports Not a directory', async () => {
+    const files = new Map([['/plain', new Uint8Array([2])]])
+    const [, io] = await run(files, new Set(['/', '/d']), ['/plain/a/b', '/d'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/a/b': Not a directory\n")
+  })
+
+  it('a genuinely absent source still reports No such file or directory', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const [, io] = await run(files, new Set(['/', '/d']), ['/nope', '/d'])
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/nope': No such file or directory\n")
+  })
+
+  it('multiple sources with a missing target report No such file or directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    await expect(run(files, new Set(['/']), ['/a.txt', '/b.txt', '/nodir'])).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('multiple sources with a plain-file target report Not a directory', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+      ['/plain', new Uint8Array([3])],
+    ])
+    await expect(run(files, new Set(['/']), ['/a.txt', '/b.txt', '/plain'])).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+  })
+
   it('refuses to copy a file onto itself', async () => {
     const files = new Map([['/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(), ['/a.txt', '/a.txt'])

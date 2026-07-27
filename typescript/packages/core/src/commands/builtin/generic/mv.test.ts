@@ -16,7 +16,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, type PrimitiveMove, type ReaddirFn } from '../../../types.ts'
-import { eacces, enoent, enotsup } from '../../../utils/errors.ts'
+import { eacces, enoent, enotdir, enotsup } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mvFlags, mvGeneric, parseMvFlags, type MvFlags } from './mv.ts'
 
@@ -125,6 +125,62 @@ describe('mvGeneric guards', () => {
     expect(io.exitCode).toBe(1)
     expect(await io.stderrStr()).toContain("mv: cannot move '/d' to a subdirectory of itself")
     expect(files.has('/d/a.txt')).toBe(true)
+  })
+
+  it('reports a refusing backend rename as cannot move', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const { stat } = makeBackend(files, new Set())
+    const rename = (): Promise<void> => Promise.reject(enoent('/missing/a.txt'))
+    const [, io] = await mvGeneric(
+      ['/a.txt', '/missing/a.txt'].map(spec),
+      stat,
+      { rename },
+      mvFlags({}),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot move '/a.txt' to '/missing/a.txt': No such file or directory\n",
+    )
+    expect(files.has('/a.txt')).toBe(true)
+  })
+
+  it('reports a rename that hits a non-directory parent as Not a directory', async () => {
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const { stat } = makeBackend(files, new Set())
+    const rename = (): Promise<void> => Promise.reject(enotdir('/plain/c.txt'))
+    const [, io] = await mvGeneric(
+      ['/a.txt', '/plain/c.txt'].map(spec),
+      stat,
+      { rename },
+      mvFlags({}),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "mv: cannot move '/a.txt' to '/plain/c.txt': Not a directory\n",
+    )
+  })
+
+  it('keeps moving the remaining sources after a rename failure', async () => {
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+    ])
+    const dirs = new Set(['/d'])
+    const backend = makeBackend(files, dirs)
+    const rename = (src: PathSpec, dst: PathSpec): Promise<void> => {
+      if (src.virtual === '/a.txt') return Promise.reject(enoent(dst.virtual))
+      return backend.rename(src, dst)
+    }
+    const [, io] = await mvGeneric(
+      ['/a.txt', '/b.txt', '/d'].map(spec),
+      backend.stat,
+      { rename },
+      mvFlags({}),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toContain("mv: cannot move '/a.txt' to '/d/a.txt'")
+    expect(files.has('/d/b.txt')).toBe(true)
+    expect(files.has('/a.txt')).toBe(true)
   })
 
   it('moves multiple sources into a directory', async () => {

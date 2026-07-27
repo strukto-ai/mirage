@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { enoent } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -21,12 +22,6 @@ import { getUserProfile } from './users.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 const encoder = new TextEncoder()
-
-function fileNotFound(key: string): Error {
-  const e = new Error(`ENOENT: ${key}`) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
-}
 
 export async function read(
   accessor: SlackAccessor,
@@ -46,25 +41,25 @@ export async function read(
   const part3 = parts[3] ?? ''
 
   if (parts.length === 4 && (part0 === 'channels' || part0 === 'dms') && part3 === 'chat.jsonl') {
-    if (index === undefined) throw fileNotFound(key)
+    if (index === undefined) throw enoent(path)
     const parentKey = `${prefix}/${part0}/${part1}`
     const lookup = await index.get(parentKey)
     if (lookup.entry === undefined || lookup.entry === null) {
-      throw fileNotFound(key)
+      throw enoent(path)
     }
     return await getHistoryJsonl(accessor, lookup.entry.id, part2)
   }
 
   if (parts.length === 5 && (part0 === 'channels' || part0 === 'dms') && part3 === 'files') {
-    if (index === undefined) throw fileNotFound(key)
+    if (index === undefined) throw enoent(path)
     const virtualKey = `${prefix}/${key}`
     const lookup = await index.get(virtualKey)
     if (lookup.entry === undefined || lookup.entry === null) {
-      throw fileNotFound(key)
+      throw enoent(path)
     }
     const url = lookup.entry.extra.url_private_download
     if (typeof url !== 'string' || url === '') {
-      throw fileNotFound(key)
+      throw enoent(path)
     }
     if (accessor.transport.downloadFile === undefined) {
       throw new Error('slack: transport does not support file download')
@@ -73,15 +68,15 @@ export async function read(
   }
 
   if (parts.length === 2 && part0 === 'users') {
-    if (index === undefined) throw fileNotFound(key)
+    if (index === undefined) throw enoent(path)
     const virtualKey = `${prefix}/${key}`
     const lookup = await index.get(virtualKey)
     if (lookup.entry === undefined || lookup.entry === null) {
-      throw fileNotFound(key)
+      throw enoent(path)
     }
     const user = await getUserProfile(accessor, lookup.entry.id)
     return encoder.encode(JSON.stringify(user))
   }
 
-  throw fileNotFound(key)
+  throw enoent(path)
 }

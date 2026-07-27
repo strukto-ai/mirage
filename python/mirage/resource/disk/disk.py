@@ -72,6 +72,12 @@ class DiskResource(BaseResource):
     def __init__(self, root: str) -> None:
         super().__init__()
         self.root = Path(root).resolve()
+        # The mount root is infrastructure, not a path component a caller
+        # asked for, so it is created here rather than on demand by the
+        # first write: writes must report ENOENT for a missing parent the
+        # way GNU does. Mirrors TypeScript, where DiskResource.open() does
+        # the same `mkdir(root, {recursive: true})`.
+        self.root.mkdir(parents=True, exist_ok=True)
         self.accessor = DiskAccessor(self.root)
         for fn in DISK_COMMANDS:
             self.register(fn)

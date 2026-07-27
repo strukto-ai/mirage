@@ -14,7 +14,8 @@
 
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, resolveFileHandle, toWritableChunk } from './utils.ts'
+import { enoent } from '@struktoai/mirage-core'
+import { destError, isNotFound, resolveFileHandle, toWritableChunk } from './utils.ts'
 
 export async function copy(accessor: OPFSAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const root = accessor.rootHandle
@@ -22,12 +23,17 @@ export async function copy(accessor: OPFSAccessor, src: PathSpec, dst: PathSpec)
   try {
     srcHandle = await resolveFileHandle(root, src.mountPath, { create: false })
   } catch (err) {
-    if (isNotFound(err)) throw new Error(`file not found: ${src.mountPath}`)
+    if (isNotFound(err)) throw enoent(src)
     throw err
   }
   const file = await srcHandle.getFile()
   const data = new Uint8Array(await file.arrayBuffer())
-  const dstHandle = await resolveFileHandle(root, dst.mountPath, { create: true })
+  let dstHandle: FileSystemFileHandle
+  try {
+    dstHandle = await resolveFileHandle(root, dst.mountPath, { create: true })
+  } catch (err) {
+    throw destError(err, dst)
+  }
   const writable = await dstHandle.createWritable()
   await writable.write(toWritableChunk(data))
   await writable.close()
