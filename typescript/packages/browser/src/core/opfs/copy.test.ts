@@ -25,10 +25,29 @@ describe('opfs/copy', () => {
     await copy(accessor, spec('/src'), spec('/dst'))
     expect(new TextDecoder().decode(await read(accessor, spec('/dst')))).toBe('CP')
   })
-  it('creates parent directories for the destination', async () => {
+  it('does not create parent directories for the destination', async () => {
+    // cp is not `mkdir -p`: GNU reports ENOENT on the destination rather
+    // than building the chain, and leaves nothing behind.
     const accessor = makeMockAccessor()
     await writeBytes(accessor, spec('/src'), new TextEncoder().encode('X'))
-    await copy(accessor, spec('/src'), spec('/a/b/dst'))
-    expect(new TextDecoder().decode(await read(accessor, spec('/a/b/dst')))).toBe('X')
+    await expect(copy(accessor, spec('/src'), spec('/a/b/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('a destination parent that is a plain file is ENOTDIR', async () => {
+    const accessor = makeMockAccessor()
+    await writeBytes(accessor, spec('/src'), new TextEncoder().encode('X'))
+    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('y'))
+    await expect(copy(accessor, spec('/src'), spec('/plain/dst'))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+  })
+
+  it('a missing source is ENOENT', async () => {
+    const accessor = makeMockAccessor()
+    await expect(copy(accessor, spec('/nope'), spec('/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

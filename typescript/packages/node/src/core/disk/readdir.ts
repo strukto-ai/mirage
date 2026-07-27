@@ -17,6 +17,7 @@ import { readdir as fsReaddir } from 'node:fs/promises'
 import {
   IndexEntry,
   ResourceType,
+  enoent,
   enotdir,
   mountPrefixOf,
   rstripSlash,
@@ -46,9 +47,13 @@ export async function readdir(
   try {
     entries = await fsReaddir(full)
   } catch (err) {
+    // The kernel already separates ENOENT (a component does not exist) from
+    // ENOTDIR (a component exists but is not a directory); keep that split
+    // instead of collapsing both into one errno. Restamped onto the PathSpec
+    // so the virtual path, never the real fs path, is reported.
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'ENOTDIR') throw enotdir(path)
-    if (code === 'ENOENT') throw enotdir(path)
+    if (code === 'ENOENT') throw enoent(path)
     throw err
   }
   const base = norm(virtual)

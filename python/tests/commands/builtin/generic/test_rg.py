@@ -660,3 +660,33 @@ async def test_rg_multi_file_missing_operand_reports_and_continues():
     assert decoded == "/a.txt:hello\n/a.txt:world\n"
     assert io.stderr == b"rg: /nope.txt: No such file or directory\n"
     assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_rg_not_a_directory_operand_keeps_the_others():
+    """readdir on a path whose component is a file raises ENOTDIR. rg must
+    warn for that operand and keep searching the rest, as it does for ENOENT.
+    """
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"hello\n",
+        "/real/b.txt": b"foo\n",
+    })
+
+    async def readdir_enotdir(path):
+        p = path.virtual if isinstance(path, PathSpec) else path
+        if p.startswith("/a.txt/"):
+            raise NotADirectoryError(p)
+        return await readdir(path)
+
+    output, io = await rg(
+        [_spec("/a.txt/x"), _spec("/real")],
+        ["foo"],
+        readdir=readdir_enotdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        flags={"args_l": True},
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/real/b.txt\n"
+    assert b"/a.txt/x" in (io.stderr or b"")

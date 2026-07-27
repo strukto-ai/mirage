@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "mdb_stat_size_docs",
+      "seq": 620030,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "stat -c '%s %n' /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 /mongodb/mirage_integ/collections/books/documents.jsonl\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

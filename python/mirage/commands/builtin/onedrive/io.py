@@ -15,8 +15,8 @@
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.onedrive.copy import copy as _copy
 from mirage.core.onedrive.create import create as _create
-from mirage.core.onedrive.du import du as _du
-from mirage.core.onedrive.du import du_all as _du_all
+from mirage.core.onedrive.du import entries as _du_entries
+from mirage.core.onedrive.du import size as _du_size
 from mirage.core.onedrive.exists import exists as _exists
 from mirage.core.onedrive.find import find as _find
 from mirage.core.onedrive.mkdir import mkdir as _mkdir
@@ -50,8 +50,8 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du_size=_du_size,
+    du_entries=_du_entries,
 )
 
 resolve_glob = IO.resolve_glob

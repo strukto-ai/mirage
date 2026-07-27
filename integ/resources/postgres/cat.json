@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "pg_cat_schema_json",
+      "seq": 610010,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/public/tables/books/schema.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"schema\": \"public\",\n  \"name\": \"books\",\n  \"kind\": \"table\",\n  \"columns\": [\n    {\n      \"name\": \"id\",\n      \"type\": \"integer\",\n      \"nullable\": false,\n      \"primary_key\": true\n    },\n    {\n      \"name\": \"title\",\n      \"type\": \"text\",\n      \"nullable\": true\n    },\n    {\n      \"name\": \"author\",\n      \"type\": \"text\",\n      \"nullable\": true\n    },\n    {\n      \"name\": \"year\",\n      \"type\": \"integer\",\n      \"nullable\": true\n    },\n    {\n      \"name\": \"rating\",\n      \"type\": \"double precision\",\n      \"nullable\": true\n    }\n  ],\n  \"primary_key\": [\n    \"id\"\n  ],\n  \"foreign_keys\": [],\n  \"indexes\": [\n    {\n      \"name\": \"books_pkey\",\n      \"columns\": [\n        \"id\"\n      ],\n      \"unique\": true\n    }\n  ],\n  \"row_count_estimate\": 5,\n  \"size_bytes_estimate\": 32768\n}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_cat_semantic_json",
+      "seq": 610011,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/public/tables/books/semantic.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"books\",\n  \"schema\": \"public\",\n  \"kind\": \"table\",\n  \"primary_key\": [\n    \"id\"\n  ],\n  \"dimensions\": [\n    {\n      \"name\": \"id\",\n      \"expr\": \"id\",\n      \"data_type\": \"integer\"\n    },\n    {\n      \"name\": \"title\",\n      \"expr\": \"title\",\n      \"data_type\": \"text\"\n    },\n    {\n      \"name\": \"author\",\n      \"expr\": \"author\",\n      \"data_type\": \"text\",\n      \"sample_values\": [\n        \"ada\",\n        \"ben\"\n      ]\n    }\n  ],\n  \"facts\": [\n    {\n      \"name\": \"year\",\n      \"expr\": \"year\",\n      \"data_type\": \"integer\"\n    },\n    {\n      \"name\": \"rating\",\n      \"expr\": \"rating\",\n      \"data_type\": \"double precision\"\n    }\n  ]\n}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_cat_rows",
+      "seq": 610012,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_cat_view_rows",
+      "seq": 610013,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/public/views/recent_books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_head_2",
+      "seq": 610014,
+      "targets": [
+        "postgres"
+      ],
+      "command": "head -n 2 /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_tail_2",
+      "seq": 610015,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tail -n 2 /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

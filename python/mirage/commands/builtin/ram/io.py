@@ -17,8 +17,8 @@ from mirage.core.ram.append import append_bytes as _append
 from mirage.core.ram.constants import SCOPE_ERROR
 from mirage.core.ram.copy import copy as _copy
 from mirage.core.ram.create import create as _create
-from mirage.core.ram.du import du as _du
-from mirage.core.ram.du import du_all as _du_all
+from mirage.core.ram.du import entries as _du_entries
+from mirage.core.ram.du import size as _du_size
 from mirage.core.ram.exists import exists as _exists
 from mirage.core.ram.find import find as _find
 from mirage.core.ram.mkdir import mkdir as _mkdir
@@ -52,8 +52,8 @@ IO = CommandIO(
     copy=_copy,
     create=_create,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du_size=_du_size,
+    du_entries=_du_entries,
     append=_append,
     set_attrs=_set_attrs,
     truncate=_truncate,

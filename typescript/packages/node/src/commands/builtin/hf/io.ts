@@ -16,6 +16,7 @@ import type { CommandIO } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../../accessor/hf.ts'
 import { SCOPE_ERROR } from '../../../core/hf/constants.ts'
 import { create as hfCreate } from '../../../core/hf/create.ts'
+import { size as hfDu, entries as hfDuAll } from '../../../core/hf/du/index.ts'
 import { mkdir as hfMkdir } from '../../../core/hf/mkdir.ts'
 import { unlink as hfUnlink } from '../../../core/hf/unlink.ts'
 import { read as hfRead } from '../../../core/hf/read.ts'
@@ -31,6 +32,8 @@ export const HF_IO: CommandIO<HfAccessor> = {
   readBytes: hfRead,
   readStream: hfStream,
   stat: hfStat,
+  duSize: hfDu,
+  duEntries: hfDuAll,
   isMounted: () => true,
   local: false,
   maxGlobMatches: SCOPE_ERROR,

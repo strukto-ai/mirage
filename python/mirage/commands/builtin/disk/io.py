@@ -17,8 +17,8 @@ from mirage.core.disk.append import append_bytes as _append
 from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.copy import copy as _copy
 from mirage.core.disk.create import create as _create
-from mirage.core.disk.du import du as _du
-from mirage.core.disk.du import du_all as _du_all
+from mirage.core.disk.du import entries as _du_entries
+from mirage.core.disk.du import size as _du_size
 from mirage.core.disk.exists import exists as _exists
 from mirage.core.disk.find import find as _find
 from mirage.core.disk.mkdir import mkdir as _mkdir
@@ -53,8 +53,8 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du_size=_du_size,
+    du_entries=_du_entries,
     append=_append,
     set_attrs=_set_attrs,
 )

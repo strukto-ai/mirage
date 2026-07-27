@@ -11,6 +11,9 @@ from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import rebase_one
 
+Readdir = Callable[[PathSpec, IndexCacheStore | None], Awaitable[list[str]]]
+Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
+
 LS_OK = 0
 LS_MINOR_PROBLEM = 1
 LS_FAILURE = 2
@@ -29,6 +32,21 @@ class LsWarning:
 
     message: str
     serious: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Operand:
+    """One ls operand once its kind is known.
+
+    ``row`` is set when the operand is not a directory: GNU prints those
+    first, as one block with no header. ``groups`` holds one
+    ``(dir, entries)`` pair per directory listed under the operand — one
+    for a plain listing, the whole pre-order subtree under ``-R``. Both
+    empty means the operand could not be accessed.
+    """
+    path: PathSpec
+    row: FileStat | None
+    groups: list[tuple[PathSpec, list[FileStat]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,9 +93,46 @@ def format_simple(entries: list[FileStat],
     return out
 
 
+def _primary_value(entry: FileStat, sort_by: LsSortBy) -> str | int:
+    if sort_by is LsSortBy.TIME:
+        return entry.modified or ""
+    if sort_by is LsSortBy.SIZE:
+        return entry.size or 0
+    return entry.name
+
+
+def _order_rows(rows: list[FileStat], sort_by: LsSortBy,
+                reverse: bool) -> list[int]:
+    """Indices of ``rows`` in GNU ls order.
+
+    GNU's `-t`/`-S` comparators fall back to the name when the timestamps or
+    sizes tie, and `-r` negates the whole comparison, tie-break included. A
+    stable name sort followed by the primary key reproduces the first half;
+    reversing the finished order reproduces the second.
+
+    Args:
+        rows (list[FileStat]): The stats to order.
+        sort_by (LsSortBy): The active sort key.
+        reverse (bool): Whether `-r` is in effect.
+    """
+    order = sorted(range(len(rows)), key=lambda i: rows[i].name)
+    if sort_by is not LsSortBy.NAME:
+        # -t and -S list newest/largest first.
+        order.sort(key=lambda i: _primary_value(rows[i], sort_by),
+                   reverse=True)
+    if reverse:
+        order.reverse()
+    return order
+
+
+def sort_stats(entries: list[FileStat], sort_by: LsSortBy,
+               reverse: bool) -> list[FileStat]:
+    return [entries[i] for i in _order_rows(entries, sort_by, reverse)]
+
+
 async def _file_entry(
     path: PathSpec,
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    stat: Stat,
     index: IndexCacheStore,
 ) -> FileStat | None:
     try:
@@ -91,53 +146,26 @@ async def _file_entry(
     return s.model_copy(update={"name": path.raw_path})
 
 
-async def walk(
+def _child_spec(path: PathSpec, name: str) -> PathSpec:
+    child = path.child(name)
+    return PathSpec(virtual=child,
+                    directory=child,
+                    resolved=False,
+                    resource_path=rekey(path.virtual, path.resource_path,
+                                        child))
+
+
+async def _stat_entries(
     path: PathSpec,
+    names: list[str],
     *,
-    readdir: Callable[[PathSpec, IndexCacheStore | None],
-                      Awaitable[list[str]]],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    all_files: bool = False,
-    sort_by: LsSortBy = LsSortBy.NAME,
-    reverse: bool = False,
-    recursive: bool = False,
-    list_dir: bool = False,
-    command_line_arg: bool = True,
-    index: IndexCacheStore = NULL_INDEX,
-) -> WalkResult:
-    warnings: list[LsWarning] = []
-    if list_dir:
-        try:
-            listed = await stat(path, index)
-        except (OSError, ValueError) as exc:
-            detail = fs_strerror(exc) or exc
-            warnings.append(
-                LsWarning(f"ls: cannot access '{path.raw_path}': {detail}",
-                          command_line_arg))
-            return WalkResult(warnings=warnings, listed=False)
-        # GNU ls -d prints the operand as given.
-        return WalkResult([listed.model_copy(update={"name": path.raw_path})],
-                          warnings)
-
-    try:
-        entries = await readdir(path, index)
-    except (OSError, ValueError) as exc:
-        file_entry = await _file_entry(path, stat, index)
-        if file_entry is not None:
-            return WalkResult([file_entry], warnings)
-        warnings.append(
-            LsWarning(
-                f"ls: cannot access '{path.raw_path}': "
-                f"{fs_strerror(exc) or exc}", command_line_arg))
-        return WalkResult(warnings=warnings, listed=False)
-
-    if not entries:
-        file_entry = await _file_entry(path, stat, index)
-        if file_entry is not None:
-            return WalkResult([file_entry], warnings)
-
+    stat: Stat,
+    all_files: bool,
+    index: IndexCacheStore,
+) -> tuple[list[FileStat], list[LsWarning]]:
     stats: list[FileStat] = []
-    for entry in entries:
+    warnings: list[LsWarning] = []
+    for entry in names:
         entry_spec = PathSpec(virtual=entry,
                               directory=entry,
                               resolved=False,
@@ -156,96 +184,172 @@ async def walk(
         if not all_files and s.name.startswith("."):
             continue
         stats.append(s)
-
-    if sort_by is LsSortBy.TIME:
-        stats.sort(key=lambda s: s.modified or "", reverse=not reverse)
-    elif sort_by is LsSortBy.SIZE:
-        stats.sort(key=lambda s: s.size or 0, reverse=not reverse)
-    else:
-        stats.sort(key=lambda s: s.name, reverse=reverse)
-
-    if recursive:
-        nested: list[FileStat] = []
-        for s in stats:
-            nested.append(s)
-            if s.type == FileType.DIRECTORY:
-                child_path = path.child(s.name)
-                child_spec = PathSpec(virtual=child_path,
-                                      directory=child_path,
-                                      resolved=False,
-                                      resource_path=rekey(
-                                          path.virtual, path.resource_path,
-                                          child_path))
-                sub = await walk(child_spec,
-                                 readdir=readdir,
-                                 stat=stat,
-                                 all_files=all_files,
-                                 sort_by=sort_by,
-                                 reverse=reverse,
-                                 recursive=True,
-                                 list_dir=False,
-                                 command_line_arg=False,
-                                 index=index)
-                nested.extend(sub.entries)
-                warnings.extend(sub.warnings)
-        stats = nested
-
-    return WalkResult(stats, warnings)
+    return stats, warnings
 
 
-async def walk_grouped(
+async def probe_operand(
     path: PathSpec,
     *,
-    readdir: Callable[[PathSpec, IndexCacheStore | None],
-                      Awaitable[list[str]]],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    readdir: Readdir,
+    stat: Stat,
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
+    recursive: bool = False,
     command_line_arg: bool = True,
     index: IndexCacheStore = NULL_INDEX,
-) -> tuple[list[tuple[PathSpec, list[FileStat]]], list[LsWarning]]:
-    """Recursive walk that returns one (dir, entries) group per directory
-    visited, in pre-order. Mirrors GNU `ls -R` output structure.
+) -> tuple[Operand, list[LsWarning]]:
+    """List one operand and report whether it turned out to be a directory.
+
+    Args:
+        path (PathSpec): the operand to list.
+        readdir (Readdir): backend directory lister.
+        stat (Stat): backend stat.
+        all_files (bool): keep dotfiles.
+        sort_by (LsSortBy): active sort key.
+        reverse (bool): reverse the sort.
+        recursive (bool): descend, emitting one group per directory (-R).
+        command_line_arg (bool): False below an operand, where GNU downgrades
+            a failure to a minor problem (exit 1).
+        index (IndexCacheStore): listing cache.
     """
-    groups: list[tuple[PathSpec, list[FileStat]]] = []
     warnings: list[LsWarning] = []
-    result = await walk(path,
-                        readdir=readdir,
-                        stat=stat,
-                        all_files=all_files,
-                        sort_by=sort_by,
-                        reverse=reverse,
-                        recursive=False,
-                        list_dir=False,
-                        command_line_arg=command_line_arg,
-                        index=index)
-    here = result.entries
-    warnings.extend(result.warnings)
-    # GNU prints no `dir:` header for a directory it could not open.
-    if not result.listed:
-        return groups, warnings
-    groups.append((path, here))
-    for s in here:
-        if s.type == FileType.DIRECTORY:
-            child_path = path.child(s.name)
-            child_spec = PathSpec(virtual=child_path,
-                                  directory=child_path,
-                                  resolved=False,
-                                  resource_path=rekey(path.virtual,
-                                                      path.resource_path,
-                                                      child_path))
-            sub_groups, sub_ws2 = await walk_grouped(child_spec,
-                                                     readdir=readdir,
-                                                     stat=stat,
-                                                     all_files=all_files,
-                                                     sort_by=sort_by,
-                                                     reverse=reverse,
-                                                     command_line_arg=False,
-                                                     index=index)
-            groups.extend(sub_groups)
-            warnings.extend(sub_ws2)
-    return groups, warnings
+    try:
+        names = await readdir(path, index)
+    except (OSError, ValueError) as exc:
+        row = await _file_entry(path, stat, index)
+        if row is not None:
+            return Operand(path, row, []), warnings
+        warnings.append(
+            LsWarning(
+                f"ls: cannot access '{path.raw_path}': "
+                f"{fs_strerror(exc) or exc}", command_line_arg))
+        return Operand(path, None, []), warnings
+
+    if not names:
+        row = await _file_entry(path, stat, index)
+        if row is not None:
+            return Operand(path, row, []), warnings
+
+    entries, entry_ws = await _stat_entries(path,
+                                            names,
+                                            stat=stat,
+                                            all_files=all_files,
+                                            index=index)
+    warnings.extend(entry_ws)
+    entries = sort_stats(entries, sort_by, reverse)
+    groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
+    if recursive:
+        for entry in entries:
+            if entry.type != FileType.DIRECTORY:
+                continue
+            child, child_ws = await probe_operand(_child_spec(
+                path, entry.name),
+                                                  readdir=readdir,
+                                                  stat=stat,
+                                                  all_files=all_files,
+                                                  sort_by=sort_by,
+                                                  reverse=reverse,
+                                                  recursive=True,
+                                                  command_line_arg=False,
+                                                  index=index)
+            groups.extend(child.groups)
+            warnings.extend(child_ws)
+    return Operand(path, None, groups), warnings
+
+
+async def walk(
+    path: PathSpec,
+    *,
+    readdir: Readdir,
+    stat: Stat,
+    all_files: bool = False,
+    sort_by: LsSortBy = LsSortBy.NAME,
+    reverse: bool = False,
+    recursive: bool = False,
+    list_dir: bool = False,
+    command_line_arg: bool = True,
+    index: IndexCacheStore = NULL_INDEX,
+) -> WalkResult:
+    """Flat listing for one operand: a directory's entries, or the operand
+    itself when it is not one. ``recursive`` flattens the whole subtree in
+    ``ls -R`` order.
+
+    Args:
+        path (PathSpec): the operand to list.
+        readdir (Readdir): backend directory lister.
+        stat (Stat): backend stat.
+        all_files (bool): keep dotfiles.
+        sort_by (LsSortBy): active sort key.
+        reverse (bool): reverse the sort.
+        recursive (bool): descend into subdirectories.
+        list_dir (bool): stat the operand itself instead of listing it (-d).
+        command_line_arg (bool): False below an operand, where GNU downgrades
+            a failure to a minor problem (exit 1).
+        index (IndexCacheStore): listing cache.
+    """
+    if list_dir:
+        try:
+            listed = await stat(path, index)
+        except (OSError, ValueError) as exc:
+            detail = fs_strerror(exc) or exc
+            return WalkResult(warnings=[
+                LsWarning(f"ls: cannot access '{path.raw_path}': {detail}",
+                          command_line_arg)
+            ],
+                              listed=False)
+        # GNU ls -d prints the operand as given.
+        return WalkResult([listed.model_copy(update={"name": path.raw_path})])
+
+    operand, warnings = await probe_operand(path,
+                                            readdir=readdir,
+                                            stat=stat,
+                                            all_files=all_files,
+                                            sort_by=sort_by,
+                                            reverse=reverse,
+                                            recursive=recursive,
+                                            command_line_arg=command_line_arg,
+                                            index=index)
+    if operand.row is not None:
+        return WalkResult([operand.row], warnings)
+    entries = [e for _, group in operand.groups for e in group]
+    return WalkResult(entries, warnings, listed=bool(operand.groups))
+
+
+async def _operand_key(
+    operand: Operand,
+    *,
+    sort_by: LsSortBy,
+    stat: Stat,
+    index: IndexCacheStore,
+) -> FileStat:
+    """Sort row for one operand, named with the operand's own spelling."""
+    if operand.row is not None:
+        return operand.row
+    if sort_by is LsSortBy.NAME:
+        return FileStat(name=operand.path.raw_path, type=FileType.DIRECTORY)
+    try:
+        s = await stat(operand.path, index)
+    except (OSError, ValueError):
+        # The stat only supplies a sort key; an operand that cannot be
+        # statted sorts as if it had none rather than failing the listing.
+        return FileStat(name=operand.path.raw_path, type=FileType.DIRECTORY)
+    return s.model_copy(update={"name": operand.path.raw_path})
+
+
+async def _sorted_operands(
+    operands: list[Operand],
+    *,
+    sort_by: LsSortBy,
+    reverse: bool,
+    stat: Stat,
+    index: IndexCacheStore,
+) -> list[Operand]:
+    keys = [
+        await _operand_key(o, sort_by=sort_by, stat=stat, index=index)
+        for o in operands
+    ]
+    return [operands[i] for i in _order_rows(keys, sort_by, reverse)]
 
 
 def _render_group(
@@ -263,12 +367,18 @@ def _render_group(
         results.extend(format_simple(entries, classify=classify))
 
 
+def _finish(results: list[str],
+            warnings: list[LsWarning]) -> tuple[bytes, IOResult]:
+    stderr = format_optional_records([w.message for w in warnings])
+    return format_records(results), IOResult(
+        stderr=stderr, exit_code=exit_status_for(warnings))
+
+
 async def ls(
     paths: list[PathSpec],
     *,
-    readdir: Callable[[PathSpec, IndexCacheStore | None],
-                      Awaitable[list[str]]],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    readdir: Readdir,
+    stat: Stat,
     long: bool = False,
     one_per_line: bool = False,
     all_files: bool = False,
@@ -283,51 +393,75 @@ async def ls(
     results: list[str] = []
     warnings: list[LsWarning] = []
 
-    if recursive and not list_dir:
-        for p in paths:
-            groups, sub_ws = await walk_grouped(p,
-                                                readdir=readdir,
-                                                stat=stat,
-                                                all_files=all_files,
-                                                sort_by=sort_by,
-                                                reverse=reverse,
-                                                index=index)
-            warnings.extend(sub_ws)
-            for dir_spec, entries in groups:
-                # An operand that could not be opened renders no group, so
-                # the separator keys off what was actually emitted.
-                if results:
-                    results.append("")
-                header = rebase_one(dir_spec.virtual, p.virtual, p.raw_path)
-                results.append(f"{header}:")
-                _render_group(results,
-                              entries,
-                              long=long,
-                              one_per_line=one_per_line,
-                              human=human,
-                              classify=classify)
-    else:
+    if list_dir:
+        # -d turns every operand into a plain row, sorted together and
+        # printed with no headers.
+        rows: list[FileStat] = []
         for p in paths:
             result = await walk(p,
                                 readdir=readdir,
                                 stat=stat,
-                                all_files=all_files,
-                                sort_by=sort_by,
-                                reverse=reverse,
-                                recursive=False,
-                                list_dir=list_dir,
+                                list_dir=True,
                                 index=index)
+            rows.extend(result.entries)
             warnings.extend(result.warnings)
+        if len(rows) > 1:
+            rows = sort_stats(rows, sort_by, reverse)
+        _render_group(results,
+                      rows,
+                      long=long,
+                      one_per_line=one_per_line,
+                      human=human,
+                      classify=classify)
+        return _finish(results, warnings)
+
+    operands: list[Operand] = []
+    for p in paths:
+        operand, p_ws = await probe_operand(p,
+                                            readdir=readdir,
+                                            stat=stat,
+                                            all_files=all_files,
+                                            sort_by=sort_by,
+                                            reverse=reverse,
+                                            recursive=recursive,
+                                            index=index)
+        warnings.extend(p_ws)
+        operands.append(operand)
+    if len(operands) > 1:
+        operands = await _sorted_operands(operands,
+                                          sort_by=sort_by,
+                                          reverse=reverse,
+                                          stat=stat,
+                                          index=index)
+
+    # GNU names every listed directory once there is more than one operand
+    # (or under -R); a lone directory operand is listed bare.
+    headed = recursive or len(paths) > 1
+    rows = [o.row for o in operands if o.row is not None]
+    _render_group(results,
+                  rows,
+                  long=long,
+                  one_per_line=one_per_line,
+                  human=human,
+                  classify=classify)
+    printed = bool(rows)
+    for operand in operands:
+        for dir_spec, entries in operand.groups:
+            if headed:
+                if printed:
+                    results.append("")
+                header = rebase_one(dir_spec.virtual, operand.path.virtual,
+                                    operand.path.raw_path)
+                results.append(f"{header}:")
             _render_group(results,
-                          result.entries,
+                          entries,
                           long=long,
                           one_per_line=one_per_line,
                           human=human,
                           classify=classify)
+            printed = True
 
-    output = format_records(results)
-    stderr = format_optional_records([w.message for w in warnings])
-    return output, IOResult(stderr=stderr, exit_code=exit_status_for(warnings))
+    return _finish(results, warnings)
 
 
 __all__ = [
@@ -335,10 +469,12 @@ __all__ = [
     "LS_MINOR_PROBLEM",
     "LS_OK",
     "LsWarning",
+    "Operand",
     "WalkResult",
     "exit_status_for",
     "format_simple",
     "ls",
+    "probe_operand",
+    "sort_stats",
     "walk",
-    "walk_grouped",
 ]

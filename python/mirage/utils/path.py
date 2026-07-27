@@ -70,6 +70,26 @@ def parent(path: str) -> str:
     return path[:i] if i > 0 else "/"
 
 
+def ancestors(path: str) -> list[str]:
+    """Return the proper ancestors of a normalized key, outermost first.
+
+    ``"/"`` is left out: every store treats the mount root as an existing
+    directory, so it is never a component worth probing. Used by the
+    store-backed backends (ram, redis) to walk a destination's parent
+    chain the way ``rename(2)`` resolves it.
+
+    Args:
+        path (str): A normalized virtual path (leading slash, no trailing
+            slash).
+
+    Returns:
+        list[str]: ``"/a/b/c"`` -> ``["/a", "/a/b"]``; ``"/a"`` and ``"/"``
+        -> ``[]``.
+    """
+    parts = path.strip("/").split("/")
+    return ["/" + "/".join(parts[:i]) for i in range(1, len(parts))]
+
+
 def resolve_path(path: str, cwd: str) -> str:
     """Resolve a relative path against cwd.
 
@@ -234,6 +254,34 @@ def rebase_one(path: str, original: str, raw: str) -> str:
     if path.startswith(base + "/"):
         return raw.rstrip("/") + path[len(base):]
     return path
+
+
+def drop_trailing_segments(path: str, count: int) -> str:
+    """The prefix of ``path`` with ``count`` trailing segments removed.
+
+    The ancestor counterpart of :func:`rebase_one`: it names a path above
+    another one while keeping the original spelling, so a relative
+    argument stays relative. ``count`` is clamped so the result never
+    loses every segment, which would leave an empty string where a path
+    belongs.
+
+    Example::
+
+        drop_trailing_segments("a/b/c", 1)   -> "a/b"
+        drop_trailing_segments("/x/y/z", 2)  -> "/x"
+        drop_trailing_segments("a/b", 5)     -> "a/b"   # clamped
+
+    Args:
+        path (str): The path as typed.
+        count (int): How many trailing segments to drop.
+    """
+    if count <= 0:
+        return path
+    parts = path.rstrip("/").split("/")
+    if count >= len([part for part in parts if part]):
+        return path
+    joined = "/".join(parts[:-count])
+    return joined if joined else "/"
 
 
 def gnu_basename(path: str, suffix: str | None = None) -> str:

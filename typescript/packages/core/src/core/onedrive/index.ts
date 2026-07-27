@@ -261,7 +261,7 @@ export async function du(
   return duTreeTotal(accessor.config, accessor.loc(path.resourcePath))
 }
 
-export async function duAll(
+export async function duEntries(
   accessor: OneDriveAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

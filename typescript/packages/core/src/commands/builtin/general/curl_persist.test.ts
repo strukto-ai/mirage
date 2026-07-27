@@ -97,7 +97,7 @@ describe('curl -o persists to mount', () => {
     const ws = await makeWs()
     const io = await ws.execute('curl -s https://x.test/file -o /nope/foo.bin')
     expect(io.exitCode).toBe(1)
-    expect(io.stderrText).toMatch(/parent directory does not exist/)
+    expect(io.stderrText).toMatch(/No such file or directory/)
     expect(io.stderrText).toContain('/nope/foo.bin')
     await ws.close()
   })

@@ -84,6 +84,18 @@ async def stat(accessor: PostgresAccessor,
                             "name": scope.entity
                         })
 
+    if scope.level == "entity_semantic":
+        if not await _entity_exists(accessor, scope.schema, scope.kind,
+                                    scope.entity):
+            raise enoent(path)
+        return FileStat(name="semantic.json",
+                        type=FileType.JSON,
+                        extra={
+                            "schema": scope.schema,
+                            "kind": scope.kind,
+                            "name": scope.entity
+                        })
+
     if scope.level == "entity_rows":
         if not await _entity_exists(accessor, scope.schema, scope.kind,
                                     scope.entity):

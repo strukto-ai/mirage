@@ -14,6 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.ram.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -22,6 +23,7 @@ from mirage.utils.path import norm
 async def create(accessor: RAMAccessor, path: PathSpec) -> None:
     store = accessor.store
     p = norm(path.mount_path)
+    check_dest_parents(store, path, p)
     store.files[p] = b""
     store.modified[p] = now_iso()
     await invalidate_after_write(path)

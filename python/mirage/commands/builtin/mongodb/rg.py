@@ -16,9 +16,11 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.grep_helper import pattern_arg
+from mirage.commands.builtin.grep_helper import (has_search_shaping_flags,
+                                                 pattern_arg)
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -57,7 +59,10 @@ async def rg(
     config = accessor.config
     limit = config.default_search_limit
 
-    if paths and "\n" not in pattern_str:
+    # The $regex push-down prints each matching document as a whole line, so
+    # output/match-shaping flags must defer to the generic scan below.
+    if (paths and not has_unresolved_glob(paths) and "\n" not in pattern_str
+            and not has_search_shaping_flags(flags)):
         scope = detect_scope(paths[0])
 
         if isinstance(scope, SEARCHABLE_SCOPE_TYPES):

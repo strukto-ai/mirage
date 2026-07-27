@@ -47,3 +47,54 @@ async def test_create_normalizes_path():
     a = RAMAccessor(s)
     await create(a, PathSpec.from_str_path("file.txt"))
     assert "/file.txt" in s.files
+
+
+@pytest.mark.asyncio
+async def test_create_into_missing_parent_leaves_no_orphan():
+    s = RAMStore()
+
+    a = RAMAccessor(s)
+    with pytest.raises(FileNotFoundError):
+        await create(a, PathSpec.from_str_path("/missing/f.txt"))
+    assert "/missing/f.txt" not in s.files
+
+
+@pytest.mark.asyncio
+async def test_create_under_a_missing_grandparent_is_not_found():
+    s = RAMStore()
+
+    a = RAMAccessor(s)
+    with pytest.raises(FileNotFoundError):
+        await create(a, PathSpec.from_str_path("/missing/sub/f.txt"))
+    assert "/missing/sub/f.txt" not in s.files
+
+
+@pytest.mark.asyncio
+async def test_create_under_a_plain_file_is_not_a_directory():
+    s = RAMStore()
+    s.files["/plain"] = b"x"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await create(a, PathSpec.from_str_path("/plain/f.txt"))
+    assert "/plain/f.txt" not in s.files
+
+
+@pytest.mark.asyncio
+async def test_create_deep_under_a_plain_file_is_not_a_directory():
+    s = RAMStore()
+    s.files["/plain"] = b"x"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await create(a, PathSpec.from_str_path("/plain/sub/f.txt"))
+
+
+@pytest.mark.asyncio
+async def test_create_into_an_existing_dir_is_allowed():
+    s = RAMStore()
+    s.dirs.add("/d")
+
+    a = RAMAccessor(s)
+    await create(a, PathSpec.from_str_path("/d/f.txt"))
+    assert s.files["/d/f.txt"] == b""

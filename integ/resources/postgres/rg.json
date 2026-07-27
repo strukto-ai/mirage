@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "pg_rg_ada",
+      "seq": 610060,
+      "targets": [
+        "postgres"
+      ],
+      "command": "rg ada /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "public/tables/books/rows.jsonl:{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\npublic/tables/books/rows.jsonl:{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_rg_c_title",
+      "seq": 610061,
+      "targets": [
+        "postgres"
+      ],
+      "command": "rg -c title /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_rg_v_ada",
+      "seq": 610062,
+      "targets": [
+        "postgres"
+      ],
+      "command": "rg -v ada /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_rg_e_multi",
+      "seq": 610063,
+      "targets": [
+        "postgres"
+      ],
+      "command": "rg -n -e ada -e ben /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n2:{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n4:{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n5:{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_rg_schema_scope",
+      "seq": 610064,
+      "targets": [
+        "postgres"
+      ],
+      "command": "rg ada /pg/public/tables/",
+      "expect": {
+        "exit": 0,
+        "stdout": "public/tables/authors/rows.jsonl:{\"id\":1,\"name\":\"ada\",\"books\":2}\npublic/tables/books/rows.jsonl:{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\npublic/tables/books/rows.jsonl:{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\npublic/tables/books/semantic.json:        \"ada\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_rg_semantic_scope",
+      "seq": 610065,
+      "targets": [
+        "postgres"
+      ],
+      "command": "rg dimensions /pg/public/tables/books/",
+      "expect": {
+        "exit": 0,
+        "stdout": "public/tables/books/semantic.json:  \"dimensions\": [\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

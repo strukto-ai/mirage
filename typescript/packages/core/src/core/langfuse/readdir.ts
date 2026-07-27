@@ -29,23 +29,22 @@ import { enoent } from '../../utils/errors.ts'
 
 const TOP_LEVEL_DIRS = ['traces', 'sessions', 'prompts', 'datasets'] as const
 
-const DEFAULT_TRACE_LIMIT = 300
-const DEFAULT_TRACE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
-
-function defaultFromTimestamp(): string {
-  return new Date(Date.now() - DEFAULT_TRACE_WINDOW_MS).toISOString()
-}
-
+// Mirrors LangfuseConfig.default_trace_limit in python.
+const DEFAULT_TRACE_LIMIT = 100
 function pickString(record: Record<string, unknown>, key: string): string {
   const value = record[key]
   return typeof value === 'string' ? value : ''
 }
 
-function pickStringOrNumber(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  if (typeof value === 'string') return value
-  if (typeof value === 'number') return String(value)
-  return ''
+function promptVersions(record: Record<string, unknown>): string[] {
+  const value = record.versions
+  if (!Array.isArray(value)) return []
+  const numbers: number[] = []
+  for (const entry of value) {
+    const parsed = typeof entry === 'number' ? entry : Number(entry)
+    if (Number.isFinite(parsed)) numbers.push(parsed)
+  }
+  return numbers.sort((a, b) => a - b).map(String)
 }
 
 function makeVirtualKey(prefix: string, key: string): string {
@@ -64,8 +63,13 @@ async function readdirTraces(
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
   }
   const limit = accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT
-  const fromTimestamp = accessor.config.defaultFromTimestamp ?? defaultFromTimestamp()
-  const traces = await fetchTraces(accessor.transport, { limit, fromTimestamp })
+  // No implicit time window: an unset defaultFromTimestamp lists whatever the
+  // project holds, up to defaultTraceLimit. A rolling default would hide
+  // traces that read() happily serves, and python applies no window either.
+  const opts: { limit: number; fromTimestamp?: string } = { limit }
+  const from = accessor.config.defaultFromTimestamp
+  if (from !== undefined && from !== '') opts.fromTimestamp = from
+  const traces = await fetchTraces(accessor.transport, opts)
   const entries: [string, IndexEntry][] = []
   const names: string[] = []
   for (const t of traces) {
@@ -128,8 +132,10 @@ async function readdirSessionTraces(
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
   }
   const limit = accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT
-  const fromTimestamp = accessor.config.defaultFromTimestamp ?? defaultFromTimestamp()
-  const traces = await fetchTraces(accessor.transport, { sessionId, limit, fromTimestamp })
+  const opts: { sessionId: string; limit: number; fromTimestamp?: string } = { sessionId, limit }
+  const from = accessor.config.defaultFromTimestamp
+  if (from !== undefined && from !== '') opts.fromTimestamp = from
+  const traces = await fetchTraces(accessor.transport, opts)
   const entries: [string, IndexEntry][] = []
   const names: string[] = []
   for (const t of traces) {
@@ -199,18 +205,21 @@ async function readdirPromptVersions(
   const names: string[] = []
   for (const p of prompts) {
     if (pickString(p, 'name') !== promptName) continue
-    const version = pickStringOrNumber(p, 'version') || '0'
-    const filename = `${version}.json`
-    entries.push([
-      filename,
-      new IndexEntry({
-        id: `${promptName}/${version}`,
-        name: version,
-        resourceType: 'langfuse/prompt_version',
-        vfsName: filename,
-      }),
-    ])
-    names.push(`${prefix}/prompts/${promptName}/${filename}`)
+    // The list endpoint returns PromptMeta, which carries every version of a
+    // prompt in a `versions` array; there is no scalar `version`.
+    for (const version of promptVersions(p)) {
+      const filename = `${version}.json`
+      entries.push([
+        filename,
+        new IndexEntry({
+          id: `${promptName}/${version}`,
+          name: version,
+          resourceType: 'langfuse/prompt_version',
+          vfsName: filename,
+        }),
+      ])
+      names.push(`${prefix}/prompts/${promptName}/${filename}`)
+    }
   }
   if (index !== undefined) await index.setDir(virtualKey, entries)
   return names

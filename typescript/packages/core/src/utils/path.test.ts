@@ -14,12 +14,14 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  ancestors,
   CycleError,
   expandTilde,
   globPrefixMatch,
   posixNormpath,
   resolvePath,
   resolveSymlinks,
+  dropTrailingSegments,
 } from './path.ts'
 
 describe('resolveSymlinks', () => {
@@ -129,5 +131,40 @@ describe('resolvePath', () => {
 
   it('normalizes .. segments', () => {
     expect(resolvePath('../file.txt', '/cwd/sub')).toBe('/cwd/file.txt')
+  })
+})
+
+describe('ancestors', () => {
+  it('lists proper parents outermost first', () => {
+    expect(ancestors('/a/b/c')).toEqual(['/a', '/a/b'])
+  })
+
+  it('a root child has none', () => {
+    expect(ancestors('/a')).toEqual([])
+  })
+
+  it('root has none', () => {
+    expect(ancestors('/')).toEqual([])
+  })
+
+  it('tolerates a trailing slash', () => {
+    expect(ancestors('/a/b/')).toEqual(['/a'])
+  })
+})
+
+describe('dropTrailingSegments', () => {
+  it.each([
+    ['a/b/c', 1, 'a/b'],
+    ['/x/y/z', 2, '/x'],
+    ['f.txt/sub', 1, 'f.txt'],
+    ['/data/mkc/f.txt/sub', 1, '/data/mkc/f.txt'],
+    ['a.txt', 0, 'a.txt'],
+  ])('drops %i trailing segments of %s', (path, count, want) => {
+    expect(dropTrailingSegments(path, count)).toBe(want)
+  })
+
+  it('is clamped so a path never becomes empty', () => {
+    expect(dropTrailingSegments('/a', 1)).toBe('/a')
+    expect(dropTrailingSegments('a/b', 5)).toBe('a/b')
   })
 })

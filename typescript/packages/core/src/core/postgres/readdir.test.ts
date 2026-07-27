@@ -92,7 +92,7 @@ describe('readdir', () => {
     expect(out).toEqual(['/pg/public/views/a_mview', '/pg/public/views/z_view'])
   })
 
-  it('lists entity: schema.json + rows.jsonl', async () => {
+  it('lists entity: schema.json + semantic.json + rows.jsonl', async () => {
     const out = await readdir(
       makeAccessor(),
       new PathSpec({
@@ -103,6 +103,7 @@ describe('readdir', () => {
     )
     expect(out).toEqual([
       '/pg/public/tables/users/schema.json',
+      '/pg/public/tables/users/semantic.json',
       '/pg/public/tables/users/rows.jsonl',
     ])
   })

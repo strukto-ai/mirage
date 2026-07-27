@@ -22,7 +22,7 @@ from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import DriftPolicy, MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import ContentDriftError, install_fingerprints
-from tests.integration.s3_mock import patch_s3_multi
+from tests.e2e.s3_mock import patch_s3_multi
 
 
 def _load(*args, **kwargs):

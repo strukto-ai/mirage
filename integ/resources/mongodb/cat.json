@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "id": "mdb_cat_database_json",
+      "seq": 620010,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongodb/mirage_integ/database.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"database\": \"mirage_integ\", \"collections\": [{\"name\": \"authors\", \"document_count\": 3}, {\"name\": \"books\", \"document_count\": 5}, {\"name\": \"system.views\", \"document_count\": 1}], \"views\": [{\"name\": \"recent_books\"}]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_cat_docs",
+      "seq": 620012,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"_id\": 1, \"title\": \"alpha\", \"author\": \"ada\", \"year\": 2020, \"tags\": [\"fiction\", \"classic\"], \"rating\": 4.5}\n{\"_id\": 2, \"title\": \"beta\", \"author\": \"ben\", \"year\": 2021, \"tags\": [\"fiction\"], \"rating\": 3.2}\n{\"_id\": 3, \"title\": \"gamma\", \"author\": \"cara\", \"year\": 2022, \"rating\": 5}\n{\"_id\": 4, \"title\": \"delta\", \"author\": \"ada\", \"year\": 2023, \"tags\": [\"history\"], \"rating\": 4}\n{\"_id\": 5, \"title\": \"epsilon\", \"author\": \"ben\", \"year\": 2024, \"rating\": 2.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_cat_view_docs",
+      "seq": 620013,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongodb/mirage_integ/views/recent_books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"_id\": 3, \"title\": \"gamma\", \"author\": \"cara\", \"year\": 2022, \"rating\": 5}\n{\"_id\": 4, \"title\": \"delta\", \"author\": \"ada\", \"year\": 2023, \"tags\": [\"history\"], \"rating\": 4}\n{\"_id\": 5, \"title\": \"epsilon\", \"author\": \"ben\", \"year\": 2024, \"rating\": 2.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_head_2",
+      "seq": 620014,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "head -n 2 /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"_id\": 1, \"title\": \"alpha\", \"author\": \"ada\", \"year\": 2020, \"tags\": [\"fiction\", \"classic\"], \"rating\": 4.5}\n{\"_id\": 2, \"title\": \"beta\", \"author\": \"ben\", \"year\": 2021, \"tags\": [\"fiction\"], \"rating\": 3.2}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_tail_2",
+      "seq": 620015,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "tail -n 2 /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"_id\": 4, \"title\": \"delta\", \"author\": \"ada\", \"year\": 2023, \"tags\": [\"history\"], \"rating\": 4}\n{\"_id\": 5, \"title\": \"epsilon\", \"author\": \"ben\", \"year\": 2024, \"rating\": 2.5}\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

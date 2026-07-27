@@ -12,18 +12,56 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rekey } from '../../../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import { duGeneric, duMulti } from '../../generic/du.ts'
+import {
+  DEFAULT_MAX_DU_ENTRIES,
+  type ComputeEntries,
+  type ComputeSize,
+  type DuEntries,
+  runDu,
+} from '../../generic/du.ts'
 import { type Builder, type CommandIO, resolveGlobOf } from '../adapter.ts'
+
+/**
+ * Entry allowance shared by every operand of one `du` invocation.
+ *
+ * Backends with no native du op are walked one `readdir` at a time, which on an
+ * API-backed tree is one request per directory. Slack, for instance, exposes a
+ * directory per channel per day, so an unbounded walk of a real workspace is
+ * tens of thousands of requests. The budget stops the walk and records that the
+ * answer is partial.
+ */
+class WalkBudget {
+  private remaining: number | null
+  hit = false
+
+  constructor(remaining: number | null) {
+    this.remaining = remaining
+  }
+
+  /** Charge one entry; false once the cap is exhausted. */
+  spend(): boolean {
+    if (this.remaining === null) return true
+    if (this.remaining <= 0) {
+      this.hit = true
+      return false
+    }
+    this.remaining -= 1
+    return true
+  }
+}
 
 async function duWalk(
   ops: CommandIO,
   accessor: Accessor,
   index: IndexCacheStore | undefined,
   path: PathSpec,
+  budget: WalkBudget,
+  entries: [string, number][] | null,
 ): Promise<number> {
   let info
   try {
@@ -31,7 +69,14 @@ async function duWalk(
   } catch {
     return 0
   }
-  if (info.type !== FileType.DIRECTORY) return info.size ?? 0
+  if (info.type !== FileType.DIRECTORY) {
+    const size = info.size ?? 0
+    if (entries !== null) {
+      const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+      entries.push([`/${mountKey(path.virtual, prefix)}`, size])
+    }
+    return size
+  }
   let children: string[]
   try {
     children = await ops.readdir(accessor, path, index)
@@ -40,30 +85,58 @@ async function duWalk(
   }
   let total = 0
   for (const child of children) {
+    if (!budget.spend()) break
     total += await duWalk(
       ops,
       accessor,
       index,
       PathSpec.fromStrPath(child, rekey(path.virtual, path.resourcePath, child)),
+      budget,
+      entries,
     )
   }
   return total
+}
+
+async function walkEntries(
+  ops: CommandIO,
+  accessor: Accessor,
+  index: IndexCacheStore | undefined,
+  budget: WalkBudget,
+  path: PathSpec,
+): Promise<DuEntries> {
+  const entries: [string, number][] = []
+  const total = await duWalk(ops, accessor, index, path, budget, entries)
+  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  return [entries, total]
 }
 
 export const DU_BUILDER: Builder = {
   name: 'du',
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
-    const { duTotal, duAll } = ops
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    if (duTotal === undefined || duAll === undefined) {
-      return duMulti(resolved, opts, (p) => duWalk(ops, accessor, idx, p))
-    }
-    return duGeneric(
-      resolved,
+    const { duSize, duEntries } = ops
+    const budget = new WalkBudget(ops.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
+    const computeSize: ComputeSize =
+      duSize === undefined
+        ? (p) => duWalk(ops, accessor, idx, p, budget, null)
+        : (p) => duSize(accessor, p, idx)
+    const computeEntries: ComputeEntries | undefined =
+      duSize === undefined
+        ? (p) => walkEntries(ops, accessor, idx, budget, p)
+        : duEntries === undefined
+          ? undefined
+          : (p) => duEntries(accessor, p, idx)
+
+    const out = await runDu(
+      paths,
       opts,
-      (p) => duTotal(accessor, p, idx),
-      (p) => duAll(accessor, p, idx),
+      (targets) => resolveGlobOf(ops)(accessor, targets, idx),
+      (p) => ops.stat(accessor, p, idx),
+      computeSize,
+      computeEntries,
+      () => budget.hit,
     )
+    return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
   },
 }

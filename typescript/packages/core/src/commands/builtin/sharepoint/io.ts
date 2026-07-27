@@ -21,6 +21,6 @@ export const SHAREPOINT_IO: CommandIO<SharePointAccessor> = {
   create: drive.create,
   truncate: drive.truncate,
   find: drive.find,
-  duTotal: drive.du,
-  duAll: drive.duAll,
+  duSize: drive.du,
+  duEntries: drive.duEntries,
 }

@@ -20,6 +20,7 @@ from typing import Any, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.ops.config import StatOverlay
 from mirage.types import FileStat, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
@@ -121,8 +122,9 @@ class CommandIO:
     truncate: OperationFn | None = None
     find: OperationFn | None = None
     is_dir_name: OperationFn | None = None
-    du_total: OperationFn | None = None
-    du_all: OperationFn | None = None
+    du_size: OperationFn | None = None
+    du_entries: OperationFn | None = None
+    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
     append: OperationFn | None = None
     set_attrs: OperationFn | None = None
 

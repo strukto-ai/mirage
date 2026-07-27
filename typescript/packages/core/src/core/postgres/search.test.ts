@@ -50,7 +50,7 @@ describe('searchEntity', () => {
     expect(query).toHaveBeenCalledTimes(1)
   })
 
-  it('builds an OR-of-ILIKE WHERE across text columns', async () => {
+  it('builds an OR-of-LIKE WHERE across text columns (case-sensitive default)', async () => {
     const { accessor, query } = makeAccessor()
     query
       .mockResolvedValueOnce({
@@ -63,9 +63,22 @@ describe('searchEntity', () => {
     expect(out).toEqual([{ id: 1 }])
     const sql = query.mock.calls[1]?.[0] as string
     expect(sql).toBe(
-      'SELECT * FROM "public"."users" WHERE "name"::text ILIKE $1 OR "email"::text ILIKE $1 LIMIT $2',
+      'SELECT * FROM "public"."users" WHERE "name"::text LIKE $1 OR "email"::text LIKE $1 LIMIT $2',
     )
     expect(query.mock.calls[1]?.[1]).toEqual(['%foo%', 10])
+  })
+
+  it('uses ILIKE and escapes LIKE wildcards when case-insensitive', async () => {
+    const { accessor, query } = makeAccessor()
+    query
+      .mockResolvedValueOnce({ rows: [{ column_name: 'name' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+
+    await searchEntity(accessor, 'public', 'tables', 'users', 'user_id', 10, true)
+    const sql = query.mock.calls[1]?.[0] as string
+    expect(sql).toBe('SELECT * FROM "public"."users" WHERE "name"::text ILIKE $1 LIMIT $2')
+    // `_` is escaped so it matches literally, not as a LIKE wildcard.
+    expect(query.mock.calls[1]?.[1]).toEqual(['%user\\_id%', 10])
   })
 })
 

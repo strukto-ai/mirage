@@ -188,3 +188,190 @@ async def test_stdin_from_process_substitution():
     ws = await _workspace()
     out = await _out(ws, "wc -l < <(printf 'x\\ny\\n')")
     assert out.strip() == "2"
+
+
+# ── unopenable redirect target (GNU bash 5.2.37 pinned) ─────
+# bash answers both `cat < missing` and `echo x > /nosuchdir/f` with
+# "bash: line 1: <target>: No such file or directory", exit 1, and
+# never names the command. mirage drops the "bash: line N:" prefix,
+# matching the house style of the other shell-attributed error
+# ("nosuchcmd: command not found").
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_is_shell_attributed():
+    ws = await _workspace()
+    io = await ws.execute("cat < /data/missing")
+    assert io.exit_code == 1
+    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_does_not_run_command():
+    # bash never reaches the command, so `hi` is not printed and the
+    # message is not prefixed with the command name.
+    ws = await _workspace()
+    io = await ws.execute("echo hi < /data/missing")
+    assert io.exit_code == 1
+    assert (io.stdout or b"") == b""
+    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_keeps_rest_of_line():
+    # GNU: `cat < missing; echo next` prints next and exits 0 — the
+    # redirect failure is not fatal to the line.
+    ws = await _workspace()
+    io = await ws.execute("cat < /data/missing; echo next")
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b"next\n"
+    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_short_circuits_and():
+    ws = await _workspace()
+    io = await ws.execute("cat < /data/missing && echo YES")
+    assert io.exit_code == 1
+    assert (io.stdout or b"") == b""
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_runs_or_branch():
+    ws = await _workspace()
+    io = await ws.execute("cat < /data/missing || echo OR")
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b"OR\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_leaves_pipeline_running():
+    # GNU: the failing element contributes nothing but `wc -l` still
+    # runs, prints 0, and owns the pipeline's exit code.
+    ws = await _workspace()
+    io = await ws.execute("cat < /data/missing | wc -l")
+    assert io.exit_code == 0
+    assert (io.stdout or b"").strip() == b"0"
+    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_reported_as_typed():
+    # GNU reports the target's spelling, not a resolved absolute path.
+    ws = await _workspace()
+    io = await ws.execute("cd /data && cat < missing")
+    assert io.exit_code == 1
+    assert (io.stderr or b"") == b"missing: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_stops_at_first_failure():
+    # Two `<` redirects, the first missing: bash stops processing
+    # redirects there, so exactly one message is emitted.
+    ws = await _workspace()
+    await ws.execute("printf PRE > /data/good")
+    io = await ws.execute("cat < /data/missing < /data/good")
+    assert io.exit_code == 1
+    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_skips_later_output_redirect():
+    # `< missing > out` fails before `out` is created, like bash.
+    ws = await _workspace()
+    io = await ws.execute("echo hi < /data/missing > /data/late")
+    assert io.exit_code == 1
+    assert (await ws.execute("test -e /data/late")).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_stdin_missing_source_does_not_prefix_first_word_of_line():
+    # Regression: the failure used to unwind to the workspace-level
+    # OSError handler, which stamped the line's first word onto the
+    # message (`cd /data && cat < missing` reported "cd:").
+    ws = await _workspace()
+    io = await ws.execute("cd /data && cat < missing")
+    stderr = (io.stderr or b"").decode()
+    assert not stderr.startswith("cd:")
+    assert not stderr.startswith("cat:")
+
+
+@pytest.mark.asyncio
+async def test_write_target_unwritable_is_shell_attributed():
+    # The `>` side gets the same treatment as `<`: bash reports the
+    # target, not the command, and not the backend's prose (which used
+    # to surface as "echo: parent directory does not exist: /nodir").
+    ws = await _workspace()
+    io = await ws.execute("echo x > /nodir/f")
+    assert io.exit_code == 1
+    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_write_target_unwritable_keeps_rest_of_line():
+    # Regression: the write raised with no handler, so the whole line
+    # died; GNU prints the error and runs `echo next`.
+    ws = await _workspace()
+    io = await ws.execute("echo x > /nodir/f; echo next")
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b"next\n"
+    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_write_target_unwritable_short_circuits_and():
+    ws = await _workspace()
+    io = await ws.execute("echo x > /nodir/f && echo YES")
+    assert io.exit_code == 1
+    assert (io.stdout or b"") == b""
+
+
+@pytest.mark.asyncio
+async def test_write_target_unwritable_runs_or_branch():
+    ws = await _workspace()
+    io = await ws.execute("echo x > /nodir/f || echo OR")
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b"OR\n"
+
+
+@pytest.mark.asyncio
+async def test_write_target_unwritable_stops_at_first_failure():
+    # GNU stops processing redirects at the failed open, so the later
+    # target is never created and only one message is emitted:
+    #   $ echo x > /nodir/f > /data/out
+    #   bash: line 1: /nodir/f: No such file or directory   # rc=1
+    #   $ ls /data/out -> No such file or directory
+    ws = await _workspace()
+    io = await ws.execute("echo x > /nodir/f > /data/out")
+    assert io.exit_code == 1
+    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+    assert (await ws.execute("test -e /data/out")).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_write_target_unwritable_keeps_earlier_target():
+    # The mirror case: GNU already opened (and truncated) the earlier
+    # target before the failing one, so it survives as an empty file.
+    #   $ echo y > /data/out2 > /nodir/g
+    #   bash: line 1: /nodir/g: No such file or directory   # rc=1
+    #   $ ls -l /data/out2 -> 0 bytes
+    ws = await _workspace()
+    io = await ws.execute("echo y > /data/out2 > /nodir/g")
+    assert io.exit_code == 1
+    assert (io.stderr or b"") == b"/nodir/g: No such file or directory\n"
+    assert (await ws.execute("test -e /data/out2")).exit_code == 0
+    assert await _out(ws, "cat /data/out2") == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "echo x >> /nodir/f",
+    "echo x 2> /nodir/f",
+    "> /nodir/f",
+])
+async def test_write_target_unwritable_same_line_for_every_form(line: str):
+    # GNU spells the append, stderr and command-less forms identically.
+    ws = await _workspace()
+    io = await ws.execute(line)
+    assert io.exit_code == 1
+    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"

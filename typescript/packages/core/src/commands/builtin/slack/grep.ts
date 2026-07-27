@@ -61,7 +61,10 @@ async function grepCommand(
   const firstPath = paths[0]
   if (firstPath !== undefined && pattern !== null && !pattern.includes('\n')) {
     const scope = detectScope(firstPath)
-    if (scope.useNative) {
+    // Slack search matches whole words while grep matches substrings, and
+    // the native path returns search results verbatim as the output, so a
+    // bare literal would under-report. Only -w makes the two agree.
+    if (scope.useNative && opts.flags.w === true) {
       const filePrefix = mountPrefixOf(firstPath.virtual, firstPath.resourcePath)
       const query = buildQuery(pattern, scope)
       const count = maxCount ?? 100

@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "ls_two_dir_operands",
+      "seq": 604000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/lsop/a/sub /data/lsop/b && touch /data/lsop/a/f.txt /data/lsop/b/g.txt /data/lsop/zf.txt && ls /data/lsop/b /data/lsop/a",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lsop/a:\nf.txt\nsub\n\n/data/lsop/b:\ng.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_file_and_dir_operands",
+      "seq": 604001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "ls /data/lsop/b /data/lsop/zf.txt /data/lsop/a && rm -r /data/lsop",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lsop/zf.txt\n\n/data/lsop/a:\nf.txt\nsub\n\n/data/lsop/b:\ng.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -17,6 +17,8 @@ import { stripSlash } from '../../utils/slash.ts'
 
 type EntityKind = 'tables' | 'views'
 
+export const ENTITY_FILES = ['schema.json', 'semantic.json', 'rows.jsonl'] as const
+
 export type PostgresScope =
   | { level: 'root'; resourcePath: string }
   | { level: 'database_json'; file: 'database.json'; resourcePath: string }
@@ -35,6 +37,14 @@ export type PostgresScope =
       kind: EntityKind
       entity: string
       file: 'schema.json'
+      resourcePath: string
+    }
+  | {
+      level: 'entity_semantic'
+      schema: string
+      kind: EntityKind
+      entity: string
+      file: 'semantic.json'
       resourcePath: string
     }
   | {
@@ -97,6 +107,16 @@ export function detectScope(path: PathSpec | string): PostgresScope {
         kind,
         entity,
         file: 'schema.json',
+        resourcePath: raw,
+      }
+    }
+    if (file === 'semantic.json') {
+      return {
+        level: 'entity_semantic',
+        schema,
+        kind,
+        entity,
+        file: 'semantic.json',
         resourcePath: raw,
       }
     }

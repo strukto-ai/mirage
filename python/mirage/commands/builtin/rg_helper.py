@@ -21,6 +21,7 @@ from mirage.commands.builtin.grep_helper import (BINARY_EXTENSIONS,
 from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
                                                  _AsyncReaddir, _AsyncStat)
 from mirage.types import FileType
+from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.fnmatch import fnmatch
 
 TYPE_EXTENSIONS: dict[str, list[str]] = {
@@ -88,7 +89,7 @@ async def rg_folder(
     results: list[str] = []
     try:
         entries = await readdir_fn(path)
-    except (FileNotFoundError, ValueError) as exc:
+    except WALK_ERRORS as exc:
         if warnings is not None:
             warnings.append(f"rg: {path}: {exc}")
         return results
@@ -98,7 +99,7 @@ async def rg_folder(
     for entry in entries:
         try:
             s = await stat_fn(entry)
-        except (FileNotFoundError, ValueError) as exc:
+        except WALK_ERRORS as exc:
             if warnings is not None:
                 warnings.append(f"rg: {entry}: {exc}")
             continue
@@ -195,11 +196,11 @@ async def rg_full(
     try:
         s = await stat_fn(path)
         is_dir = s.type == FileType.DIRECTORY
-    except (FileNotFoundError, ValueError):
+    except WALK_ERRORS:
         try:
             await readdir_fn(path)
             is_dir = True
-        except (FileNotFoundError, ValueError):
+        except WALK_ERRORS:
             # not a directory (or vanished): treat the operand as a file
             pass
 
@@ -254,7 +255,7 @@ async def rg_full(
     results = []
     try:
         entries = await readdir_fn(path)
-    except (FileNotFoundError, ValueError) as exc:
+    except WALK_ERRORS as exc:
         if warnings is not None:
             warnings.append(f"rg: {path}: {exc}")
         return results
@@ -262,7 +263,7 @@ async def rg_full(
     for entry in entries:
         try:
             s = await stat_fn(entry)
-        except (FileNotFoundError, ValueError) as exc:
+        except WALK_ERRORS as exc:
             if warnings is not None:
                 warnings.append(f"rg: {entry}: {exc}")
             continue

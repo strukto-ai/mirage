@@ -75,6 +75,19 @@ export function rebaseRaw(paths: string[], virtual: string, raw: string): string
   return paths.map((p) => rebaseOne(p, virtual, raw))
 }
 
+// The prefix of `path` with `count` trailing segments removed. The ancestor
+// counterpart of rebaseOne: it names a path above another one while keeping the
+// original spelling, so a relative argument stays relative. `count` is clamped
+// so the result never loses every segment, which would leave an empty string
+// where a path belongs. Mirrors Python's drop_trailing_segments.
+export function dropTrailingSegments(path: string, count: number): string {
+  if (count <= 0) return path
+  const parts = rstripSlash(path).split('/')
+  if (count >= parts.filter((part) => part !== '').length) return path
+  const joined = parts.slice(0, parts.length - count).join('/')
+  return joined === '' ? '/' : joined
+}
+
 export function rebaseOne(path: string, virtual: string, raw: string): string {
   if (raw === virtual) return path
   const base = rstripSlash(virtual)
@@ -87,6 +100,18 @@ export function parent(path: string): string {
   const i = path.lastIndexOf('/')
   if (i <= 0) return '/'
   return path.slice(0, i)
+}
+
+// The proper ancestors of a normalized key, outermost first: "/a/b/c" ->
+// ["/a", "/a/b"]; "/a" and "/" -> []. "/" is left out because every store
+// treats the mount root as an existing directory, so it is never a component
+// worth probing. Used by the store-backed backends (ram, redis) to walk a
+// destination's parent chain the way rename(2) resolves it.
+export function ancestors(path: string): string[] {
+  const parts = stripSlash(path).split('/')
+  const out: string[] = []
+  for (let i = 1; i < parts.length; i++) out.push(`/${parts.slice(0, i).join('/')}`)
+  return out
 }
 
 export const MAX_SYMLINK_HOPS = 40

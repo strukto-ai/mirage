@@ -30,7 +30,8 @@ from mirage.types import (CopyStrategy, FileType, NativeCopy, NativeMove,
                           StatFn)
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.errors import FS_ERRORS, fs_strerror
-from mirage.utils.key_prefix import mount_prefix_of, rekey
+from mirage.utils.key_prefix import mounted_path, rekey
+from mirage.utils.path import norm, parent
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
 
@@ -250,8 +251,62 @@ async def target_dir_error(cmd_name: str, stat: StatFn,
     return None
 
 
+async def dest_parent_error(cmd_name: str, stat: StatFn, target: PathSpec,
+                            src_is_dir: bool) -> str | None:
+    """GNU error line when a destination's parent chain is unusable.
+
+    ``cp`` is not ``mkdir -p``: it never creates the destination's parent,
+    so a missing or non-directory component is a per-operand failure. GNU
+    surfaces the two cases at different phases, and the wording follows:
+    a component that is a plain file fails the destination stat
+    (``cannot stat 'DST': Not a directory``, at any depth), while a merely
+    absent parent fails the create (``cannot create regular file`` for a
+    file source, ``cannot create directory`` for a recursive one).
+
+    Only walks upward until it finds something that exists, so the common
+    case (the parent is there) costs a single stat.
+
+    Args:
+        cmd_name (str): Command name for the error prefix.
+        stat (StatFn): Stats a path; raises when missing.
+        target (PathSpec): The destination operand.
+        src_is_dir (bool): Whether the source is a directory, which picks
+            between GNU's "regular file" and "directory" create wording.
+
+    Returns:
+        str | None: The GNU stderr line, or None when the parent chain is
+        a usable directory path.
+    """
+    noun = "directory" if src_is_dir else "regular file"
+    enoent_line = (f"{cmd_name}: cannot create {noun} '{target.virtual}': "
+                   "No such file or directory")
+    enotdir_line = (f"{cmd_name}: cannot stat '{target.virtual}': "
+                    "Not a directory")
+    immediate = parent(norm(target.virtual))
+    node = immediate
+    while node != "/":
+        exists, is_dir = await entry_kind(stat, descendant_path(target, node))
+        if exists:
+            if not is_dir:
+                return enotdir_line
+            # An existing directory higher up means the intermediate
+            # components are simply absent.
+            return None if node == immediate else enoent_line
+        node = parent(node)
+    # The mount root always exists as a directory and is never stat-ed:
+    # a backend that cannot stat "/" must not fail every copy into it.
+    return None if immediate == "/" else enoent_line
+
+
 async def entry_kind(stat: StatFn, path: PathSpec) -> tuple[bool, bool]:
     """Probe a path once for ``(exists, is_dir)``.
+
+    ENOTDIR counts as "does not exist": a path whose parent chain runs
+    through a plain file cannot exist, and the callers (cp/mv) turn that
+    into GNU's own wording via :func:`dest_parent_error`. Only this probe
+    absorbs it, so read-family commands keep reporting "Not a directory"
+    verbatim. ``NotADirectoryError`` is not a ``FileNotFoundError``
+    subclass, so it has to be named explicitly.
 
     Args:
         stat (StatFn): Stats a path; raises when missing.
@@ -259,9 +314,45 @@ async def entry_kind(stat: StatFn, path: PathSpec) -> tuple[bool, bool]:
     """
     try:
         info = await stat(path)
-    except (FileNotFoundError, ValueError):
+    except (FileNotFoundError, NotADirectoryError, ValueError):
         return False, False
     return True, info.type == FileType.DIRECTORY
+
+
+async def source_kind(stat: StatFn,
+                      path: PathSpec) -> tuple[bool, bool, str | None]:
+    """Probe a source operand for ``(exists, is_dir, strerror)``.
+
+    A source keeps the errno GNU reports: ``cp /plain/child /dst`` is
+    ``cannot stat 'X': Not a directory``, not "No such file or directory".
+    The backends cannot supply that distinction, because ``stat`` answers
+    ENOENT for a path under a plain file just as it does for a genuinely
+    absent one (only ``readdir`` splits the two). So the chain is walked
+    the way :func:`dest_parent_error` walks a destination's: the first
+    component that does exist decides, and a plain file there means
+    ENOTDIR. Walking happens only on the failure path.
+
+    Args:
+        stat (StatFn): Stats a path; raises when missing.
+        path (PathSpec): The probed source operand.
+
+    Returns:
+        tuple[bool, bool, str | None]: Whether it exists, whether it is a
+        directory, and the GNU strerror when it does not exist.
+    """
+    exists, is_dir = await entry_kind(stat, path)
+    if exists:
+        return True, is_dir, None
+    node = parent(norm(path.virtual))
+    while node != "/":
+        node_exists, node_is_dir = await entry_kind(
+            stat, descendant_path(path, node))
+        if node_exists:
+            if not node_is_dir:
+                return False, False, "Not a directory"
+            break
+        node = parent(node)
+    return False, False, "No such file or directory"
 
 
 def overwrite_type_error(cmd_name: str, src: PathSpec, src_is_dir: bool,
@@ -455,10 +546,35 @@ def descendant_path(root: PathSpec, virtual: str) -> PathSpec:
         virtual, rekey(root.virtual, root.resource_path, virtual))
 
 
-def mounted_path(root: PathSpec, mount_path: str) -> PathSpec:
-    prefix = mount_prefix_of(root.virtual, root.resource_path)
-    virtual = prefix + mount_path if prefix else mount_path
-    return PathSpec.from_str_path(virtual, mount_path.strip("/"))
+async def _tree_lines(strategy: NativeCopy, src: PathSpec, target: PathSpec,
+                      src_base: str, dst_base: str,
+                      find_type: str) -> list[str]:
+    """GNU ``-v`` lines for a natively copied tree, parents first.
+
+    GNU ``cp -rv`` reports directories as well as files, including the
+    source root itself. Deliberate divergence: GNU's sibling order follows
+    readdir, which no backend can reproduce, so entries are sorted
+    lexicographically instead. That keeps every parent ahead of its
+    children (GNU's only load-bearing ordering guarantee) and is stable
+    across backends.
+
+    Args:
+        strategy (NativeCopy): Native copy capability.
+        src (PathSpec): Source root.
+        target (PathSpec): Destination root.
+        src_base (str): Source root's mount path, no trailing slash.
+        dst_base (str): Destination root's mount path, no trailing slash.
+        find_type (str): File-type selector for the file pass.
+    """
+    dirs = await strategy.find(src, type="d")
+    files = await strategy.find(src, type=find_type)
+    lines: list[str] = []
+    for entry_mount in sorted({src_base, *dirs, *files}):
+        entry = mounted_path(src, entry_mount)
+        entry_dst = mounted_path(target,
+                                 dst_base + entry_mount[len(src_base):])
+        lines.append(f"'{entry.virtual}' -> '{entry_dst.virtual}'")
+    return lines
 
 
 async def _mirror_dirs(
@@ -470,7 +586,8 @@ async def _mirror_dirs(
     dst_base: str,
     writes: dict[str, ByteSource],
     errors: list[str],
-) -> None:
+    lines: list[str] | None = None,
+) -> bool:
     """Recreate a source tree's directories under the destination root.
 
     Only needed on the per-entry policy path, where a whole-tree
@@ -479,6 +596,11 @@ async def _mirror_dirs(
     tree would copy to nothing. A backend exposing no ``mkdir``
     (directories are implied by keys) is a no-op. Parents sort before
     children so a nested tree lands in order.
+
+    A failed ``mkdir`` stops the whole source, mirroring ``copy_entries``
+    and GNU: the children of a directory that could not be created cannot
+    land, so reporting one line per descendant (and then copying the files
+    anyway) would be both noisy and wrong.
 
     Args:
         strategy (NativeCopy): Native copy capability.
@@ -489,13 +611,22 @@ async def _mirror_dirs(
         dst_base (str): Destination root's mount path, no trailing slash.
         writes (dict[str, ByteSource]): Recorded writes, updated in place.
         errors (list[str]): Collected stderr lines, appended in place.
+        lines (list[str] | None): Verbose sink for the directory entries
+            GNU also reports; None keeps them silent.
+
+    Returns:
+        bool: False when a directory could not be created, so the caller
+        skips this source's file pass.
     """
     if strategy.mkdir is None:
-        return
+        return True
     mounts = [src_base, *await strategy.find(src, type="d")]
     for entry_mount in sorted(set(mounts), key=len):
         entry_dst = mounted_path(target,
                                  dst_base + entry_mount[len(src_base):])
+        if lines is not None:
+            entry = mounted_path(src, entry_mount)
+            lines.append(f"'{entry.virtual}' -> '{entry_dst.virtual}'")
         if await is_directory(stat, entry_dst):
             continue
         try:
@@ -503,8 +634,9 @@ async def _mirror_dirs(
         except FS_ERRORS as exc:
             errors.append(f"cp: cannot create directory "
                           f"'{entry_dst.virtual}': {fs_strerror(exc)}")
-            continue
+            return False
         writes[entry_dst.mount_path] = b""
+    return True
 
 
 async def walk(
@@ -698,10 +830,12 @@ async def cp(
         if err is not None:
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)
         dst_is_dir = True
+        dst_exists = True
     elif flags.no_target_dir:
         dst_is_dir = False
+        dst_exists = True
     else:
-        dst_is_dir = await is_directory(stat, dst)
+        dst_exists, dst_is_dir = await entry_kind(stat, dst)
     if readdir is None and isinstance(strategy, PrimitiveCopy):
         readdir = strategy.readdir
     policy = TransferPolicy(cmd_name="cp",
@@ -715,11 +849,10 @@ async def cp(
     reads: dict[str, ByteSource] = {}
     lines: list[str] = []
     errors: list[str] = []
-    for src, target in copy_targets(sources, dst, dst_is_dir):
-        src_exists, src_is_dir = await entry_kind(stat, src)
+    for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists):
+        src_exists, src_is_dir, src_err = await source_kind(stat, src)
         if not src_exists:
-            errors.append(f"cp: cannot stat '{src.virtual}': "
-                          "No such file or directory")
+            errors.append(f"cp: cannot stat '{src.virtual}': {src_err}")
             continue
         if key_of(src) == key_of(target):
             errors.append(f"cp: '{src.virtual}' and '{target.virtual}' "
@@ -734,6 +867,12 @@ async def cp(
                           f"'{src.virtual}'")
             continue
         target_exists, target_is_dir = await entry_kind(stat, target)
+        if not target_exists:
+            parent_err = await dest_parent_error("cp", stat, target,
+                                                 src_is_dir)
+            if parent_err is not None:
+                errors.append(parent_err)
+                continue
         mismatch = overwrite_type_error("cp", src, src_is_dir, target,
                                         target_exists, target_is_dir)
         if mismatch is not None:
@@ -761,19 +900,21 @@ async def cp(
                     continue
                 await strategy.dir_copy(src, target)
                 for entry_mount in await strategy.find(src, type=find_type):
-                    entry = mounted_path(src, entry_mount)
                     entry_dst = mounted_path(
                         target, dst_base + entry_mount[len(src_base):])
                     writes[entry_dst.mount_path] = b""
-                    if flags.verbose:
-                        lines.append(
-                            f"'{entry.virtual}' -> '{entry_dst.virtual}'")
+                if flags.verbose:
+                    lines.extend(await
+                                 _tree_lines(strategy, src, target, src_base,
+                                             dst_base, find_type))
                 continue
             # Per-entry policy forfeits dir_copy, so the tree's directories
             # are recreated here: a files-only pass would drop every
             # directory that holds no files (GNU keeps them).
-            await _mirror_dirs(strategy, stat, src, target, src_base, dst_base,
-                               writes, errors)
+            if not await _mirror_dirs(strategy, stat, src, target, src_base,
+                                      dst_base, writes, errors,
+                                      lines if flags.verbose else None):
+                continue
             for entry_mount in await strategy.find(src, type=find_type):
                 entry = mounted_path(src, entry_mount)
                 entry_dst = mounted_path(

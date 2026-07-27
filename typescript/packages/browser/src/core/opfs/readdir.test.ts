@@ -31,4 +31,18 @@ describe('opfs/readdir', () => {
     await writeBytes(accessor, spec('/sub/x'), new Uint8Array())
     expect(await readdir(accessor, spec('/sub'))).toEqual(['/sub/x'])
   })
+  it('throws ENOENT for a missing path, at any depth', async () => {
+    const accessor = makeMockAccessor()
+    await mkdir(accessor, spec('/sub'))
+    for (const p of ['/nope', '/sub/nope', '/nope/deeper']) {
+      await expect(readdir(accessor, spec(p))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+  it('throws ENOTDIR when a path component is a file', async () => {
+    const accessor = makeMockAccessor()
+    await writeBytes(accessor, spec('/a.txt'), new Uint8Array())
+    for (const p of ['/a.txt', '/a.txt/x', '/a.txt/x/y']) {
+      await expect(readdir(accessor, spec(p))).rejects.toMatchObject({ code: 'ENOTDIR' })
+    }
+  })
 })

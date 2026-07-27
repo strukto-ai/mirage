@@ -17,7 +17,7 @@ import pytest
 from mirage.commands.builtin.generic.mv import MvFlags, mv
 from mirage.types import (FileStat, FileType, NativeMove, PathSpec,
                           PrimitiveMove)
-from mirage.utils.errors import enotsup
+from mirage.utils.errors import enoent, enotdir, enotsup
 
 
 def _spec(path: str) -> PathSpec:
@@ -78,6 +78,61 @@ async def test_multiple_sources_into_directory():
     assert files["/d/b.txt"] == b"BBB"
     assert "/a.txt" not in files
     assert "/b.txt" not in files
+
+
+@pytest.mark.asyncio
+async def test_refusing_backend_rename_reports_cannot_move():
+    files = {"/a.txt": b"AAA"}
+    stat, _ = _make_backend(files, set())
+
+    async def rename(src, dst) -> None:
+        raise enoent(dst)
+
+    _, io = await mv([_spec(p) for p in ["/a.txt", "/missing/a.txt"]],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 1
+    assert io.stderr == (b"mv: cannot move '/a.txt' to '/missing/a.txt': "
+                         b"No such file or directory\n")
+    assert files["/a.txt"] == b"AAA"
+
+
+@pytest.mark.asyncio
+async def test_rename_onto_nondir_parent_reports_not_a_directory():
+    files = {"/a.txt": b"AAA"}
+    stat, _ = _make_backend(files, set())
+
+    async def rename(src, dst) -> None:
+        raise enotdir(dst)
+
+    _, io = await mv([_spec(p) for p in ["/a.txt", "/plain/c.txt"]],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 1
+    assert io.stderr == (b"mv: cannot move '/a.txt' to '/plain/c.txt': "
+                         b"Not a directory\n")
+
+
+@pytest.mark.asyncio
+async def test_rename_failure_keeps_moving_remaining_sources():
+    files = {"/a.txt": b"AAA", "/b.txt": b"BBB"}
+    stat, real_rename = _make_backend(files, {"/d"})
+
+    async def rename(src, dst) -> None:
+        if src.virtual == "/a.txt":
+            raise enoent(dst)
+        await real_rename(src, dst)
+
+    _, io = await mv([_spec(p) for p in ["/a.txt", "/b.txt", "/d"]],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 1
+    assert b"mv: cannot move '/a.txt' to '/d/a.txt'" in io.stderr
+    assert files["/d/b.txt"] == b"BBB"
+    assert files["/a.txt"] == b"AAA"
 
 
 @pytest.mark.asyncio

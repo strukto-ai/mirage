@@ -16,8 +16,8 @@ from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
 from mirage.core.ssh.create import create as _create
-from mirage.core.ssh.du import du as _du
-from mirage.core.ssh.du import du_all as _du_all
+from mirage.core.ssh.du import entries as _du_entries
+from mirage.core.ssh.du import size as _du_size
 from mirage.core.ssh.exists import exists as _exists
 from mirage.core.ssh.find import find as _find
 from mirage.core.ssh.mkdir import mkdir as _mkdir
@@ -50,8 +50,8 @@ IO = CommandIO(
     copy=_copy,
     create=_create,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du_size=_du_size,
+    du_entries=_du_entries,
     truncate=_truncate,
 )
 

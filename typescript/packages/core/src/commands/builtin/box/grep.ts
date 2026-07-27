@@ -43,6 +43,7 @@ async function grepCommand(
     const narrowed = await narrowScope(accessor, paths, pattern, {
       fixedString: opts.flags.F === true,
       recursive: opts.flags.r === true || opts.flags.R === true,
+      wholeWord: opts.flags.w === true,
       exactFileSet: opts.flags.v === true || opts.flags.c === true,
       ...(opts.index !== null ? { index: opts.index } : {}),
     })

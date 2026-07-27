@@ -270,7 +270,8 @@ async def test_ls_missing_operand_exits_2():
 @pytest.mark.asyncio
 async def test_ls_missing_operand_exits_2_even_beside_a_good_one():
     """GNU ratchets to 2 for any bad command-line operand, and still lists
-    the good ones. Order must not matter.
+    the good ones. Order must not matter. Two operands means the survivor is
+    still headed, exactly as GNU prints it.
     """
     tree = {"/dir": _dir("dir"), "/dir/a.txt": _file("a.txt")}
     readdir, stat = _make_fs_backend(tree)
@@ -279,7 +280,7 @@ async def test_ls_missing_operand_exits_2_even_beside_a_good_one():
                                     _spec("/nope")]):
         output, io = await ls(paths, readdir=readdir, stat=stat)
         assert io.exit_code == LS_FAILURE
-        assert output == b"a.txt\n"
+        assert output == b"/dir:\na.txt\n"
 
 
 @pytest.mark.asyncio
@@ -443,6 +444,224 @@ async def test_ls_file_argument_lists_the_file():
     output, io = await ls([_spec("/dir/a.json")], readdir=readdir, stat=stat)
     assert output == b"/dir/a.json\n"
     assert io.exit_code == 0
+
+
+def _two_dir_tree() -> dict[str, FileStat]:
+    return {
+        "/a": _dir("a"),
+        "/a/f.txt": _file("f.txt", 3),
+        "/a/sub": _dir("sub"),
+        "/b": _dir("b"),
+        "/b/g.txt": _file("g.txt", 3),
+        "/c": _dir("c"),
+        "/mfile": _file("mfile", 1),
+        "/zfile": _file("zfile", 1),
+    }
+
+
+@pytest.mark.asyncio
+async def test_ls_single_dir_operand_has_no_header():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/a")], readdir=readdir, stat=stat)
+    assert output == b"f.txt\nsub\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_two_dir_operands_print_headers_separated_by_blank():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, io = await ls([_spec("/a"), _spec("/b")],
+                          readdir=readdir,
+                          stat=stat)
+    assert output == b"/a:\nf.txt\nsub\n\n/b:\ng.txt\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_ls_empty_dir_operand_still_gets_a_header():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/b"), _spec("/c")],
+                         readdir=readdir,
+                         stat=stat)
+    assert output == b"/b:\ng.txt\n\n/c:\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_file_operands_print_first_without_headers():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls(
+        [_spec("/b"),
+         _spec("/zfile"),
+         _spec("/a"),
+         _spec("/mfile")],
+        readdir=readdir,
+        stat=stat)
+    assert output == (b"/mfile\n/zfile\n"
+                      b"\n/a:\nf.txt\nsub\n"
+                      b"\n/b:\ng.txt\n")
+
+
+@pytest.mark.asyncio
+async def test_ls_only_file_operands_emit_no_trailing_blank():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/zfile"), _spec("/mfile")],
+                         readdir=readdir,
+                         stat=stat)
+    assert output == b"/mfile\n/zfile\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_operands_sort_by_name_not_command_line_order():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/b"), _spec("/a")],
+                         readdir=readdir,
+                         stat=stat)
+    assert output == b"/a:\nf.txt\nsub\n\n/b:\ng.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_reverse_flips_operand_and_entry_order():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/a"), _spec("/b")],
+                         readdir=readdir,
+                         stat=stat,
+                         reverse=True)
+    assert output == b"/b:\ng.txt\n\n/a:\nsub\nf.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_failed_operand_still_headers_the_one_that_listed():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, io = await ls([_spec("/nope"), _spec("/a")],
+                          readdir=readdir,
+                          stat=stat)
+    assert output == b"/a:\nf.txt\nsub\n"
+    # The header is output, not evidence of success: the bad operand still
+    # ratchets the status to 2.
+    assert io.exit_code == LS_FAILURE
+    assert b"/nope" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_ls_repeated_operand_lists_twice():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/a"), _spec("/a")],
+                         readdir=readdir,
+                         stat=stat)
+    assert output == b"/a:\nf.txt\nsub\n\n/a:\nf.txt\nsub\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_recursive_single_operand_keeps_its_header():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/a")],
+                         readdir=readdir,
+                         stat=stat,
+                         recursive=True)
+    assert output == b"/a:\nf.txt\nsub\n\n/a/sub:\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_recursive_file_operand_is_not_headed():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls([_spec("/a"), _spec("/zfile")],
+                         readdir=readdir,
+                         stat=stat,
+                         recursive=True)
+    assert output == b"/zfile\n\n/a:\nf.txt\nsub\n\n/a/sub:\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_list_dir_sorts_operands_and_stays_unheaded():
+    readdir, stat = _make_fs_backend(_two_dir_tree())
+    output, _ = await ls(
+        [_spec("/zfile"), _spec("/b"),
+         _spec("/a")],
+        readdir=readdir,
+        stat=stat,
+        list_dir=True)
+    assert output == b"/a\n/b\n/zfile\n"
+
+
+def _tied_tree() -> dict[str, FileStat]:
+    stamp = datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat()
+    return {
+        "/a": _file("a", 2, modified=stamp),
+        "/b": _file("b", 2, modified=stamp),
+        "/c": _file("c", 2, modified=stamp),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sort_by", [LsSortBy.TIME, LsSortBy.SIZE])
+async def test_ls_tied_operands_break_on_name(sort_by):
+    """GNU's -t/-S comparators fall back to the name on a tie."""
+    readdir, stat = _make_fs_backend(_tied_tree())
+    output, _ = await ls(
+        [_spec("/c"), _spec("/a"), _spec("/b")],
+        readdir=readdir,
+        stat=stat,
+        sort_by=sort_by)
+    assert output == b"/a\n/b\n/c\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sort_by", [LsSortBy.TIME, LsSortBy.SIZE])
+async def test_ls_reverse_flips_the_tie_break_too(sort_by):
+    """`-r` negates the whole comparison, so tied names come out descending."""
+    readdir, stat = _make_fs_backend(_tied_tree())
+    output, _ = await ls(
+        [_spec("/c"), _spec("/a"), _spec("/b")],
+        readdir=readdir,
+        stat=stat,
+        sort_by=sort_by,
+        reverse=True)
+    assert output == b"/c\n/b\n/a\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sort_by", [LsSortBy.TIME, LsSortBy.SIZE])
+async def test_ls_tied_entries_break_on_name(sort_by):
+    stamp = datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat()
+    tree = {
+        "/dir": _dir("dir"),
+        "/dir/b.txt": _file("b.txt", 2, modified=stamp),
+        "/dir/a.txt": _file("a.txt", 2, modified=stamp),
+    }
+    readdir, stat = _make_fs_backend(tree)
+    output, _ = await ls([_spec("/dir")],
+                         readdir=readdir,
+                         stat=stat,
+                         sort_by=sort_by)
+    assert output == b"a.txt\nb.txt\n"
+    output, _ = await ls([_spec("/dir")],
+                         readdir=readdir,
+                         stat=stat,
+                         sort_by=sort_by,
+                         reverse=True)
+    assert output == b"b.txt\na.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_long_widths_are_per_directory_block():
+    tree = {
+        "/a": _dir("a"),
+        "/a/big.txt": _file("big.txt", 1000),
+        "/b": _dir("b"),
+        "/b/small.txt": _file("small.txt", 1),
+    }
+    readdir, stat = _make_fs_backend(tree)
+    output, _ = await ls([_spec("/a"), _spec("/b")],
+                         readdir=readdir,
+                         stat=stat,
+                         long=True)
+    lines = output.decode().splitlines()
+    assert lines[0] == "/a:"
+    assert " 1000 " in lines[1]
+    assert lines[2] == ""
+    assert lines[3] == "/b:"
+    # GNU sizes its columns per block, so /b is not padded to /a's width.
+    assert " 1 " in lines[4]
+    assert "    1 " not in lines[4]
 
 
 @pytest.mark.asyncio

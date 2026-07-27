@@ -1,0 +1,98 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { isNotFound, iterEntries, resolveDirHandle, resolveParentDirHandle } from '../utils.ts'
+
+async function walkSizes(dir: FileSystemDirectoryHandle): Promise<number> {
+  let total = 0
+  for await (const [name, handle] of iterEntries(dir)) {
+    if (handle.kind === 'file') {
+      try {
+        const fh = await dir.getFileHandle(name, { create: false })
+        const file = await fh.getFile()
+        total += file.size
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        const child = await dir.getDirectoryHandle(name, { create: false })
+        total += await walkSizes(child)
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return total
+}
+
+export async function walkAll(
+  dir: FileSystemDirectoryHandle,
+  currentPath: string,
+  entries: [string, number][],
+): Promise<number> {
+  let total = 0
+  for await (const [name, handle] of iterEntries(dir)) {
+    const childPath = currentPath === '/' ? `/${name}` : `${currentPath}/${name}`
+    if (handle.kind === 'file') {
+      try {
+        const fh = await dir.getFileHandle(name, { create: false })
+        const file = await fh.getFile()
+        entries.push([childPath, file.size])
+        total += file.size
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        const child = await dir.getDirectoryHandle(name, { create: false })
+        total += await walkAll(child, childPath, entries)
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return total
+}
+
+export async function sizeOfPath(
+  root: FileSystemDirectoryHandle,
+  virtual: string,
+): Promise<number> {
+  try {
+    const [parentDir, name] = await resolveParentDirHandle(root, virtual, { create: false })
+    try {
+      const fh = await parentDir.getFileHandle(name, { create: false })
+      const file = await fh.getFile()
+      return file.size
+    } catch (err) {
+      if (!isNotFound(err) && !(err instanceof DOMException && err.name === 'TypeMismatchError')) {
+        throw err
+      }
+    }
+    const dir = await parentDir.getDirectoryHandle(name, { create: false })
+    return await walkSizes(dir)
+  } catch (err) {
+    if (isNotFound(err)) return 0
+    if (err instanceof Error && err.message.startsWith('no parent directory')) {
+      try {
+        const rootDir = await resolveDirHandle(root, virtual, { create: false })
+        return await walkSizes(rootDir)
+      } catch {
+        return 0
+      }
+    }
+    throw err
+  }
+}

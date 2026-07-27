@@ -106,10 +106,29 @@ async def test_search_entity_builds_or_clause():
     accessor = _accessor_with_conn(conn)
     await search_entity(accessor, "public", "tables", "t1", "pat", limit=5)
     final_call_sql = conn.fetch.await_args_list[1].args[0]
-    assert "ILIKE" in final_call_sql
-    assert final_call_sql.count("ILIKE") == 3
+    # grep is case-sensitive by default, so the push-down uses LIKE, not ILIKE.
+    assert "ILIKE" not in final_call_sql
+    assert final_call_sql.count("LIKE") == 3
     assert "$1" in final_call_sql
     assert "LIMIT $2" in final_call_sql
+
+
+@pytest.mark.asyncio
+async def test_search_entity_case_insensitive_uses_ilike_and_escapes():
+    conn = MagicMock()
+    conn.fetch = AsyncMock(side_effect=[[{"column_name": "a"}], []])
+    accessor = _accessor_with_conn(conn)
+    await search_entity(accessor,
+                        "public",
+                        "tables",
+                        "t1",
+                        "user_id",
+                        limit=5,
+                        case_insensitive=True)
+    final_call_sql = conn.fetch.await_args_list[1].args[0]
+    assert "ILIKE" in final_call_sql
+    # `_` is escaped so it matches literally, not as a LIKE wildcard.
+    assert conn.fetch.await_args_list[1].args[1] == "%user\\_id%"
 
 
 @pytest.mark.asyncio

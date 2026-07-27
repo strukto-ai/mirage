@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import datetime as dt
+import math
 from collections.abc import Iterable
 from typing import Any
 
@@ -34,7 +35,13 @@ def _scalar_tag(v) -> str:
     if isinstance(v, int):
         return BsonTypeTag.INT
     if isinstance(v, float):
-        return BsonTypeTag.DOUBLE
+        # MongoDB is schemaless, so a field's type is inferred from values.
+        # The JS driver returns BSON double as a plain JS number, so it cannot
+        # tell a whole-valued double from an int (Number.isInteger). Mirror
+        # that here so py and ts classify identically (a whole-valued double
+        # is typed int, matching how it renders as a bare integer).
+        return (BsonTypeTag.INT
+                if math.isfinite(v) and v.is_integer() else BsonTypeTag.DOUBLE)
     if isinstance(v, str):
         return BsonTypeTag.STRING
     if isinstance(v, ObjectId):
@@ -85,7 +92,10 @@ async def sample_field_types(col,
                              sample_size: int = 100) -> list[dict[str, Any]]:
     counts: dict[str, dict[str, int]] = {}
     total = 0
-    async for doc in await col.aggregate([{"$sample": {"size": sample_size}}]):
+    # Read the first sample_size docs sorted by _id (deterministic), not
+    # $sample (random): schema.json must be reproducible across reads, and
+    # this mirrors the TS sampler so the two languages infer identically.
+    async for doc in col.find({}, sort=[(PRIMARY_KEY, 1)], limit=sample_size):
         total += 1
         _walk(doc, "", counts)
     if total == 0:

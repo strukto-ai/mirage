@@ -59,12 +59,18 @@ function spec(virtual: string): PathSpec {
 }
 
 async function run(
-  overrides: { pattern?: string | null; recursive?: boolean; exactFileSet?: boolean } = {},
+  overrides: {
+    pattern?: string | null
+    recursive?: boolean
+    wholeWord?: boolean
+    exactFileSet?: boolean
+  } = {},
   accessor = makeAccessor(),
 ): Promise<{ resolved: PathSpec[]; usedSearch: boolean }> {
   return narrowScope(accessor, [scope()], overrides.pattern ?? 'needle', {
     fixedString: false,
     recursive: overrides.recursive ?? true,
+    wholeWord: overrides.wholeWord ?? true,
     exactFileSet: overrides.exactFileSet ?? false,
   })
 }
@@ -118,10 +124,12 @@ describe('narrowScope', () => {
     expect(narrow).not.toHaveBeenCalled()
   })
 
-  it('narrows regexes on their required literal', async () => {
+  it('skips search for a regex even under -w', async () => {
+    // A regex narrows on an extracted literal, so the searched term is only
+    // part of the match and a whole-word search for it can miss real matches.
     const out = await run({ pattern: 'import.*os' })
-    expect(out.usedSearch).toBe(true)
-    expect(narrow.mock.calls[0]?.[1]).toBe('import')
+    expect(out.usedSearch).toBe(false)
+    expect(narrow).not.toHaveBeenCalled()
   })
 
   it('skips search for file scopes', async () => {

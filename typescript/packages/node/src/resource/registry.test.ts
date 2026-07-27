@@ -18,10 +18,15 @@ import {
   normalizeMem0Config,
   normalizeOneDriveConfig,
   OneDriveResource,
+  ResourceName,
   resourceStateRequiresOverride,
 } from '@struktoai/mirage-core'
 import { normalizeS3Config } from './s3/config.ts'
 import { buildResource, knownResources, register } from './registry.ts'
+
+// Captured before any test calls register(), which is the public hook for
+// custom resources and legitimately adds names with no ResourceName.
+const BUILTIN_RESOURCES = knownResources()
 
 describe('node resource registry', () => {
   it('lists known resources sorted', () => {
@@ -259,5 +264,34 @@ describe('hf resources in registry', () => {
     await expect(buildResource('hf_models', { repo_id: 'plain' })).rejects.toThrow(
       /namespace\/name/,
     )
+  })
+})
+
+describe('ResourceName coverage', () => {
+  // Names that are deliberately not buildable from the node registry.
+  const BROWSER_ONLY = new Set(['opfs'])
+  // `history` is an internal view mount, never named in user config.
+  const INTERNAL = new Set(['history'])
+  // Config-mountable in python but not yet wired into a TypeScript registry.
+  // Listing them keeps the gap visible instead of hiding it behind a count.
+  const PYTHON_ONLY = new Set(['chroma', 'dify', 'lancedb', 'qdrant'])
+
+  it('every resource name is buildable or explicitly exempt', () => {
+    // This is the guard a hardcoded entry count cannot give: adding a backend
+    // to ResourceName without a registry factory fails here, naming it.
+    const known = new Set(BUILTIN_RESOURCES)
+    const unreachable = Object.values(ResourceName).filter(
+      (name) =>
+        !known.has(name) &&
+        !BROWSER_ONLY.has(name) &&
+        !INTERNAL.has(name) &&
+        !PYTHON_ONLY.has(name),
+    )
+    expect(unreachable).toEqual([])
+  })
+
+  it('every built-in registry factory has a ResourceName', () => {
+    const names = new Set<string>(Object.values(ResourceName))
+    expect(BUILTIN_RESOURCES.filter((n) => !names.has(n))).toEqual([])
   })
 })

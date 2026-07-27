@@ -16,6 +16,7 @@ import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { listDatabases } from '../../../core/mongodb/_client.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
+import { hasUnresolvedGlob } from '../utils/operands.ts'
 import { MONGODB_IO } from './io.ts'
 import { read as mongoRead } from '../../../core/mongodb/read.ts'
 import { readdir as mongoReaddir } from '../../../core/mongodb/readdir.ts'
@@ -32,7 +33,7 @@ import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
-import { patternArg } from '../grep_helper.ts'
+import { hasSearchShapingFlags, patternArg } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
 import { searchProvision } from './_provision.ts'
 
@@ -55,8 +56,16 @@ async function grepCommand(
   const pattern = patternArg(texts, opts.flags)
   const limit = accessor.config.defaultSearchLimit
 
+  // The $regex push-down prints each matching document as a whole line, so
+  // output/match-shaping flags must defer to the generic scan below.
   const first = paths[0]
-  if (first !== undefined && pattern !== null && !pattern.includes('\n')) {
+  if (
+    first !== undefined &&
+    !hasUnresolvedGlob(paths) &&
+    pattern !== null &&
+    !pattern.includes('\n') &&
+    !hasSearchShapingFlags(opts.flags)
+  ) {
     const scope = detectScope(first)
 
     if (scope.level !== ScopeLevel.ROOT) {

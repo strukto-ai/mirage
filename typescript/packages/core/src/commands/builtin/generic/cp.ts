@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf, rekey } from '../../../utils/key_prefix.ts'
+import { mountedPath, rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
@@ -39,7 +39,8 @@ import {
   type BackendKeyFn,
 } from '../utils/copy.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../../utils/errors.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
+import { norm, parent } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 
@@ -247,7 +248,46 @@ export async function targetDirError(
   return null
 }
 
-// Probe a path once for {exists, isDir}.
+// GNU error line when a destination's parent chain is unusable, or null when
+// it is a usable directory path. cp is not `mkdir -p`: it never creates the
+// destination's parent, so a missing or non-directory component is a
+// per-operand failure. GNU surfaces the two cases at different phases and the
+// wording follows: a component that is a plain file fails the destination stat
+// ("cannot stat 'DST': Not a directory", at any depth), while a merely absent
+// parent fails the create ("cannot create regular file", or "cannot create
+// directory" for a recursive source). Only walks upward until it finds
+// something that exists, so the common case costs a single stat.
+async function destParentError(
+  cmdName: string,
+  stat: StatFn,
+  target: PathSpec,
+  srcIsDir: boolean,
+): Promise<string | null> {
+  const noun = srcIsDir ? 'directory' : 'regular file'
+  const enoentLine = `${cmdName}: cannot create ${noun} '${target.virtual}': No such file or directory`
+  const enotdirLine = `${cmdName}: cannot stat '${target.virtual}': Not a directory`
+  const immediate = parent(norm(target.virtual))
+  let node = immediate
+  while (node !== '/') {
+    const { exists, isDir } = await entryKind(stat, descendantPath(target, node))
+    if (exists) {
+      if (!isDir) return enotdirLine
+      // An existing directory higher up means the intermediate components
+      // are simply absent.
+      return node === immediate ? null : enoentLine
+    }
+    node = parent(node)
+  }
+  // The mount root always exists as a directory and is never stat-ed: a
+  // backend that cannot stat "/" must not fail every copy into it.
+  return immediate === '/' ? null : enoentLine
+}
+
+// Probe a path once for {exists, isDir}. ENOTDIR counts as "does not exist":
+// a path whose parent chain runs through a plain file cannot exist, and the
+// callers (cp/mv) turn that into GNU's own wording via destParentError. Only
+// this probe absorbs it; isMissingPath stays ENOENT-only so read-family
+// commands keep reporting "Not a directory" verbatim.
 export async function entryKind(
   stat: StatFn,
   path: PathSpec,
@@ -256,10 +296,36 @@ export async function entryKind(
   try {
     info = await stat(path)
   } catch (err) {
-    if (!isMissingPath(err)) throw err
+    const code = (err as { code?: unknown }).code
+    if (!isMissingPath(err) && code !== 'ENOTDIR') throw err
     return { exists: false, isDir: false }
   }
   return { exists: true, isDir: info.type === FileType.DIRECTORY }
+}
+
+// Probe a source operand, keeping the errno GNU reports: `cp /plain/child /dst`
+// is `cannot stat 'X': Not a directory`, not "No such file or directory". The
+// backends cannot supply that distinction, because stat answers ENOENT for a
+// path under a plain file just as it does for a genuinely absent one (only
+// readdir splits the two). So the chain is walked the way destParentError walks
+// a destination's: the first component that does exist decides, and a plain
+// file there means ENOTDIR. Walking happens only on the failure path.
+export async function sourceKind(
+  stat: StatFn,
+  path: PathSpec,
+): Promise<{ exists: boolean; isDir: boolean; strerror: string | null }> {
+  const probe = await entryKind(stat, path)
+  if (probe.exists) return { exists: true, isDir: probe.isDir, strerror: null }
+  let node = parent(norm(path.virtual))
+  while (node !== '/') {
+    const up = await entryKind(stat, descendantPath(path, node))
+    if (up.exists) {
+      if (!up.isDir) return { exists: false, isDir: false, strerror: 'Not a directory' }
+      break
+    }
+    node = parent(node)
+  }
+  return { exists: false, isDir: false, strerror: 'No such file or directory' }
 }
 
 // GNU dir/non-dir overwrite mismatch line, or null when compatible.
@@ -425,18 +491,39 @@ function descendantPath(root: PathSpec, virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual, rekey(root.virtual, root.resourcePath, virtual))
 }
 
-function mountedPath(root: PathSpec, mountPath: string): PathSpec {
-  const prefix = mountPrefixOf(root.virtual, root.resourcePath)
-  const virtual = prefix !== '' ? prefix + mountPath : mountPath
-  return PathSpec.fromStrPath(virtual, stripSlash(mountPath))
-}
-
 // Recreate a source tree's directories under the destination root. Only
 // needed on the per-entry policy path, where a whole-tree dirCopy cannot be
 // used: without this, a directory holding no files would never appear at the
 // destination, and an entirely empty tree would copy to nothing. A backend
 // exposing no mkdir (directories are implied by keys) is a no-op. Parents
 // sort before children so a nested tree lands in order.
+// GNU -v lines for a natively copied tree, parents first. GNU `cp -rv`
+// reports directories as well as files, including the source root itself.
+// Deliberate divergence: GNU's sibling order follows readdir, which no backend
+// can reproduce, so entries are sorted lexicographically instead. That keeps
+// every parent ahead of its children (GNU's only load-bearing ordering
+// guarantee) and is stable across backends.
+async function treeLines(
+  strategy: NativeCopy,
+  src: PathSpec,
+  target: PathSpec,
+  srcBase: string,
+  dstBase: string,
+): Promise<string[]> {
+  const dirs = await strategy.find(src, { type: 'd' })
+  const files = await strategy.find(src, { type: 'f' })
+  const unique = [...new Set([srcBase, ...dirs, ...files])].sort()
+  return unique.map((entryMount) => {
+    const entry = mountedPath(src, entryMount)
+    const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
+    return `'${entry.virtual}' -> '${entryDst.virtual}'`
+  })
+}
+
+// A failed mkdir stops the whole source, mirroring copyEntries and GNU: the
+// children of a directory that could not be created cannot land, so reporting
+// one line per descendant (and then copying the files anyway) would be both
+// noisy and wrong. Returns false when the caller must skip the file pass.
 async function mirrorDirs(
   strategy: NativeCopy,
   stat: StatFn,
@@ -447,22 +534,28 @@ async function mirrorDirs(
   writes: Record<string, ByteSource>,
   errors: string[],
   index?: IndexCacheStore,
-): Promise<void> {
-  if (strategy.mkdir === undefined) return
+  lines?: string[],
+): Promise<boolean> {
+  if (strategy.mkdir === undefined) return true
   const mounts = [srcBase, ...(await strategy.find(src, { type: 'd' }))]
   const unique = [...new Set(mounts)].sort((a, b) => a.length - b.length)
   for (const entryMount of unique) {
     const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
+    if (lines !== undefined) {
+      const entry = mountedPath(src, entryMount)
+      lines.push(`'${entry.virtual}' -> '${entryDst.virtual}'`)
+    }
     if (await isDirectory(stat, entryDst, index)) continue
     try {
       await strategy.mkdir(entryDst)
     } catch (err) {
       if (!isFsError(err)) throw err
       errors.push(`cp: cannot create directory '${entryDst.virtual}': ${String(fsStrerror(err))}`)
-      continue
+      return false
     }
     writes[entryDst.mountPath] = new Uint8Array()
   }
+  return true
 }
 
 // List a tree as {path, isDir} pairs, parents before children. The type is
@@ -616,6 +709,7 @@ export async function cpGeneric(
   const [sources, dstOperand] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
   let dst: PathSpec
   let dstIsDir: boolean
+  let dstExists: boolean
   if (dstOperand === null) {
     const firstSource = sources[0]
     if (firstSource === undefined) return [null, new IOResult()]
@@ -628,12 +722,16 @@ export async function cpGeneric(
       return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
     }
     dstIsDir = true
+    dstExists = true
   } else if (flags.noTargetDir) {
     dst = dstOperand
     dstIsDir = false
+    dstExists = true
   } else {
     dst = dstOperand
-    dstIsDir = await isDirectory(stat, dst, index)
+    const probe = await entryKind(stat, dst)
+    dstExists = probe.exists
+    dstIsDir = probe.isDir
   }
   let versionReaddir = readdir
   if (versionReaddir === undefined && isPrimitiveCopy(strategy)) {
@@ -651,10 +749,10 @@ export async function cpGeneric(
   const reads: Record<string, Uint8Array> = {}
   const lines: string[] = []
   const errors: string[] = []
-  for (const [src, target] of copyTargets(sources, dst, dstIsDir)) {
-    const { exists: srcExists, isDir: srcIsDir } = await entryKind(stat, src)
+  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists)) {
+    const { exists: srcExists, isDir: srcIsDir, strerror: srcErr } = await sourceKind(stat, src)
     if (!srcExists) {
-      errors.push(`cp: cannot stat '${src.virtual}': No such file or directory`)
+      errors.push(`cp: cannot stat '${src.virtual}': ${String(srcErr)}`)
       continue
     }
     if (keyOf(src) === keyOf(target)) {
@@ -670,6 +768,13 @@ export async function cpGeneric(
       continue
     }
     const { exists: targetExists, isDir: targetIsDir } = await entryKind(stat, target)
+    if (!targetExists) {
+      const parentErr = await destParentError('cp', stat, target, srcIsDir)
+      if (parentErr !== null) {
+        errors.push(parentErr)
+        continue
+      }
+    }
     const mismatch = overwriteTypeError('cp', src, srcIsDir, target, targetExists, targetIsDir)
     if (mismatch !== null) {
       errors.push(mismatch)
@@ -692,17 +797,30 @@ export async function cpGeneric(
         if (flags.noClobber && targetExists) continue
         await strategy.dirCopy(src, target)
         for (const entryMount of await strategy.find(src, { type: 'f' })) {
-          const entry = mountedPath(src, entryMount)
           const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
           writes[entryDst.mountPath] = new Uint8Array()
-          if (flags.verbose) lines.push(`'${entry.virtual}' -> '${entryDst.virtual}'`)
+        }
+        if (flags.verbose) {
+          lines.push(...(await treeLines(strategy, src, target, srcBase, dstBase)))
         }
         continue
       }
       // Per-entry policy forfeits dirCopy, so the tree's directories are
       // recreated here: a files-only pass would drop every directory that
       // holds no files (GNU keeps them).
-      await mirrorDirs(strategy, stat, src, target, srcBase, dstBase, writes, errors, index)
+      const mirrored = await mirrorDirs(
+        strategy,
+        stat,
+        src,
+        target,
+        srcBase,
+        dstBase,
+        writes,
+        errors,
+        index,
+        flags.verbose ? lines : undefined,
+      )
+      if (!mirrored) continue
       for (const entryMount of await strategy.find(src, { type: 'f' })) {
         const entry = mountedPath(src, entryMount)
         const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))

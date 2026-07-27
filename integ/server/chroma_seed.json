@@ -1,0 +1,135 @@
+{
+  "path_tree": {
+    "guides/quickstart.md": {
+      "size": 180,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-02-01T00:00:00Z"
+    },
+    "guides/auth.md": {
+      "size": 190,
+      "created_at": "2026-01-15T00:00:00Z",
+      "updated_at": "2026-02-15T00:00:00Z"
+    },
+    "policies/refunds.md": {
+      "size": 150,
+      "created_at": "2026-02-01T00:00:00Z",
+      "updated_at": "2026-03-01T00:00:00Z"
+    },
+    "policies/privacy.md": {
+      "size": 120,
+      "created_at": "2026-02-10T00:00:00Z",
+      "updated_at": "2026-03-10T00:00:00Z"
+    },
+    "CHANGELOG.md": {
+      "size": 90
+    },
+    "policies/archived.md": {
+      "created_at": "2026-03-01T00:00:00Z"
+    }
+  },
+  "chunks": {
+    "policies/archived.md": [
+      {
+        "document": "Archived policy retained for records.",
+        "metadata": {
+          "page_slug": "policies/archived.md",
+          "chunk_index": 0
+        }
+      }
+    ],
+    "guides/quickstart.md": [
+      {
+        "document": "Welcome to Acme. This quickstart gets you running fast.",
+        "metadata": {
+          "page_slug": "guides/quickstart.md",
+          "chunk_index": 0
+        }
+      },
+      {
+        "document": "Install the CLI with npm i -g acme then run acme login.",
+        "metadata": {
+          "page_slug": "guides/quickstart.md",
+          "chunk_index": 1
+        }
+      },
+      {
+        "document": "Set your token in the ACME_TOKEN environment variable.",
+        "metadata": {
+          "page_slug": "guides/quickstart.md",
+          "chunk_index": 2
+        }
+      }
+    ],
+    "guides/auth.md": [
+      {
+        "document": "Authentication uses bearer tokens via the Authorization header.",
+        "metadata": {
+          "page_slug": "guides/auth.md",
+          "chunk_index": 0
+        }
+      },
+      {
+        "document": "Requests are rate limited to 100 calls per minute per token.",
+        "metadata": {
+          "page_slug": "guides/auth.md",
+          "chunk_index": 1
+        }
+      },
+      {
+        "document": "If you exceed the limit you receive HTTP 429 and must back off.",
+        "metadata": {
+          "page_slug": "guides/auth.md",
+          "chunk_index": 2
+        }
+      }
+    ],
+    "policies/refunds.md": [
+      {
+        "document": "Refunds are available within 30 days of purchase.",
+        "metadata": {
+          "page_slug": "policies/refunds.md",
+          "chunk_index": 0
+        }
+      },
+      {
+        "document": "Email support to start a refund with your order id.",
+        "metadata": {
+          "page_slug": "policies/refunds.md",
+          "chunk_index": 1
+        }
+      },
+      {
+        "document": "Approved refunds are processed within five business days.",
+        "metadata": {
+          "page_slug": "policies/refunds.md",
+          "chunk_index": 2
+        }
+      }
+    ],
+    "policies/privacy.md": [
+      {
+        "document": "Customer data is stored encrypted at rest and in transit.",
+        "metadata": {
+          "page_slug": "policies/privacy.md",
+          "chunk_index": 0
+        }
+      },
+      {
+        "document": "We never sell personal information to third parties.",
+        "metadata": {
+          "page_slug": "policies/privacy.md",
+          "chunk_index": 1
+        }
+      }
+    ],
+    "CHANGELOG.md": [
+      {
+        "document": "v2.0 added rate limit headers and refund automation.",
+        "metadata": {
+          "page_slug": "CHANGELOG.md",
+          "chunk_index": 0
+        }
+      }
+    ]
+  }
+}

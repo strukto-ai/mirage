@@ -27,14 +27,28 @@ function getCurrentSession(): Session | null {
   return sessionStorage.getStore() ?? null
 }
 
+/**
+ * A session touched a mount outside its allowlist.
+ *
+ * Stamped EACCES + operand so it behaves like python's `PermissionError`
+ * from the same guard, which is a member of `FS_ERRORS`: callers that
+ * handle filesystem errors per-operand (the redirect write pass) render
+ * `<target>: Permission denied` instead of letting the guard's own prose
+ * escape as the whole message. Callers that want the prose still read
+ * `.message`, and the explicit `instanceof` checks in `command.ts` and the
+ * FUSE bridge run before any of that and are unaffected.
+ */
 export class MountNotAllowedError extends Error {
   readonly sessionId: string
   readonly mountPrefix: string
+  readonly code = 'EACCES'
+  readonly virtualPath: string
   constructor(sessionId: string, mountPrefix: string) {
     super(`session '${sessionId}' not allowed to access mount '${mountPrefix}'`)
     this.name = 'MountNotAllowedError'
     this.sessionId = sessionId
     this.mountPrefix = mountPrefix
+    this.virtualPath = mountPrefix
   }
 }
 

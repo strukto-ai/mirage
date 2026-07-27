@@ -15,7 +15,7 @@
 import { IOResult } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
-import { isMissingOp } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError, isMissingOp } from '../../../utils/errors.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -575,8 +575,19 @@ export async function handleTouch(
       if (setMtime) fields.mtime = stamp
       await setattrVia(namespace, dispatch, resolved, fields)
     } catch (err) {
-      if (!isReadOnlyError(err)) throw err
-      errors.push(readOnlyError('touch', namespace, resolved))
+      if (isReadOnlyError(err)) {
+        errors.push(readOnlyError('touch', namespace, resolved))
+        exitCode = 1
+        continue
+      }
+      // A destination whose parent chain is not all directories is one
+      // failed operand, not an aborted command: GNU reports it and touches
+      // the rest. Caught here rather than around the write because backends
+      // disagree about which call refuses first (ram answers stat with
+      // ENOENT and fails the write; a real filesystem answers stat itself
+      // with ENOTDIR).
+      if (!isFsError(err)) throw err
+      errors.push(`touch: cannot touch '${target.rawPath}': ${String(fsStrerror(err))}\n`)
       exitCode = 1
     }
   }

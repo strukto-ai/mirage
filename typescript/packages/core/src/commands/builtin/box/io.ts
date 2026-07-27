@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../../accessor/box.ts'
-import { du as boxDu, duAll as boxDuAll } from '../../../core/box/du.ts'
+import { size as boxDu, entries as boxDuAll } from '../../../core/box/du/index.ts'
 import { find as boxFind } from '../../../core/box/find.ts'
 import { read as boxRead, stream as boxStream } from '../../../core/box/read.ts'
 import { isDirName, readdir as boxReaddir } from '../../../core/box/readdir.ts'
@@ -40,8 +40,8 @@ export const BOX_IO: CommandIO<BoxAccessor> = {
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),
   local: false,
-  duTotal: boxDu,
-  duAll: boxDuAll,
+  duSize: boxDu,
+  duEntries: boxDuAll,
   write: boxWrite,
   exists: boxExists,
   mkdir: boxMkdir,

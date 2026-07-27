@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "id": "lf_dataset_item_ids",
+      "seq": 600060,
+      "targets": ["langfuse"],
+      "command": "jq -r '.id' /lf/datasets/eval-basic/items.jsonl | sort",
+      "expect": { "exit": 0, "stdout": "item-one\nitem-two\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_item_inputs",
+      "seq": 600061,
+      "targets": ["langfuse"],
+      "command": "jq -r '.input.question' /lf/datasets/eval-basic/items.jsonl | sort",
+      "expect": { "exit": 0, "stdout": "capital of france\ncapital of japan\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_item_expected_outputs",
+      "seq": 600062,
+      "targets": ["langfuse"],
+      "command": "jq -r '.expectedOutput.answer' /lf/datasets/eval-basic/items.jsonl | sort",
+      "expect": { "exit": 0, "stdout": "paris\ntokyo\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_item_status",
+      "seq": 600063,
+      "targets": ["langfuse"],
+      "command": "jq -r '.status' /lf/datasets/eval-basic/items.jsonl | sort -u",
+      "expect": { "exit": 0, "stdout": "ACTIVE\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_items_line_count",
+      "seq": 600064,
+      "targets": ["langfuse"],
+      "command": "cat /lf/datasets/eval-basic/items.jsonl | wc -l",
+      "expect": { "exit": 0, "stdout": "2\n", "stderr": "" }
+    },
+    {
+      "id": "lf_empty_dataset_items_cat",
+      "seq": 600065,
+      "targets": ["langfuse"],
+      "command": "cat /lf/datasets/eval-empty/items.jsonl",
+      "expect": { "exit": 0, "stdout": "", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_run_name",
+      "seq": 600066,
+      "targets": ["langfuse"],
+      "command": "jq -r '.name' /lf/datasets/eval-basic/runs/run-alpha.jsonl",
+      "expect": { "exit": 0, "stdout": "run-alpha\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_run_dataset_name",
+      "seq": 600067,
+      "targets": ["langfuse"],
+      "command": "jq -r '.datasetName' /lf/datasets/eval-basic/runs/run-alpha.jsonl",
+      "expect": { "exit": 0, "stdout": "eval-basic\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_run_metadata",
+      "seq": 600068,
+      "targets": ["langfuse"],
+      "command": "jq -c '.metadata' /lf/datasets/eval-basic/runs/run-alpha.jsonl",
+      "expect": { "exit": 0, "stdout": "{}\n", "stderr": "" }
+    }
+  ]
+}

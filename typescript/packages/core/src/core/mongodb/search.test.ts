@@ -40,13 +40,17 @@ beforeEach(() => {
 })
 
 describe('searchCollection', () => {
-  it('uses $text when a text index exists', async () => {
+  it('uses $regex even when a text index exists', async () => {
+    // $text matches whole words and stems them while grep matches substrings,
+    // and these rows are the grep output with no local re-scan, so the text
+    // index is never used.
     vi.mocked(_client.listIndexes).mockResolvedValue([{ name: 'body_text', textIndexVersion: 3 }])
     vi.mocked(_client.findDocuments).mockResolvedValue([{ _id: '1', name: 'a' }])
-    const out = await searchCollection(accessorWith(), 'app', 'users', 'foo', 5)
+    const acc = accessorWith([{ _id: '1', name: 'x' }])
+    const out = await searchCollection(acc, 'app', 'users', 'foo', 5)
     expect(out).toEqual([{ _id: '1', name: 'a' }])
     const call = vi.mocked(_client.findDocuments).mock.calls[0]
-    expect(call?.[3]).toEqual({ $text: { $search: 'foo' } })
+    expect(call?.[3]).toEqual({ $or: [{ name: { $regex: 'foo', $options: 'i' } }] })
   })
 
   it('falls back to $or of $regex over sampled string fields', async () => {
@@ -80,7 +84,7 @@ describe('searchDatabase', () => {
     vi.mocked(_client.findDocuments)
       .mockResolvedValueOnce([{ _id: '1' }])
       .mockResolvedValueOnce([])
-    const out = await searchDatabase(accessorWith(), 'app', 'foo', 5)
+    const out = await searchDatabase(accessorWith([{ _id: '1', name: 'x' }]), 'app', 'foo', 5)
     expect(out).toEqual([{ database: 'app', collection: 'users', docs: [{ _id: '1' }] }])
   })
 })

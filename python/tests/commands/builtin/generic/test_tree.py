@@ -208,7 +208,9 @@ async def test_tree_missing_path_marks_error_and_exits_2():
         "/nowhere  [error opening dir]", "", "0 directories, 0 files"
     ]
     assert io.exit_code == 2
-    assert b"nowhere" in (io.stderr or b"")
+    # GNU signals this with the inline marker and exit 2 and writes nothing to
+    # stderr; TypeScript already behaved this way.
+    assert io.stderr is None
 
 
 @pytest.mark.asyncio
@@ -218,3 +220,23 @@ async def test_tree_empty_dir_reports_zero_counts():
     output, io = await tree(_spec("/r"), readdir=readdir, stat=stat)
     assert output.decode().splitlines() == ["/r", "", "0 directories, 0 files"]
     assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_tree_not_a_directory_matches_the_missing_path_shape():
+    """GNU `tree /a.txt/x` prints the same `[error opening dir]` body and
+    exits 2 as `tree /nope`; ENOTDIR must not escape the walk.
+    """
+
+    async def readdir(p: PathSpec, _index=None) -> list[str]:
+        raise NotADirectoryError(p.virtual)
+
+    async def stat(p: PathSpec, index=None) -> FileStat:
+        raise NotADirectoryError(p.virtual)
+
+    output, io = await tree(_spec("/a.txt/x"), readdir=readdir, stat=stat)
+    lines = output.decode().splitlines()
+    assert lines == [
+        "/a.txt/x  [error opening dir]", "", "0 directories, 0 files"
+    ]
+    assert io.exit_code == 2

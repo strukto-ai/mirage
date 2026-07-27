@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.types import PathSpec
+
 
 def normalize(raw: str | None) -> str:
     """Normalize a key prefix.
@@ -166,3 +168,20 @@ def mount_prefix_of(virtual: str, resource_path: str) -> str:
     """
     prefix_len = len(virtual.rstrip("/")) - len(resource_path)
     return virtual[:prefix_len].rstrip("/")
+
+
+def mounted_path(root: PathSpec, mount_path: str) -> PathSpec:
+    """A PathSpec for a mount-local key, addressed like ``root``.
+
+    Rebuilds the virtual path from the mount prefix ``root`` sits behind,
+    so a backend holding only a key (an ancestor it walked to, say) can
+    name it the way the user would see it. Mirrors TS ``mountedPath``.
+
+    Args:
+        root (PathSpec): Any operand on the same mount, read for its
+            prefix.
+        mount_path (str): The mount-local key to address.
+    """
+    prefix = mount_prefix_of(root.virtual, root.resource_path)
+    virtual = prefix + mount_path if prefix else mount_path
+    return PathSpec.from_str_path(virtual, mount_path.strip("/"))

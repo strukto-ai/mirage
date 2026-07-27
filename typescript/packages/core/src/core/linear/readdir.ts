@@ -299,5 +299,8 @@ export async function readdir(
     return names
   }
 
-  return []
+  // An unrecognized path is not an empty directory: returning [] made `ls` and
+  // `tree` report a bogus path as a real-but-empty one, and left `rg` without a
+  // message.
+  throw enoent(virtualKey)
 }

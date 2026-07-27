@@ -19,8 +19,7 @@ from typing import Callable
 from mirage.commands.builtin.utils.backup import (DEFAULT_BACKUP_SUFFIX,
                                                   backup_control, sibling_path)
 from mirage.commands.builtin.utils.copy import (backend_key_default,
-                                                copy_targets, is_directory,
-                                                path_exists)
+                                                copy_targets, path_exists)
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -30,8 +29,9 @@ from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 from mirage.commands.builtin.generic.cp import (  # isort: skip
     TransferPolicy, backup_displaces, backup_raw, copy_entries, entry_kind,
-    make_backup, overwrite_gate, overwrite_type_error, split_operands,
-    target_dir_error, target_flags, update_mode, walk, wrap_target_dir)
+    source_kind, make_backup, overwrite_gate, overwrite_type_error,
+    split_operands, target_dir_error, target_flags, update_mode, walk,
+    wrap_target_dir)
 
 _logger = logging.getLogger(__name__)
 
@@ -332,10 +332,12 @@ async def mv(
         if err is not None:
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)
         dst_is_dir = True
+        dst_exists = True
     elif flags.no_target_dir:
         dst_is_dir = False
+        dst_exists = True
     else:
-        dst_is_dir = await is_directory(stat, dst)
+        dst_exists, dst_is_dir = await entry_kind(stat, dst)
     if readdir is None and isinstance(strategy, PrimitiveMove):
         readdir = strategy.readdir
     policy = TransferPolicy(cmd_name="mv",
@@ -346,11 +348,10 @@ async def mv(
     writes: dict[str, ByteSource] = {}
     lines: list[str] = []
     errors: list[str] = []
-    for src, target in copy_targets(sources, dst, dst_is_dir):
-        src_exists, src_is_dir = await entry_kind(stat, src)
+    for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists):
+        src_exists, src_is_dir, src_err = await source_kind(stat, src)
         if not src_exists:
-            errors.append(f"mv: cannot stat '{src.virtual}': "
-                          "No such file or directory")
+            errors.append(f"mv: cannot stat '{src.virtual}': {src_err}")
             continue
         if key_of(src) == key_of(target):
             errors.append(f"mv: '{src.virtual}' and '{target.virtual}' "
@@ -417,7 +418,16 @@ async def mv(
                 # the source entries it could not remove.
                 continue
         else:
-            await strategy.rename(src, target)
+            try:
+                await strategy.rename(src, target)
+            except FS_ERRORS as exc:
+                # A backend rename that refuses (e.g. a destination whose
+                # parent chain is not all directories) is one failed
+                # operand, not an aborted command: GNU reports it and
+                # keeps going with the remaining sources.
+                errors.append(f"mv: cannot move '{src.virtual}' to "
+                              f"'{target.virtual}': {fs_strerror(exc)}")
+                continue
             writes[src.mount_path] = b""
             writes[target.mount_path] = b""
         if flags.verbose:

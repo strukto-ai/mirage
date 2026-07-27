@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { dropTrailingSegments, rebaseOne } from './path.ts'
+import { rstripSlash } from './slash.ts'
+
 export interface FsError extends Error {
   code: string
   // The virtual path the user typed (PathSpec.virtual) — the ONLY path that
@@ -62,6 +65,34 @@ export function eacces(path: string | { virtual: string }): FsError {
 
 export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
+}
+
+// The errno a failed directory listing should report. opendir reports ENOTDIR
+// only when a component of the path exists and is not a directory (GNU
+// `ls /f.txt/x` -> 'Not a directory'); a component that does not exist at all
+// is ENOENT (`ls /nope` -> 'No such file or directory'), however deep it is.
+// Store-backed backends have no kernel to draw that line for them, so they
+// walk the ancestors and ask here instead of collapsing both cases into one
+// errno. `key` is the mount-local normalized path that was looked up, isFile
+// probes whether a mount-local path exists as a non-directory and isDir
+// whether it exists as a directory. The walk stops at the first component
+// that is neither, the way the kernel stops resolving there: a store can hold
+// a key whose parent is not a directory, and looking past that gap would
+// report ENOTDIR for a path the kernel never reaches.
+// Mirrors Python's readdir_error.
+export async function readdirError(
+  path: string | { virtual: string; rawPath?: string },
+  key: string,
+  isFile: (p: string) => boolean | Promise<boolean>,
+  isDir: (p: string) => boolean | Promise<boolean>,
+): Promise<FsError> {
+  const segments = key.split('/').filter((s) => s !== '')
+  for (let i = 1; i <= segments.length; i++) {
+    const component = `/${segments.slice(0, i).join('/')}`
+    if (await isFile(component)) return enotdir(path)
+    if (!(await isDir(component))) return enoent(path)
+  }
+  return enoent(path)
 }
 
 // The registry's refusal for a path that falls outside every mount. Mirrors
@@ -138,6 +169,21 @@ export function eaccesReadOnly(
   return err
 }
 
+// A missing-parent write refusal, keeping the backend's human message (tests
+// and logs read 'parent directory does not exist') while stamping ENOENT +
+// operand so fs chokepoints render 'No such file or directory'. Mirrors
+// Python, which raises FileNotFoundError with the same prose — an untyped
+// Error here leaked the prose to the user as if it were the path.
+export function enoentWithMessage(
+  message: string,
+  path: string | { virtual: string; rawPath?: string },
+): FsError {
+  const err = new Error(message) as FsError
+  err.code = 'ENOENT'
+  err.virtualPath = virtualOf(path)
+  return err
+}
+
 const STRERROR: Record<string, string> = {
   ENOENT: 'No such file or directory',
   ENOTDIR: 'Not a directory',
@@ -175,6 +221,31 @@ export function errorVirtualPath(err: unknown): string {
 export function isFsError(err: unknown): boolean {
   const code = (err as { code?: unknown }).code
   return typeof code === 'string' && gnuStrerror(code) !== null
+}
+
+// Re-spell a reported path the way its operand was typed. Backends name paths
+// in virtual space, but GNU quotes the operand as the user wrote it:
+// `cd /data && mkdir -p f.txt/sub` reports 'f.txt', not '/data/f.txt'. The path
+// an error names is the operand itself, an ancestor of it (mkdir -p blames the
+// component of the chain it tripped on), or something under it, so all three
+// are rebased onto rawPath. An absolute operand rebases to itself, which is why
+// this is a no-op for most invocations. Mirrors Python's operand_spelling.
+export function operandSpelling(
+  path: string,
+  operand: { virtual: string; rawPath?: string },
+): string {
+  const virtual = operand.virtual
+  const raw = operand.rawPath ?? virtual
+  if (raw === virtual) return path
+  if (path === virtual) return raw
+  const base = rstripSlash(virtual)
+  if (path.startsWith(base + '/')) return rebaseOne(path, virtual, raw)
+  const trimmed = rstripSlash(path)
+  if (base.startsWith(trimmed + '/')) {
+    const segments = (p: string): number => p.split('/').filter((s) => s !== '').length
+    return dropTrailingSegments(raw, segments(base) - segments(trimmed))
+  }
+  return path
 }
 
 // GNU coreutils stderr line for one failed path operand, spelled as typed

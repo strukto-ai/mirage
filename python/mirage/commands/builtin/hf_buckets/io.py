@@ -14,8 +14,8 @@
 
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.hf_buckets.create import create as _create
-from mirage.core.hf_buckets.du import du as _du
-from mirage.core.hf_buckets.du import du_all as _du_all
+from mirage.core.hf_buckets.du import entries as _du_entries
+from mirage.core.hf_buckets.du import size as _du_size
 from mirage.core.hf_buckets.exists import exists as _exists
 from mirage.core.hf_buckets.find import find as _find
 from mirage.core.hf_buckets.mkdir import mkdir as _mkdir
@@ -28,7 +28,6 @@ from mirage.core.hf_buckets.unlink import unlink as _unlink
 from mirage.core.hf_buckets.write import write_bytes as _write
 
 # Hugging Face bucket files are read and written through the generic factory;
-# du keeps a wrapper because its du_all returns a flat list (du_multi contract)
 # rather than the generic (list, total) tuple.
 # cp and mv are skipped because HF buckets have no server-side copy/rename op.
 IO = CommandIO(
@@ -45,8 +44,8 @@ IO = CommandIO(
     rm_r=_rm_r,
     create=_create,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du_size=_du_size,
+    du_entries=_du_entries,
 )
 
 resolve_glob = IO.resolve_glob

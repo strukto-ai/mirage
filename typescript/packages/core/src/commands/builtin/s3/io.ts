@@ -16,7 +16,7 @@ import type { S3Accessor } from '../../../accessor/s3.ts'
 import { SCOPE_ERROR } from '../../../core/s3/constants.ts'
 import { copy as s3Copy } from '../../../core/s3/copy.ts'
 import { create as s3Create } from '../../../core/s3/create.ts'
-import { du as s3Du, duAll as s3DuAll } from '../../../core/s3/du.ts'
+import { size as s3Du, entries as s3DuAll } from '../../../core/s3/du/index.ts'
 import { exists as s3Exists } from '../../../core/s3/exists.ts'
 import { find as s3Find } from '../../../core/s3/find.ts'
 import { mkdir as s3Mkdir } from '../../../core/s3/mkdir.ts'
@@ -51,6 +51,6 @@ export const S3_IO: CommandIO<S3Accessor> = {
   create: s3Create,
   truncate: s3Truncate,
   find: s3Find,
-  duTotal: s3Du,
-  duAll: s3DuAll,
+  duSize: s3Du,
+  duEntries: s3DuAll,
 }

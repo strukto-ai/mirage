@@ -77,9 +77,19 @@ describe('opfs/utils — handle resolvers (against mock OPFS)', () => {
 
   it('resolveFileHandle creates and finds files', async () => {
     const root = makeMockRoot()
+    await resolveDirHandle(root, '/a/b', { create: true })
     const file = await resolveFileHandle(root, '/a/b/c.txt', { create: true })
     expect(file.kind).toBe('file')
     expect(file.name).toBe('c.txt')
+  })
+
+  it('resolveFileHandle create applies to the file, not its parents', async () => {
+    // Creating the chain on demand would be a silent `mkdir -p` where GNU
+    // reports ENOENT.
+    const root = makeMockRoot()
+    await expect(resolveFileHandle(root, '/a/b/c.txt', { create: true })).rejects.toBeInstanceOf(
+      DOMException,
+    )
   })
 
   it('resolveParentDirHandle splits parent + name', async () => {

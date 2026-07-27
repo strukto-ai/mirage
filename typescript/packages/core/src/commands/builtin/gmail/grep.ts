@@ -58,7 +58,10 @@ async function grepCommand(
   const first = paths[0]
   if (first !== undefined && pattern !== null && !pattern.includes('\n') && !shaping) {
     const scope = detectScope(first)
-    if (scope.useNative) {
+    // Gmail search matches whole words while grep matches substrings,
+    // and the native path returns search results verbatim as the output, so
+    // a bare literal would under-report. Only -w makes the two agree.
+    if (scope.useNative && opts.flags.w === true) {
       const filePrefix =
         mountPrefixOf(first.virtual, first.resourcePath) !== ''
           ? mountPrefixOf(first.virtual, first.resourcePath)

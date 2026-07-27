@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "mdb_jq_titles",
+      "seq": 620070,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "jq '.title' /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alpha\"\n\"beta\"\n\"gamma\"\n\"delta\"\n\"epsilon\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_jq_schema_fields",
+      "seq": 620071,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongodb/mirage_integ/collections/books/schema.json | jq -c '.fields'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"path\":\"author\",\"presence\":1,\"types\":{\"string\":1}},{\"path\":\"rating\",\"presence\":1,\"types\":{\"double\":0.6,\"int\":0.4}},{\"path\":\"tags\",\"presence\":0.6,\"types\":{\"array<string>\":0.6}},{\"path\":\"title\",\"presence\":1,\"types\":{\"string\":1}},{\"path\":\"year\",\"presence\":1,\"types\":{\"int\":1}}]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

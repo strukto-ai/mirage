@@ -1,0 +1,472 @@
+{
+  "cases": [
+    {
+      "id": "qdrant_ls_root",
+      "seq": 640000,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "ls /db/",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat\ndog\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_ls_group",
+      "seq": 640001,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "ls /db/cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "big\nsmall\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_ls_leaf",
+      "seq": 640002,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "ls /db/cat/big",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.json\n1.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_find_txt",
+      "seq": 640003,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "find /db/ -name '*.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/cat/big/1.txt\n/db/cat/small/2.txt\n/db/dog/big/3.txt\n/db/dog/small/4.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_find_json",
+      "seq": 640004,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "find /db/ -name '*.json'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/cat/big/1.json\n/db/cat/small/2.json\n/db/dog/big/3.json\n/db/dog/small/4.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_cat_txt",
+      "seq": 640005,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_cat_json",
+      "seq": 640006,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_wc_c_txt",
+      "seq": 640007,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "wc -c /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "17 /db/cat/big/1.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_text",
+      "seq": 640008,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep orange /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_json_field",
+      "seq": 640009,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep label /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_i",
+      "seq": 640010,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -i ORANGE /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_n",
+      "seq": 640011,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -n cat /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_c",
+      "seq": 640012,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -c cat /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_o",
+      "seq": 640013,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -o cat /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat\ncat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_w",
+      "seq": 640014,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -w big /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_F_literal",
+      "seq": 640015,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -F 'orange cat' /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_E_alt",
+      "seq": 640016,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -E \"orange|brown\" /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_v",
+      "seq": 640017,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -v zebra /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_multi",
+      "seq": 640018,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep small /db/cat/small/2.json /db/dog/small/4.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/cat/small/2.json:{\"label\":\"cat\",\"kind\":\"small\",\"name\":\"a small grey cat\",\"id\":2}\n/db/dog/small/4.json:{\"label\":\"dog\",\"kind\":\"small\",\"name\":\"a small white dog\",\"id\":4}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_r_group",
+      "seq": 640019,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -r orange /db/cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/cat/big/1.json:{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n/db/cat/big/1.txt:a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_rl",
+      "seq": 640020,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -rl cat /db/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/cat/big/1.json\n/db/cat/big/1.txt\n/db/cat/small/2.json\n/db/cat/small/2.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_pipe_grep_stdin",
+      "seq": 640021,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.json | grep orange",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_rg_basic",
+      "seq": 640022,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "rg orange /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_du_leaf",
+      "seq": 640023,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "du /db/cat/big",
+      "expect": {
+        "exit": 0,
+        "stdout": "79\t/db/cat/big\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_du_group",
+      "seq": 640024,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "du /db/cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_du_root",
+      "seq": 640025,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "du /db/",
+      "expect": {
+        "exit": 0,
+        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n77\t/db/dog/big\n83\t/db/dog/small\n160\t/db/dog\n320\t/db\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_du_c_multi",
+      "seq": 640026,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "du -c /db/cat /db/dog",
+      "expect": {
+        "exit": 0,
+        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n77\t/db/dog/big\n83\t/db/dog/small\n160\t/db/dog\n320\ttotal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_sym_ln",
+      "seq": 640027,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "ln -s /db/cat/big/1.json /db/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_sym_readlink",
+      "seq": 640028,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "readlink /db/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/cat/big/1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_sym_cat",
+      "seq": 640029,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_sym_grep",
+      "seq": 640030,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep label /db/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"label\":\"cat\",\"kind\":\"big\",\"name\":\"a big orange cat\",\"id\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_sym_ls",
+      "seq": 640031,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "ls -F /db/ | grep meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "meta_link@\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_sym_rm",
+      "seq": 640032,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "rm /db/meta_link && ls /db/",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat\ndog\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_q_match",
+      "seq": 640033,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -q cat /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_q_no_match",
+      "seq": 640034,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -q zebra /db/cat/big/1.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "qdrant_grep_no_match",
+      "seq": 640035,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep zebra /db/cat/big/1.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

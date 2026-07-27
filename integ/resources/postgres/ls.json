@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "pg_ls_root",
+      "seq": 610000,
+      "targets": [
+        "postgres"
+      ],
+      "command": "ls /pg/",
+      "expect": {
+        "exit": 0,
+        "stdout": "database.json\npublic\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_ls_schema",
+      "seq": 610001,
+      "targets": [
+        "postgres"
+      ],
+      "command": "ls /pg/public/",
+      "expect": {
+        "exit": 0,
+        "stdout": "tables\nviews\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_ls_tables",
+      "seq": 610002,
+      "targets": [
+        "postgres"
+      ],
+      "command": "ls /pg/public/tables/",
+      "expect": {
+        "exit": 0,
+        "stdout": "authors\nbooks\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_ls_views",
+      "seq": 610003,
+      "targets": [
+        "postgres"
+      ],
+      "command": "ls /pg/public/views/",
+      "expect": {
+        "exit": 0,
+        "stdout": "recent_books\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_ls_entity",
+      "seq": 610004,
+      "targets": [
+        "postgres"
+      ],
+      "command": "ls /pg/public/tables/books/",
+      "expect": {
+        "exit": 0,
+        "stdout": "rows.jsonl\nschema.json\nsemantic.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_tree",
+      "seq": 610005,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tree -L 3 /pg/public/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/pg/public\n|-- tables\n|   |-- authors\n|   |   |-- rows.jsonl\n|   |   |-- schema.json\n|   |   `-- semantic.json\n|   `-- books\n|       |-- rows.jsonl\n|       |-- schema.json\n|       `-- semantic.json\n`-- views\n    `-- recent_books\n        |-- rows.jsonl\n        |-- schema.json\n        `-- semantic.json\n\n6 directories, 9 files\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

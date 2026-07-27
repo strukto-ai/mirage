@@ -19,6 +19,7 @@ import { encodeBase64 } from '../../utils/base64.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { estimateSize, fetchRows } from './_client.ts'
 import { buildDatabaseJson, buildEntitySchemaJson } from './_schema_json.ts'
+import { buildEntitySemanticJson } from './semantic.ts'
 import { detectScope } from './scope.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -59,6 +60,11 @@ export async function read(
   if (scope.level === 'entity_schema') {
     const kind = scope.kind === 'tables' ? 'table' : 'view'
     const doc = await buildEntitySchemaJson(accessor, scope.schema, scope.entity, kind)
+    return new TextEncoder().encode(JSON.stringify(doc, null, 2))
+  }
+  if (scope.level === 'entity_semantic') {
+    const kind = scope.kind === 'tables' ? 'table' : 'view'
+    const doc = await buildEntitySemanticJson(accessor, scope.schema, scope.entity, kind)
     return new TextEncoder().encode(JSON.stringify(doc, null, 2))
   }
   if (scope.level === 'entity_rows') {

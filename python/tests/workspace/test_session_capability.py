@@ -201,7 +201,30 @@ def test_redirect_to_forbidden_mount_is_denied():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"not allowed" in (io.stderr or b"")
+    # A refused redirect target is shell-attributed like GNU
+    # ("bash: line 1: /b/leaked.txt: Permission denied"); the mount
+    # guard's own "not allowed to access mount" prose stays on the
+    # exception (the FUSE bridge still sniffs it) instead of reaching
+    # the user as the path.
+    assert (io.stderr or b"") == b"/b/leaked.txt: Permission denied\n"
+
+
+def test_append_to_forbidden_mount_is_shell_attributed():
+    # `>>` pre-reads the existing content before writing, and that read
+    # hits the mount guard first. The pre-read must swallow the denial so
+    # the write reports it as the same shell-attributed line `>` gets,
+    # instead of unwinding to the workspace-level OSError handler (which
+    # kills the rest of the line and stamps the line's first word).
+    ws = _two_mounts_with_secret()
+
+    async def run():
+        return await ws.execute("echo leaked >> /b/leaked.txt; echo next",
+                                session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b"next\n"
+    assert (io.stderr or b"") == b"/b/leaked.txt: Permission denied\n"
 
 
 def test_cross_mount_copy_into_forbidden_mount_is_denied():
@@ -283,7 +306,7 @@ def test_read_grant_blocks_redirect_write():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.stderr == b"echo: /a/y.txt: Permission denied\n"
+    assert io.stderr == b"/a/y.txt: Permission denied\n"
     assert "/y.txt" not in a._store.files
 
 
@@ -310,7 +333,7 @@ def test_grant_cannot_widen_read_mount():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.stderr == b"echo: /a/y.txt: Permission denied\n"
+    assert io.stderr == b"/a/y.txt: Permission denied\n"
 
 
 def test_user_root_mount_governed_by_grants():
@@ -336,7 +359,7 @@ def test_user_root_mount_governed_by_grants():
     assert b"not allowed" in (denied.stderr or b"")
     assert read_ok.exit_code == 0 and b"top" in (read_ok.stdout or b"")
     assert write_denied.exit_code != 0
-    assert write_denied.stderr == b"echo: /root.txt: Permission denied\n"
+    assert write_denied.stderr == b"/root.txt: Permission denied\n"
 
 
 def test_implicit_root_keeps_pathless_commands_working():

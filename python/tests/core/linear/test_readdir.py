@@ -148,3 +148,25 @@ async def test_readdir_issue_folder(accessor, index):
         "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json",
         "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/comments.jsonl",
     ]
+
+
+@pytest.mark.asyncio
+async def test_readdir_unrecognized_path_raises(accessor, index):
+    # Returning [] for an unknown path made `ls` and `tree` report a bogus path
+    # as real-but-empty, and left `rg` without a message.
+    with pytest.raises(FileNotFoundError):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="__nf_missing__",
+                     virtual="/__nf_missing__",
+                     directory="/__nf_missing__"), index)
+
+
+@pytest.mark.asyncio
+async def test_readdir_unrecognized_nested_path_raises(accessor, index):
+    with pytest.raises(FileNotFoundError):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="teams/x/nope/deeper",
+                     virtual="/teams/x/nope/deeper",
+                     directory="/teams/x/nope/deeper"), index)

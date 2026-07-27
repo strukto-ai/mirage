@@ -25,6 +25,11 @@ from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.types import PRIMARY_KEY, ScopeLevel
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.json_canonical import canonicalize_value
+
+
+def render_doc(doc: dict[str, Any]) -> str:
+    return dumps(canonicalize_value(doc), json_options=RELAXED_JSON_OPTIONS)
 
 
 def _apply_elision(value: dict[str, Any], paths: set[str]) -> dict[str, Any]:
@@ -88,7 +93,7 @@ async def read_tail(
     for doc in docs:
         if elide:
             doc = _apply_elision(doc, elide)
-        lines.append(dumps(doc, json_options=RELAXED_JSON_OPTIONS))
+        lines.append(render_doc(doc))
     return ("\n".join(lines) + "\n").encode()
 
 
@@ -111,7 +116,7 @@ async def read_stream(
     ):
         if elide:
             doc = _apply_elision(doc, elide)
-        yield (dumps(doc, json_options=RELAXED_JSON_OPTIONS) + "\n").encode()
+        yield (render_doc(doc) + "\n").encode()
 
 
 async def watch_stream(
@@ -126,4 +131,4 @@ async def watch_stream(
     async for doc in iter_inserts(accessor.client, scope.database, scope.name):
         if elide:
             doc = _apply_elision(doc, elide)
-        yield (dumps(doc, json_options=RELAXED_JSON_OPTIONS) + "\n").encode()
+        yield (render_doc(doc) + "\n").encode()

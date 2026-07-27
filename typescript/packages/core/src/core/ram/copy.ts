@@ -16,11 +16,13 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
 import { enoent } from '../../utils/errors.ts'
+import { checkDestParents } from './dest.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 
 export async function copy(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.mountPath)
   const d = norm(dst.mountPath)
+  checkDestParents(accessor, dst, d)
   const data = accessor.store.files.get(s)
   if (data === undefined) throw enoent(src)
   accessor.store.files.set(d, data)

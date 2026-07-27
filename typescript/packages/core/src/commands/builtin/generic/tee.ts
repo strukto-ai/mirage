@@ -15,6 +15,7 @@
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -83,12 +84,14 @@ export async function writeOutput(
   } catch (err) {
     // GNU tee still copies stdin to stdout on a write error, prints a
     // diagnostic, and exits non-zero. With a single output sink the
-    // --output-error modes (warn/exit/*-nopipe) collapse to this.
-    const msg = err instanceof Error ? err.message : String(err)
-    return [
-      passthrough,
-      new IOResult({ exitCode: 1, stderr: ENC.encode(`tee: ${path.mountPath}: ${msg}\n`) }),
-    ]
+    // --output-error modes (warn/exit/*-nopipe) collapse to this. The
+    // operand is named as typed and the strerror comes from the shared
+    // table, so an unwritable destination reads like GNU rather than
+    // exposing the backend's own exception text.
+    const line = isFsError(err)
+      ? fsErrorLine('tee', path, err)
+      : `tee: ${path.mountPath}: ${err instanceof Error ? err.message : String(err)}\n`
+    return [passthrough, new IOResult({ exitCode: 1, stderr: ENC.encode(line) })]
   }
   return [
     passthrough,

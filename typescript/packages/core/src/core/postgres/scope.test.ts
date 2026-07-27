@@ -97,6 +97,16 @@ describe('detectScope', () => {
     expect(s.file).toBe('schema.json')
   })
 
+  it('detects entity_semantic file', () => {
+    const s = detectScope(ps('/public/tables/users/semantic.json'))
+    expect(s.level).toBe('entity_semantic')
+    if (s.level !== 'entity_semantic') return
+    expect(s.schema).toBe('public')
+    expect(s.kind).toBe('tables')
+    expect(s.entity).toBe('users')
+    expect(s.file).toBe('semantic.json')
+  })
+
   it('detects entity_rows file', () => {
     const s = detectScope(ps('/public/tables/users/rows.jsonl'))
     expect(s.level).toBe('entity_rows')

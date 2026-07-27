@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
+                             Sequence)
 
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_context import grep_context_lines
@@ -26,6 +27,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.key_prefix import mount_prefix_of
 
 BINARY_EXTENSIONS = frozenset({
@@ -121,6 +123,29 @@ def extract_required_literal(pattern: str) -> str | None:
     return best if len(best) >= _MIN_SEARCH_LITERAL else None
 
 
+def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
+    """Whether the pattern is searched verbatim, with no regex extraction.
+
+    Push-down against a whole-word search index is only complete when the term
+    handed to the provider is the entire match. A regex narrowed on an
+    extracted literal fails that: ``foo[0-9]`` under -w matches ``foo1``, but a
+    whole-word search for ``foo`` never returns a file whose only token is
+    ``foo1``.
+
+    Args:
+        pattern (str): the search pattern.
+        fixed_string (bool): True if -F is set.
+
+    Returns:
+        bool: True when the pattern itself is the search term.
+    """
+    if fixed_string:
+        return True
+    pt = classify_pattern(pattern, fixed_string)
+    return pt == PatternType.EXACT or (pt == PatternType.SIMPLE
+                                       and "." not in pattern)
+
+
 def search_query(pattern: str, fixed_string: bool) -> str | None:
     """Literal to push down to a code-search API for a grep/rg pattern.
 
@@ -135,6 +160,55 @@ def search_query(pattern: str, fixed_string: bool) -> str | None:
     if classify_pattern(pattern, fixed_string) != PatternType.REGEX:
         return pattern
     return extract_required_literal(pattern)
+
+
+_PUSHDOWN_SHAPING_BOOL = ("v", "n", "c", "args_l", "w", "o", "q", "H", "h",
+                          "args_I")
+_PUSHDOWN_SHAPING_INT = ("m", "A", "B", "C")
+_PUSHDOWN_FILTER_STR = ("type", "glob")
+
+
+def has_search_shaping_flags(flags: Mapping[str, object] | None) -> bool:
+    """True when a flag alters the match set or output shape of grep/rg.
+
+    A search push-down prints each matching record as one whole line, so it
+    cannot honor -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename),
+    nor rg's file-filtering --glob/--type; when any is present the wrapper must
+    defer to the generic scan, which applies exact semantics. Reads through a
+    spec-less FlagView so the shared key set works for both the grep and rg
+    specs (rg simply never sets the grep-only keys).
+
+    Args:
+        flags (Mapping[str, object] | None): raw flag kwargs.
+    """
+    fl = FlagView(flags)
+    if any(fl.as_bool(k) for k in _PUSHDOWN_SHAPING_BOOL):
+        return True
+    if any(fl.as_int(k) is not None for k in _PUSHDOWN_SHAPING_INT):
+        return True
+    return any(fl.as_str(k) is not None for k in _PUSHDOWN_FILTER_STR)
+
+
+def search_pushdown_ok(flags: Mapping[str, object] | None,
+                       pattern: str) -> bool:
+    """True when a literal-substring push-down faithfully reproduces grep/rg.
+
+    For the LIKE/ILIKE substring push-down (postgres/mysql), faithful means a
+    literal pattern with no shaping flags; a real regex is treated literally
+    by LIKE and so must take the generic scan, and a newline-joined pattern
+    list (-F with multiple -e) is a set of independent alternatives that LIKE
+    cannot express. Backends that push a real regex down (mongodb) gate on
+    has_search_shaping_flags alone instead.
+
+    Args:
+        flags (Mapping[str, object] | None): raw flag kwargs.
+        pattern (str): the resolved search pattern.
+    """
+    if "\n" in pattern:
+        return False
+    fl = FlagView(flags)
+    return (is_literal_pattern(pattern, fl.as_bool("F"))
+            and not has_search_shaping_flags(flags))
 
 
 def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
@@ -483,14 +557,14 @@ async def grep_recursive(
     results: list[str] = []
     try:
         entries = await readdir_fn(path)
-    except (FileNotFoundError, ValueError) as exc:
+    except WALK_ERRORS as exc:
         if warnings is not None:
             warnings.append(f"grep: {path}: {exc}")
         return results
     for entry in entries:
         try:
             s = await stat_fn(entry)
-        except (FileNotFoundError, ValueError) as exc:
+        except WALK_ERRORS as exc:
             if warnings is not None:
                 warnings.append(f"grep: {entry}: {exc}")
             continue
@@ -597,7 +671,7 @@ async def grep_files_only(
         try:
             s = await stat_fn(path)
             operand_is_file = s.type != FileType.DIRECTORY
-        except (FileNotFoundError, ValueError):
+        except WALK_ERRORS:
             operand_is_file = False
         if not operand_is_file:
             return await grep_recursive(
@@ -652,7 +726,7 @@ async def grep_files_only(
                 warnings,
                 read_stream_fn,
             )
-    except (FileNotFoundError, ValueError) as exc:
+    except WALK_ERRORS as exc:
         if warnings is not None:
             warnings.append(f"grep: {path}: {exc}")
         try:
@@ -672,7 +746,7 @@ async def grep_files_only(
                 warnings,
                 read_stream_fn,
             )
-        except (FileNotFoundError, ValueError) as exc2:
+        except WALK_ERRORS as exc2:
             if warnings is not None:
                 warnings.append(f"grep: {path}: {exc2}")
 

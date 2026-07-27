@@ -18,7 +18,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { listMatviews, listSchemas, listTables, listViews } from './_client.ts'
-import { detectScope } from './scope.ts'
+import { detectScope, ENTITY_FILES } from './scope.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export async function readdir(
@@ -51,7 +51,7 @@ export async function readdir(
   }
   if (scope.level === 'entity') {
     const base = rstripSlash(raw)
-    return [`${prefix}${base}/schema.json`, `${prefix}${base}/rows.jsonl`]
+    return ENTITY_FILES.map((name) => `${prefix}${base}/${name}`)
   }
   const err = new Error(raw) as Error & { code?: string }
   err.code = 'ENOENT'

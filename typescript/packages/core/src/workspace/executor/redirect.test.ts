@@ -311,3 +311,239 @@ describe('fd-table routing end-to-end', () => {
     }
   })
 })
+
+// GNU bash 5.2.37 pinned: both `cat < missing` and `echo x > /nosuchdir/f`
+// answer "bash: line 1: <target>: No such file or directory", exit 1, and
+// never name the command. mirage drops the "bash: line N:" prefix, matching
+// the house style of the other shell-attributed error
+// ("nosuchcmd: command not found").
+describe('handleRedirect missing < source', () => {
+  it('is shell-attributed, not command-attributed', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'cat < /data/missing')
+      expect(exit).toBe(1)
+      expect(out).toBe('')
+      expect(err).toBe('/data/missing: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('does not run the command', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'echo hi < /data/missing')
+      expect(exit).toBe(1)
+      expect(out).toBe('')
+      expect(err).toBe('/data/missing: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps the rest of the line running', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'cat < /data/missing; echo next')
+      expect(exit).toBe(0)
+      expect(out).toBe('next\n')
+      expect(err).toBe('/data/missing: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('short-circuits && and runs ||', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [andExit, andOut] = await runResult(ws, 'cat < /data/missing && echo YES')
+      expect(andExit).toBe(1)
+      expect(andOut).toBe('')
+      const [orExit, orOut] = await runResult(ws, 'cat < /data/missing || echo OR')
+      expect(orExit).toBe(0)
+      expect(orOut).toBe('OR\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('leaves the rest of the pipeline running', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'cat < /data/missing | wc -l')
+      expect(exit).toBe(0)
+      expect(out.trim()).toBe('0')
+      expect(err).toBe('/data/missing: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports the target as typed, not resolved', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, , err] = await runResult(ws, 'cd /data && cat < missing')
+      expect(exit).toBe(1)
+      expect(err).toBe('missing: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('stops at the first failing redirect', async () => {
+    const { ws } = await makeIntegrationWS({ good: 'PRE' })
+    try {
+      const [exit, , err] = await runResult(ws, 'cat < /data/missing < /data/good')
+      expect(exit).toBe(1)
+      expect(err).toBe('/data/missing: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('skips a later output redirect', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit] = await runResult(ws, 'echo hi < /data/missing > /data/late')
+      expect(exit).toBe(1)
+      expect(await runExit(ws, 'test -e /data/late')).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('rethrows a non-filesystem read error', async () => {
+    const dispatch = vi.fn(() =>
+      Promise.reject(new Error('backend exploded')),
+    ) as unknown as DispatchFn
+    const executeNode = vi.fn() as unknown as ExecuteNodeFn
+    const redirects = [new Redirect({ fd: 0, target: '/data/missing', kind: RedirectKind.STDIN })]
+    await expect(
+      handleRedirect(
+        executeNode,
+        dispatch,
+        STUB_NODE,
+        redirects,
+        new Session({ sessionId: 'test' }),
+        null,
+        null,
+      ),
+    ).rejects.toThrow('backend exploded')
+    expect(executeNode).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleRedirect unwritable > target', () => {
+  it('is shell-attributed, not command-attributed or backend prose', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f')
+      expect(exit).toBe(1)
+      expect(out).toBe('')
+      expect(err).toBe('/nodir/f: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps the rest of the line running', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f; echo next')
+      expect(exit).toBe(0)
+      expect(out).toBe('next\n')
+      expect(err).toBe('/nodir/f: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('short-circuits && and runs ||', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [andExit, andOut] = await runResult(ws, 'echo x > /nodir/f && echo YES')
+      expect(andExit).toBe(1)
+      expect(andOut).toBe('')
+      const [orExit, orOut] = await runResult(ws, 'echo x > /nodir/f || echo OR')
+      expect(orExit).toBe(0)
+      expect(orOut).toBe('OR\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(['echo x >> /nodir/f', 'echo x 2> /nodir/f', '> /nodir/f'])(
+    'spells %s the same way',
+    async (line) => {
+      const { ws } = await makeIntegrationWS()
+      try {
+        const [exit, , err] = await runResult(ws, line)
+        expect(exit).toBe(1)
+        expect(err).toBe('/nodir/f: No such file or directory\n')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('stops at the first failure and skips the later target', async () => {
+    // GNU: `echo x > /nodir/f > /data/out` reports /nodir/f once and
+    // never creates /data/out.
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, , err] = await runResult(ws, 'echo x > /nodir/f > /data/out')
+      expect(exit).toBe(1)
+      expect(err).toBe('/nodir/f: No such file or directory\n')
+      expect(await runExit(ws, 'test -e /data/out')).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps a target opened before the failing one', async () => {
+    // GNU: `echo y > /data/out2 > /nodir/g` already truncated
+    // /data/out2, so it survives as an empty file.
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, , err] = await runResult(ws, 'echo y > /data/out2 > /nodir/g')
+      expect(exit).toBe(1)
+      expect(err).toBe('/nodir/g: No such file or directory\n')
+      expect(await runExit(ws, 'test -e /data/out2')).toBe(0)
+      const [, out] = await runResult(ws, 'cat /data/out2')
+      expect(out).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('rethrows a non-filesystem append pre-read error', async () => {
+    // The `>>` pre-read swallows filesystem errors (the write reports
+    // them) but must not hide a backend bug.
+    const dispatch = vi.fn<DispatchFn>((op) => {
+      if (op === 'read') return Promise.reject(new Error('backend exploded'))
+      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+    })
+    const execute: ExecuteNodeFn = () =>
+      Promise.resolve([encode('hi'), new IOResult(), new ExecutionNode()])
+    const redirects = [
+      new Redirect({ fd: 1, target: '/ram/out.txt', kind: RedirectKind.STDOUT, append: true }),
+    ]
+    await expect(
+      handleRedirect(execute, dispatch, STUB_NODE, redirects, new Session({ sessionId: 'test' })),
+    ).rejects.toThrow('backend exploded')
+  })
+
+  it('rethrows a non-filesystem write error', async () => {
+    const dispatch = vi.fn<DispatchFn>((op) => {
+      if (op === 'write') return Promise.reject(new Error('backend exploded'))
+      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+    })
+    const execute: ExecuteNodeFn = () =>
+      Promise.resolve([encode('hi'), new IOResult(), new ExecutionNode()])
+    const redirects = [new Redirect({ fd: 1, target: '/ram/out.txt', kind: RedirectKind.STDOUT })]
+    await expect(
+      handleRedirect(execute, dispatch, STUB_NODE, redirects, new Session({ sessionId: 'test' })),
+    ).rejects.toThrow('backend exploded')
+  })
+})

@@ -277,7 +277,7 @@ export { findGeneric, findSizeMtimeError, invalidFindArg } from './commands/buil
 export { walkFind } from './core/generic/find.ts'
 export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'
-export { duGeneric } from './commands/builtin/generic/du.ts'
+export { duGeneric, parseDepth, parseDuFlags, runDu } from './commands/builtin/generic/du.ts'
 export { treeGeneric } from './commands/builtin/generic/tree.ts'
 export { lsGeneric } from './commands/builtin/generic/ls.ts'
 export { fileGeneric } from './commands/builtin/generic/file.ts'
@@ -307,7 +307,15 @@ export { fmtGeneric } from './commands/builtin/generic/fmt.ts'
 export { headStream } from './commands/builtin/generic/head.ts'
 export { basenameFn } from './commands/builtin/generic/basename.ts'
 export { dirnameFn } from './commands/builtin/generic/dirname.ts'
-export { gnuBasename, gnuDirname, norm, parent, posixNormpath, resolvePath } from './utils/path.ts'
+export {
+  ancestors,
+  gnuBasename,
+  gnuDirname,
+  norm,
+  parent,
+  posixNormpath,
+  resolvePath,
+} from './utils/path.ts'
 export { shlexSplit } from './utils/shlex.ts'
 export {
   DEFAULT_MAX_GLOB_MATCHES,
@@ -662,7 +670,7 @@ export { S3_PROMPT } from './resource/s3/prompt.ts'
 export { SCOPE_ERROR as S3_SCOPE_ERROR } from './core/s3/constants.ts'
 export { copy } from './core/s3/copy.ts'
 export { create } from './core/s3/create.ts'
-export { du, duAll } from './core/s3/du.ts'
+export { size as s3DuSize, entries as s3DuEntries } from './core/s3/du/index.ts'
 export { exists } from './core/s3/exists.ts'
 export { find } from './core/s3/find.ts'
 export { mkdir } from './core/s3/mkdir.ts'
@@ -770,6 +778,20 @@ export { readdir as langfuseReaddir } from './core/langfuse/readdir.ts'
 export { stat as langfuseStat } from './core/langfuse/stat.ts'
 export { LANGFUSE_PROMPT } from './resource/langfuse/prompt.ts'
 export { detectScope as langfuseDetectScope, type LangfuseScope } from './core/langfuse/scope.ts'
+export {
+  HttpJaegerTransport,
+  JaegerApiError,
+  isTraceId as jaegerIsTraceId,
+  type JaegerTransport,
+} from './core/jaeger/_client.ts'
+export { JaegerAccessor, type JaegerResourceLike } from './accessor/jaeger.ts'
+export { JAEGER_COMMANDS } from './commands/builtin/jaeger/index.ts'
+export { JAEGER_OPS } from './ops/jaeger/index.ts'
+export { read as jaegerRead } from './core/jaeger/read.ts'
+export { readdir as jaegerReaddir } from './core/jaeger/readdir.ts'
+export { stat as jaegerStat } from './core/jaeger/stat.ts'
+export { JAEGER_PROMPT } from './resource/jaeger/prompt.ts'
+export { detectScope as jaegerDetectScope, type JaegerScope } from './core/jaeger/scope.ts'
 export { read as trelloRead } from './core/trello/read.ts'
 export { readdir as trelloReaddir, type TrelloReaddirFilter } from './core/trello/readdir.ts'
 export { stat as trelloStat } from './core/trello/stat.ts'
@@ -1259,7 +1281,7 @@ export {
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './utils/slash.ts'
-export { mountKey, mountPrefixOf, rekey, stripMount } from './utils/key_prefix.ts'
+export { mountKey, mountPrefixOf, mountedPath, rekey, stripMount } from './utils/key_prefix.ts'
 export * as keyPrefix from './utils/key_prefix.ts'
 export { fnmatch } from './utils/fnmatch.ts'
 export {
@@ -1276,18 +1298,25 @@ export {
   treeHasEmpty,
 } from './commands/builtin/findEval.ts'
 export {
+  eexist,
   eisdir,
   enoent,
+  enoentWithMessage,
   enotdir,
   enotsup,
   errorVirtualPath,
+  fsErrorLine,
   type FsError,
+  fsStrerror,
   gnuStrerror,
+  isFsError,
   isMissingOp,
   isMissingPath,
+  operandSpelling,
   type MissingOpError,
   noMount,
   type NoMountError,
+  readdirError,
 } from './utils/errors.ts'
 
 export {

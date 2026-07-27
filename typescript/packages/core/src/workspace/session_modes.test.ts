@@ -89,9 +89,27 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.execute('echo leaked > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toBe('echo: /a/y.txt: Permission denied\n')
+    expect(stderrStr(denied)).toBe('/a/y.txt: Permission denied\n')
     expect(a.store.files.has('/y.txt')).toBe(false)
   })
+
+  // A mount with no grant at all takes the same shell-attributed line as a
+  // READ-granted one, on `>` and `>>` alike, and the rest of the line keeps
+  // running — matching python, whose guard raises a PermissionError that is
+  // already a member of FS_ERRORS.
+  it.each(['echo leaked > /b/y.txt; echo next', 'echo leaked >> /b/y.txt; echo next'])(
+    'shell-attributes %s for an ungranted mount',
+    async (line) => {
+      const { ws, b } = await makeGrantsWorkspace()
+      ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
+
+      const denied = await ws.execute(line, { sessionId: 'agent' })
+      expect(denied.exitCode).toBe(0)
+      expect(stdoutStr(denied)).toBe('next\n')
+      expect(stderrStr(denied)).toBe('/b/y.txt: Permission denied\n')
+      expect(b.store.files.has('/y.txt')).toBe(false)
+    },
+  )
 
   it('write grant allows writes', async () => {
     const { ws, a } = await makeGrantsWorkspace()
@@ -108,7 +126,7 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.execute('echo up > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toBe('echo: /a/y.txt: Permission denied\n')
+    expect(stderrStr(denied)).toBe('/a/y.txt: Permission denied\n')
   })
 
   it('list form inherits the mount mode', async () => {
@@ -145,7 +163,7 @@ describe('per-session mount grants', () => {
 
     const writeDenied = await ws.execute('echo x > /root.txt', { sessionId: 'root_ro' })
     expect(writeDenied.exitCode).not.toBe(0)
-    expect(stderrStr(writeDenied)).toBe('echo: /root.txt: Permission denied\n')
+    expect(stderrStr(writeDenied)).toBe('/root.txt: Permission denied\n')
   })
 
   it('the implicit scratch root keeps pathless commands working', async () => {

@@ -15,7 +15,7 @@
 import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, PathSpec, type StatFn } from '../../../types.ts'
-import { enotdir, isMissingPath } from '../../../utils/errors.ts'
+import { enoent, enotdir, isMissingPath } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 export type BackendKeyFn = (path: PathSpec) => string
@@ -29,12 +29,17 @@ function childPath(parent: PathSpec, name: string): PathSpec {
   return PathSpec.fromStrPath(child, rekey(parent.virtual, parent.resourcePath, child))
 }
 
+// Multiple sources require the directory form, and GNU distinguishes why it
+// is unusable: an absent target is "No such file or directory", an existing
+// non-directory is "Not a directory" (identical wording in cp and mv).
 export function copyTargets(
   sources: PathSpec[],
   dst: PathSpec,
   dstIsDir: boolean,
+  dstExists = true,
 ): [PathSpec, PathSpec][] {
   if (sources.length > 1 && !dstIsDir) {
+    if (!dstExists) throw enoent(`target '${dst.virtual}'`)
     throw enotdir(`target '${dst.virtual}'`)
   }
   if (!dstIsDir) {

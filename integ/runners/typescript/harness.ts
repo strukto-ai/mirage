@@ -16,7 +16,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const CASE_DIRS = ['unix', 'bash', 'crossmount', 'runtime', 'resources', 'cli']
+const CASE_DIRS = ['unix', 'bash', 'crossmount', 'runtime', 'resources', 'cli', 'session']
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
@@ -46,7 +46,12 @@ export interface Target {
   mail?: string
   dataset?: string
   agentId?: string
+  facet?: string
   mounts: Mount[]
+  // Sessions a case can name via its `session` field. Grants take either the
+  // mapping form ({ '/data': 'read' }) or the list form (['/data'], which
+  // inherits the mount's own mode).
+  sessions?: Record<string, Record<string, string> | string[]>
 }
 
 export interface Expect {
@@ -71,6 +76,7 @@ export interface Case {
   provision?: boolean
   clear_cache?: boolean
   consistency?: 'always' | 'lazy'
+  session?: string
   scenario?: ScenarioStep[]
   expect: Expect
   _source?: string
@@ -107,10 +113,11 @@ export interface HarnessStat {
 }
 
 export interface ExecWorkspace {
-  execute(cmd: string, opts?: { stdin?: Uint8Array }): Promise<ExecResult>
+  execute(cmd: string, opts?: { stdin?: Uint8Array; sessionId?: string }): Promise<ExecResult>
   dispatch(opName: string, path: string): Promise<unknown>
   cache: { clear(): Promise<void> }
   mounts(): readonly { resource: { index?: { clear(): Promise<void> } } }[]
+  createSession(sessionId: string, options: { mounts: Record<string, string> | string[] }): unknown
   close(): Promise<void>
 }
 
@@ -229,6 +236,31 @@ function provisionLine(r: ProvisionInfo): string {
   )
 }
 
+/**
+ * Substitute {mount} in a case with a target's primary mount path.
+ *
+ * Lets one case assert a behavior that every backend shares while each target
+ * keeps its own mount path. Cases without the token are returned untouched, so
+ * this is inert for the existing suite.
+ */
+export function bindMount(c: Case, mountPath: string): Case {
+  const prefix = mountPath.replace(/\/+$/, '')
+  const hasToken =
+    c.command?.includes('{mount}') === true ||
+    c.expect.stdout.includes('{mount}') ||
+    c.expect.stderr.includes('{mount}')
+  if (!hasToken) return c
+  return {
+    ...c,
+    ...(c.command !== undefined ? { command: c.command.split('{mount}').join(prefix) } : {}),
+    expect: {
+      ...c.expect,
+      stdout: c.expect.stdout.split('{mount}').join(prefix),
+      stderr: c.expect.stderr.split('{mount}').join(prefix),
+    },
+  }
+}
+
 export async function runCase(
   ws: ExecWorkspace,
   c: Case,
@@ -251,7 +283,7 @@ export async function runCase(
       elapsed: (performance.now() - start) / 1000,
     }
   }
-  const result = await ws.execute(c.command)
+  const result = await ws.execute(c.command, { sessionId: c.session })
   const elapsed = (performance.now() - start) / 1000
   let out = DEC.decode(result.stdout)
   if (c.check !== undefined) out = await statCheck(ws, c.check)

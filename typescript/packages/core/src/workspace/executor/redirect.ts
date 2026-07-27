@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { formatFsError } from '../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../utils/errors.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -27,23 +27,6 @@ import type { DispatchFn } from './cross_mount.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
-
-// The name a failed redirect write reports itself under, matching the
-// workspace chokepoint (and Python's `command.split()[0]`): the command's
-// own name, or the redirect operator for the command-less `> file` form.
-function redirectCmdName(command: TSNodeLike | null, redirects: readonly Redirect[]): string {
-  if (command !== null) return command.text.trim().split(/\s+/, 1)[0] ?? 'redirect'
-  const write = redirects.find(
-    (r) =>
-      r.kind !== RedirectKind.STDIN &&
-      r.kind !== RedirectKind.HEREDOC &&
-      r.kind !== RedirectKind.HERESTRING,
-  )
-  if (write === undefined) return 'redirect'
-  const arrow = write.append ? '>>' : '>'
-  if (write.fd === -1) return `&${arrow}`
-  return write.fd === 2 ? `2${arrow}` : arrow
-}
 
 const TO_STDOUT = Symbol('stdout')
 const TO_STDERR = Symbol('stderr')
@@ -60,9 +43,28 @@ type FdDest = typeof TO_STDOUT | typeof TO_STDERR | string
  * the stream ends up empty — including the command-less `> file` form
  * (command is null).
  *
+ * A redirect target that cannot be opened is a shell error, not a command
+ * error — on both the `<` read and the `>` write side. bash reports it itself
+ * and never names the command, so both paths render `<target>: <strerror>`
+ * (see `redirectErrorLine`) and the rest of the line keeps running. bash also
+ * stops processing redirects at the first failed open, so later targets are
+ * left alone: GNU 5.2.37 answers `echo x > /nodir/f > /data/out` with one
+ * message and no `/data/out`, while earlier targets keep the empty file their
+ * open already created (`echo y > /data/out2 > /nodir/g` leaves `/data/out2`
+ * present and empty).
+ *
  * Deliberate divergence from bash: when both streams route to the same
  * destination they are concatenated stdout-then-stderr, not temporally
  * interleaved (streams are materialized buffers).
+ *
+ * Deliberate divergence from bash: because output files are created in a
+ * second pass (after the command runs), an output redirect that precedes a
+ * failing `<` is not truncated — bash processes redirects strictly left to
+ * right, so `> out < missing` empties `out` before failing. `< missing >
+ * out` leaves `out` uncreated on both, which is bash's behavior. For the same
+ * reason a command whose `>` target is unwritable has already run here, while
+ * bash fails at open time and never runs it; the write error and exit 1 are
+ * reported either way.
  */
 export async function handleRedirect(
   executeNode: ExecuteNodeFn,
@@ -78,7 +80,13 @@ export async function handleRedirect(
   for (const r of redirects) {
     if (r.kind === RedirectKind.STDIN) {
       const scope = ensureScope(r.target)
-      const [data] = await dispatch('read', scope)
+      let data: unknown
+      try {
+        ;[data] = await dispatch('read', scope)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        return redirectFailure(scope, err)
+      }
       cmdStdin = data as ByteSource | null
     } else if (r.kind === RedirectKind.HEREDOC) {
       cmdStdin =
@@ -186,13 +194,10 @@ export async function handleRedirect(
       await dispatch('write', scope, [data])
       io.writes[path] = data
     } catch (err) {
-      // GNU spells a failed redirect target `<cmd>: <path>: <strerror>`;
-      // the raw error message leaked the internal op-registry wording.
-      outStderr = concat([
-        outStderr,
-        formatFsError(redirectCmdName(command, redirects), err, [scope]),
-      ])
+      if (!isFsError(err)) throw err
+      outStderr = concat([outStderr, redirectErrorLine(scope, err)])
       io.exitCode = 1
+      break
     }
   }
 
@@ -202,12 +207,52 @@ export async function handleRedirect(
   return [outSource, io, execNode]
 }
 
+/**
+ * GNU stderr line for a redirect target that could not be opened.
+ *
+ * GNU bash 5.2.37 answers both `cat < missing` and `echo x > /nosuchdir/f`
+ * with `bash: line 1: <target>: No such file or directory` and exit 1: the
+ * error belongs to the shell, not the command, and the rest of the line keeps
+ * running (`;` continues, `&&` short-circuits, `||` runs).
+ *
+ * Deliberate divergence from bash: the `bash: line N:` prefix is dropped, so
+ * the line is `<target>: <strerror>`. This matches the house style already
+ * set by the other shell-attributed error, `nosuchcmd: command not found`
+ * (bash prints `bash: line 1: nosuchcmd: command not found`) — `bash:` is
+ * bash's `$0` and mirage is not bash, and `line N` has no meaning for a
+ * one-line `Workspace.execute` call.
+ *
+ * The label is the target's own spelling, never the error's message: backends
+ * raise write failures with prose in the message (`parent directory does not
+ * exist: /nodir`), which used to reach the user as the path.
+ */
+function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
+  const strerror = fsStrerror(err)
+  const label = scope.rawPath
+  return new TextEncoder().encode(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
+}
+
+/**
+ * Shell-attributed IOResult for a `<` source that cannot be read.
+ *
+ * bash never runs the command and stops processing redirects at the first
+ * failure, so this replaces the whole result. Returning an IOResult rather
+ * than rethrowing is what keeps the rest of the line alive.
+ */
+function redirectFailure(scope: PathSpec, err: unknown): Result {
+  const io = new IOResult({ exitCode: 1, stderr: redirectErrorLine(scope, err) })
+  return [null, io, new ExecutionNode({ command: 'redirect', exitCode: 1 })]
+}
+
 async function readExisting(dispatch: DispatchFn, scope: PathSpec): Promise<Uint8Array> {
   try {
     const [existing] = await dispatch('read', scope)
     if (existing instanceof Uint8Array) return existing
-  } catch {
-    // file doesn't exist yet, or not readable — appending starts fresh
+  } catch (err) {
+    // file doesn't exist yet, or not readable — appending starts fresh and
+    // the write that follows reports the real failure as a shell-attributed
+    // line. Non-filesystem errors are bugs and still propagate.
+    if (!isFsError(err)) throw err
   }
   return new Uint8Array()
 }

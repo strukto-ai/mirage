@@ -22,6 +22,7 @@
       "gsheets",
       "gslides",
       "hf_buckets",
+      "jaeger",
       "lancedb",
       "langfuse",
       "linear",

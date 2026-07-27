@@ -23,7 +23,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.stream import exit_on_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
+from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import rebase_raw
 
@@ -137,11 +137,11 @@ async def rg(
         try:
             s = await st(paths[0].virtual)
             is_dir = s.type == FileType.DIRECTORY
-        except (FileNotFoundError, ValueError):
+        except WALK_ERRORS:
             try:
                 await rd(paths[0].virtual)
                 is_dir = True
-            except (FileNotFoundError, ValueError):
+            except WALK_ERRORS:
                 # Neither statable nor listable: keep is_dir False and let
                 # the plain-file search path report the real read error.
                 pass

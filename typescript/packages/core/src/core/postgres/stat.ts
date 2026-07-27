@@ -104,6 +104,14 @@ export async function stat(
       extra: { schema: scope.schema, kind: scope.kind, name: scope.entity },
     })
   }
+  if (scope.level === 'entity_semantic') {
+    if (!(await entityExists(accessor, scope.schema, scope.kind, scope.entity))) throw enoent(spec)
+    return new FileStat({
+      name: 'semantic.json',
+      type: FileType.JSON,
+      extra: { schema: scope.schema, kind: scope.kind, name: scope.entity },
+    })
+  }
   if (scope.level === 'entity_rows') {
     if (!(await entityExists(accessor, scope.schema, scope.kind, scope.entity))) throw enoent(spec)
     return rowsStat(accessor, scope.schema, scope.kind, scope.entity)

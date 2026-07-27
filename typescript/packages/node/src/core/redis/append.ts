@@ -14,6 +14,7 @@
 
 import { ResourceName, invalidateAfterWrite, record, type PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
+import { checkDestParents } from './dest.ts'
 import { norm, nowIso } from './utils.ts'
 
 export async function appendBytes(
@@ -24,6 +25,7 @@ export async function appendBytes(
   const start = performance.now()
   const p = norm(path.mountPath)
   const store = accessor.store
+  await checkDestParents(store, path, p)
   const existing = await store.getFile(p)
   if (existing !== null) {
     const merged = new Uint8Array(existing.byteLength + data.byteLength)

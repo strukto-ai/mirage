@@ -1,0 +1,186 @@
+{
+  "cases": [
+    {
+      "id": "lf_trace_name",
+      "seq": 600020,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.name' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "checkout-flow\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_user_id",
+      "seq": 600021,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.userId' /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "user-bo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_session_id",
+      "seq": 600022,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.sessionId' /lf/traces/trace-gamma.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "session-two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_tags",
+      "seq": 600023,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.tags | join(\",\")' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "checkout,prod\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_input",
+      "seq": 600024,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.input.cart' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "two items\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_output",
+      "seq": 600025,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.output.status' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "confirmed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_metadata",
+      "seq": 600026,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.metadata.region' /lf/traces/trace-gamma.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "eu-west\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_client_timestamp",
+      "seq": 600027,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.timestamp' /lf/traces/trace-beta.json | cut -c1-19",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-01T00:05:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_project_id",
+      "seq": 600028,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.projectId' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-integ-project\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_html_path",
+      "seq": 600029,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.htmlPath' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/project/mirage-integ-project/traces/trace-alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_whole_doc",
+      "seq": 600030,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -c 'del(.createdAt, .updatedAt) | keys' /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"bookmarked\",\"environment\",\"externalId\",\"htmlPath\",\"id\",\"input\",\"latency\",\"metadata\",\"name\",\"observations\",\"output\",\"projectId\",\"public\",\"release\",\"scores\",\"sessionId\",\"tags\",\"timestamp\",\"totalCost\",\"userId\",\"version\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_via_session_path",
+      "seq": 600031,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.name' /lf/sessions/session-one/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "search-query\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_grep_name",
+      "seq": 600032,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "grep -c checkout-flow /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_trace_grep_nomatch",
+      "seq": 600033,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "grep __lf_absent__ /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

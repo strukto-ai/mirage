@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "pg_wc_l_books",
+      "seq": 610020,
+      "targets": [
+        "postgres"
+      ],
+      "command": "wc -l /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /pg/public/tables/books/rows.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_wc_default_books",
+      "seq": 610021,
+      "targets": [
+        "postgres"
+      ],
+      "command": "wc /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "  5   5 323 /pg/public/tables/books/rows.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_wc_l_authors",
+      "seq": 610022,
+      "targets": [
+        "postgres"
+      ],
+      "command": "wc -l /pg/public/tables/authors/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 /pg/public/tables/authors/rows.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_wc_l_view",
+      "seq": 610023,
+      "targets": [
+        "postgres"
+      ],
+      "command": "wc -l /pg/public/views/recent_books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 /pg/public/views/recent_books/rows.jsonl\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

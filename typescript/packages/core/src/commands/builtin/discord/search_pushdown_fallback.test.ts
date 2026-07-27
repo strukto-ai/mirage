@@ -62,7 +62,7 @@ describe('discord grep push-down fallback', () => {
       ['hi'],
       {
         stdin: null,
-        flags: { args_l: true },
+        flags: { args_l: true, w: true },
         filetypeFns: null,
         cwd: '/',
         resource,
@@ -98,7 +98,7 @@ describe('discord rg push-down fallback', () => {
       ['hi'],
       {
         stdin: null,
-        flags: {},
+        flags: { w: true },
         filetypeFns: null,
         cwd: '/',
         resource,

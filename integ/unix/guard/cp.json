@@ -95,6 +95,86 @@
         "stdout": "",
         "stderr": "cp: cannot stat '/data/missing.txt': No such file or directory\n"
       }
+    },
+    {
+      "id": "guard_cp_into_missing_parent",
+      "seq": 619,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/guard/g.txt /data/guard/nodir/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot create regular file '/data/guard/nodir/g.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_cp_under_a_file",
+      "seq": 620,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/guard/g.txt /data/guard/sub/s.txt/x.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot stat '/data/guard/sub/s.txt/x.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "guard_cp_multi_source_missing_target",
+      "seq": 621,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/guard/g.txt /data/guard/sub/s.txt /data/guard/nodir",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: target '/data/guard/nodir': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_cp_recursive_into_missing_parent",
+      "seq": 622,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp -r /data/guard/sub /data/guard/nodir/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot create directory '/data/guard/nodir/sub': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_cp_refusals_left_no_orphans",
+      "seq": 623,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/guard -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

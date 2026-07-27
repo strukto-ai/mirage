@@ -43,8 +43,20 @@ describe('core/disk/append', () => {
     expect(await readFile(join(root, 'new'), 'utf-8')).toBe('hi')
   })
 
-  it('creates parent dirs', async () => {
-    await appendBytes(accessor, spec('/d/x'), new TextEncoder().encode('z'))
-    expect(await readFile(join(root, 'd/x'), 'utf-8')).toBe('z')
+  it('does not create parent dirs', async () => {
+    // `>>` is not `mkdir -p`: GNU reports ENOENT on a missing parent.
+    await expect(
+      appendBytes(accessor, spec('/d/x'), new TextEncoder().encode('z')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('reports the virtual path, never the host path', async () => {
+    try {
+      await appendBytes(accessor, spec('/d/x'), new TextEncoder().encode('z'))
+      expect.unreachable()
+    } catch (err) {
+      expect((err as Error).message).not.toContain(root)
+      expect((err as { virtualPath?: string }).virtualPath).toBe('/d/x')
+    }
   })
 })

@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "pg_cat_missing",
+      "seq": 610090,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /pg/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pg_write_rejected",
+      "seq": 610091,
+      "targets": [
+        "postgres"
+      ],
+      "command": "echo hi > /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/pg/public/tables/books/rows.jsonl: Operation not supported\n"
+      }
+    },
+    {
+      "id": "pg_sed_stream_1p",
+      "seq": 610092,
+      "targets": [
+        "postgres"
+      ],
+      "command": "sed -n 1p /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_sed_i_readonly",
+      "seq": 610093,
+      "targets": [
+        "postgres"
+      ],
+      "command": "sed -i s/x/y/ /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
+    },
+    {
+      "id": "pg_prov_cat",
+      "seq": 610094,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/public/tables/books/rows.jsonl",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_prov_grep",
+      "seq": 610095,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep x /pg/public/tables/books/rows.jsonl",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_prov_ls",
+      "seq": 610096,
+      "targets": [
+        "postgres"
+      ],
+      "command": "ls /pg/public/tables/books",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

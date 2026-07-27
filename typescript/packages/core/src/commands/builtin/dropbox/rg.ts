@@ -74,6 +74,7 @@ async function rgCommand(
     const narrowed = await narrowScope(accessor, paths, pattern, {
       fixedString: opts.flags.F === true,
       recursive: true,
+      wholeWord: opts.flags.w === true,
       exactFileSet:
         opts.flags.v === true ||
         typeof opts.flags.type === 'string' ||

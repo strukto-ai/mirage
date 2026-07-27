@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { appendFile, mkdir } from 'node:fs/promises'
-import path from 'node:path'
+import { appendFile } from 'node:fs/promises'
 import { ResourceName, invalidateAfterWrite, record, type PathSpec } from '@struktoai/mirage-core'
+import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
 
 export async function appendBytes(
@@ -26,8 +26,11 @@ export async function appendBytes(
   const start = performance.now()
   const virtual = p.mountPath
   const full = resolveSafe(accessor.root, virtual)
-  await mkdir(path.dirname(full), { recursive: true })
-  await appendFile(full, data)
+  try {
+    await appendFile(full, data)
+  } catch (err) {
+    throw diskError(err, p)
+  }
   record('append', virtual, ResourceName.DISK, data.byteLength, start)
   await invalidateAfterWrite(p)
 }

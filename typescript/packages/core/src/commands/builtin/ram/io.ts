@@ -16,7 +16,7 @@ import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { appendBytes as ramAppend } from '../../../core/ram/append.ts'
 import { copy as ramCopy } from '../../../core/ram/copy.ts'
 import { create as ramCreate } from '../../../core/ram/create.ts'
-import { du as ramDu, duAll as ramDuAll } from '../../../core/ram/du.ts'
+import { size as ramDu, entries as ramDuAll } from '../../../core/ram/du/index.ts'
 import { exists as ramExists } from '../../../core/ram/exists.ts'
 import { find as ramFind } from '../../../core/ram/find.ts'
 import { mkdir as ramMkdir } from '../../../core/ram/mkdir.ts'
@@ -55,6 +55,6 @@ export const RAM_IO: CommandIO<RAMAccessor> = {
   append: ramAppend,
   setAttrs: ramSetAttrs,
   find: ramFind,
-  duTotal: ramDu,
-  duAll: ramDuAll,
+  duSize: ramDu,
+  duEntries: ramDuAll,
 }

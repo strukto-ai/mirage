@@ -14,7 +14,8 @@
 
 from mirage.core.gridfs.copy import copy
 from mirage.core.gridfs.create import create
-from mirage.core.gridfs.du import du, du_all
+from mirage.core.gridfs.du import entries as du_entries
+from mirage.core.gridfs.du import size as du_size
 from mirage.core.gridfs.exists import exists
 from mirage.core.gridfs.find import find
 from mirage.core.gridfs.mkdir import mkdir
@@ -32,8 +33,8 @@ from mirage.core.gridfs.write import write_bytes
 __all__ = [
     "copy",
     "create",
-    "du",
-    "du_all",
+    "du_size",
+    "du_entries",
     "exists",
     "find",
     "mkdir",

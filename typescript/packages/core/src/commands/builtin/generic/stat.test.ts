@@ -175,6 +175,11 @@ describe('stat -c directive formatting', () => {
     expect(await render('size=%s type=%F', fs({ size: 6 }))).toBe('size=6 type=regular file')
   })
 
+  it('handles long incomplete directives in linear time', async () => {
+    const fmt = `%${'0'.repeat(10_000)}!`
+    expect(await render(fmt, fs())).toBe(fmt)
+  })
+
   it('reports missing operand', async () => {
     const result = await statGeneric([], opts('%n'), () => Promise.resolve(fs()))
     if (result === null) throw new Error('statGeneric returned null')

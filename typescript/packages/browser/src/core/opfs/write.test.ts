@@ -14,6 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
+import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
 
@@ -28,8 +29,25 @@ describe('opfs/write.writeBytes', () => {
     await writeBytes(accessor, spec('/x'), new TextEncoder().encode('hi'))
     expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('hi')
   })
-  it('creates parent directories on demand', async () => {
-    await writeBytes(accessor, spec('/a/b/c'), new TextEncoder().encode('deep'))
-    expect(new TextDecoder().decode(await read(accessor, spec('/a/b/c')))).toBe('deep')
+  it('does not create parent directories', async () => {
+    // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent
+    // rather than building the chain. OPFS creates per segment, so this
+    // has to be refused explicitly rather than inherited from the kernel.
+    await expect(
+      writeBytes(accessor, spec('/a/b/c'), new TextEncoder().encode('deep')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('writes into an existing directory', async () => {
+    await mkdir(accessor, spec('/a'), true)
+    await writeBytes(accessor, spec('/a/c'), new TextEncoder().encode('deep'))
+    expect(new TextDecoder().decode(await read(accessor, spec('/a/c')))).toBe('deep')
+  })
+
+  it('a parent that is a plain file is ENOTDIR', async () => {
+    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('y'))
+    await expect(
+      writeBytes(accessor, spec('/plain/c'), new TextEncoder().encode('deep')),
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })

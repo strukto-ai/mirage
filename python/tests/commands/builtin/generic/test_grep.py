@@ -634,3 +634,44 @@ async def test_grep_multi_file_missing_operand_matches_still_exit_1():
     assert decoded == "/a.txt:hello\n"
     assert io.stderr == b"grep: /nope.txt: No such file or directory\n"
     assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_recursive_not_a_directory_operand_keeps_the_others():
+    """A component that exists as a file makes readdir raise ENOTDIR. GNU
+    warns for that operand and still searches the rest, the same as ENOENT.
+    """
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"hello\n",
+        "/real/b.txt": b"foo\n",
+    })
+
+    async def readdir_enotdir(path):
+        p = path.virtual if isinstance(path, PathSpec) else path
+        if p.startswith("/a.txt/"):
+            raise NotADirectoryError(p)
+        return await readdir(path)
+
+    async def stat_enoent(path):
+        # RAM/Redis `stat` still reports a missing path as ENOENT; only
+        # `readdir` splits the errno, so that is what the walk must survive.
+        p = path.virtual if isinstance(path, PathSpec) else path
+        if p.startswith("/a.txt/"):
+            raise FileNotFoundError(p)
+        return await stat(path)
+
+    output, io = await grep(
+        [_spec("/a.txt/x"), _spec("/real")],
+        ["foo"],
+        readdir=readdir_enotdir,
+        stat=stat_enoent,
+        read_bytes=rb,
+        read_stream=rs,
+        flags={
+            "r": True,
+            "args_l": True
+        },
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/real/b.txt\n"
+    assert b"/a.txt/x" in (io.stderr or b"")

@@ -24,6 +24,7 @@ import { formatRecords } from '../utils/output.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
+type SortBy = 'time' | 'size' | 'name'
 
 export const LS_OK = 0
 export const LS_MINOR_PROBLEM = 1
@@ -39,8 +40,20 @@ interface LsWarning {
 
 interface WalkOpts {
   all: boolean
-  sortBy: 'time' | 'size' | 'name'
+  sortBy: SortBy
   reverse: boolean
+  recursive: boolean
+}
+
+// One ls operand once its kind is known. `row` is set when the operand is not
+// a directory: GNU prints those first, as one block with no header. `groups`
+// holds one [dir, entries] pair per directory listed under the operand — one
+// for a plain listing, the whole pre-order subtree under -R. Both empty means
+// the operand could not be accessed.
+interface Operand {
+  readonly path: PathSpec
+  readonly row: FileStat | null
+  readonly groups: [PathSpec, FileStat[]][]
 }
 
 function errText(err: unknown): string {
@@ -85,22 +98,28 @@ function appendListing(
   for (const s of stats) lines.push(formatShort(s, classify))
 }
 
-function sortStats(
-  stats: FileStat[],
-  sortBy: 'time' | 'size' | 'name',
-  reverse: boolean,
-): FileStat[] {
-  const sorted = [...stats].sort((a, b) => {
-    if (sortBy === 'time') {
-      const am = a.modified ?? ''
-      const bm = b.modified ?? ''
-      return am < bm ? 1 : am > bm ? -1 : 0
-    }
-    if (sortBy === 'size') return (b.size ?? 0) - (a.size ?? 0)
-    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-  })
-  if (reverse) sorted.reverse()
-  return sorted
+function primaryValue(entry: FileStat, sortBy: SortBy): string | number {
+  return sortBy === 'time' ? (entry.modified ?? '') : (entry.size ?? 0)
+}
+
+// GNU's -t/-S comparators fall back to the name when the timestamps or sizes
+// tie, so the order is total. `-r` negates the whole comparison, tie-break
+// included, which is why callers fold the sign into this comparator instead of
+// reversing the finished array.
+function compareStats(a: FileStat, b: FileStat, sortBy: SortBy): number {
+  if (sortBy !== 'name') {
+    const av = primaryValue(a, sortBy)
+    const bv = primaryValue(b, sortBy)
+    // -t and -S list newest/largest first.
+    if (av < bv) return 1
+    if (av > bv) return -1
+  }
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+}
+
+function sortStats(stats: readonly FileStat[], sortBy: SortBy, reverse: boolean): FileStat[] {
+  const sign = reverse ? -1 : 1
+  return [...stats].sort((a, b) => sign * compareStats(a, b, sortBy))
 }
 
 // A file operand whose readdir came back empty: backends without real
@@ -138,7 +157,7 @@ function asOperand(s: FileStat, path: PathSpec): FileStat {
 
 // An entry that cannot be stat'd is skipped with its own diagnostic rather
 // than failing the whole directory: GNU keeps listing the siblings and exits
-// 1. Mirrors the per-entry tolerance of Python ls `walk`.
+// 1. Mirrors the per-entry tolerance of Python ls `_stat_entries`.
 async function listDir(
   readdir: Readdir,
   stat: Stat,
@@ -167,42 +186,83 @@ async function listDir(
   return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
 }
 
-async function walkGrouped(
+// List one operand and report whether it turned out to be a directory.
+async function probeOperand(
   readdir: Readdir,
   stat: Stat,
-  dir: PathSpec,
+  path: PathSpec,
   opts: WalkOpts,
-  groups: [PathSpec, FileStat[]][],
   warnings: LsWarning[],
   commandLineArg: boolean,
-): Promise<void> {
+): Promise<Operand> {
   let stats: FileStat[]
   try {
-    stats = await listDir(readdir, stat, dir, opts.all, warnings)
+    stats = await listDir(readdir, stat, path, opts.all, warnings)
   } catch (err) {
+    const row = await fileEntry(stat, path)
+    if (row !== null) return { path, row, groups: [] }
     warnings.push({
-      message: `ls: cannot access '${dir.rawPath}': ${errText(err)}`,
+      message: `ls: cannot access '${path.rawPath}': ${errText(err)}`,
       serious: commandLineArg,
     })
-    return
+    return { path, row: null, groups: [] }
   }
-  const sorted = sortStats(stats, opts.sortBy, opts.reverse)
-  groups.push([dir, sorted])
-  for (const s of sorted) {
-    if (s.type === FileType.DIRECTORY) {
-      const base = rstripSlash(dir.virtual)
-      const childPath = `${base}/${s.name}`
-      await walkGrouped(
+  if (stats.length === 0) {
+    const row = await fileEntry(stat, path)
+    if (row !== null) return { path, row, groups: [] }
+  }
+  const entries = sortStats(stats, opts.sortBy, opts.reverse)
+  const groups: [PathSpec, FileStat[]][] = [[path, entries]]
+  if (opts.recursive) {
+    for (const s of entries) {
+      if (s.type !== FileType.DIRECTORY) continue
+      const childPath = `${rstripSlash(path.virtual)}/${s.name}`
+      const child = await probeOperand(
         readdir,
         stat,
-        childSpec(childPath, mountPrefixOf(dir.virtual, dir.resourcePath)),
+        childSpec(childPath, mountPrefixOf(path.virtual, path.resourcePath)),
         opts,
-        groups,
         warnings,
         false,
       )
+      // Appended one at a time: `push(...child.groups)` would spread the
+      // child's whole pre-order subtree as call arguments and overflow the
+      // engine's argument limit on a very wide tree. Mirrors Python's
+      // `groups.extend(child.groups)`.
+      for (const group of child.groups) groups.push(group)
     }
   }
+  return { path, row: null, groups }
+}
+
+// Sort row for one operand, named with the operand's own spelling.
+async function operandKey(operand: Operand, sortBy: SortBy, stat: Stat): Promise<FileStat> {
+  if (operand.row !== null) return operand.row
+  if (sortBy === 'name') {
+    return new FileStat({ name: operand.path.rawPath, type: FileType.DIRECTORY })
+  }
+  try {
+    return asOperand(await stat(operand.path), operand.path)
+  } catch {
+    // The stat only supplies a sort key; an operand that cannot be statted
+    // sorts as if it had none rather than failing the listing.
+    return new FileStat({ name: operand.path.rawPath, type: FileType.DIRECTORY })
+  }
+}
+
+async function sortOperands(
+  operands: readonly Operand[],
+  sortBy: SortBy,
+  reverse: boolean,
+  stat: Stat,
+): Promise<Operand[]> {
+  const keyed: { key: FileStat; operand: Operand }[] = []
+  for (const operand of operands) {
+    keyed.push({ key: await operandKey(operand, sortBy, stat), operand })
+  }
+  const sign = reverse ? -1 : 1
+  keyed.sort((a, b) => sign * compareStats(a.key, b.key, sortBy))
+  return keyed.map((k) => k.operand)
 }
 
 function finish(lines: string[], warnings: readonly LsWarning[]): CommandFnResult {
@@ -239,12 +299,13 @@ export async function lsGeneric(
   const classify = opts.flags.F === true
   const recursive = opts.flags.R === true
   const listDirItself = opts.flags.d === true
-  const sortBy: 'time' | 'size' | 'name' =
-    opts.flags.t === true ? 'time' : opts.flags.S === true ? 'size' : 'name'
+  const sortBy: SortBy = opts.flags.t === true ? 'time' : opts.flags.S === true ? 'size' : 'name'
   const warnings: LsWarning[] = []
   const lines: string[] = []
 
   if (listDirItself) {
+    // -d turns every operand into a plain row, sorted together and printed
+    // with no headers.
     const collected: FileStat[] = []
     for (const p of targets) {
       try {
@@ -257,52 +318,34 @@ export async function lsGeneric(
         })
       }
     }
-    appendListing(collected, long, human, classify, lines)
+    const rows = collected.length > 1 ? sortStats(collected, sortBy, reverse) : collected
+    appendListing(rows, long, human, classify, lines)
     return finish(lines, warnings)
   }
 
-  if (recursive) {
-    const walkOpts: WalkOpts = { all, sortBy, reverse }
-    const groups: [PathSpec, FileStat[]][] = []
-    for (const p of targets) {
-      await walkGrouped(readdir, stat, p, walkOpts, groups, warnings, true)
-    }
-    for (let i = 0; i < groups.length; i++) {
-      const group = groups[i]
-      if (group === undefined) continue
-      const [dirSpec, entries] = group
-      if (i > 0) lines.push('')
-      const owner =
-        targets.find((t) => {
-          const b = rstripSlash(t.virtual)
-          return dirSpec.virtual === b || dirSpec.virtual.startsWith(b + '/')
-        }) ?? dirSpec
-      lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.rawPath)}:`)
-      appendListing(entries, long, human, classify, lines)
-    }
-    return finish(lines, warnings)
-  }
-
+  const walkOpts: WalkOpts = { all, sortBy, reverse, recursive }
+  const probed: Operand[] = []
   for (const p of targets) {
-    let stats: FileStat[]
-    try {
-      stats = await listDir(readdir, stat, p, all, warnings)
-    } catch (err) {
-      try {
-        stats = [asOperand(await stat(p), p)]
-      } catch {
-        warnings.push({
-          message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
-          serious: true,
-        })
-        continue
-      }
-    }
-    if (stats.length === 0) {
-      const fe = await fileEntry(stat, p)
-      if (fe !== null) stats = [fe]
-    }
-    appendListing(sortStats(stats, sortBy, reverse), long, human, classify, lines)
+    probed.push(await probeOperand(readdir, stat, p, walkOpts, warnings, true))
   }
+  const operands = probed.length > 1 ? await sortOperands(probed, sortBy, reverse, stat) : probed
+
+  // GNU names every listed directory once there is more than one operand
+  // (or under -R); a lone directory operand is listed bare.
+  const headed = recursive || targets.length > 1
+  const rows = operands.flatMap((o) => (o.row !== null ? [o.row] : []))
+  appendListing(rows, long, human, classify, lines)
+  let printed = rows.length > 0
+  for (const operand of operands) {
+    for (const [dirSpec, entries] of operand.groups) {
+      if (headed) {
+        if (printed) lines.push('')
+        lines.push(`${rebaseOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)}:`)
+      }
+      appendListing(entries, long, human, classify, lines)
+      printed = true
+    }
+  }
+
   return finish(lines, warnings)
 }

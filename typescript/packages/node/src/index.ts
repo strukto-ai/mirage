@@ -294,6 +294,7 @@ export {
   type NotionConfigRedacted,
 } from './resource/notion/config.ts'
 export { LangfuseResource, type LangfuseResourceState } from './resource/langfuse/langfuse.ts'
+export { JaegerResource, type JaegerResourceState } from './resource/jaeger/jaeger.ts'
 export {
   normalizeLangfuseConfig,
   redactLangfuseConfig,
