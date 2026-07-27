@@ -222,8 +222,9 @@ export function isLiteralPattern(pattern: string, fixedString: boolean): boolean
 
 // True when a flag alters the match set or output shape of grep/rg. A search
 // push-down prints each matching record as one whole line, so it cannot honor
-// -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h; the wrapper must defer to the
-// generic scan when any is present.
+// -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), nor rg's
+// file-filtering --glob/--type; the wrapper must defer to the generic scan
+// when any is present.
 export function hasSearchShapingFlags(flags: Record<string, string | boolean | string[]>): boolean {
   if (
     flags.v === true ||
@@ -235,7 +236,8 @@ export function hasSearchShapingFlags(flags: Record<string, string | boolean | s
     flags.o === true ||
     flags.q === true ||
     flags.H === true ||
-    flags.h === true
+    flags.h === true ||
+    flags.args_I === true
   ) {
     return true
   }
@@ -243,17 +245,22 @@ export function hasSearchShapingFlags(flags: Record<string, string | boolean | s
     typeof flags.m === 'string' ||
     typeof flags.A === 'string' ||
     typeof flags.B === 'string' ||
-    typeof flags.C === 'string'
+    typeof flags.C === 'string' ||
+    flags.type !== undefined ||
+    flags.glob !== undefined
   )
 }
 
-// True when a literal-substring push-down (ILIKE) faithfully reproduces
-// grep/rg: a literal pattern with no shaping flags. Backends that push a real
-// regex down (mongodb) gate on hasSearchShapingFlags alone instead.
+// True when a literal-substring push-down (LIKE/ILIKE) faithfully reproduces
+// grep/rg: a literal pattern with no shaping flags. A newline-joined pattern
+// list (-F with multiple -e) is a set of independent alternatives LIKE cannot
+// express, so it stays on the generic path. Backends that push a real regex
+// down (mongodb) gate on hasSearchShapingFlags alone instead.
 export function searchPushdownOk(
   flags: Record<string, string | boolean | string[]>,
   pattern: string,
 ): boolean {
+  if (pattern.includes('\n')) return false
   return isLiteralPattern(pattern, flags.F === true) && !hasSearchShapingFlags(flags)
 }
 

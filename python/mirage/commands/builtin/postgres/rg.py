@@ -54,6 +54,7 @@ async def rg(
 
     config = accessor.config
     limit = config.default_search_limit
+    ci = fl.as_bool("i")
 
     # Native search takes one literal pattern and prints each matching row as
     # a whole line; a multi -e set (#347), a real regex, or any match/output
@@ -67,44 +68,69 @@ async def rg(
         # push-down. Deliberate divergence from GNU: rows come first and
         # metadata second, rather than in per-entity readdir order.
         if scope.level == "root":
-            results = await search_database(accessor, pattern_str, limit)
+            results = await search_database(accessor,
+                                            pattern_str,
+                                            limit,
+                                            case_insensitive=ci)
             all_lines = format_grep_results(results)
-            all_lines += await search_database_metadata(accessor, pattern_str)
+            all_lines += await search_database_metadata(accessor,
+                                                        pattern_str,
+                                                        case_insensitive=ci)
             if not all_lines:
                 return b"", IOResult(exit_code=1)
             return format_records(all_lines), IOResult()
 
         if scope.level == "schema":
-            results = await search_schema(accessor, scope.schema, pattern_str,
-                                          limit)
+            results = await search_schema(accessor,
+                                          scope.schema,
+                                          pattern_str,
+                                          limit,
+                                          case_insensitive=ci)
             all_lines = format_grep_results(results)
-            all_lines += await search_schema_metadata(accessor, scope.schema,
-                                                      pattern_str)
+            all_lines += await search_schema_metadata(accessor,
+                                                      scope.schema,
+                                                      pattern_str,
+                                                      case_insensitive=ci)
             if not all_lines:
                 return b"", IOResult(exit_code=1)
             return format_records(all_lines), IOResult()
 
         if scope.level == "kind":
-            results = await search_kind(accessor, scope.schema, scope.kind,
-                                        pattern_str, limit)
+            results = await search_kind(accessor,
+                                        scope.schema,
+                                        scope.kind,
+                                        pattern_str,
+                                        limit,
+                                        case_insensitive=ci)
             all_lines = format_grep_results(results)
-            all_lines += await search_kind_metadata(accessor, scope.schema,
-                                                    scope.kind, pattern_str)
+            all_lines += await search_kind_metadata(accessor,
+                                                    scope.schema,
+                                                    scope.kind,
+                                                    pattern_str,
+                                                    case_insensitive=ci)
             if not all_lines:
                 return b"", IOResult(exit_code=1)
             return format_records(all_lines), IOResult()
 
         if scope.level in ("entity", "entity_rows"):
-            rows = await search_entity(accessor, scope.schema, scope.kind,
-                                       scope.entity, pattern_str, limit)
+            rows = await search_entity(accessor,
+                                       scope.schema,
+                                       scope.kind,
+                                       scope.entity,
+                                       pattern_str,
+                                       limit,
+                                       case_insensitive=ci)
             results = [(scope.schema, scope.kind, scope.entity, rows)]
             all_lines = format_grep_results(results)
             # entity_rows names rows.jsonl explicitly; only the directory
             # scope pulls in the sibling metadata files.
             if scope.level == "entity":
-                all_lines += await search_entity_metadata(
-                    accessor, scope.schema, scope.kind, scope.entity,
-                    pattern_str)
+                all_lines += await search_entity_metadata(accessor,
+                                                          scope.schema,
+                                                          scope.kind,
+                                                          scope.entity,
+                                                          pattern_str,
+                                                          case_insensitive=ci)
             if not all_lines:
                 return b"", IOResult(exit_code=1)
             return format_records(all_lines), IOResult()

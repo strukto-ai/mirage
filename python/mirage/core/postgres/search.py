@@ -43,31 +43,56 @@ async def _text_columns(conn, schema: str, name: str) -> list[str]:
     return [r["column_name"] for r in rows]
 
 
-async def search_entity(accessor: PostgresAccessor, schema: str, kind: str,
-                        entity: str, pattern: str,
-                        limit: int) -> list[dict[str, Any]]:
+def _escape_like(pattern: str) -> str:
+    """Escape LIKE/ILIKE wildcards so the pattern matches as a literal.
+
+    Postgres LIKE treats % and _ as wildcards and \\ as the default escape
+    char; grep's substring pattern has no such meaning, so `user_id` must not
+    match `userXid`.
+
+    Args:
+        pattern (str): the literal substring to match.
+    """
+    return (pattern.replace("\\", "\\\\").replace("%",
+                                                  "\\%").replace("_", "\\_"))
+
+
+async def search_entity(
+        accessor: PostgresAccessor,
+        schema: str,
+        kind: str,
+        entity: str,
+        pattern: str,
+        limit: int,
+        *,
+        case_insensitive: bool = False) -> list[dict[str, Any]]:
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         cols = await _text_columns(conn, schema, entity)
         if not cols:
             return []
-        where = " OR ".join(f"{quote_ident(c)}::text ILIKE $1" for c in cols)
+        op = "ILIKE" if case_insensitive else "LIKE"
+        where = " OR ".join(f"{quote_ident(c)}::text {op} $1" for c in cols)
         sql = (f"SELECT * FROM {qualified(schema, entity)} "
                f"WHERE {where} LIMIT $2")
-        rows = await conn.fetch(sql, f"%{pattern}%", limit)
+        rows = await conn.fetch(sql, f"%{_escape_like(pattern)}%", limit)
         return [canonicalize_row(dict(r)) for r in rows]
 
 
-async def search_entity_metadata(accessor: PostgresAccessor, schema: str,
-                                 kind: str, entity: str,
-                                 pattern: str) -> list[str]:
+async def search_entity_metadata(accessor: PostgresAccessor,
+                                 schema: str,
+                                 kind: str,
+                                 entity: str,
+                                 pattern: str,
+                                 *,
+                                 case_insensitive: bool = False) -> list[str]:
     """Grep an entity's rendered metadata files.
 
-    The ILIKE push-down only ever sees row values, so schema.json and
+    The LIKE push-down only ever sees row values, so schema.json and
     semantic.json would be invisible at directory scope: `grep -r` would
     report "not found" for content that is plainly there. These documents
     are rendered, not stored, so the only honest way to match them is to
-    render and scan. Matching is case-insensitive to agree with ILIKE.
+    render and scan. Matching mirrors grep: case-sensitive unless -i is set.
 
     Args:
         accessor (PostgresAccessor): backend handle.
@@ -75,9 +100,10 @@ async def search_entity_metadata(accessor: PostgresAccessor, schema: str,
         kind (str): "tables" or "views".
         entity (str): the entity name.
         pattern (str): the literal substring to match.
+        case_insensitive (bool): True when -i folds case.
     """
     entity_kind = "table" if kind == "tables" else "view"
-    needle = pattern.lower()
+    needle = pattern.lower() if case_insensitive else pattern
     docs = (
         ("schema.json", await build_entity_schema_json(accessor, schema,
                                                        entity, entity_kind)),
@@ -88,13 +114,18 @@ async def search_entity_metadata(accessor: PostgresAccessor, schema: str,
     for name, doc in docs:
         rendered = orjson.dumps(doc, option=orjson.OPT_INDENT_2).decode()
         for line in rendered.splitlines():
-            if needle in line.lower():
+            hay = line.lower() if case_insensitive else line
+            if needle in hay:
                 lines.append(f"{schema}/{kind}/{entity}/{name}:{line}")
     return lines
 
 
-async def search_kind_metadata(accessor: PostgresAccessor, schema: str,
-                               kind: str, pattern: str) -> list[str]:
+async def search_kind_metadata(accessor: PostgresAccessor,
+                               schema: str,
+                               kind: str,
+                               pattern: str,
+                               *,
+                               case_insensitive: bool = False) -> list[str]:
     """Grep every entity's metadata files under one kind directory.
 
     Args:
@@ -102,45 +133,67 @@ async def search_kind_metadata(accessor: PostgresAccessor, schema: str,
         schema (str): the owning schema.
         kind (str): "tables" or "views".
         pattern (str): the literal substring to match.
+        case_insensitive (bool): True when -i folds case.
     """
     names = await _entity_names(accessor, schema, kind)
     lines: list[str] = []
     for n in names:
-        lines.extend(await search_entity_metadata(accessor, schema, kind, n,
-                                                  pattern))
+        lines.extend(await
+                     search_entity_metadata(accessor,
+                                            schema,
+                                            kind,
+                                            n,
+                                            pattern,
+                                            case_insensitive=case_insensitive))
     return lines
 
 
-async def search_schema_metadata(accessor: PostgresAccessor, schema: str,
-                                 pattern: str) -> list[str]:
+async def search_schema_metadata(accessor: PostgresAccessor,
+                                 schema: str,
+                                 pattern: str,
+                                 *,
+                                 case_insensitive: bool = False) -> list[str]:
     """Grep metadata files across both kinds of one schema.
 
     Args:
         accessor (PostgresAccessor): backend handle.
         schema (str): the owning schema.
         pattern (str): the literal substring to match.
+        case_insensitive (bool): True when -i folds case.
     """
     lines: list[str] = []
     for kind in ("tables", "views"):
-        lines.extend(await search_kind_metadata(accessor, schema, kind,
-                                                pattern))
+        lines.extend(await
+                     search_kind_metadata(accessor,
+                                          schema,
+                                          kind,
+                                          pattern,
+                                          case_insensitive=case_insensitive))
     return lines
 
 
-async def search_database_metadata(accessor: PostgresAccessor,
-                                   pattern: str) -> list[str]:
+async def search_database_metadata(
+        accessor: PostgresAccessor,
+        pattern: str,
+        *,
+        case_insensitive: bool = False) -> list[str]:
     """Grep metadata files across every visible schema.
 
     Args:
         accessor (PostgresAccessor): backend handle.
         pattern (str): the literal substring to match.
+        case_insensitive (bool): True when -i folds case.
     """
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         schemas = await _client.list_schemas(conn, accessor.config.schemas)
     lines: list[str] = []
     for s in schemas:
-        lines.extend(await search_schema_metadata(accessor, s, pattern))
+        lines.extend(await
+                     search_schema_metadata(accessor,
+                                            s,
+                                            pattern,
+                                            case_insensitive=case_insensitive))
     return lines
 
 
@@ -156,35 +209,65 @@ async def _entity_names(accessor: PostgresAccessor, schema: str,
 
 
 async def search_kind(
-        accessor: PostgresAccessor, schema: str, kind: str, pattern: str,
-        limit: int) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
+    accessor: PostgresAccessor,
+    schema: str,
+    kind: str,
+    pattern: str,
+    limit: int,
+    *,
+    case_insensitive: bool = False
+) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
     names = await _entity_names(accessor, schema, kind)
     out: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for n in names:
-        rows = await search_entity(accessor, schema, kind, n, pattern, limit)
+        rows = await search_entity(accessor,
+                                   schema,
+                                   kind,
+                                   n,
+                                   pattern,
+                                   limit,
+                                   case_insensitive=case_insensitive)
         if rows:
             out.append((schema, kind, n, rows))
     return out
 
 
 async def search_schema(
-        accessor: PostgresAccessor, schema: str, pattern: str,
-        limit: int) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
+    accessor: PostgresAccessor,
+    schema: str,
+    pattern: str,
+    limit: int,
+    *,
+    case_insensitive: bool = False
+) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
     out: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for kind in ("tables", "views"):
-        out.extend(await search_kind(accessor, schema, kind, pattern, limit))
+        out.extend(await search_kind(accessor,
+                                     schema,
+                                     kind,
+                                     pattern,
+                                     limit,
+                                     case_insensitive=case_insensitive))
     return out
 
 
 async def search_database(
-        accessor: PostgresAccessor, pattern: str,
-        limit: int) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
+    accessor: PostgresAccessor,
+    pattern: str,
+    limit: int,
+    *,
+    case_insensitive: bool = False
+) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         schemas = await _client.list_schemas(conn, accessor.config.schemas)
     out: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for s in schemas:
-        out.extend(await search_schema(accessor, s, pattern, limit))
+        out.extend(await search_schema(accessor,
+                                       s,
+                                       pattern,
+                                       limit,
+                                       case_insensitive=case_insensitive))
     return out
 
 

@@ -162,18 +162,21 @@ def search_query(pattern: str, fixed_string: bool) -> str | None:
     return extract_required_literal(pattern)
 
 
-_PUSHDOWN_SHAPING_BOOL = ("v", "n", "c", "args_l", "w", "o", "q", "H", "h")
+_PUSHDOWN_SHAPING_BOOL = ("v", "n", "c", "args_l", "w", "o", "q", "H", "h",
+                          "args_I")
 _PUSHDOWN_SHAPING_INT = ("m", "A", "B", "C")
+_PUSHDOWN_FILTER_STR = ("type", "glob")
 
 
 def has_search_shaping_flags(flags: Mapping[str, object] | None) -> bool:
     """True when a flag alters the match set or output shape of grep/rg.
 
     A search push-down prints each matching record as one whole line, so it
-    cannot honor -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h; when any is present
-    the wrapper must defer to the generic scan, which applies exact semantics.
-    Reads through a spec-less FlagView so the shared key set works for both
-    the grep and rg specs (rg simply never sets the grep-only keys).
+    cannot honor -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename),
+    nor rg's file-filtering --glob/--type; when any is present the wrapper must
+    defer to the generic scan, which applies exact semantics. Reads through a
+    spec-less FlagView so the shared key set works for both the grep and rg
+    specs (rg simply never sets the grep-only keys).
 
     Args:
         flags (Mapping[str, object] | None): raw flag kwargs.
@@ -181,22 +184,28 @@ def has_search_shaping_flags(flags: Mapping[str, object] | None) -> bool:
     fl = FlagView(flags)
     if any(fl.as_bool(k) for k in _PUSHDOWN_SHAPING_BOOL):
         return True
-    return any(fl.as_int(k) is not None for k in _PUSHDOWN_SHAPING_INT)
+    if any(fl.as_int(k) is not None for k in _PUSHDOWN_SHAPING_INT):
+        return True
+    return any(fl.as_str(k) is not None for k in _PUSHDOWN_FILTER_STR)
 
 
 def search_pushdown_ok(flags: Mapping[str, object] | None,
                        pattern: str) -> bool:
     """True when a literal-substring push-down faithfully reproduces grep/rg.
 
-    For the ILIKE substring push-down (postgres/mysql), faithful means a
+    For the LIKE/ILIKE substring push-down (postgres/mysql), faithful means a
     literal pattern with no shaping flags; a real regex is treated literally
-    by ILIKE and so must take the generic scan. Backends that push a real
-    regex down (mongodb) gate on has_search_shaping_flags alone instead.
+    by LIKE and so must take the generic scan, and a newline-joined pattern
+    list (-F with multiple -e) is a set of independent alternatives that LIKE
+    cannot express. Backends that push a real regex down (mongodb) gate on
+    has_search_shaping_flags alone instead.
 
     Args:
         flags (Mapping[str, object] | None): raw flag kwargs.
         pattern (str): the resolved search pattern.
     """
+    if "\n" in pattern:
+        return False
     fl = FlagView(flags)
     return (is_literal_pattern(pattern, fl.as_bool("F"))
             and not has_search_shaping_flags(flags))

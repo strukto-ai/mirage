@@ -60,10 +60,12 @@ async function grepCommand(
   const pattern = patternArg(texts, opts.flags)
   const limit = accessor.config.defaultSearchLimit
 
-  // The push-down is a case-insensitive literal-substring search that prints
+  // The push-down is a literal-substring search (case-sensitive unless -i)
+  // that prints
   // each matching row as a whole line; it cannot honor output/match-shaping
   // flags or a real regex, so those defer to the generic scan below.
   const first = paths[0]
+  const ci = opts.flags.i === true
   if (
     first !== undefined &&
     !hasUnresolvedGlob(paths) &&
@@ -81,25 +83,25 @@ async function grepCommand(
     // Deliberate divergence from GNU: rows come first and metadata second,
     // rather than in per-entity readdir order.
     if (scope.level === 'root') {
-      const results = await searchDatabase(accessor, pattern, limit)
+      const results = await searchDatabase(accessor, pattern, limit, ci)
       const allLines = formatGrepResults(results)
-      allLines.push(...(await searchDatabaseMetadata(accessor, pattern)))
+      allLines.push(...(await searchDatabaseMetadata(accessor, pattern, ci)))
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [formatRecords(allLines), new IOResult()]
     }
 
     if (scope.level === 'schema') {
-      const results = await searchSchema(accessor, scope.schema, pattern, limit)
+      const results = await searchSchema(accessor, scope.schema, pattern, limit, ci)
       const allLines = formatGrepResults(results)
-      allLines.push(...(await searchSchemaMetadata(accessor, scope.schema, pattern)))
+      allLines.push(...(await searchSchemaMetadata(accessor, scope.schema, pattern, ci)))
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [formatRecords(allLines), new IOResult()]
     }
 
     if (scope.level === 'kind') {
-      const results = await searchKind(accessor, scope.schema, scope.kind, pattern, limit)
+      const results = await searchKind(accessor, scope.schema, scope.kind, pattern, limit, ci)
       const allLines = formatGrepResults(results)
-      allLines.push(...(await searchKindMetadata(accessor, scope.schema, scope.kind, pattern)))
+      allLines.push(...(await searchKindMetadata(accessor, scope.schema, scope.kind, pattern, ci)))
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [formatRecords(allLines), new IOResult()]
     }
@@ -112,6 +114,7 @@ async function grepCommand(
         scope.entity,
         pattern,
         limit,
+        ci,
       )
       const results = [{ schema: scope.schema, kind: scope.kind, entity: scope.entity, rows }]
       const allLines = formatGrepResults(results)
@@ -125,6 +128,7 @@ async function grepCommand(
             scope.kind,
             scope.entity,
             pattern,
+            ci,
           )),
         )
       }
