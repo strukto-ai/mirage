@@ -80,6 +80,16 @@
       "value_optional": false
     },
     {
+      "description": "Fail with exit 22 on an HTTP error status.",
+      "long": "--fail",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-f",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
       "description": "Run silently without progress output.",
       "long": null,
       "numeric_shorthand": false,
