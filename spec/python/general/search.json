@@ -2,10 +2,13 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
-      "dify"
+      "dify",
+      "lancedb",
+      "mem0",
+      "qdrant"
     ]
   },
   "description": null,

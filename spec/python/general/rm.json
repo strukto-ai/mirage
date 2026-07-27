@@ -11,11 +11,17 @@
       "dropbox",
       "gdocs",
       "gdrive",
+      "gridfs",
       "gsheets",
       "gslides",
+      "hf_buckets",
+      "nextcloud",
       "onedrive",
       "ram",
-      "sharepoint"
+      "redis",
+      "s3",
+      "sharepoint",
+      "ssh"
     ]
   },
   "description": null,
