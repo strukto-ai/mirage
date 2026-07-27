@@ -211,6 +211,23 @@ describe('duGeneric', () => {
     expect(out.exitCode).toBe(1)
   })
 
+  it('warns but succeeds for -s with --max-depth=0', async () => {
+    const [size, entries] = backend({ '/dir/a.txt': 2 })
+    const parsed = parseDuFlags(opts({ s: true, max_depth: '0' }))
+    const out = await duGeneric([spec('/dir', 'dir')], parsed, size, entries)
+    expect(DEC.decode(out.stdout)).toBe('2\t/dir\n')
+    expect(DEC.decode(out.stderr)).toBe(
+      'du: warning: summarizing is the same as using --max-depth=0\n',
+    )
+    expect(out.exitCode).toBe(0)
+  })
+
+  it('still rejects -s with a nonzero --max-depth', () => {
+    expect(() => parseDuFlags(opts({ s: true, max_depth: '1' }))).toThrow(
+      /summarizing conflicts with --max-depth=1/,
+    )
+  })
+
   it('reads a driver error on the content probe as missing', async () => {
     const boom = () => {
       throw new Error('Graph API error 404 (itemNotFound)')

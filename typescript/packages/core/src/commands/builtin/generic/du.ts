@@ -16,7 +16,7 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { isMissingPath } from '../../../utils/errors.ts'
-import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rebaseRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -62,6 +62,8 @@ export interface DuFlags {
   c: boolean
   /** --max-depth/-d, deepest level to print. */
   maxDepth: number | null
+  /** A non-fatal diagnostic GNU prints before the output. */
+  warning?: string
 }
 
 /** What `du` produced for one invocation. */
@@ -99,20 +101,36 @@ export function parseDuFlags(opts: CommandOpts): DuFlags {
   if (s && a) {
     throw new UsageError(`du: cannot both summarize and show all entries\n${USAGE_HINT}`, 1)
   }
+  let warning: string | undefined
   if (s && maxDepth !== null) {
-    throw new UsageError(
-      `du: warning: summarizing conflicts with --max-depth=${String(maxDepth)}\n${USAGE_HINT}`,
-      1,
-    )
+    // GNU treats -s and --max-depth=0 as the same request, so it warns and
+    // carries on; any other depth is a real conflict and exits 1.
+    if (maxDepth !== 0) {
+      throw new UsageError(
+        `du: warning: summarizing conflicts with --max-depth=${String(maxDepth)}\n${USAGE_HINT}`,
+        1,
+      )
+    }
+    warning = 'du: warning: summarizing is the same as using --max-depth=0'
   }
-  return { s, a, h: opts.flags.h === true, c: opts.flags.c === true, maxDepth }
+  return {
+    s,
+    a,
+    h: opts.flags.h === true,
+    c: opts.flags.c === true,
+    maxDepth,
+    ...(warning === undefined ? {} : { warning }),
+  }
 }
 
 /** The operand GNU `du` assumes when the line names none. */
-function cwdSpec(cwd: string): PathSpec {
+function cwdSpec(cwd: string, mountPrefix?: string): PathSpec {
   const dir = cwd || '/'
+  // The cwd is a virtual path, so under a non-root mount its backend key is
+  // the cwd with the mount prefix removed: from /ram the backend must be
+  // asked for its own root, not for a 'ram' entry inside itself.
   return new PathSpec({
-    resourcePath: stripSlash(dir),
+    resourcePath: mountPrefix === undefined ? stripSlash(dir) : mountKey(dir, mountPrefix),
     virtual: dir,
     directory: dir,
     resolved: false,
@@ -160,8 +178,9 @@ async function duOperands(
   resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
   stat: (p: PathSpec) => Promise<unknown>,
   hasContent?: (p: PathSpec) => Promise<boolean>,
+  mountPrefix?: string,
 ): Promise<{ present: PathSpec[]; missing: string[] }> {
-  const targets = paths.length > 0 ? paths : [cwdSpec(cwd)]
+  const targets = paths.length > 0 ? paths : [cwdSpec(cwd, mountPrefix)]
   const resolved = await resolveGlob(targets)
   const present: PathSpec[] = []
   const missing: string[] = []
@@ -341,8 +360,13 @@ export async function runDu(
   truncated?: () => boolean,
 ): Promise<DuOutput> {
   const flags = parseDuFlags(opts)
-  const { present, missing } = await duOperands(paths, opts.cwd, resolveGlob, stat, (p) =>
-    duHasContent(computeSize, computeEntries, p),
+  const { present, missing } = await duOperands(
+    paths,
+    opts.cwd,
+    resolveGlob,
+    stat,
+    (p) => duHasContent(computeSize, computeEntries, p),
+    opts.mountPrefix,
   )
   return duGeneric(present, flags, computeSize, computeEntries, missing, truncated)
 }
@@ -378,8 +402,9 @@ export async function duGeneric(
   // this stays outside the loop guard.
   if (flags.c) lines.push(`${fmt(grand)}\ttotal`)
 
-  const notes = missing.map((raw) => `du: cannot access '${raw}': No such file or directory`)
-  let exitCode = notes.length > 0 ? 1 : 0
+  const notes = flags.warning === undefined ? [] : [flags.warning]
+  notes.push(...missing.map((raw) => `du: cannot access '${raw}': No such file or directory`))
+  let exitCode = missing.length > 0 ? 1 : 0
   if (truncated?.() === true) {
     notes.push(TRUNCATED_NOTE)
     exitCode = 1

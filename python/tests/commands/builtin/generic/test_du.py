@@ -274,6 +274,27 @@ async def test_c_still_prints_a_total_when_every_operand_is_missing():
 
 
 @pytest.mark.asyncio
+async def test_s_with_max_depth_zero_warns_but_succeeds():
+    """GNU: -s and --max-depth=0 are the same request, so it warns only."""
+    compute_size, compute_entries = _make_backend({"/dir/a.txt": 2})
+    flags = parse_flags(s=True, a=False, h=False, c=False, max_depth="0")
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=flags)
+    assert out.stdout == b"2\t/dir\n"
+    assert out.stderr == (
+        b"du: warning: summarizing is the same as using --max-depth=0\n")
+    assert out.exit_code == 0
+
+
+def test_s_with_a_nonzero_max_depth_is_still_a_usage_error():
+    with pytest.raises(UsageError) as excinfo:
+        parse_flags(s=True, a=False, h=False, c=False, max_depth="1")
+    assert "summarizing conflicts with --max-depth=1" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
 async def test_backend_error_on_the_content_probe_reads_as_missing():
     """A driver error probing an absent path must not replace GNU's line."""
 

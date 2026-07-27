@@ -34,6 +34,8 @@ class DuFlags:
         h (bool): -h, human-readable sizes.
         c (bool): -c, append a grand total.
         max_depth (int | None): --max-depth/-d, deepest level to print.
+        warning (str | None): a non-fatal diagnostic GNU prints before the
+            output, without failing the command.
     """
 
     s: bool = False
@@ -41,6 +43,7 @@ class DuFlags:
     h: bool = False
     c: bool = False
     max_depth: int | None = None
+    warning: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,11 +115,17 @@ def parse_flags(*, s: bool, a: bool, h: bool, c: bool,
     if s and a:
         raise UsageError(
             f"du: cannot both summarize and show all entries\n{USAGE_HINT}", 1)
+    warning: str | None = None
     if s and depth is not None:
-        raise UsageError(
-            f"du: warning: summarizing conflicts with --max-depth={depth}\n"
-            f"{USAGE_HINT}", 1)
-    return DuFlags(s=s, a=a, h=h, c=c, max_depth=depth)
+        # GNU treats -s and --max-depth=0 as the same request, so it warns
+        # and carries on; any other depth is a real conflict and exits 1.
+        if depth != 0:
+            raise UsageError(
+                "du: warning: summarizing conflicts with "
+                f"--max-depth={depth}\n{USAGE_HINT}", 1)
+        warning = ("du: warning: summarizing is the same as using "
+                   "--max-depth=0")
+    return DuFlags(s=s, a=a, h=h, c=c, max_depth=depth, warning=warning)
 
 
 def cwd_spec(cwd: PathSpec | str) -> PathSpec:
@@ -446,11 +455,10 @@ async def du(
     if flags.c:
         lines.append(_line(sum(totals), flags.h, "total"))
 
-    notes = [
-        f"du: cannot access '{raw}': No such file or directory"
-        for raw in missing
-    ]
-    exit_code = 1 if notes else 0
+    notes = [flags.warning] if flags.warning else []
+    notes.extend(f"du: cannot access '{raw}': No such file or directory"
+                 for raw in missing)
+    exit_code = 1 if missing else 0
     if truncated is not None and truncated():
         notes.append("du: walk stopped early: the reported sizes are "
                      "incomplete")
