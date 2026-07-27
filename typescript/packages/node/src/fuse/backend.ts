@@ -16,6 +16,7 @@ import { posix } from 'node:path'
 import {
   KERNEL_BACKENDS,
   MountBackend,
+  rstripSlash,
   sizesAlwaysKnown,
   type Workspace,
 } from '@struktoai/mirage-core'
@@ -97,10 +98,10 @@ export function checkMountpoint(backend: MountBackend, mountpoint: string): void
  * them. Mirrors Python's `Ops.unsized_mounts`.
  */
 export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][] {
-  const root = rootPrefix.replace(/\/+$/, '')
+  const root = rstripSlash(rootPrefix)
   const found: [string, string][] = []
   for (const m of ws.mounts()) {
-    const bare = m.prefix.replace(/\/+$/, '')
+    const bare = rstripSlash(m.prefix)
     if (root !== '' && bare !== root && !m.prefix.startsWith(root + '/')) continue
     if (!sizesAlwaysKnown(m.resource)) found.push([m.prefix, m.resource.kind])
   }
