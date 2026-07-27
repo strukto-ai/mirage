@@ -54,7 +54,6 @@ with Workspace({"/data/": Mount(resource, mode=MountMode.WRITE,
     print(f">>>   ls -la {mp}/")
     print(f">>>   cat {mp}/example.json")
     print(f">>>   cat {mp}/example.json | jq .")
-    print(f">>>   cat {mp}/example.parquet")
     print(">>> Press Enter to unmount and exit...")
     input()
 
