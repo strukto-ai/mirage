@@ -203,6 +203,14 @@ describe('workspace: subshell', () => {
     expect(ws.getSession(ws.defaultSessionId).env.X).toBe('outer')
     await ws.close()
   })
+
+  it('$? updates between commands inside a subshell', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('(false; echo subshell=$?)')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('subshell=1\n')
+    await ws.close()
+  })
 })
 
 describe('workspace: function', () => {
@@ -246,6 +254,14 @@ describe('workspace: brace group', () => {
     const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
+    await ws.close()
+  })
+
+  it('$? updates between commands inside a brace group', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('{ false; echo group=$?; }')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('group=1\n')
     await ws.close()
   })
 })

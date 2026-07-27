@@ -419,6 +419,8 @@ export async function executeNode(
       lastExec = execNode
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      // Seed $? between body commands (same as program / subshell).
+      session.lastExitCode = io.exitCode
       if (
         io.exitCode !== 0 &&
         session.shellOptions.errexit === true &&

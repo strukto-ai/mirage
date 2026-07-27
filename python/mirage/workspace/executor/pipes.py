@@ -263,6 +263,8 @@ async def handle_subshell(
                     execute_node, child, None, session, job_table, agent_id
                     or "", stdin, call_stack)
                 merged_io = await merged_io.merge(io)
+                # Seed $? for later body commands (mirrors program loop).
+                session.last_exit_code = io.exit_code
                 if stdout is not None:
                     all_stdout.append(stdout)
                 i += 2
@@ -280,6 +282,7 @@ async def handle_subshell(
                                   stderr=sig.stderr or None)
                 merged_io = await merged_io.merge(sig_io)
                 merged_io.exit_code = sig.contained_code
+                session.last_exit_code = sig.contained_code
                 last_exec = ExecutionNode(command="()",
                                           exit_code=sig.contained_code,
                                           stderr=sig.stderr)
@@ -287,6 +290,9 @@ async def handle_subshell(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            # Seed $? between body commands (handle_connection does this
+            # for top-level lists; subshells iterate children directly).
+            session.last_exit_code = io.exit_code
             if (io.exit_code != 0 and session.shell_options.get("errexit")
                     and child.type not in ERREXIT_EXEMPT_TYPES
                     and not session.errexit_immune):

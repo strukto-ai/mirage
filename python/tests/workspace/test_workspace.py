@@ -364,6 +364,17 @@ def test_brace_group():
     assert s.env["B"] == "2"
 
 
+def test_status_inside_subshell_and_brace_group():
+    """$? inside ( ) and { } must track prior commands (issue #476)."""
+    ws = _ws()
+    io = _exec(ws, "(false; echo subshell=$?)")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"subshell=1\n"
+    io = _exec(ws, "{ false; echo group=$?; }")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"group=1\n"
+
+
 # ── variable expansion ─────────────────────────
 
 

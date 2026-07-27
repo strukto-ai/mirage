@@ -366,6 +366,8 @@ async def execute_node(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            # Seed $? between body commands (same as program / subshell).
+            session.last_exit_code = io.exit_code
             if (io.exit_code != 0 and session.shell_options.get("errexit")
                     and child.type not in ERREXIT_EXEMPT_TYPES
                     and not session.errexit_immune):

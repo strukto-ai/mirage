@@ -294,6 +294,8 @@ export async function handleSubshell(
         )
         if (bgStdout !== null) allStdout.push(bgStdout)
         mergedIo = await mergedIo.merge(bgIo)
+        // Seed $? for later body commands (mirrors program loop).
+        session.lastExitCode = bgIo.exitCode
         lastExec = bgExec
         i += 2
         continue
@@ -312,6 +314,7 @@ export async function handleSubshell(
         const sigIo = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
         mergedIo = await mergedIo.merge(sigIo)
         mergedIo.exitCode = err.containedCode
+        session.lastExitCode = err.containedCode
         lastExec = new ExecutionNode({
           command: '()',
           exitCode: err.containedCode,
@@ -322,6 +325,9 @@ export async function handleSubshell(
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       lastExec = childExec
+      // Seed $? between body commands (handleConnection does this for
+      // top-level lists; subshells iterate children directly).
+      session.lastExitCode = io.exitCode
       if (
         io.exitCode !== 0 &&
         session.shellOptions.errexit === true &&
