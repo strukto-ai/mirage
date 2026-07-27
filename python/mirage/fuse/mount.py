@@ -53,34 +53,42 @@ def _run_fuse(fs: MirageFS,
     # uid=-1/gid=-1 (win32): the WinFsp-FUSE builtin that presents all files
     # as owned by the mounting user; POSIX uid/gid values reported by getattr
     # have no meaningful SID mapping on Windows (see the WinFsp FAQ).
-    # backend=fskit: mfusepy forwards unknown kwargs as -o options, so this
-    # reaches macFUSE 5.x's FSKit shim and the mount runs with no kernel
-    # extension loaded. direct_io has no effect there, which is exactly why
-    # check_sizes refuses resources that cannot size their files.
     win_opts = {"uid": -1, "gid": -1} if sys.platform == "win32" else {}
-    backend_opts = ({
-        "backend": backend.value
-    } if backend is not MountBackend.FUSE else {})
+    opts: dict[str, object] = {"attr_timeout": 0}
+    if backend is MountBackend.FSKIT:
+        # The recipe verified on a real macFUSE 5.x FSKit mount (issue #82):
+        # backend=fskit plus a volname, and NO direct_io. Do not "restore"
+        # direct_io here on the theory that it is merely inert on this path;
+        # the only reported working mount omits it, and this is not a
+        # configuration we can test in CI.
+        opts["backend"] = backend.value
+        opts["volname"] = os.path.basename(mountpoint.rstrip("/"))
+    else:
+        opts["direct_io"] = True
     fuse.FUSE(fs,
               mountpoint,
               nothreads=True,
               foreground=foreground,
-              direct_io=True,
-              attr_timeout=0,
-              **backend_opts,
+              **opts,
               **win_opts)
 
 
 def _await_ready(thread: threading.Thread,
                  mountpoint: str,
-                 timeout: float = 10.0) -> None:
+                 timeout: float = 10.0,
+                 backend: MountBackend = MountBackend.FUSE) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         # POSIX: the pre-existing directory becomes a mountpoint. Windows:
         # _prepare_mountpoint removed the directory and WinFsp recreates it
         # when the filesystem is live, so bare existence is the ready signal
         # (os.path.ismount does not recognize WinFsp directory mounts).
-        if os.path.ismount(mountpoint) or (sys.platform == "win32"
+        # FSKit: the /Volumes entry does not exist until the system creates
+        # it for the live volume, so existence is a real signal there too,
+        # and it does not depend on ismount recognizing the mount.
+        creates_own_mountpoint = (sys.platform == "win32"
+                                  or backend is MountBackend.FSKIT)
+        if os.path.ismount(mountpoint) or (creates_own_mountpoint
                                            and os.path.lexists(mountpoint)):
             return
         if not thread.is_alive():
@@ -121,7 +129,7 @@ def mount_background(
                          args=(fs, mountpoint, True, resolved),
                          daemon=True)
     t.start()
-    _await_ready(t, mountpoint)
+    _await_ready(t, mountpoint, backend=resolved)
     return t
 
 

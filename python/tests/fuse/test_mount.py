@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.fuse.backend import MountBackend
 from mirage.fuse.fs import MirageFS
 from mirage.fuse.mount import _prepare_mountpoint, _run_fuse
 from mirage.resource.ram import RAMResource
@@ -92,3 +93,26 @@ def test_run_fuse_posix_omits_owner_mapping(monkeypatch, fs):
     _run_fuse(fs, "/tmp/mp", foreground=True)
     assert "uid" not in _CaptureFuse.kwargs
     assert "gid" not in _CaptureFuse.kwargs
+
+
+def test_fskit_mount_options_match_the_verified_recipe(monkeypatch, fs):
+    # Issue #82's only reported working mount was backend=fskit + volname
+    # with direct_io omitted. Pin all three: nothing in CI can exercise this
+    # path (it needs macOS 15.4+, macFUSE 5.x, and a GUI-enabled FSKit
+    # module), so a regression here would ship silently.
+    monkeypatch.setattr("mirage.fuse.mount.fuse.FUSE", _CaptureFuse)
+    _run_fuse(fs, "/Volumes/mirage-abc", False, MountBackend.FSKIT)
+    assert _CaptureFuse.kwargs["backend"] == "fskit"
+    assert _CaptureFuse.kwargs["volname"] == "mirage-abc"
+    assert "direct_io" not in _CaptureFuse.kwargs
+    assert _CaptureFuse.kwargs["attr_timeout"] == 0
+
+
+def test_fuse_backend_keeps_direct_io(monkeypatch, fs):
+    # The kext path still needs direct_io: without it cat reads 0 bytes from
+    # a size-unknown file on macOS (see the CLAUDE.md FUSE section).
+    monkeypatch.setattr("mirage.fuse.mount.fuse.FUSE", _CaptureFuse)
+    _run_fuse(fs, "/tmp/mirage-abc", False, MountBackend.FUSE)
+    assert _CaptureFuse.kwargs["direct_io"] is True
+    assert "backend" not in _CaptureFuse.kwargs
+    assert "volname" not in _CaptureFuse.kwargs

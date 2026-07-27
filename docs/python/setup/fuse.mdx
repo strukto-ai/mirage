@@ -100,8 +100,12 @@ with Workspace({
 are enforced at mount time rather than discovered at run time:
 
 - **The mountpoint must be under `/Volumes`.** FSKit refuses anything else.
-  Mirage picks a `/Volumes` temp directory automatically when you do not pass
-  a path, and rejects an explicit path outside it.
+  Mirage names one automatically when you do not pass a path, and rejects an
+  explicit path outside it.
+- **Mirage does not create the mountpoint, macOS does.** An FSKit mount is a
+  volume: the `/Volumes` entry appears when the filesystem goes live and is
+  removed when it unmounts. `/Volumes` is root-owned, so nothing here needs
+  (or could get) elevated permissions.
 - **Every mounted resource must be able to size its files.** See below.
 
 There is deliberately **no `auto`** value: auto-selecting FSKit would silently

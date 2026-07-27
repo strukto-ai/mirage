@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
 import subprocess
+import tempfile
 
 import pytest
 
@@ -163,3 +165,79 @@ def test_mount_spec_fuse_unmounts_on_close(monkeypatch):
             mode=MountMode.WRITE) as ws:
         assert set(ws.fuse_mountpoints) == {"/gdocs/"}
     assert ws.fuse_mountpoints == {}
+
+
+def _capture_mount(monkeypatch):
+    """Record what FuseManager hands to mount_background."""
+    seen = {}
+
+    def _fake(ops, mountpoint, root_prefix="", session=None, backend=None):
+        seen["mountpoint"] = mountpoint
+        seen["backend"] = backend
+        return _FakeThread()
+
+    monkeypatch.setattr("mirage.workspace.fuse.mount_background", _fake)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: None)
+    return seen
+
+
+def test_fskit_auto_mountpoint_is_named_not_created(monkeypatch):
+    # /Volumes is root-owned (drwxr-xr-x root:wheel), so mkdtemp there raises
+    # PermissionError for every non-root user. An FSKit mount is a volume:
+    # the system creates the directory when the filesystem goes live, so
+    # mirage only names it. Creating it here would break every fskit mount.
+    _capture_mount(monkeypatch)
+    made = []
+    monkeypatch.setattr(tempfile, "mkdtemp",
+                        lambda *a, **k: made.append(k) or "/tmp/should-not")
+    fm = FuseManager()
+    mp = fm.setup(Workspace({
+        "/": RAMResource()
+    }, mode=MountMode.WRITE)._ops,
+                  "/",
+                  backend=MountBackend.FSKIT)
+    assert mp.startswith("/Volumes/mirage-")
+    assert not os.path.exists(mp)
+    assert made == []
+
+
+def test_fskit_pinned_mountpoint_is_not_created(monkeypatch):
+    seen = _capture_mount(monkeypatch)
+    calls = []
+    monkeypatch.setattr(os, "makedirs", lambda *a, **k: calls.append(a))
+    fm = FuseManager()
+    fm.setup(Workspace({
+        "/": RAMResource()
+    }, mode=MountMode.WRITE)._ops,
+             "/",
+             mountpoint="/Volumes/pinned-vol",
+             backend=MountBackend.FSKIT)
+    assert calls == []
+    assert seen["mountpoint"] == "/Volumes/pinned-vol"
+
+
+def test_fuse_auto_mountpoint_still_uses_tempdir(monkeypatch):
+    _capture_mount(monkeypatch)
+    fm = FuseManager()
+    mp = fm.setup(
+        Workspace({
+            "/": RAMResource()
+        }, mode=MountMode.WRITE)._ops, "/")
+    assert not mp.startswith("/Volumes/")
+    assert os.path.isdir(mp)
+    os.rmdir(mp)
+
+
+def test_unmount_never_rmdirs_a_volumes_entry(monkeypatch):
+    # The /Volumes entry belongs to the system; rmdir would fail anyway.
+    _capture_mount(monkeypatch)
+    removed = []
+    monkeypatch.setattr(os, "rmdir", lambda p: removed.append(p))
+    fm = FuseManager()
+    fm.setup(Workspace({
+        "/": RAMResource()
+    }, mode=MountMode.WRITE)._ops,
+             "/",
+             backend=MountBackend.FSKIT)
+    fm.unmount()
+    assert removed == []

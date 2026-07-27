@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
+from uuid import uuid4
 
 from mirage.fuse.backend import (FSKIT_MOUNT_ROOT, MountBackend,
                                  check_mountpoint, prepare_backend)
@@ -57,6 +58,7 @@ class FuseManager:
             str: the mountpoint now serving the tree.
         """
         resolved = prepare_backend(backend)
+        is_fskit = resolved is MountBackend.FSKIT
         if mountpoint:
             # Caller/deployment-owned mountpoints may be reused across process
             # restarts, container lifecycles, or volume mounts. Mirage should
@@ -64,14 +66,23 @@ class FuseManager:
             check_mountpoint(resolved, mountpoint)
             self._mountpoint = mountpoint
             self._owns_mountpoint = False
-            os.makedirs(mountpoint, exist_ok=True)
+            # An FSKit mount is a volume: the system creates the /Volumes
+            # entry when the filesystem goes live, and /Volumes is root-owned
+            # so makedirs would fail for a normal user anyway.
+            if not is_fskit:
+                os.makedirs(mountpoint, exist_ok=True)
         else:
             # FSKit refuses to mount outside /Volumes, so the default
-            # temporary mountpoint moves there rather than the system temp
-            # dir. The rule lives here so no call site has to know it.
-            is_fskit = resolved is MountBackend.FSKIT
-            parent = FSKIT_MOUNT_ROOT if is_fskit else None
-            self._mountpoint = tempfile.mkdtemp(prefix="mirage-", dir=parent)
+            # mountpoint moves there rather than the system temp dir. It is
+            # NAMED, never created: /Volumes is root-owned (drwxr-xr-x
+            # root:wheel), so mkdtemp there raises PermissionError for every
+            # non-root user, and the volume directory is the system's to
+            # create. Same shape as the WinFsp branch in _prepare_mountpoint.
+            if is_fskit:
+                self._mountpoint = (f"{FSKIT_MOUNT_ROOT}/mirage-"
+                                    f"{uuid4().hex[:8]}")
+            else:
+                self._mountpoint = tempfile.mkdtemp(prefix="mirage-")
             self._owns_mountpoint = True
         self._thread = mount_background(ops,
                                         self._mountpoint,
@@ -93,7 +104,10 @@ class FuseManager:
         else:
             subprocess.run(["fusermount", "-u", self._mountpoint],
                            capture_output=True)
-        if self._owns_mountpoint:
+        # An FSKit /Volumes entry is created and removed by the system, and
+        # is not ours to rmdir (nor could we: /Volumes is root-owned).
+        if self._owns_mountpoint and not self._mountpoint.startswith(
+                FSKIT_MOUNT_ROOT + "/"):
             try:
                 # Empty-directory cleanup only. If the mount is still live or
                 # the directory has contents, leave it for the caller/admin.
