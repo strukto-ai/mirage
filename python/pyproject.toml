@@ -203,6 +203,28 @@ all = [
     "mirage-ai[daytona]",
     "mirage-ai[e2b]",
 ]
+sandbox = [
+    "mirage-ai[s3]",
+    "mirage-ai[r2]",
+    "mirage-ai[gcs]",
+    "mirage-ai[oci]",
+    "mirage-ai[databricks]",
+    "mirage-ai[ssh]",
+    "mirage-ai[nextcloud]",
+    "mirage-ai[hf]",
+    "mirage-ai[fuse]",
+    "mirage-ai[mongodb]",
+    "mirage-ai[gridfs]",
+    "mirage-ai[postgres]",
+    "mirage-ai[redis]",
+    "mirage-ai[email]",
+    "mirage-ai[parquet]",
+    "mirage-ai[hdf5]",
+    "mirage-ai[pdf]",
+    "mirage-ai[langfuse]",
+    "mirage-ai[chroma]",
+    "mirage-ai[qdrant]",
+]
 lancedb = [
     "lancedb>=0.33.0",
 ]

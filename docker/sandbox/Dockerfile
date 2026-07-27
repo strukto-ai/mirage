@@ -4,15 +4,16 @@
 #   docker build -f docker/sandbox/Dockerfile --target fuse \
 #     -t mirage-python-fuse .
 #
-# The fuse target installs every backend (mirage-ai[all], which already
-# includes fuse) plus fuse3, so one image can FUSE-mount whatever
-# backend a workspace declares, not just S3. Usable as-is for local
-# docker (run with --cap-add SYS_ADMIN --device /dev/fuse), as a Daytona
-# image/snapshot source, and as an E2B template base.
+# The fuse target installs the `sandbox` extra: every mountable backend
+# plus fuse3, so one image can FUSE-mount whatever backend a workspace
+# declares, not just S3. It deliberately excludes the agent frameworks
+# and the sandbox-provider SDKs (daytona/e2b) that `all` pulls in: a
+# sandbox is a filesystem host, it never builds agents or launches other
+# sandboxes. Usable as-is for local docker (run with --cap-add SYS_ADMIN
+# --device /dev/fuse), as a Daytona image/snapshot source, and as an E2B
+# template base.
 #
-# `all` also pulls host-side extras the sandbox never uses (the
-# daytona/e2b SDKs, agent frameworks). For a leaner image, narrow the
-# extras to the backends you actually mount:
+# Narrow the extras to just the backends you mount for a leaner image:
 #   docker build -f docker/sandbox/Dockerfile --target fuse \
 #     --build-arg MIRAGE_EXTRAS=s3,postgres -t mirage-fuse-lean .
 # Or extend this image as a base: FROM mirage-python-fuse, then
@@ -20,7 +21,7 @@
 
 FROM python:3.12-slim AS fuse
 
-ARG MIRAGE_EXTRAS=all
+ARG MIRAGE_EXTRAS=sandbox
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends fuse3 libfuse3-dev \
