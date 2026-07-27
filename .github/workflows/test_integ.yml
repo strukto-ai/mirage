@@ -843,8 +843,9 @@ jobs:
     # macFUSE installs its FSKit module without kext approval (that is the
     # whole point of the backend), but whether a hosted runner enables the
     # module without a GUI toggle is exactly what this job measures.
-    # Python only: @zkochan/fuse-native bundles a pre-macFUSE-5 dylib, so a
-    # TS leg cannot reach fskit at all.
+    # Python only for now: TypeScript reaches fskit too (fuse.node links the
+    # installed libfuse), but the mount never comes up on a hosted runner
+    # either way, so one leg is enough to measure the environment.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7

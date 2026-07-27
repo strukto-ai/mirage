@@ -12,16 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// TypeScript cannot serve an FSKit mount. '@zkochan/fuse-native' bundles a
-// pre-macFUSE-5 dylib with no route to FSKit, so `backend: fskit` is
-// rejected up front instead of failing halfway through a mount. This shows
-// the refusal and the two things you can actually do about it.
+// Mount over Apple's FSKit from Node, with no kernel extension loaded.
+// Needs macOS 15.4+ and macFUSE 5.x with its FSKit module enabled:
 //
 //     pnpm --dir examples/typescript exec tsx fuse/fskit.ts
+//
+// It mounts, reads, then shows the two things that will bite you: the
+// size guard that refuses API-backed resources, and the partial write
+// surface. Every probe below runs in a child process: a TS FUSE mount is
+// served by this process's event loop, so touching the mountpoint
+// synchronously from here would deadlock it.
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { basename } from "node:path";
+import { promisify } from "node:util";
 import {
   Mount,
   MountBackend,
@@ -30,57 +34,94 @@ import {
   Workspace,
 } from "@struktoai/mirage-node";
 
+const run = promisify(execFile);
 const CONTENT = new TextEncoder().encode('{"messages": 2}\n');
 
-function seed(): RAMResource {
-  const resource = new RAMResource();
+class SizeUnknownRAM extends RAMResource {
+  // A resource that cannot size its files, like Slack or Gmail.
+  override readonly sizesAlwaysKnown = false;
+}
+
+function seed(resource: RAMResource): RAMResource {
   resource.store.dirs.add("/");
   resource.store.files.set("/api.json", CONTENT);
+  resource.store.files.set("/existing.txt", new TextEncoder().encode("old\n"));
   return resource;
 }
 
-async function main(): Promise<void> {
-  console.log("=== backend: fskit ===");
+async function attempt(cmd: string, args: string[]): Promise<string> {
   try {
-    new Workspace({
-      "/data": new Mount(seed(), {
-        mode: MountMode.WRITE,
-        backend: MountBackend.FSKIT,
-      }),
-    });
+    await run(cmd, args);
+    return "ok";
+  } catch (err) {
+    const failure = err as { code?: string | number; stderr?: string };
+    const detail = (failure.stderr ?? "").trim().split("\n")[0];
+    return detail === "" ? `failed (${String(failure.code)})` : detail;
+  }
+}
+
+async function main(): Promise<void> {
+  console.log("=== the size guard ===");
+  // addFuseMount rejects; constructor auto-mounts only warn on stderr
+  // (the deliberate auto-mount failure policy in workspace.ts).
+  const guarded = new Workspace({
+    "/api": new Mount(seed(new SizeUnknownRAM()), { mode: MountMode.READ }),
+  });
+  try {
+    await guarded.addFuseMount("/api", undefined, undefined, MountBackend.FSKIT);
     console.log("  mounted (unexpected)");
   } catch (err) {
     console.log(`  refused: ${(err as Error).message}`);
+  } finally {
+    await guarded.close();
   }
 
-  // Option 1: the same mount over the kernel extension, which the TS
-  // binding does support. This is the one to use on macOS with the kext
-  // approved, or anywhere on Linux.
-  console.log("\n=== backend: fuse (works here) ===");
-  const mountpoint = await mkdtemp(join(tmpdir(), "mirage-"));
+  console.log("\n=== fskit mount ===");
   const ws = new Workspace({
-    "/data": new Mount(seed(), {
+    "/data": new Mount(seed(new RAMResource()), {
       mode: MountMode.WRITE,
-      backend: MountBackend.FUSE,
-      mountpoint,
+      backend: MountBackend.FSKIT,
     }),
   });
   try {
+    await ws.fuseReady();
     const mp = ws.fuseMountpoints["/data"];
     console.log(`  mounted at ${mp}`);
-    // Read from a child process, never synchronously from this one: a TS
-    // FUSE mount is served by this event loop and would deadlock.
-    const body = await readFile(join(mp, "api.json"), "utf8");
-    console.log(`  cat api.json -> ${body.trim()}`);
+
+    const rows = await run("mount", []);
+    for (const line of rows.stdout.split("\n")) {
+      if (line.includes(basename(mp))) console.log(`  ${line}`);
+    }
+
+    console.log("\n=== reads (from child processes) ===");
+    const cat = await run("/bin/cat", [`${mp}/api.json`]);
+    console.log(`  cat api.json -> ${cat.stdout.trim()}`);
+    const wc = await run("/usr/bin/wc", ["-c", `${mp}/api.json`]);
+    console.log(`  wc -c        -> ${wc.stdout.trim()}`);
+
+    console.log("\n=== writes: only part of the surface works ===");
+    console.log(
+      "  append existing -> " +
+        (await attempt("/bin/sh", ["-c", `echo x >> ${mp}/existing.txt`])),
+    );
+    console.log(
+      "  unlink existing -> " + (await attempt("/bin/rm", [`${mp}/existing.txt`])),
+    );
+    console.log(
+      "  create new file -> " + (await attempt("/usr/bin/touch", [`${mp}/new.txt`])),
+    );
+    console.log("  mkdir           -> " + (await attempt("/bin/mkdir", [`${mp}/sub`])));
+    console.log(
+      "  rename          -> " +
+        (await attempt("/bin/mv", [`${mp}/api.json`, `${mp}/moved.json`])),
+    );
+    console.log("\n  Creating new names fails with ENOSYS on the FSKit shim,");
+    console.log("  and a failed create can still apply. Use backend 'fuse'");
+    console.log("  for write workloads; see docs/typescript/setup/fuse.mdx.");
   } finally {
     await ws.close();
-    await rm(mountpoint, { recursive: true, force: true });
   }
-
-  // Option 2: for a kext-free mount, use the Python package, which routes
-  // through macFUSE 5.x's FSKit shim. See examples/python/fuse/fskit.py.
-  console.log("\n  For kext-free mounts use Python:");
-  console.log("    ./python/.venv/bin/python examples/python/fuse/fskit.py");
+  console.log("\nunmounted, done");
 }
 
 main().catch((err: unknown) => {

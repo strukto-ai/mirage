@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountBackend, MountMode, RAMResource } from '@struktoai/mirage-core'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import {
   checkMountpoint,
@@ -66,27 +66,48 @@ describe('resolveBackend', () => {
   })
 
   it('prepareBackend runs the fskit guards, so no mount path can skip them', () => {
-    // TypeScript cannot reach fskit at all, so the platform guard fires
-    // first and unconditionally — that is the assert being pinned here.
-    expect(() => prepareBackend('fskit')).toThrow(/fskit/)
+    setPlatform('darwin')
+    // mountpoint guard
+    expect(() => prepareBackend('fskit', undefined, '/tmp/x')).toThrow(/only mounts under/)
+    // size guard
+    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    expect(() => prepareBackend('fskit', ws, `${FSKIT_MOUNT_ROOT}/m`)).not.toThrow()
   })
+})
+
+/** Stub process.platform for a test; afterEach below restores it. */
+const REAL_PLATFORM = process.platform
+function setPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true })
+}
+afterEach(() => {
+  setPlatform(REAL_PLATFORM)
 })
 
 describe('checkPlatform', () => {
   it('allows fuse everywhere', () => {
+    setPlatform('linux')
     expect(() => {
       checkPlatform(MountBackend.FUSE)
     }).not.toThrow()
   })
 
-  it('rejects fskit: fuse-native cannot reach the FSKit shim', () => {
-    // Known gap mirrored from docs/typescript/setup/fuse.mdx —
-    // @zkochan/fuse-native bundles a pre-macFUSE-5 dylib, so the option
-    // never reaches a driver that understands it. Python is the only side
-    // that can serve fskit.
+  it('rejects fskit off darwin', () => {
+    setPlatform('linux')
     expect(() => {
       checkPlatform(MountBackend.FSKIT)
-    }).toThrow(/fskit/)
+    }).toThrow(/macOS-only/)
+  })
+
+  it('allows fskit on darwin: fuse.node links the installed libfuse', () => {
+    // fuse-native's fuse.node links /usr/local/lib/libfuse.2.dylib by
+    // absolute path (its bundled libosxfuse.2.dylib is a stub with that
+    // install name), so backend=fskit reaches macFUSE 5.x's own libfuse.
+    // Verified with a live mount; see examples/typescript/fuse/fskit.ts.
+    setPlatform('darwin')
+    expect(() => {
+      checkPlatform(MountBackend.FSKIT)
+    }).not.toThrow()
   })
 })
 

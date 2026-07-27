@@ -162,9 +162,9 @@ default is a trap. `MountBackend.FSKIT` is macOS-only and raises elsewhere.
 refusing a resource that cannot size its files, a live mount with reads
 matching their stat size, and each write op with the errno it returns.
 
-TypeScript has no FSKit path at all; `examples/typescript/fuse/fskit.ts`
-shows the refusal and the two alternatives (`backend: 'fuse'` there, or the
-Python package for a kext-free mount).
+TypeScript supports the same backend with the same guards
+([details](/typescript/setup/fuse#mounting-without-the-kernel-extension-fskit));
+`examples/typescript/fuse/fskit.ts` is its live end-to-end check.
 
 ## Size semantics for API-backed files
 

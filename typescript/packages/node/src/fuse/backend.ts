@@ -60,13 +60,13 @@ export function requireKernelBackend(backend: MountBackend): void {
 }
 
 /**
- * Reject a backend this runtime cannot serve.
+ * Reject a backend the current platform cannot serve.
  *
- * Known gap, deliberate: TypeScript cannot reach FSKit at all.
- * `@zkochan/fuse-native` bundles its own pre-macFUSE-5 dylib, so the
- * `backend=fskit` mount option never reaches a driver that understands it.
- * Python (mfusepy, which links the installed libfuse) is the only side that
- * can. Documented in docs/typescript/setup/fuse.mdx alongside the ORC gap.
+ * FSKit works from TypeScript: `fuse.node` links `/usr/local/lib/
+ * libfuse.2.dylib` by absolute path (the `libosxfuse.2.dylib` it ships is a
+ * stub with that install name), so on a machine with macFUSE 5.x the
+ * `backend=fskit` option reaches the same libfuse Python uses. Verified
+ * with a live mount; see examples/typescript/fuse/fskit.ts.
  */
 export function checkPlatform(backend: MountBackend): void {
   if (backend !== MountBackend.FSKIT) return
@@ -75,11 +75,6 @@ export function checkPlatform(backend: MountBackend): void {
       `the fskit mount backend is macOS-only (running on ${process.platform}); use backend 'fuse'`,
     )
   }
-  throw new Error(
-    "the fskit mount backend is not available in TypeScript: '@zkochan/fuse-native' bundles a " +
-      'pre-macFUSE-5 dylib that cannot route to FSKit. Use the Python package for kext-free ' +
-      'mounts, or backend "fuse" here. See https://mirage.dev/typescript/setup/fuse',
-  )
 }
 
 /** Reject a mountpoint the backend cannot mount on. */

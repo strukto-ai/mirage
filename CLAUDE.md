@@ -59,8 +59,14 @@ Command history is a recording, not a command log. A hidden `Observer` records e
   a size-unknown resource would serve silent empty files). `resolve_backend`
   rejects `vfs`: reaching it means a kernel mount was requested. In YAML the
   keys are `backend:` and `mountpoint:`.
-  TypeScript cannot reach FSKit at all: `@zkochan/fuse-native` bundles a
-  pre-macFUSE-5 dylib, so `checkPlatform` throws. Documented gap, ORC-style.
+  TypeScript serves fskit too: `fuse.node` links `/usr/local/lib/libfuse.2.dylib`
+  by absolute path (the bundled `libosxfuse.2.dylib` is a stub with that
+  install name), so `backend=fskit` + `volname` reach macFUSE 5.x's own
+  libfuse via `appendMountOptions` in `mount.ts`. Verified live. Caveat: a TS
+  fskit mount intermittently wedged on a write op in testing (probed from
+  child processes), and a dead FSKit volume blocks mount-table enumeration
+  system-wide until the macFUSE appex process is killed; treat fskit from TS
+  as read-mostly and experimental.
   A mount is ready only when `os.path.ismount` says so, never when the
   `/Volumes` entry merely exists: macFUSE creates that directory while
   mounting and leaves it behind if the FSKit handoff fails, which reads as a

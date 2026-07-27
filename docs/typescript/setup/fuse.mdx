@@ -101,7 +101,7 @@ field:
 | --- | --- |
 | `vfs` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
 | `fuse` | Also exposed as a real mountpoint via FUSE. |
-| `fskit` | Not available in TypeScript; see the gap below. |
+| `fskit` | Also exposed as a real mountpoint via FSKit, with no kernel extension. macOS 15.4+ only; see below. |
 
 A kernel-backed mount shows only that mount's subtree. `mountpoint` pins
 where it lands; omit it for a fresh temp directory:
@@ -121,27 +121,41 @@ mounts:
 Programmatically, set `backend` per mount: `{ '/data': new Mount(dataResource, { backend: MountBackend.FUSE, mountpoint: '/tmp/data-repo' }), '/s3': new Mount(s3Resource, { backend: MountBackend.FUSE }) }`.
 `ws.fuseMountpoints` returns a `{ prefix: path }` map of the live mountpoints.
 
-## Known gap: no FSKit backend in TypeScript
+## Mounting without the kernel extension (FSKit)
 
 macOS 15.4+ with macFUSE 5.x can serve a mount through Apple's FSKit instead
-of the macFUSE kernel extension. **The TypeScript package cannot reach it.**
-`@zkochan/fuse-native` bundles its own pre-macFUSE-5 dylib, so the
-`backend=fskit` mount option never reaches a driver that understands it.
-Requesting it throws rather than silently mounting through the kext:
+of the macFUSE kernel extension. This works from TypeScript: `fuse.node`
+links `/usr/local/lib/libfuse.2.dylib` by absolute path, so `backend:
+'fskit'` reaches the same macFUSE 5.x libfuse the Python package uses.
 
 ```ts
-await mount(ws, { backend: 'fskit' })
-// Error: the fskit mount backend is not available in TypeScript ...
+const ws = new Workspace({
+  '/data': new Mount(dataResource, { backend: MountBackend.FSKIT }),
+})
+await ws.fuseReady()
+ws.fuseMountpoints['/data'] // => /Volumes/mirage-<id>, tagged fskit
 ```
 
-Use [the Python package](/python/setup/fuse#mounting-without-the-kernel-extension-fskit)
-for kext-free mounts. This is a binding limitation, not a design decision;
-it sits alongside the ORC gap as a documented place where the two
-implementations differ.
+The same rules as Python apply, enforced at mount time: macOS-only, the
+mountpoint must be under `/Volumes` (named by mirage, created by the
+system), and every mounted resource must report exact sizes
+(`sizesAlwaysKnown`; the `checkSizes` guard refuses anything else by name).
+The FSKit shim's write surface is also partial: in-place writes and
+`unlink` work, while `create`, `mkdir` and `rename` return ENOSYS, and a
+failed create can still apply. See
+[the Python page](/python/setup/fuse#mounting-without-the-kernel-extension-fskit)
+for the full measured matrix.
 
-The `sizesAlwaysKnown` resource capability and the `unsizedMounts` /
-`checkSizes` guards **are** implemented here and mirror Python exactly, so
-the semantics are already in place if the binding ever gains FSKit support.
+<Warning>
+  **A wedged FSKit mount blocks more than itself.** A TS mount is served by
+  the mounting process's event loop, and in testing an FSKit mount
+  intermittently hung on a write op even when probed from child processes.
+  A dead FSKit volume blocks `mount`-table enumeration system-wide until
+  the macFUSE FSKit extension process is killed. Prefer `backend: 'fuse'`
+  for anything long-running or write-heavy; treat `fskit` from TypeScript
+  as read-mostly and experimental. `examples/typescript/fuse/fskit.ts` is
+  the live end-to-end check.
+</Warning>
 
 ## Size semantics for API-backed files
 
