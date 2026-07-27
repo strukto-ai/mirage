@@ -116,4 +116,51 @@ describe('Workspace observer wiring', () => {
     expect(prefixes).toEqual(new Set(['/', '/data/', '/dev/', '/.bash_history/']))
     await ws.close()
   })
+
+  // The three below assert the recorded event shape on the real execute path.
+  // observer.test.ts builds entries by hand, so a regression in the wiring from
+  // a command to its event would not be caught there, and the /.bash_history
+  // and `history` views render fine without these fields.
+  it('records exitCode and cwd on every command event', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hello > /data/test.txt')
+    await ws.execute('cat /data/missing.txt')
+    const commands = await ws.history()
+    expect(commands).toHaveLength(2)
+    expect(commands.every((e) => 'exit_code' in e)).toBe(true)
+    expect(commands.every((e) => 'cwd' in e)).toBe(true)
+    expect(commands.map((e) => e.exit_code)).toEqual([0, 1])
+    await ws.close()
+  })
+
+  // The path form is deliberately not asserted here: this host records the
+  // op path mount-relative ('/test.txt') where python records the virtual path
+  // ('/data/test.txt'), so the prefix set by Mount.execute is not reaching
+  // record(). Python's test_execute_records_op_source pins the correct form;
+  // asserting the mount-relative one here would freeze the bug in place.
+  it('records a source and a read op on every op event', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hello > /data/test.txt')
+    await ws.execute('cat /data/test.txt')
+    const events = await ws.observer.events()
+    const ops = events.filter((e) => e.type === 'op')
+    expect(ops.length).toBeGreaterThan(0)
+    expect(ops.every((e) => 'source' in e)).toBe(true)
+    expect(ops.filter((e) => e.op === 'read').length).toBeGreaterThan(0)
+    await ws.close()
+  })
+
+  it('records clear, command, delete and op event types', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hello > /data/test.txt')
+    await ws.execute('history -s synthetic')
+    await ws.execute('history -d 1')
+    await ws.execute('history -c')
+    const events = await ws.observer.events()
+    const types = new Set(events.map((e) => e.type))
+    for (const kind of ['clear', 'command', 'delete', 'op']) {
+      expect(types.has(kind)).toBe(true)
+    }
+    await ws.close()
+  })
 })

@@ -151,6 +151,13 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
+      # Snapshot roundtrip and out-of-band-delete GC only: the per-command
+      # metadata cases live in integ/unix/meta{,_overlay} now.
+      - name: Run metadata snapshot/GC scenarios and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/metadata.py > /tmp/metadata.out
+          diff integ/truth_metadata.txt /tmp/metadata.out
+
       - name: Run Safeguard scenarios and diff against truth
         run: |
           ./python/.venv/bin/python integ/safeguard.py > /tmp/safeguard.out
@@ -283,6 +290,14 @@ jobs:
           /tmp/mc mb local/mirage-integ-gcs || true
           /tmp/mc mb local/mirage-integ-minio || true
 
+
+      # Snapshot roundtrip and out-of-band-delete GC only: the per-command
+      # metadata cases live in integ/unix/meta{,_overlay} now.
+      - name: Run metadata snapshot/GC scenarios and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx metadata.ts > /tmp/ts-metadata.out
+          diff truth_metadata.txt /tmp/ts-metadata.out
 
       - name: Run Safeguard scenarios and diff against truth
         working-directory: integ

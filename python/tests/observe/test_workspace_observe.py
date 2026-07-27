@@ -73,3 +73,39 @@ def test_observer_store_not_mounted():
     assert result.exit_code != 0
     prefixes = {m.prefix for m in ws._registry.mounts()}
     assert prefixes == {"/", "/data/", "/dev/", "/.bash_history/"}
+
+
+# The tests below assert the recorded event shape on the real execute path.
+# The rest of the observe suite builds entries by hand, so a regression in the
+# wiring from a command to its event would not be caught there, and the
+# /.bash_history and `history` views render fine without these fields.
+def test_execute_records_exit_code_and_cwd():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    asyncio.run(ws.execute("echo hello > /data/test.txt"))
+    asyncio.run(ws.execute("cat /data/missing.txt"))
+    commands = asyncio.run(ws.history())
+    assert len(commands) == 2
+    assert all("exit_code" in e for e in commands)
+    assert all("cwd" in e for e in commands)
+    assert [e["exit_code"] for e in commands] == [0, 1]
+
+
+def test_execute_records_op_source():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    asyncio.run(ws.execute("echo hello > /data/test.txt"))
+    asyncio.run(ws.execute("cat /data/test.txt"))
+    events = asyncio.run(ws.observer.events())
+    ops = [e for e in events if e["type"] == "op"]
+    assert ops
+    assert all("source" in e for e in ops)
+    assert "/data/test.txt" in {e["path"] for e in ops if e["op"] == "read"}
+
+
+def test_execute_records_every_event_type():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    asyncio.run(ws.execute("echo hello > /data/test.txt"))
+    asyncio.run(ws.execute("history -s synthetic"))
+    asyncio.run(ws.execute("history -d 1"))
+    asyncio.run(ws.execute("history -c"))
+    events = asyncio.run(ws.observer.events())
+    assert {"clear", "command", "delete", "op"} <= {e["type"] for e in events}
