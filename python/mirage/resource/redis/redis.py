@@ -79,6 +79,8 @@ class RedisResource(BaseResource):
 
     accessor: RedisAccessor
     name: str = ResourceName.REDIS
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     index_ttl: float = 0
     _ops: dict[str, Any] = _REDIS_OPS
     PROMPT: str = PROMPT

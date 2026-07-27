@@ -90,7 +90,13 @@ export type {
   SessionSnapshot,
   WorkspaceStateDict,
 } from './workspace/snapshot/types.ts'
-export { BaseResource, type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
+export {
+  BaseResource,
+  type FindOptions,
+  type Resource,
+  sizesAlwaysKnown,
+  throwUnsupported,
+} from './resource/base.ts'
 export {
   hasRedactedSecret,
   REDACTED_SECRET,

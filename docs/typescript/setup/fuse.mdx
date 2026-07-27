@@ -113,6 +113,28 @@ mounts:
 Programmatically, set `fuse` per mount: `{ '/data': new Mount(dataResource, { fuse: '/tmp/data-repo' }), '/s3': new Mount(s3Resource, { fuse: true }) }`.
 `ws.fuseMountpoints` returns a `{ prefix: path }` map of the live mountpoints.
 
+## Known gap: no FSKit backend in TypeScript
+
+macOS 15.4+ with macFUSE 5.x can serve a mount through Apple's FSKit instead
+of the macFUSE kernel extension. **The TypeScript package cannot reach it.**
+`@zkochan/fuse-native` bundles its own pre-macFUSE-5 dylib, so the
+`backend=fskit` mount option never reaches a driver that understands it.
+Requesting it throws rather than silently mounting through the kext:
+
+```ts
+await mount(ws, { backend: 'fskit' })
+// Error: the fskit mount backend is not available in TypeScript ...
+```
+
+Use [the Python package](/python/setup/fuse#mounting-without-the-kernel-extension-fskit)
+for kext-free mounts. This is a binding limitation, not a design decision;
+it sits alongside the ORC gap as a documented place where the two
+implementations differ.
+
+The `sizesAlwaysKnown` resource capability and the `unsizedMounts` /
+`checkSizes` guards **are** implemented here and mirror Python exactly, so
+the semantics are already in place if the binding ever gains FSKit support.
+
 ## Size semantics for API-backed files
 
 Some resources (Linear, Trello, Slack, ...) cannot report a file's size

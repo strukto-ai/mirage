@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Session, Workspace } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../optional_peer.ts'
+import { checkMountpoint, checkPlatform, checkSizes, resolveBackend } from './backend.ts'
 import { MirageFS } from './fs.ts'
 
 export interface FuseHandle {
@@ -48,6 +49,12 @@ export interface MountOptions {
    * Mirage appends by default (see appendDirectIO).
    */
   fuseOptions?: Record<string, unknown>
+  /**
+   * Which kernel interface serves the mount: 'fuse' (default) or 'fskit'.
+   * See backend.ts — 'fskit' currently throws in TypeScript, because
+   * `@zkochan/fuse-native` cannot reach the FSKit shim.
+   */
+  backend?: string
 }
 
 interface FuseInstance {
@@ -118,10 +125,14 @@ export function forceUnmount(mountpoint: string): void {
 }
 
 export async function mount(ws: Workspace, options: MountOptions = {}): Promise<FuseHandle> {
+  const backend = resolveBackend(options.backend)
+  checkPlatform(backend)
+  checkSizes(backend, ws, options.rootPrefix ?? '')
   const Fuse = await loadFuse()
   let mountpoint: string
   let ownsMountpoint = false
   if (options.mountpoint !== undefined) {
+    checkMountpoint(backend, options.mountpoint)
     // Pinned path: create if missing, but keep ownership with the caller.
     mkdirSync(options.mountpoint, { recursive: true })
     mountpoint = options.mountpoint

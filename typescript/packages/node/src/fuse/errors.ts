@@ -59,7 +59,10 @@ const MESSAGE_ERRNO: [string[], number][] = [
  */
 export function classifyErrno(err: unknown): number {
   const code = (err as { code?: string }).code
-  if (code !== undefined && code in CODE_ERRNO) return CODE_ERRNO[code] as number
+  if (code !== undefined) {
+    const mapped = CODE_ERRNO[code]
+    if (mapped !== undefined) return mapped
+  }
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
   for (const [needles, errno] of MESSAGE_ERRNO) {
     if (needles.some((n) => msg.includes(n))) return errno
@@ -76,6 +79,6 @@ export function classifyError(err: unknown): number {
  * Build an error carrying a POSIX code, so the mount core can signal a
  * specific errno without importing any adapter's numbering.
  */
-export function errnoError(code: keyof typeof CODE_ERRNO | string, message: string): Error {
+export function errnoError(code: keyof typeof CODE_ERRNO, message: string): Error {
   return Object.assign(new Error(message), { code })
 }

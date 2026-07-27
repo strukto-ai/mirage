@@ -71,6 +71,56 @@ mounts:
 
 `ws.fuse_mountpoints` returns a `{prefix: path}` map of the live mountpoints.
 
+## Mounting without the kernel extension (FSKit)
+
+macOS 15.4+ with macFUSE 5.x can serve a mount through Apple's FSKit instead
+of the macFUSE kernel extension. Set `fuse_backend` on the mount:
+
+```python
+from mirage import Mount, MountMode, Workspace
+from mirage.resource.ram import RAMResource
+
+with Workspace({
+    "/data/": Mount(RAMResource(), mode=MountMode.WRITE,
+                    fuse=True, fuse_backend="fskit")
+}) as ws:
+    print(ws.fuse_mountpoint)   # /Volumes/mirage-...
+```
+
+`kextstat` stays empty and the mount table tags the volume `fskit`. Two rules
+are enforced at mount time rather than discovered at run time:
+
+- **The mountpoint must be under `/Volumes`.** FSKit refuses anything else.
+  Mirage picks a `/Volumes` temp directory automatically when you do not pass
+  a path, and rejects an explicit path outside it.
+- **Every mounted resource must be able to size its files.** See below.
+
+There is deliberately **no `auto`** value: auto-selecting FSKit would silently
+break every API-backed mount, and an option whose safe value is always the
+default is a trap. `fuse_backend="fskit"` is macOS-only and raises elsewhere.
+
+<Warning>
+  **FSKit cannot serve size-unknown resources.** FSKit has no `direct_io`
+  equivalent, so reads are driven entirely by the size the filesystem
+  reports. A resource that stats as 0 bytes before open would return an
+  empty file with exit code 0, which is worse than a failed mount. Mirage
+  refuses such a mount by name:
+
+  ```
+  the fskit mount backend cannot serve resources whose file sizes are only
+  known after a read; these mounts would return empty files: /slack/ (slack)
+  ```
+
+  Eligible today: `ram`, `disk`, `redis`, `s3` (and its compatible
+  backends), `gridfs`. Everything else needs `fuse`. To use FSKit in a
+  workspace that also holds API resources, scope the FSKit mount to the
+  byte-store subtree, and reach the rest through the mirage command surface.
+</Warning>
+
+Examples: `examples/python/ram/ram_fskit.py`, `redis/redis_fskit.py` and
+`s3/s3_fskit.py` mount successfully; `slack/slack_fskit.py` and
+`gmail/gmail_fskit.py` show the refusal and the supported workarounds.
+
 ## Size semantics for API-backed files
 
 Some resources (Linear, Trello, Slack, ...) cannot report a file's size

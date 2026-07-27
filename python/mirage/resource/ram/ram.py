@@ -72,6 +72,8 @@ class RAMResource(BaseResource):
 
     accessor: RAMAccessor
     name: str = ResourceName.RAM
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     index_ttl: float = 0
     _ops: dict[str, Any] = _RAM_OPS
     PROMPT: str = PROMPT

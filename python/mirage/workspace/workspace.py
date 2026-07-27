@@ -232,16 +232,18 @@ class Workspace:
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch_runtime: WatchDelegate | None = None
 
-        fuse_targets: list[tuple[str, bool | str]] = []
+        fuse_targets: list[tuple[str, bool | str, str]] = []
         for prefix, value in resources.items():
             mount_safeguards: dict[str, CommandSafeguard] = {}
             mount_fuse: bool | str = False
+            mount_fuse_backend = "fuse"
             if isinstance(value, Mount):
                 prov = value.resource
                 mount_mode = value.mode if value.mode is not None else mode
                 if value.command_safeguards:
                     mount_safeguards = dict(value.command_safeguards)
                 mount_fuse = value.fuse
+                mount_fuse_backend = value.fuse_backend
             elif isinstance(value, tuple):
                 if len(value) not in (2, 3):
                     raise TypeError(
@@ -259,7 +261,7 @@ class Workspace:
             if mount_safeguards:
                 mount_obj.command_safeguards.update(mount_safeguards)
             if mount_fuse:
-                fuse_targets.append((prefix, mount_fuse))
+                fuse_targets.append((prefix, mount_fuse, mount_fuse_backend))
 
         self._implicit_root = self._registry.root_mount is None
         if self._implicit_root:
@@ -297,9 +299,9 @@ class Workspace:
         _reject_config_script("route", route)
         self._route = route
 
-        for prefix, fuse_target in fuse_targets:
+        for prefix, fuse_target, fuse_backend in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
-            self.add_fuse_mount(prefix, mountpoint)
+            self.add_fuse_mount(prefix, mountpoint, backend=fuse_backend)
 
     async def history(self) -> list[dict[str, Any]]:
         """Command events recorded by the hidden recorder.
@@ -391,7 +393,8 @@ class Workspace:
     def add_fuse_mount(self,
                        prefix: str,
                        mountpoint: str | None = None,
-                       session_id: str | None = None) -> str:
+                       session_id: str | None = None,
+                       backend: str | None = None) -> str:
         # Register a pinned path BEFORE mounting so a collision is rejected
         # without leaving a partial mount. Each mount gets its own manager,
         # so a workspace can expose any number of FUSE subtrees at once.
@@ -407,7 +410,11 @@ class Workspace:
         fm = FuseManager()
         self._fuse_managers[key] = fm
         try:
-            mp = fm.setup(self._ops, prefix, mountpoint, session=session)
+            mp = fm.setup(self._ops,
+                          prefix,
+                          mountpoint,
+                          session=session,
+                          backend=backend)
         except Exception:
             # The mount never came up; drop the manager and any registered
             # path so fuse_mountpoints does not misreport it as live.

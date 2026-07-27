@@ -60,6 +60,8 @@ export class GridFSResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GRIDFS
   readonly cachesReads: boolean = true
   readonly supportsSnapshot: boolean = true
+  // byte store: stat() sizes every file from metadata
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = GRIDFS_PROMPT
   readonly config: GridFSConfig

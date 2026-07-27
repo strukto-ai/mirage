@@ -23,6 +23,8 @@ try:
 except ImportError:
     fuse = None
 
+from mirage.fuse.backend import (MountBackend, check_mountpoint,
+                                 check_platform, check_sizes, resolve_backend)
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
 from mirage.workspace.session.session import Session
@@ -38,7 +40,10 @@ def _prepare_mountpoint(mountpoint: str) -> None:
         os.rmdir(mountpoint)
 
 
-def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
+def _run_fuse(fs: MirageFS,
+              mountpoint: str,
+              foreground: bool,
+              backend: MountBackend = MountBackend.FUSE) -> None:
     # direct_io: the kernel ignores st_size and keeps issuing reads until the
     # backend returns EOF, which is what makes size-unknown (API-backed) files
     # readable by tools that never fstat (cat, grep).
@@ -49,13 +54,21 @@ def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
     # uid=-1/gid=-1 (win32): the WinFsp-FUSE builtin that presents all files
     # as owned by the mounting user; POSIX uid/gid values reported by getattr
     # have no meaningful SID mapping on Windows (see the WinFsp FAQ).
+    # backend=fskit: mfusepy forwards unknown kwargs as -o options, so this
+    # reaches macFUSE 5.x's FSKit shim and the mount runs with no kernel
+    # extension loaded. direct_io has no effect there, which is exactly why
+    # check_sizes refuses resources that cannot size their files.
     win_opts = {"uid": -1, "gid": -1} if sys.platform == "win32" else {}
+    backend_opts = ({
+        "backend": backend.value
+    } if backend is not MountBackend.FUSE else {})
     fuse.FUSE(fs,
               mountpoint,
               nothreads=True,
               foreground=foreground,
               direct_io=True,
               attr_timeout=0,
+              **backend_opts,
               **win_opts)
 
 
@@ -81,14 +94,33 @@ def _await_ready(thread: threading.Thread,
         f"{timeout:g}s")
 
 
-def mount_background(ops: Ops,
-                     mountpoint: str,
-                     root_prefix: str = "",
-                     session: Session | None = None) -> threading.Thread:
+def mount_background(
+        ops: Ops,
+        mountpoint: str,
+        root_prefix: str = "",
+        session: Session | None = None,
+        backend: str | MountBackend | None = None) -> threading.Thread:
+    """Mount in a background thread and return once the tree is live.
+
+    Args:
+        ops (Ops): the op facade to serve.
+        mountpoint (str): where to mount.
+        root_prefix (str): mount root; non-empty scopes the tree.
+        session (Session | None): bind ops to this session's mount grants.
+        backend (str | MountBackend | None): kernel interface to use;
+            None means FUSE.
+
+    Returns:
+        threading.Thread: the thread serving the mount.
+    """
+    resolved = resolve_backend(backend)
+    check_platform(resolved)
+    check_mountpoint(resolved, mountpoint)
+    check_sizes(resolved, ops, root_prefix)
     fs = MirageFS(ops, root_prefix=root_prefix, session=session)
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(target=_run_fuse,
-                         args=(fs, mountpoint, True),
+                         args=(fs, mountpoint, True, resolved),
                          daemon=True)
     t.start()
     _await_ready(t, mountpoint)
@@ -100,7 +132,13 @@ def mount(ops: Ops | None = None,
           foreground: bool = True,
           fs: MirageFS | None = None,
           daemon: bool = False,
-          post_fork=None) -> None:
+          post_fork=None,
+          backend: str | MountBackend | None = None) -> None:
+    resolved = resolve_backend(backend)
+    check_platform(resolved)
+    check_mountpoint(resolved, mountpoint)
+    if ops is not None:
+        check_sizes(resolved, ops)
     if fs is None:
         if ops is None:
             raise ValueError("mount requires either ops or a prebuilt fs")
@@ -113,11 +151,11 @@ def mount(ops: Ops | None = None,
         os.setsid()
         if post_fork:
             post_fork()
-        _run_fuse(fs, mountpoint, foreground=True)
+        _run_fuse(fs, mountpoint, True, resolved)
         return
     t = threading.Thread(
         target=_run_fuse,
-        args=(fs, mountpoint, foreground),
+        args=(fs, mountpoint, foreground, resolved),
         daemon=True,
     )
     if post_fork:

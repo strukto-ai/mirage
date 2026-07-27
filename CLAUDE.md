@@ -38,6 +38,23 @@ Command history is a recording, not a command log. A hidden `Observer` records e
 
 ## FUSE
 
+- **The mount layer is split core/adapter in both languages.** `MountCore`
+  (`python/mirage/fuse/core.py`, `typescript/packages/node/src/fuse/core.ts`)
+  owns all filesystem semantics in POSIX terms and imports nothing from
+  mfusepy or `@zkochan/fuse-native`; `MirageFS` in `fs.py`/`fs.ts` is the
+  libfuse adapter and owns only the callback signatures plus errno
+  translation. Core methods raise ordinary exceptions; adapters classify them
+  through `classify_error`/`classifyErrno` (`fuse/errors.py`, `fuse/errors.ts`),
+  which is one shared table, not per-method `except` arms. Put new filesystem
+  behavior in the core, not the adapter.
+- **`backend: fuse | fskit`.** `Mount(..., fuse_backend="fskit")` routes
+  through macFUSE 5.x's FSKit shim (no kernel extension). Rules live in
+  `fuse/backend.py` and are enforced at mount time: macOS-only, mountpoint must
+  be under `/Volumes`, and every mounted resource must set
+  `SIZES_ALWAYS_KNOWN` (FSKit has no `direct_io`, so a size-unknown resource
+  would serve silent empty files). There is deliberately **no `auto`**.
+  TypeScript cannot reach FSKit at all: `@zkochan/fuse-native` bundles a
+  pre-macFUSE-5 dylib, so `checkPlatform` throws. Documented gap, ORC-style.
 - **Directory and unknown sizes.** `getattr` reports `st_size` 0 for directories and for API-backed size-unknown files that have not been opened recently. Reads stay correct because Python mounts with `direct_io` (kernel reads to EOF regardless of st_size) AND `attr_timeout=0` (post-open fstat routes to `getattr(path, fh)`, which serves the real size of the open-hydrated content); prefetched bytes live in a 30s TTL cache (`PREFETCH_TTL`) so release-then-stat does not refetch. All three pieces are load-bearing: without `attr_timeout=0`, `wc -c` prints 0, BSD `cp` copies 0 bytes, and `tail -c` dumps the whole file; without `direct_io`, `cat` reads 0 bytes on macOS. Do not "fix" getattr to report real sizes eagerly (one API fetch per `ls -l` entry), and do not report fake sizes: stat-only tools (`tar`, `rsync`, `test -s`) seeing 0 matches procfs precedent. TypeScript uses the same recipe: `@zkochan/fuse-native` doesn't serialize a `direct_io` option, so `mount.ts` appends it to the option string at runtime (`appendDirectIO`; a pnpm patch would not reach consumers), plus `attrTimeout: '0'` + fgetattr. The old 100 MiB sentinel is gone; do not reintroduce it.
 - **TS FUSE mounts are served by the mounting process's event loop.** Never touch your own mountpoint synchronously (`readFileSync`, `statSync`, `execFileSync`) from the process that created the mount: the call deadlocks the loop that must answer it, the kernel times out, and every later op fails with `Device not configured`/`ENOTCONN` — which looks exactly like a broken mount. Probe from a child process or use async APIs (see `examples/typescript/fuse/helper.ts`). Python is immune (FUSE loop runs on a thread).
 - **`FileStat.size` must be the rendered content's byte length or `None`, never a storage-side or source-side number.** A confidently wrong size is worse than an unknown one: over FUSE it makes `wc -c`/`ls -l` lie and risks truncated copies, while `None` rides the unknown-size machinery above. Postgres `rows.jsonl` (on-disk `table_size_bytes` vs rendered JSONL), Dify documents (uploaded source size vs rendered segment text), Gmail messages (`sizeEstimate` vs rendered `.gmail.json`), Drive-rendered google-apps files (Drive storage size vs rendered `.gdoc/.gsheet/.gslide` JSON; raw binary downloads keep Drive's size), and Microsoft Graph folders (OneDrive/SharePoint report an aggregate subtree `size` on the folder facet, not any content length) made this mistake; their storage/source numbers now live in `extra` (`size_bytes` / `source_size` / `size_estimate`). Do not reintroduce it in new backends. Graph's `folder.childCount` rides along in `extra` too, and is what `find -empty` reads for a directory.

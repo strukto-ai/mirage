@@ -24,5 +24,9 @@ class Mount:
     resource: BaseResource
     mode: MountMode | None = None
     fuse: bool | str = False
+    # Which kernel interface serves the FUSE mount: "fuse" (default,
+    # everywhere) or "fskit" (macOS 15.4+ with macFUSE 5.x, no kernel
+    # extension). Ignored when fuse is False. See mirage.fuse.backend.
+    fuse_backend: str = "fuse"
     command_safeguards: dict[str,
                              CommandSafeguard] = field(default_factory=dict)

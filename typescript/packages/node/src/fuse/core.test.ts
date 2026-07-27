@@ -72,16 +72,24 @@ describe('MountCore', () => {
 
   it('throws EINVAL from readlink on a regular file', async () => {
     const core = await mkCore()
-    expect(() => core.readlink('/data/greeting.txt')).toThrow(
-      expect.objectContaining({ code: 'EINVAL' }),
-    )
+    let code: string | undefined
+    try {
+      core.readlink('/data/greeting.txt')
+    } catch (err) {
+      code = (err as { code?: string }).code
+    }
+    expect(code).toBe('EINVAL')
   })
 
   it('signals ENOTEMPTY for a non-empty directory', async () => {
     const core = await mkCore()
-    await expect(core.rmdir('/data/sub')).rejects.toThrow(
-      expect.objectContaining({ code: 'ENOTEMPTY' }),
-    )
+    let code: string | undefined
+    try {
+      await core.rmdir('/data/sub')
+    } catch (err) {
+      code = (err as { code?: string }).code
+    }
+    expect(code).toBe('ENOTEMPTY')
   })
 
   it('round-trips advisory xattrs', async () => {
@@ -93,7 +101,7 @@ describe('MountCore', () => {
     expect(core.listxattr('/data/greeting.txt')).toEqual([])
   })
 
-  it('honors the root prefix when resolving', async () => {
+  it('honors the root prefix when resolving', () => {
     const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
     const core = new MountCore(ws, { rootPrefix: '/data/' })
     expect(core.resolve('/')).toBe('/data')
