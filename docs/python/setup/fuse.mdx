@@ -82,8 +82,23 @@ mounts:
 
 ## Mounting without the kernel extension (FSKit)
 
-macOS 15.4+ with macFUSE 5.x can serve a mount through Apple's FSKit instead
-of the macFUSE kernel extension. Set `backend` on the mount:
+Apple has deprecated third-party kernel extensions: on Apple Silicon the
+macFUSE kext already needs a reduced-security boot plus admin approval, and
+future macOS releases are expected to stop loading it entirely. FSKit
+(macOS 15.4+) is Apple's supported userspace replacement, and macFUSE 5.x
+serves the same libfuse API through it. `backend=fskit` is mirage's path to
+keep real mounts working on Macs where the kext is blocked. Only the
+kernel-to-userspace hop changes:
+
+```mermaid
+flowchart LR
+    A[cat /Volumes/.../file] --> K[kernel VFS]
+    K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
+    K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
+    L --> M[MirageFS] --> R[resource]
+```
+
+Set `backend` on the mount:
 
 ```python
 from mirage import Mount, MountBackend, MountMode, Workspace
@@ -113,49 +128,23 @@ break every API-backed mount, and an option whose safe value is always the
 default is a trap. `MountBackend.FSKIT` is macOS-only and raises elsewhere.
 
 <Warning>
-  **An FSKit mount is read-mostly, and its write failures are not clean.**
-  macFUSE's FSKit shim serves only part of the write surface. Measured on
-  macFUSE 5.3.3 / macOS 26 (`integ/fskit.py`):
-
-  | Operation | Result |
-  | --- | --- |
-  | read, `listdir`, `stat` | works |
-  | write, append, truncate an existing file | works |
-  | `unlink` | works |
-  | **create a new file** | `ENOSYS` (Function not implemented) |
-  | **`mkdir`** | `ENOSYS` |
-  | **`rename`** | `ENOSYS` |
-
-  Worse than the failures themselves: a failed create **still applies**. The
-  syscall returns `ENOSYS` and the file exists in the resource and through
-  the mount anyway, so a caller that treats the error as "nothing happened"
-  is wrong. Mirage's own `create` succeeds and returns a handle; the shim
-  fails the syscall afterwards, so this is not something mirage can report
-  more accurately.
-
-  Anything that creates files (`git clone`, `pip install`, a compiler, an
-  agent writing new output) will fail on an FSKit mount. Use
-  `MountBackend.FUSE` for write workloads, and prefer `MountMode.READ` when
-  mounting via FSKit so the limitation surfaces as a clear permission error
-  instead of a partial write.
+  **FSKit mounts are read-mostly, and write failures are not clean.**
+  Measured on macFUSE 5.3.3 / macOS 26 (`integ/fskit.py`): reads, in-place
+  writes and `unlink` work; `create`, `mkdir` and `rename` return `ENOSYS`,
+  and a failed create **still applies** (the file exists despite the error).
+  Anything that creates files (`git clone`, `pip install`, an agent writing
+  output) will fail. Use `MountBackend.FUSE` for write workloads, and prefer
+  `MountMode.READ` on fskit mounts so the limit surfaces as a clean
+  permission error.
 </Warning>
 
 <Warning>
-  **FSKit cannot serve size-unknown resources.** FSKit has no `direct_io`
-  equivalent, so reads are driven entirely by the size the filesystem
-  reports. A resource that stats as 0 bytes before open would return an
-  empty file with exit code 0, which is worse than a failed mount. Mirage
-  refuses such a mount by name:
-
-  ```
-  the fskit mount backend cannot serve resources whose file sizes are only
-  known after a read; these mounts would return empty files: /slack/ (slack)
-  ```
-
-  Eligible today: `ram`, `disk`, `redis`, `s3` (and its compatible
-  backends), `gridfs`. Everything else needs `MountBackend.FUSE`. To use FSKit in a
-  workspace that also holds API resources, scope the FSKit mount to the
-  byte-store subtree, and reach the rest through the mirage command surface.
+  **FSKit cannot serve size-unknown resources.** There is no `direct_io`, so
+  reads are driven entirely by the size `stat` reports; a resource that
+  stats 0 pre-open would return empty files with exit code 0. Mirage refuses
+  such a mount by name at mount time (`SIZES_ALWAYS_KNOWN`). Byte stores
+  (ram, disk, redis, s3, gridfs) qualify; API-backed resources need
+  `MountBackend.FUSE`, or scope the fskit mount to the byte-store subtree.
 </Warning>
 
 `examples/python/fuse/fskit.py` runs all of this end to end: the size guard

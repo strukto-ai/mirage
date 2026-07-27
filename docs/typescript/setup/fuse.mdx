@@ -123,10 +123,21 @@ Programmatically, set `backend` per mount: `{ '/data': new Mount(dataResource, {
 
 ## Mounting without the kernel extension (FSKit)
 
-macOS 15.4+ with macFUSE 5.x can serve a mount through Apple's FSKit instead
-of the macFUSE kernel extension. This works from TypeScript: `fuse.node`
-links `/usr/local/lib/libfuse.2.dylib` by absolute path, so `backend:
-'fskit'` reaches the same macFUSE 5.x libfuse the Python package uses.
+Apple has deprecated third-party kernel extensions; FSKit (macOS 15.4+) is
+the supported userspace replacement, and macFUSE 5.x serves the same libfuse
+API through it. This works from TypeScript: `fuse.node` links
+`/usr/local/lib/libfuse.2.dylib` by absolute path, so `backend: 'fskit'`
+reaches the same macFUSE 5.x libfuse the Python package uses, keeping real
+mounts working on Macs where the kext is blocked. Only the
+kernel-to-userspace hop changes:
+
+```mermaid
+flowchart LR
+    A[cat /Volumes/.../file] --> K[kernel VFS]
+    K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
+    K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
+    L --> M[MirageFS] --> R[resource]
+```
 
 ```ts
 const ws = new Workspace({
