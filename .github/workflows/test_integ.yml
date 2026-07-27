@@ -856,11 +856,21 @@ jobs:
         run: brew install --cask macfuse
 
       - name: Enable the macFUSE FSKit modules
+        # The installer auto-registers only the -local module; the non-local
+        # one ships in the same bundle but never appears in pluginkit on a
+        # runner (both are registered on a developer Mac). Add every appex
+        # explicitly, then enable it.
         run: |
+          exts=/Library/Filesystems/macfuse.fs/Contents/Resources/macfuse.app/Contents/Extensions
+          ls -la "$exts" || true
+          for appex in "$exts"/*.appex; do
+            echo "registering $appex"
+            pluginkit -a "$appex" || true
+          done
           pluginkit -e use -i io.macfuse.app.fsmodule.macfuse || true
           pluginkit -e use -i io.macfuse.app.fsmodule.macfuse-local || true
           echo "--- registered FSKit modules (+ means enabled) ---"
-          pluginkit -m -p com.apple.fskit.fsmodule || true
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
 
       - name: Confirm no kext is loaded
         run: kextstat | grep -i fuse || echo "no macFUSE kext (expected)"

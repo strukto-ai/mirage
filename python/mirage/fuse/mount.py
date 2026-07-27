@@ -75,21 +75,21 @@ def _run_fuse(fs: MirageFS,
 
 def _await_ready(thread: threading.Thread,
                  mountpoint: str,
-                 timeout: float = 10.0,
-                 backend: MountBackend = MountBackend.FUSE) -> None:
+                 timeout: float = 10.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         # POSIX: the pre-existing directory becomes a mountpoint. Windows:
         # _prepare_mountpoint removed the directory and WinFsp recreates it
         # when the filesystem is live, so bare existence is the ready signal
         # (os.path.ismount does not recognize WinFsp directory mounts).
-        # FSKit: the /Volumes entry does not exist until the system creates
-        # it for the live volume, so existence is a real signal there too,
-        # and it does not depend on ismount recognizing the mount.
-        creates_own_mountpoint = (sys.platform == "win32"
-                                  or backend is MountBackend.FSKIT)
-        if os.path.ismount(mountpoint) or (creates_own_mountpoint
-                                           and os.path.lexists(mountpoint)):
+        # FSKit does NOT get that shortcut: macFUSE creates the /Volumes
+        # entry while mounting and leaves the empty directory behind when
+        # the handoff fails, so existence there says nothing about liveness.
+        # The macOS integ job caught exactly that, reporting a failed mount
+        # as a confusing ENOENT on the first read.
+        if os.path.ismount(mountpoint):
+            return
+        if sys.platform == "win32" and os.path.lexists(mountpoint):
             return
         if not thread.is_alive():
             raise RuntimeError(
@@ -129,7 +129,7 @@ def mount_background(
                          args=(fs, mountpoint, True, resolved),
                          daemon=True)
     t.start()
-    _await_ready(t, mountpoint, backend=resolved)
+    _await_ready(t, mountpoint)
     return t
 
 
