@@ -4,5 +4,10 @@
   "cat": "{\"messages\": 2}",
   "size": 16,
   "read_bytes": 16,
-  "write_roundtrip": true
+  "write_in_place": "ok",
+  "unlink": "ok",
+  "create_file": "ENOSYS",
+  "created_anyway": true,
+  "mkdir": "ENOSYS",
+  "rename": "ENOSYS"
 }

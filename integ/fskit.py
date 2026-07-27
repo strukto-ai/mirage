@@ -20,15 +20,17 @@ multi-mount scenario needs two mounts in one process, which macOS forbids.
 Emits its result as one JSON line for integ/check_json.py.
 """
 
+import errno
 import json
 import os
 import subprocess
+from typing import Callable
 
 from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 CONTENT = b'{"messages": 2}\n'
-WRITTEN = b"beta\n"
+EXISTING = b"old\n"
 
 
 def mount_line(mountpoint: str) -> str:
@@ -78,10 +80,27 @@ def describe(mountpoint: str) -> None:
         print(f"# listdir failed: {err!r}")
 
 
+def attempt(fn: Callable[[], object]) -> str:
+    """Run a filesystem op and name its outcome.
+
+    Args:
+        fn (Callable[[], object]): the operation to attempt.
+
+    Returns:
+        str: "ok", or the errno name the kernel returned.
+    """
+    try:
+        fn()
+        return "ok"
+    except OSError as err:
+        return errno.errorcode.get(err.errno or 0, str(err.errno))
+
+
 def main() -> None:
     data = RAMResource()
     data._store.dirs.add("/")
     data._store.files["/api.json"] = CONTENT
+    data._store.files["/existing.txt"] = EXISTING
 
     with Workspace({
             "/data":
@@ -93,10 +112,19 @@ def main() -> None:
 
         with open(f"{mp}/api.json", "rb") as fh:
             body = fh.read()
-        with open(f"{mp}/written.txt", "wb") as fh:
-            fh.write(WRITTEN)
-        with open(f"{mp}/written.txt", "rb") as fh:
-            echo = fh.read()
+
+        # macFUSE's FSKit shim serves a partial write surface: ops that
+        # modify an existing file work, ops that add a new name to a
+        # directory fail. Pinned rather than assumed, because a create that
+        # reports ENOSYS still lands in the store (see created_anyway).
+        in_place = attempt(
+            lambda: open(f"{mp}/existing.txt", "ab").write(b"more\n"))
+        create = attempt(lambda: open(f"{mp}/new.txt", "wb").close())
+        created_anyway = os.path.exists(f"{mp}/new.txt")
+        make_dir = attempt(lambda: os.mkdir(f"{mp}/sub"))
+        rename = attempt(
+            lambda: os.rename(f"{mp}/api.json", f"{mp}/moved.json"))
+        remove = attempt(lambda: os.unlink(f"{mp}/existing.txt"))
 
         result = {
             # Volatile, reported but never asserted.
@@ -116,7 +144,15 @@ def main() -> None:
             # SIZES_ALWAYS_KNOWN guard exists to guarantee.
             "size": os.path.getsize(f"{mp}/api.json"),
             "read_bytes": len(body),
-            "write_roundtrip": echo == WRITTEN,
+            "write_in_place": in_place,
+            "create_file": create,
+            # The dangerous part: the syscall reports failure and the file
+            # exists anyway, so a caller treating ENOSYS as "nothing
+            # happened" is wrong.
+            "created_anyway": created_anyway,
+            "mkdir": make_dir,
+            "rename": rename,
+            "unlink": remove,
         }
         print(json.dumps(result))
 
