@@ -57,6 +57,27 @@ def kext_loaded() -> bool:
     return any("macfuse" in ln.lower() for ln in kexts.stdout.splitlines())
 
 
+def describe(mountpoint: str) -> None:
+    """Print what the kernel thinks of a mountpoint, before reading it.
+
+    Emitted eagerly and in plain text: if the read below fails, this is the
+    only evidence of whether the volume came up at all. check_json.py reads
+    JSON lines only, so these are ignored by the check.
+
+    Args:
+        mountpoint (str): the mountpoint to describe.
+    """
+    print(f"# mountpoint: {mountpoint}")
+    print(f"# exists={os.path.exists(mountpoint)} "
+          f"isdir={os.path.isdir(mountpoint)} "
+          f"ismount={os.path.ismount(mountpoint)}")
+    print(f"# mount row: {mount_line(mountpoint) or '(not in mount table)'}")
+    try:
+        print(f"# listdir: {sorted(os.listdir(mountpoint))}")
+    except OSError as err:
+        print(f"# listdir failed: {err!r}")
+
+
 def main() -> None:
     data = RAMResource()
     data._store.dirs.add("/")
@@ -67,6 +88,7 @@ def main() -> None:
             Mount(data, mode=MountMode.WRITE, backend=MountBackend.FSKIT),
     }) as ws:
         mp = ws.fuse_mountpoints["/data"]
+        describe(mp)
         line = mount_line(mp)
 
         with open(f"{mp}/api.json", "rb") as fh:

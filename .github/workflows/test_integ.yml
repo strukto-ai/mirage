@@ -888,6 +888,22 @@ jobs:
           ./python/.venv/bin/python integ/check_json.py \
             integ/truth_fskit.json < /tmp/fskit.out
 
+      - name: Host state after the probe
+        if: always()
+        run: |
+          echo "--- mount ---"
+          mount
+          echo "--- /Volumes ---"
+          ls -la /Volumes
+          echo "--- FSKit modules ---"
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
+          echo "--- macFUSE bundle ---"
+          ls -la /Library/Filesystems/ || true
+          echo "--- recent fskit/macfuse log ---"
+          log show --last 3m --style compact \
+            --predicate 'eventMessage CONTAINS[c] "fskit" OR eventMessage CONTAINS[c] "macfuse"' \
+            2>/dev/null | tail -50 || true
+
   runtime-py:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
