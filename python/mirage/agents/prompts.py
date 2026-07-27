@@ -18,7 +18,7 @@ cloud storage, local files, and in-memory data as a unified file tree.
 
 Capabilities beyond standard filesystem:
 - head -n 5 on data files returns the first 5 rows
-- grep works natively on CSV, JSON, Parquet — not just text
+- grep works on structured text such as CSV and JSON, not just plain text
 - Pipes work: cat data.csv | grep error | sort | uniq | wc -l
 - head, tail, cut, wc, sort, uniq, tee, xargs are all available
 
