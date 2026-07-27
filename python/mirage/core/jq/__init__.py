@@ -12,20 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.jq.eval import jq_eval
+from mirage.core.jq.eval import has_top_level_spread, jq_eval
 from mirage.core.jq.format import JQ_EMPTY, format_jq_output
 from mirage.core.jq.stream import (eval_jsonl_stream, is_jsonl_path,
                                    is_streamable_jsonl_expr, parse_json_auto,
-                                   parse_json_path, parse_jsonl)
+                                   parse_json_docs, parse_json_path,
+                                   parse_jsonl)
 
 __all__ = [
     "JQ_EMPTY",
     "eval_jsonl_stream",
     "format_jq_output",
+    "has_top_level_spread",
     "is_jsonl_path",
     "is_streamable_jsonl_expr",
     "jq_eval",
     "parse_json_auto",
+    "parse_json_docs",
     "parse_json_path",
     "parse_jsonl",
 ]

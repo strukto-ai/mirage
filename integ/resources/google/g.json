@@ -290,7 +290,7 @@
       "command": "gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes'\\\"}\" | jq -c '[.files[] | {name, mimeType}]'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n",
+        "stdout": "[{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}]\n",
         "stderr": ""
       }
     },
@@ -361,7 +361,7 @@
       "expect": {
         "exit": 0,
         "stderr": "",
-        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n\"Notes copy\"\n"
+        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n[\"Notes copy\"]\n"
       }
     },
     {

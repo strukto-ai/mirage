@@ -15,7 +15,8 @@
 import orjson
 import pytest
 
-from mirage.core.jq.stream import eval_jsonl_stream, parse_json_auto
+from mirage.core.jq.stream import (eval_jsonl_stream, parse_json_auto,
+                                   parse_json_docs)
 
 
 def test_parse_json_auto_empty_raises_clear_error():
@@ -40,6 +41,29 @@ def test_parse_json_auto_ndjson():
 def test_parse_json_auto_single_line_garbage_propagates_error():
     with pytest.raises(orjson.JSONDecodeError):
         parse_json_auto(b"this is not json")
+
+
+def test_parse_json_docs_single_value_is_one_document():
+    assert parse_json_docs(b'{"a":1}') == [{"a": 1}]
+
+
+def test_parse_json_docs_ndjson_stream():
+    assert parse_json_docs(b'{"a":1}\n{"a":2}\n') == [{"a": 1}, {"a": 2}]
+
+
+def test_parse_json_docs_pretty_printed_stream():
+    # jq reads a stream of values, so documents need not be one per line.
+    raw = b'{\n  "a": 1\n}\n{\n  "a": 2\n}\n'
+    assert parse_json_docs(raw) == [{"a": 1}, {"a": 2}]
+
+
+def test_parse_json_docs_stream_of_arrays():
+    assert parse_json_docs(b"[1,2]\n[3,4]\n") == [[1, 2], [3, 4]]
+
+
+def test_parse_json_docs_garbage_reports_the_document_error():
+    with pytest.raises(orjson.JSONDecodeError):
+        parse_json_docs(b"this is not json")
 
 
 async def _lines(*items: bytes):

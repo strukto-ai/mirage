@@ -17,7 +17,17 @@ import jq as _libjq
 from mirage.core.jq.format import JQ_EMPTY
 
 
-def _has_top_level_spread(expr: str) -> bool:
+def has_top_level_spread(expr: str) -> bool:
+    """Report whether a jq program spreads its input at the top level.
+
+    A top-level ``[]`` means the program emits one output per element,
+    so the caller must print each on its own line. A ``[]`` nested
+    inside a collector (``[.a[] | .b]``) does not: that program emits a
+    single array. Strings are skipped so a literal "[]" never counts.
+
+    Args:
+        expr (str): jq program text.
+    """
     depth = 0
     in_str = False
     i = 0
@@ -59,6 +69,6 @@ def jq_eval(obj: object, expr: str) -> object:
     outputs = list(program.input_value(obj))
     if not outputs:
         return JQ_EMPTY
-    if len(outputs) == 1 and not _has_top_level_spread(expr):
+    if len(outputs) == 1 and not has_top_level_spread(expr):
         return outputs[0]
     return outputs

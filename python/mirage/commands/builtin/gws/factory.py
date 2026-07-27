@@ -18,10 +18,11 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.cache.context import invalidate_after_write
-from mirage.commands.builtin.gws.methods import (GWS_API_SPEC, GWS_METHODS,
-                                                 SERVICE_BASES,
-                                                 SERVICE_RESOURCES, GwsMethod)
+from mirage.commands.builtin.gws.methods import (GWS_METHODS, SERVICE_BASES,
+                                                 SERVICE_RESOURCES, GwsMethod,
+                                                 gws_method_spec)
 from mirage.commands.registry import command
+from mirage.commands.spec.types import FlagView
 from mirage.core.google._client import (TokenManager, google_delete,
                                         google_get, google_get_bytes,
                                         google_patch, google_post)
@@ -136,6 +137,15 @@ async def run_gws_method(
         data = await google_get_bytes(token_manager,
                                       _with_query(url, query_params))
         return yield_bytes(data), IOResult()
+    fl = FlagView(_extra, spec=gws_method_spec(method))
+    if method.http == "GET":
+        # Deliberate divergence from the official gws CLI, which stops at
+        # one page unless --page-all is passed: a truncated listing is
+        # indistinguishable from a complete one, so mirage follows the
+        # token by default and --page-limit is how you opt out.
+        out = await _paginate(method, token_manager, url, body, query_params,
+                              fl.as_int("page_limit"))
+        return yield_bytes(out), IOResult()
     result = await _CALLERS[method.http](token_manager, url, body,
                                          query_params)
     if method.http != "GET":
@@ -145,6 +155,56 @@ async def run_gws_method(
     out = json_lib.dumps(result, ensure_ascii=False,
                          separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()
+
+
+async def _paginate(
+    method: GwsMethod,
+    token_manager: TokenManager,
+    url: str,
+    body: dict[str, Any],
+    query: dict[str, str],
+    page_limit: int | None,
+) -> bytes:
+    """Follow nextPageToken and emit one page response per line.
+
+    Google list methods cap a page and hand back a token; a single call
+    silently returns a partial listing. Pages are emitted as NDJSON so a
+    caller can pipe straight into `jq`, which evaluates per document.
+
+    Args:
+        method (GwsMethod): the Discovery method being wrapped.
+        token_manager (TokenManager): the mount's OAuth handle.
+        url (str): the fully built request URL.
+        body (dict): the request body, unused for GET.
+        query (dict): query parameters; pageToken is overwritten per page.
+        page_limit (int | None): stop after this many pages, or None for all.
+
+    Returns:
+        bytes: newline-delimited page responses.
+    """
+    pages: list[bytes] = []
+    params = dict(query)
+    fetched = 0
+    while True:
+        result = await _CALLERS[method.http](token_manager, url, body, params)
+        if result is _NO_CONTENT:
+            break
+        pages.append(
+            json_lib.dumps(result, ensure_ascii=False,
+                           separators=(",", ":")).encode())
+        fetched += 1
+        if page_limit is not None and fetched >= page_limit:
+            break
+        token = result.get("nextPageToken") if isinstance(result,
+                                                          dict) else None
+        if not token:
+            break
+        params["pageToken"] = str(token)
+    # A single response keeps the exact bytes an unpaginated call produced,
+    # so every non-list GET is unchanged. Only a real multi-page stream is
+    # newline-terminated, per the NDJSON convention.
+    body_out = b"\n".join(pages)
+    return body_out + b"\n" if len(pages) > 1 else body_out
 
 
 def _with_query(url: str, query: dict[str, str]) -> str:
@@ -167,7 +227,7 @@ def make_gws_api_commands(service: str) -> list[Callable[..., object]]:
         commands.append(
             command(m.command_name,
                     resource=SERVICE_RESOURCES[service],
-                    spec=GWS_API_SPEC,
+                    spec=gws_method_spec(m),
                     write=m.http
                     != "GET")(functools.partial(run_gws_method, m)))
     return commands

@@ -61,4 +61,8 @@ def render_help(name: str, spec: CommandSpec) -> str:
             else:
                 lines.append(f"  {flag.ljust(width)}  {desc}")
 
+    if spec.epilog:
+        lines.append("")
+        lines.append(spec.epilog.rstrip("\n"))
+
     return "\n".join(lines) + "\n"
