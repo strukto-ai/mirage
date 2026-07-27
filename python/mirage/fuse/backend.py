@@ -86,6 +86,12 @@ def check_platform(backend: MountBackend) -> None:
 def check_mountpoint(backend: MountBackend, mountpoint: str) -> None:
     """Reject a mountpoint the backend cannot mount on.
 
+    FSKit mounts only under /Volumes. This is measured, not assumed: issue
+    #82 tried an fskit mount under /tmp and got "mount_macfuse: the file
+    system is not available (1)", and the same mount succeeded once it moved
+    to /Volumes. The cost is that /Volumes is root-owned, so mirage names
+    its mountpoint there but never creates it.
+
     Args:
         backend (MountBackend): the requested backend.
         mountpoint (str): the intended mountpoint.
