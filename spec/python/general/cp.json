@@ -10,14 +10,9 @@
       "disk",
       "dropbox",
       "gdrive",
-      "gridfs",
-      "nextcloud",
       "onedrive",
       "ram",
-      "redis",
-      "s3",
-      "sharepoint",
-      "ssh"
+      "sharepoint"
     ]
   },
   "description": null,

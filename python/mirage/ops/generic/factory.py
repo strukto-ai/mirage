@@ -164,21 +164,21 @@ def make_generic_ops(
     store through the cache context on mutation, so forwarding
     ``index`` into read/readdir/stat is always safe, whereas the TS
     ram/disk/redis/ssh cores cache listings that mutations never
-    invalidate and need ``forwardIndex: false``. Likewise
-    ``filetype_read`` is a bool (every backend that opts in gets the
-    full cat set, with missing optional deps skipped at import) while
-    TS takes an explicit ``filetypeRead`` extension list (TS has no ORC
-    support and its backends opt in per extension).
+    invalidate and need ``forwardIndex: false``. ``filetype_read`` is
+    the one remaining shape difference: a bool here (opting in gets
+    whatever the registry holds) against an explicit extension list in
+    TS ``filetypeRead``. Both are extension points with no callers,
+    since mirage ships no filetype renderers.
 
     Args:
         resource (str | list[str]): resource name(s) the ops register
             under; a list fans out one ``RegisteredOp`` per name (the
             HF family registers one surface for four resources).
         table (OpsTable): the backend's IO table (its ``CommandIO``).
-        filetype_read (bool): emit ``read`` ops for ``.parquet`` /
-            ``.feather`` / ``.orc`` / ``.hdf5`` rendered through the
-            shared filetype cats; formats whose optional dependency is
-            missing are skipped like ``try_load_command`` does.
+        filetype_read (bool): emit one filetype-scoped ``read`` op per
+            extension registered in ``FILETYPE_CATS``. The registry is
+            empty by default, so this is inert until a renderer is
+            registered.
         emulate_truncate (bool): synthesize ``truncate`` from
             ``read_bytes`` + ``write`` for backends with no native
             partial write (s3/ssh/ram/redis today).

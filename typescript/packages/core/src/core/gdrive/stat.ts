@@ -37,10 +37,6 @@ function guessType(name: string): FileType {
   if (lower.endsWith('.zip')) return FileType.ZIP
   if (lower.endsWith('.gz') || lower.endsWith('.gzip')) return FileType.GZIP
   if (lower.endsWith('.pdf')) return FileType.PDF
-  if (lower.endsWith('.parquet')) return FileType.PARQUET
-  if (lower.endsWith('.orc')) return FileType.ORC
-  if (lower.endsWith('.feather')) return FileType.FEATHER
-  if (lower.endsWith('.h5') || lower.endsWith('.hdf5')) return FileType.HDF5
   if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.log'))
     return FileType.TEXT
   return FileType.BINARY

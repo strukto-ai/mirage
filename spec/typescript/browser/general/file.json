@@ -1,13 +1,6 @@
 {
   "_meta": {
-    "filetypes": [
-      ".arrow",
-      ".feather",
-      ".h5",
-      ".hdf5",
-      ".ipc",
-      ".parquet"
-    ],
+    "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
     "has_write": false,

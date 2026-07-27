@@ -211,10 +211,6 @@ export const FileType = Object.freeze({
   ZIP: 'application/zip',
   GZIP: 'application/gzip',
   PDF: 'application/pdf',
-  PARQUET: 'parquet',
-  ORC: 'orc',
-  FEATHER: 'feather',
-  HDF5: 'hdf5',
 } as const)
 
 export type FileType = (typeof FileType)[keyof typeof FileType]

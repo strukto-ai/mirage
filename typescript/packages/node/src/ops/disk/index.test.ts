@@ -17,8 +17,8 @@ import { ResourceName } from '@struktoai/mirage-core'
 import { DISK_OPS } from './index.ts'
 
 describe('DISK_OPS', () => {
-  it('registers the expected 15 ops with resource=disk', () => {
-    expect(DISK_OPS).toHaveLength(15)
+  it('registers the expected 12 ops with resource=disk', () => {
+    expect(DISK_OPS).toHaveLength(12)
     for (const op of DISK_OPS) expect(op.resource).toBe(ResourceName.DISK)
   })
 
@@ -42,11 +42,8 @@ describe('DISK_OPS', () => {
     )
   })
 
-  it('registers format-specific read variants via filetype', () => {
-    const formats = DISK_OPS.filter((op) => op.name === 'read' && op.filetype !== null).map(
-      (op) => op.filetype,
-    )
-    expect(formats.sort()).toEqual(['.feather', '.hdf5', '.parquet'])
+  it('registers no filetype-scoped read variants', () => {
+    expect(DISK_OPS.filter((op) => op.filetype !== null)).toHaveLength(0)
   })
 
   it('write-side ops are flagged write:true', () => {
