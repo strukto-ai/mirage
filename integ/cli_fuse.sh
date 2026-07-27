@@ -33,10 +33,12 @@ mode: WRITE
 mounts:
   /data:
     resource: ram
-    fuse: $dmnt
+    backend: fuse
+    mountpoint: $dmnt
   /logs:
     resource: ram
-    fuse: $lmnt
+    backend: fuse
+    mountpoint: $lmnt
   /auto:
     resource: ram
     backend: fuse
@@ -45,7 +47,7 @@ YML
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
 
-  # Collision rejection: two mounts whose fuse: resolves to the SAME OS path must
+  # Collision rejection: two mounts whose mountpoint resolves to the SAME OS path must
   # be rejected at workspace-create time (server returns 409, CLI exits non-zero),
   # and the server must not leak a partial mount. Self-contained sub-check that
   # never touches the main cf workspace.
@@ -56,10 +58,12 @@ mode: WRITE
 mounts:
   /one:
     resource: ram
-    fuse: $collide_mp
+    backend: fuse
+    mountpoint: $collide_mp
   /two:
     resource: ram
-    fuse: $collide_mp
+    backend: fuse
+    mountpoint: $collide_mp
 YML
   $cli workspace delete cfx >/dev/null 2>&1 </dev/null || true
   if $cli workspace create "$yaml_collide" --id cfx >/dev/null 2>&1 </dev/null; then
@@ -129,7 +133,8 @@ mode: WRITE
 mounts:
   /data:
     resource: ram
-    fuse: $dmnt
+    backend: fuse
+    mountpoint: $dmnt
 YML
   $cli workspace delete cf2 >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$reuse_yaml" --id cf2 >/dev/null </dev/null

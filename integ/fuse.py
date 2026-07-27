@@ -90,8 +90,13 @@ def main() -> None:
     # /data pins its mountpoint and overrides the workspace default to WRITE;
     # /logs gets a generated mountpoint and inherits the default READ.
     with Workspace({
-            "/data": Mount(data, mode=MountMode.WRITE, fuse=pinned),
-            "/logs": Mount(logs, backend=MountBackend.FUSE),
+            "/data":
+            Mount(data,
+                  mode=MountMode.WRITE,
+                  backend=MountBackend.FUSE,
+                  mountpoint=pinned),
+            "/logs":
+            Mount(logs, backend=MountBackend.FUSE),
     }) as ws:
         data_mp = ws.fuse_mountpoints["/data"]
         logs_mp = ws.fuse_mountpoints["/logs"]
