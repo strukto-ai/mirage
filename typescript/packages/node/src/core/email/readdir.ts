@@ -14,6 +14,7 @@
 
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import {
+  enoent,
   IndexEntry,
   PathSpec as PathSpecCtor,
   mountKey,
@@ -48,12 +49,6 @@ function dateFromHeader(dateStr: string): string {
   const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
   const dd = d.getUTCDate().toString().padStart(2, '0')
   return `${yyyy}-${mm}-${dd}`
-}
-
-function enoent(p: string): Error {
-  const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
 }
 
 export async function readdir(
@@ -94,6 +89,9 @@ export async function readdir(
       if (cached.entries !== undefined && cached.entries !== null) return cached.entries
     }
     if (index === undefined) throw enoent(path.virtual)
+    // An unknown folder must be ENOENT: selecting it over IMAP fails with
+    // "command SEARCH illegal in state AUTH", which leaked to the caller.
+    if (!(await listFolders(accessor)).includes(folderName)) throw enoent(path.virtual)
     const maxMessages = accessor.config.maxMessages
     const uids = await listMessageUids(accessor, folderName, 'ALL', maxMessages)
     const headersList = await fetchHeaders(accessor, folderName, uids)

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { norm, parent, gnuBasename as basename } from '@struktoai/mirage-core'
+export { norm, gnuBasename as basename } from '@struktoai/mirage-core'
 
 export function nowIso(): string {
   return new Date().toISOString()

@@ -56,6 +56,7 @@ EXPECTED_RESOURCES = {
     "qdrant",
     "notion",
     "langfuse",
+    "jaeger",
     "ssh",
     "email",
     "databricks_volume",

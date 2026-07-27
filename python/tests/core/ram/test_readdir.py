@@ -151,8 +151,9 @@ async def test_readdir_file_component_is_not_a_directory(index):
 
 @pytest.mark.asyncio
 async def test_readdir_orphan_below_a_missing_dir_is_not_found(index):
-    # `mv /a.txt /missing/a.txt` stores the key without adding /missing to
-    # dirs, so the store holds a file whose parent is not a directory. The
+    # The store can hold a file whose parent is not in dirs: a restored
+    # snapshot or another writer can seed one, so readdir stays defensive
+    # about it even though rename and copy now refuse to create one. The
     # walk must stop at /missing, the way the kernel would, instead of
     # reaching the orphan and reporting ENOTDIR.
     s = RAMStore()

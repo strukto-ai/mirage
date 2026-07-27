@@ -15,6 +15,7 @@
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
+import { isMissingPath } from '../../../utils/errors.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rebaseRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
@@ -168,11 +169,14 @@ async function duOperands(
   // reports as unreadable.
   if (resolved.length === 0) missing.push(...targets.map((p) => p.rawPath))
   for (const path of resolved) {
-    // A stat failure is the diagnostic, not an error to propagate.
+    // A missing path is the diagnostic, not an error to propagate. Any
+    // other backend failure (403, a driver fault) is real and must surface
+    // rather than being renamed "No such file or directory".
     let stattable = true
     try {
       await stat(path)
-    } catch {
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
       stattable = false
     }
     if (!stattable && !(hasContent !== undefined && (await hasContent(path)))) {

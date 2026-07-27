@@ -154,10 +154,11 @@ async def test_readdir_missing_stays_not_found_at_any_depth(index):
 
 @pytest.mark.asyncio
 async def test_readdir_orphan_below_a_missing_dir_is_not_found(index):
-    # `mv /a.txt /missing/a.txt` stores the key without adding /missing to
-    # the dir set, so the store holds a file whose parent is not a directory.
-    # The walk must stop at /missing instead of reaching the orphan and
-    # reporting ENOTDIR.
+    # The store can hold a file whose parent is not in the dir set: a
+    # restored snapshot or another client on the same Redis can seed one, so
+    # readdir stays defensive about it even though rename and copy now refuse
+    # to create one. The walk must stop at /missing instead of reaching the
+    # orphan and reporting ENOTDIR.
     s = RedisStore(url=REDIS_URL, key_prefix="test:readdir:orphan:")
     await s.clear()
     await s.add_dir("/")

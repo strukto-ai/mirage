@@ -14,9 +14,10 @@
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm, nowIso, parent } from './utils.ts'
+import { norm, nowIso } from './utils.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
+import { checkDestParents } from './dest.ts'
 
 export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): Promise<void> {
   const p = norm(path.mountPath)
@@ -35,10 +36,7 @@ export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = fal
     await invalidateAncestors(path)
     return Promise.resolve()
   }
-  const par = parent(p)
-  if (par !== '/' && !accessor.store.dirs.has(par)) {
-    throw new Error(`parent directory does not exist: ${par}`)
-  }
+  checkDestParents(accessor, path, p)
   accessor.store.dirs.add(p)
   accessor.store.modified.set(p, nowIso())
   await invalidateAfterWrite(path)

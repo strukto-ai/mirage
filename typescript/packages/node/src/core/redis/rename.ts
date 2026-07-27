@@ -15,18 +15,20 @@
 import { type PathSpec, invalidateAfterUnlink, invalidateAfterWrite } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm, nowIso } from './utils.ts'
-import { rstripSlash } from '@struktoai/mirage-core'
+import { checkDestParents } from './dest.ts'
+import { enoent, rstripSlash } from '@struktoai/mirage-core'
 
 export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.mountPath)
   const d = norm(dst.mountPath)
   const now = nowIso()
   const store = accessor.store
+  await checkDestParents(store, dst, d)
   if (await store.hasFile(s)) {
     const data = await store.getFile(s)
     const mod = await store.getModified(s)
     const attrs = await store.getAttrs(s)
-    if (data === null) throw new Error(`file not found: ${s}`)
+    if (data === null) throw enoent(src)
     await store.delFile(s)
     await store.delModified(s)
     await store.delAttrs(s)
@@ -65,5 +67,5 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
     await invalidateAfterWrite(d)
     return
   }
-  throw new Error(`file not found: ${s}`)
+  throw enoent(src)
 }

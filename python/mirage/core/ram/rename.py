@@ -15,6 +15,7 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
+from mirage.core.ram.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -27,6 +28,7 @@ async def rename(accessor: RAMAccessor, src_spec: PathSpec,
     store = accessor.store
     s, d = norm(src), norm(dst)
     now = now_iso()
+    check_dest_parents(store, dst_spec, d)
     if s in store.files:
         store.files[d] = store.files.pop(s)
         store.modified[d] = store.modified.pop(s, now)

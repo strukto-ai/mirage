@@ -18,6 +18,7 @@ import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { httpFormRequest, httpRequest } from '../utils/http.ts'
+import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
@@ -94,8 +95,16 @@ async function curlCommand(
       try {
         await opts.dispatch('write', scope, [result])
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err)
-        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`curl: ${o}: ${errMsg}\n`) })]
+        // Python keeps the raw message for the refusals whose wording is
+        // load-bearing (a read-only mount says "read-only", an unsupported
+        // op says so); an unusable path carries only the path as its
+        // message, so it needs the shared GNU strerror instead.
+        const code = (err as { code?: string }).code
+        const raw = code === 'EACCES' || code === 'ENOTSUP' || !isFsError(err)
+        const line = raw
+          ? `curl: ${o}: ${err instanceof Error ? err.message : String(err)}\n`
+          : fsErrorLine('curl', o, err)
+        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(line) })]
       }
     }
     const msg = silent ? new Uint8Array() : ENC.encode(`saved to ${o}`)

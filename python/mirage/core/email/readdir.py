@@ -86,6 +86,10 @@ async def readdir(
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
+        # An unknown folder must be ENOENT: selecting it over IMAP fails with
+        # "command SEARCH illegal in state AUTH", which leaked to the caller.
+        if folder_name not in await list_folders(accessor):
+            raise enoent(virtual)
         max_msgs = accessor.config.max_messages
         uids = await list_message_uids(accessor,
                                        folder_name,

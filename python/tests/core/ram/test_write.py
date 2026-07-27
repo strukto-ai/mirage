@@ -62,13 +62,44 @@ async def test_write_bytes_parent_not_found():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    with pytest.raises(FileNotFoundError,
-                       match="parent directory does not exist"):
+    # The operand is what a GNU stderr line names, so the error carries the
+    # virtual path, not the internal "parent does not exist" phrasing.
+    with pytest.raises(FileNotFoundError, match="/no/parent/file.txt"):
         await write_bytes(
             a,
             PathSpec(resource_path="no/parent/file.txt",
                      virtual="/no/parent/file.txt",
                      directory="/no/parent/file.txt"), b"data")
+    assert "/no/parent/file.txt" not in s.files
+
+
+@pytest.mark.asyncio
+async def test_write_bytes_under_a_plain_file_is_not_a_directory():
+    s = RAMStore()
+    s.files["/plain"] = b"x"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await write_bytes(
+            a,
+            PathSpec(resource_path="plain/file.txt",
+                     virtual="/plain/file.txt",
+                     directory="/plain/file.txt"), b"data")
+    assert "/plain/file.txt" not in s.files
+
+
+@pytest.mark.asyncio
+async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory():
+    s = RAMStore()
+    s.files["/plain"] = b"x"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await write_bytes(
+            a,
+            PathSpec(resource_path="plain/sub/file.txt",
+                     virtual="/plain/sub/file.txt",
+                     directory="/plain/sub/file.txt"), b"data")
 
 
 @pytest.mark.asyncio

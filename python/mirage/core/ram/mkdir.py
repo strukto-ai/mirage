@@ -14,9 +14,10 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.core.ram.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
-from mirage.utils.path import norm, parent
+from mirage.utils.path import norm
 
 
 async def mkdir(accessor: RAMAccessor,
@@ -37,10 +38,7 @@ async def mkdir(accessor: RAMAccessor,
         await invalidate_after_write(path_spec)
         await invalidate_ancestors(path_spec)
         return
-    parent_dir = parent(p)
-    if parent_dir != "/" and parent_dir not in store.dirs:
-        raise FileNotFoundError(
-            f"parent directory does not exist: {parent_dir}")
+    check_dest_parents(store, path_spec, p)
     store.dirs.add(p)
     store.modified[p] = now_iso()
     await invalidate_after_write(path_spec)

@@ -199,6 +199,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeLangfuseConfig } = await import('./langfuse/config.ts')
     return new LangfuseResource(normalizeLangfuseConfig(config))
   },
+  jaeger: async (config) => {
+    const { JaegerResource } = await import('./jaeger/jaeger.ts')
+    const { normalizeJaegerConfig } = await import('./jaeger/config.ts')
+    return new JaegerResource(normalizeJaegerConfig(config))
+  },
   github: async (config) => {
     const { GitHubResource } = await import('./github/github.ts')
     const { normalizeGitHubConfig } = await import('./github/config.ts')

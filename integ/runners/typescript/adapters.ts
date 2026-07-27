@@ -43,6 +43,8 @@ import {
   GSheetsResource,
   GSlidesResource,
   HfBucketsResource,
+  JaegerResource,
+  LangfuseResource,
   LinearResource,
   MinIOResource,
   Mem0Resource,
@@ -1011,6 +1013,45 @@ async function openLinear(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
+// The jaeger stack is a real jaeger all-in-one container, seeded over OTLP by
+// integ/server/jaeger_seed.py so trace ids and timestamps are fixed.
+async function openJaeger(target: Target): Promise<Open> {
+  const host = process.env.JAEGER_URL
+  if (!host) throw new Error('jaeger target requires JAEGER_URL')
+  const mounts: Record<string, JaegerResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new JaegerResource({ host })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+// The langfuse stack is a real self-hosted Langfuse (integ/server/
+// langfuse_compose.yml), seeded by integ/server/langfuse_seed.py. The project
+// keys come from LANGFUSE_INIT_* headless initialization, so they are fixed.
+async function openLangfuse(target: Target): Promise<Open> {
+  const host = process.env.LANGFUSE_URL
+  if (!host) throw new Error('langfuse target requires LANGFUSE_URL')
+  const mounts: Record<string, LangfuseResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new LangfuseResource({
+      publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? 'pk-lf-mirage-integ',
+      secretKey: process.env.LANGFUSE_SECRET_KEY ?? 'sk-lf-mirage-integ',
+      host,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
@@ -1037,6 +1078,8 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   slack: openSlack,
   trello: openTrello,
   linear: openLinear,
+  langfuse: openLangfuse,
+  jaeger: openJaeger,
   dify: openDify,
 }
 

@@ -43,11 +43,54 @@ async def test_overwrite_existing_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_parent_directory_auto_creation(tmp_path):
+async def test_write_does_not_create_parents(tmp_path):
+    # A write is not `mkdir -p`: GNU `echo x > a/b/c/file.txt` fails with
+    # ENOENT rather than building the chain, and the store-backed backends
+    # refuse the same way.
+    accessor = DiskAccessor(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        await write_bytes(
+            accessor,
+            PathSpec(resource_path="a/b/c/file.txt",
+                     virtual="/a/b/c/file.txt",
+                     directory="/a/b/c/file.txt"), b"deep")
+    assert not (tmp_path / "a").exists()
+
+
+@pytest.mark.asyncio
+async def test_write_into_an_existing_dir(tmp_path):
+    (tmp_path / "d").mkdir()
     accessor = DiskAccessor(tmp_path)
     await write_bytes(
         accessor,
-        PathSpec(resource_path="a/b/c/file.txt",
-                 virtual="/a/b/c/file.txt",
-                 directory="/a/b/c/file.txt"), b"deep")
-    assert (tmp_path / "a" / "b" / "c" / "file.txt").read_bytes() == b"deep"
+        PathSpec(resource_path="d/file.txt",
+                 virtual="/d/file.txt",
+                 directory="/d/file.txt"), b"deep")
+    assert (tmp_path / "d" / "file.txt").read_bytes() == b"deep"
+
+
+@pytest.mark.asyncio
+async def test_write_under_a_plain_file_is_not_a_directory(tmp_path):
+    (tmp_path / "plain").write_bytes(b"x")
+    accessor = DiskAccessor(tmp_path)
+    with pytest.raises(NotADirectoryError):
+        await write_bytes(
+            accessor,
+            PathSpec(resource_path="plain/file.txt",
+                     virtual="/plain/file.txt",
+                     directory="/plain/file.txt"), b"data")
+
+
+@pytest.mark.asyncio
+async def test_write_error_reports_the_virtual_path(tmp_path):
+    # The host root is an implementation detail of the mount: only the
+    # virtual path may reach a user-facing stderr line.
+    accessor = DiskAccessor(tmp_path)
+    with pytest.raises(FileNotFoundError) as excinfo:
+        await write_bytes(
+            accessor,
+            PathSpec(resource_path="nodir/file.txt",
+                     virtual="/data/nodir/file.txt",
+                     directory="/data/nodir/file.txt"), b"data")
+    assert str(tmp_path) not in str(excinfo.value)
+    assert "/data/nodir/file.txt" in str(excinfo.value)

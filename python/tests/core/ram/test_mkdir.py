@@ -40,13 +40,44 @@ async def test_mkdir_parent_not_found():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    with pytest.raises(FileNotFoundError,
-                       match="parent directory does not exist"):
+    # The operand is what a GNU stderr line names, so the error carries the
+    # virtual path, not the internal "parent does not exist" phrasing.
+    with pytest.raises(FileNotFoundError, match="/no/parent"):
         await mkdir(
             a,
             PathSpec(resource_path="no/parent",
                      virtual="/no/parent",
                      directory="/no/parent"))
+    assert "/no/parent" not in s.dirs
+
+
+@pytest.mark.asyncio
+async def test_mkdir_under_a_plain_file_is_not_a_directory():
+    s = RAMStore()
+    s.files["/plain"] = b"x"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await mkdir(
+            a,
+            PathSpec(resource_path="plain/sub",
+                     virtual="/plain/sub",
+                     directory="/plain/sub"))
+    assert "/plain/sub" not in s.dirs
+
+
+@pytest.mark.asyncio
+async def test_mkdir_deep_under_a_plain_file_is_not_a_directory():
+    s = RAMStore()
+    s.files["/plain"] = b"x"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await mkdir(
+            a,
+            PathSpec(resource_path="plain/sub/deeper",
+                     virtual="/plain/sub/deeper",
+                     directory="/plain/sub/deeper"))
 
 
 @pytest.mark.asyncio

@@ -50,7 +50,7 @@ describe('dispatch applies safeguards on the executing mount', () => {
 })
 
 describe('dispatch rename addresses dst against the source mount', () => {
-  it('cross-mount dst lands where Python lands it (EXDEV is a follow-up)', async () => {
+  it('cross-mount dst is refused like Python refuses it (EXDEV is a follow-up)', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/a': new RAMResource(), '/b': new RAMResource() },
@@ -58,12 +58,16 @@ describe('dispatch rename addresses dst against the source mount', () => {
     )
     try {
       await ws.execute('echo moved-bytes > /a/x.txt')
-      await ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath('/b/y.txt')])
-      // Both languages execute the rename on the source backend; the dst
-      // key is the virtual path minus the source prefix, so the file
-      // stays on /a under b/y.txt. Neither language crosses mounts.
-      expect(DEC.decode((await ws.execute('cat /a/b/y.txt')).stdout)).toBe('moved-bytes\n')
-      expect((await ws.execute('cat /a/x.txt')).exitCode).not.toBe(0)
+      // Both languages execute the rename on the source backend and address
+      // the dst key against it, so '/b/y.txt' means 'b/y.txt' inside /a, a
+      // directory that does not exist there. The store-backed backends
+      // refuse (rename(2) ENOENT) instead of growing an orphan key under a
+      // directory they never recorded. Neither language crosses mounts.
+      await expect(
+        ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath('/b/y.txt')]),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(DEC.decode((await ws.execute('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
+      expect((await ws.execute('cat /a/b/y.txt')).exitCode).not.toBe(0)
       expect((await ws.execute('cat /b/y.txt')).exitCode).not.toBe(0)
     } finally {
       await ws.close()

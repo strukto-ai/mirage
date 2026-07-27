@@ -25,6 +25,7 @@ import {
   toVirtual,
 } from './du.ts'
 import { PathSpec } from '../../../types.ts'
+import { enoent } from '../../../utils/errors.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { UsageError } from '../../errors.ts'
 
@@ -218,7 +219,7 @@ describe('duGeneric', () => {
       [spec('/data/nosuch', 'nosuch')],
       opts({ c: true }),
       (targets) => Promise.resolve(targets),
-      () => Promise.reject(new Error('ENOENT')),
+      (p) => Promise.reject(enoent(p.virtual)),
       boom as unknown as ComputeSize,
       boom as unknown as ComputeEntries,
     )

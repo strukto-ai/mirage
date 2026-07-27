@@ -70,15 +70,50 @@ async def test_write_bytes_parent_not_found():
     await s.clear()
     await s.add_dir("/")
     a = RedisAccessor(s)
-    with pytest.raises(
-            FileNotFoundError,
-            match="parent directory does not exist",
-    ):
+    # The operand is what a GNU stderr line names, so the error carries the
+    # virtual path, not the internal "parent does not exist" phrasing.
+    with pytest.raises(FileNotFoundError, match="/no/parent/file.txt"):
         await write_bytes(
             a,
             PathSpec(resource_path="no/parent/file.txt",
                      virtual="/no/parent/file.txt",
                      directory="/no/parent/file.txt"), b"data")
+    assert not await s.has_file("/no/parent/file.txt")
+    await s.clear()
+    await s.close()
+
+
+@pytest.mark.asyncio
+async def test_write_bytes_under_a_plain_file_is_not_a_directory():
+    s = RedisStore(url=REDIS_URL, key_prefix="test:write:nd:")
+    await s.clear()
+    await s.add_dir("/")
+    await s.set_file("/plain", b"x")
+    a = RedisAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await write_bytes(
+            a,
+            PathSpec(resource_path="plain/file.txt",
+                     virtual="/plain/file.txt",
+                     directory="/plain/file.txt"), b"data")
+    assert not await s.has_file("/plain/file.txt")
+    await s.clear()
+    await s.close()
+
+
+@pytest.mark.asyncio
+async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory():
+    s = RedisStore(url=REDIS_URL, key_prefix="test:write:ndd:")
+    await s.clear()
+    await s.add_dir("/")
+    await s.set_file("/plain", b"x")
+    a = RedisAccessor(s)
+    with pytest.raises(NotADirectoryError):
+        await write_bytes(
+            a,
+            PathSpec(resource_path="plain/sub/file.txt",
+                     virtual="/plain/sub/file.txt",
+                     directory="/plain/sub/file.txt"), b"data")
     await s.clear()
     await s.close()
 

@@ -110,7 +110,11 @@ async def _readdir_traces(
     if listing.entries is not None:
         return listing.entries
     limit = accessor.config.default_trace_limit
-    traces = await fetch_traces(accessor.api, limit=limit)
+    traces = await fetch_traces(
+        accessor.api,
+        limit=limit,
+        from_timestamp=accessor.config.default_from_timestamp,
+    )
     entries = []
     names = []
     for t in traces:
@@ -169,6 +173,7 @@ async def _readdir_session_traces(
         accessor.api,
         session_id=session_id,
         limit=limit,
+        from_timestamp=accessor.config.default_from_timestamp,
     )
     entries = []
     names = []
@@ -233,16 +238,18 @@ async def _readdir_prompt_versions(
     for p in prompts:
         if p.get("name") != prompt_name:
             continue
-        version = p.get("version", 0)
-        filename = f"{version}.json"
-        entry = IndexEntry(
-            id=f"{prompt_name}/{version}",
-            name=str(version),
-            resource_type="langfuse/prompt_version",
-            vfs_name=filename,
-        )
-        entries.append((filename, entry))
-        names.append(f"{prefix}/prompts/{prompt_name}/{filename}")
+        # The list endpoint returns PromptMeta, which carries every version
+        # of a prompt in a `versions` array; there is no scalar `version`.
+        for version in sorted(p.get("versions", [])):
+            filename = f"{version}.json"
+            entry = IndexEntry(
+                id=f"{prompt_name}/{version}",
+                name=str(version),
+                resource_type="langfuse/prompt_version",
+                vfs_name=filename,
+            )
+            entries.append((filename, entry))
+            names.append(f"{prefix}/prompts/{prompt_name}/{filename}")
     await index.set_dir(virtual_key, entries)
     return names
 

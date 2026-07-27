@@ -74,4 +74,7 @@ def detect_scope(path: PathSpec) -> LangfuseScope:
                 resource_path=raw,
             )
 
-    return LangfuseScope(level="root", resource_path=raw)
+    # An unrecognized path is not the mount root: falling back to "root" made
+    # the grep/rg search push-down treat any bogus path as "search every
+    # trace", answering a missing file with the whole mount and exit 0.
+    return LangfuseScope(level="unknown", resource_path=raw)

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { enoent } from '../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -29,12 +30,6 @@ function slackModified(remoteTime: string): string | null {
   const ts = Number.parseFloat(remoteTime)
   if (Number.isNaN(ts) || ts <= 0) return null
   return epochToIso(ts)
-}
-
-function fileNotFound(key: string): Error {
-  const e = new Error(`ENOENT: ${key}`) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
 }
 
 async function lookupWithFallback(
@@ -89,10 +84,10 @@ export async function stat(
   const virtualKey = `${prefix}/${key}`
 
   if (parts.length === 2 && (part0 === 'channels' || part0 === 'dms')) {
-    if (index === undefined) throw fileNotFound(raw)
+    if (index === undefined) throw enoent(path)
     const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
     if (lookup.entry === undefined || lookup.entry === null) {
-      throw fileNotFound(raw)
+      throw enoent(path)
     }
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
@@ -103,10 +98,10 @@ export async function stat(
   }
 
   if (parts.length === 2 && part0 === 'users') {
-    if (index === undefined) throw fileNotFound(raw)
+    if (index === undefined) throw enoent(path)
     const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
     if (lookup.entry === undefined || lookup.entry === null) {
-      throw fileNotFound(raw)
+      throw enoent(path)
     }
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
@@ -143,10 +138,10 @@ export async function stat(
     DATE_RE.test(part2) &&
     part3 === 'files'
   ) {
-    if (index === undefined) throw fileNotFound(raw)
+    if (index === undefined) throw enoent(path)
     const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
     if (lookup.entry === undefined || lookup.entry === null) {
-      throw fileNotFound(raw)
+      throw enoent(path)
     }
     const mimetype =
       typeof lookup.entry.extra.mimetype === 'string' ? lookup.entry.extra.mimetype : ''
@@ -159,5 +154,5 @@ export async function stat(
     })
   }
 
-  throw fileNotFound(raw)
+  throw enoent(path)
 }

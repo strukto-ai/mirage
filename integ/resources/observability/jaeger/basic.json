@@ -1,0 +1,277 @@
+{
+  "cases": [
+    {
+      "id": "jg_root_ls",
+      "seq": 610000,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j",
+      "expect": {
+        "exit": 0,
+        "stdout": "services\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_services_ls",
+      "seq": 610001,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j/services",
+      "expect": {
+        "exit": 0,
+        "stdout": "checkout-api\njaeger\norders-api\nsearch-api\nweb-frontend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_service_children_ls",
+      "seq": 610002,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j/services/checkout-api",
+      "expect": {
+        "exit": 0,
+        "stdout": "operations.json\ntraces\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_traces_ls",
+      "seq": 610003,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j/services/checkout-api/traces",
+      "expect": {
+        "exit": 0,
+        "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_search_traces_ls",
+      "seq": 610004,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j/services/search-api/traces",
+      "expect": {
+        "exit": 0,
+        "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_trace_id",
+      "seq": 610005,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.traceID' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_trace_span_names",
+      "seq": 610006,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[].operationName' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "POST /checkout\ncharge-card\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_trace_span_count",
+      "seq": 610007,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans | length' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_trace_parent_ref",
+      "seq": 610008,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"charge-card\") | .references[0].refType' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "CHILD_OF\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_trace_process_service",
+      "seq": 610009,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.processes.p1.serviceName' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "checkout-api\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_trace_client_start_time",
+      "seq": 610010,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"POST /checkout\") | .startTime' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1767225600000000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_trace_http_tag",
+      "seq": 610011,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"POST /checkout\") | .tags[] | select(.key==\"http.method\") | .value' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "POST\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_operations",
+      "seq": 610012,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.[].name' /j/services/checkout-api/operations.json | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "POST /checkout\ncharge-card\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_find_trace_files",
+      "seq": 610013,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "find /j/services/search-api -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/j/services/search-api/operations.json\n/j/services/search-api/traces/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_tree_service",
+      "seq": 610014,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "tree /j/services/search-api",
+      "expect": {
+        "exit": 0,
+        "stdout": "/j/services/search-api\n|-- operations.json\n`-- traces\n    `-- bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2.json\n\n2 directories, 2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_grep_operation",
+      "seq": 610015,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "grep -c charge-card /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_unknown_service_ls",
+      "seq": 610016,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j/services/__nf_missing__",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/j/services/__nf_missing__': No such file or directory\n"
+      }
+    },
+    {
+      "id": "jg_malformed_trace_id_cat",
+      "seq": 610017,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/checkout-api/traces/zzz.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /j/services/checkout-api/traces/zzz.json: No such file or directory\n"
+      }
+    },
+    {
+      "id": "jg_unlisted_trace_stat",
+      "seq": 610018,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat /j/services/checkout-api/traces/00000000000000000000000000000000.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /j/services/checkout-api/traces/00000000000000000000000000000000.json: No such file or directory\n"
+      }
+    },
+    {
+      "id": "jg_foreign_service_cat",
+      "seq": 610019,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json: No such file or directory\n"
+      }
+    },
+    {
+      "id": "jg_foreign_service_stat",
+      "seq": 610020,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /j/services/search-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json: No such file or directory\n"
+      }
+    }
+  ]
+}

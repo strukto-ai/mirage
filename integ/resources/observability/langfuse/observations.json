@@ -1,0 +1,212 @@
+{
+  "cases": [
+    {
+      "id": "lf_obs_00",
+      "seq": 602000,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations | length' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_01",
+      "seq": 602001,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations[].name' /lf/traces/trace-alpha.json | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "describe-order\nvalidate-cart\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_02",
+      "seq": 602002,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations[].type' /lf/traces/trace-alpha.json | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "GENERATION\nSPAN\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_03",
+      "seq": 602003,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations[] | select(.type==\"GENERATION\") | .model' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "gpt-4o-mini\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_04",
+      "seq": 602004,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations[] | select(.name==\"describe-order\") | .parentObservationId' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "obs-span-checkout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_05",
+      "seq": 602005,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations[] | select(.name==\"validate-cart\") | .input.items' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_06",
+      "seq": 602006,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations[] | select(.type==\"GENERATION\") | .output.content' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "two items, confirmed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_07",
+      "seq": 602007,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.scores | length' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_08",
+      "seq": 602008,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.scores[0].name' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "helpfulness\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_09",
+      "seq": 602009,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.scores[0].value' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "0.75\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_10",
+      "seq": 602010,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.scores[0].comment' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "clear summary\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_11",
+      "seq": 602011,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.scores[0].dataType' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "NUMERIC\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_12",
+      "seq": 602012,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.latency' /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_13",
+      "seq": 602013,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.observations | length' /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_14",
+      "seq": 602014,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.scores | length' /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_obs_15",
+      "seq": 602015,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "grep -c obs-span-checkout /lf/traces/trace-alpha.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

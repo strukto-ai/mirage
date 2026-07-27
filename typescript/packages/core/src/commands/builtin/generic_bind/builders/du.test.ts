@@ -16,6 +16,7 @@ import { DU_BUILDER } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { enoent } from '../../../../utils/errors.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandIO } from '../adapter.ts'
 
@@ -40,7 +41,9 @@ const OPS: CommandIO = {
   readStream: () => emptyStream(),
   stat: (_a, p) => {
     const node = TREE[p.virtual]
-    if (node === undefined) return Promise.reject(new Error('ENOENT'))
+    // A stamped FsError, as every real backend raises: the builder tells a
+    // missing operand from a backend failure by the code, not the message.
+    if (node === undefined) return Promise.reject(enoent(p.virtual))
     return Promise.resolve(
       new FileStat({
         name: p.virtual,
@@ -149,6 +152,22 @@ describe('du walk fallback (no native du op)', () => {
     await expect(runDu([PathSpec.fromStrPath('/db')], { s: true, a: true })).rejects.toThrow(
       /cannot both summarize/,
     )
+  })
+
+  it('a backend failure propagates instead of reading as a missing operand', async () => {
+    const failing: CommandIO = {
+      ...OPS,
+      stat: () => Promise.reject(new Error('403 Forbidden')),
+    }
+    await expect(
+      DU_BUILDER.fn(failing, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
+        stdin: null,
+        flags: {},
+        filetypeFns: null,
+        cwd: '/',
+        resource: {} as never,
+      }),
+    ).rejects.toThrow('403 Forbidden')
   })
 
   it('-h renders human-readable sizes', async () => {

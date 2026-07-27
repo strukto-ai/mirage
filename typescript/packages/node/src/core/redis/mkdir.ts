@@ -14,7 +14,8 @@
 
 import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm, nowIso, parent } from './utils.ts'
+import { checkDestParents } from './dest.ts'
+import { norm, nowIso } from './utils.ts'
 import { stripSlash } from '@struktoai/mirage-core'
 
 export async function mkdir(
@@ -40,10 +41,7 @@ export async function mkdir(
     await invalidateAncestors(path)
     return
   }
-  const par = parent(p)
-  if (par !== '/' && !(await store.hasDir(par))) {
-    throw new Error(`parent directory does not exist: ${par}`)
-  }
+  await checkDestParents(store, path, p)
   await store.addDir(p)
   await store.setModified(p, nowIso())
   await invalidateAfterWrite(p)

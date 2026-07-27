@@ -310,7 +310,9 @@ async def readdir(
         return await _readdir_files_dir(accessor, path, prefix, key,
                                         virtual_key, container, parts[1],
                                         parts[2], index)
-    return []
+    # An unrecognized path is not an empty directory: returning [] made
+    # `ls` and `tree` report a bogus path as a real-but-empty one.
+    raise enoent(path.virtual)
 
 
 async def _fetch_day(

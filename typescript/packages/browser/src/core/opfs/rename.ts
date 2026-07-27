@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '@struktoai/mirage-core'
+import { enoent, type PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import {
+  destError,
   isNotFound,
   iterEntries,
   resolveDirHandle,
@@ -54,7 +55,7 @@ export async function rename(accessor: OPFSAccessor, src: PathSpec, dst: PathSpe
   try {
     ;[srcParent, srcName] = await resolveParentDirHandle(root, srcPath, { create: false })
   } catch (err) {
-    if (isNotFound(err)) throw new Error(`file or directory not found: ${srcPath}`)
+    if (isNotFound(err)) throw enoent(src)
     throw err
   }
   let isFile = false
@@ -70,15 +71,27 @@ export async function rename(accessor: OPFSAccessor, src: PathSpec, dst: PathSpe
     try {
       await srcParent.getDirectoryHandle(srcName, { create: false })
     } catch (err) {
-      if (isNotFound(err)) throw new Error(`file or directory not found: ${srcPath}`)
+      if (isNotFound(err)) throw enoent(src)
       throw err
     }
+  }
+  // rename(2) resolves the destination first and never creates parents;
+  // OPFS creates per segment, so the chain has to be probed explicitly.
+  try {
+    await resolveParentDirHandle(root, dstPath, { create: false })
+  } catch (err) {
+    throw destError(err, dst)
   }
   if (isFile) {
     const srcFile = await resolveFileHandle(root, srcPath, { create: false })
     const file = await srcFile.getFile()
     const data = new Uint8Array(await file.arrayBuffer())
-    const dstFile = await resolveFileHandle(root, dstPath, { create: true })
+    let dstFile: FileSystemFileHandle
+    try {
+      dstFile = await resolveFileHandle(root, dstPath, { create: true })
+    } catch (err) {
+      throw destError(err, dst)
+    }
     const writable = await dstFile.createWritable()
     await writable.write(toWritableChunk(data))
     await writable.close()

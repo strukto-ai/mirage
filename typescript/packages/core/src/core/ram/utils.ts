@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { norm, parent, gnuBasename as basename } from '../../utils/path.ts'
+export { norm, gnuBasename as basename } from '../../utils/path.ts'
 
 export function nowIso(): string {
   return new Date().toISOString()

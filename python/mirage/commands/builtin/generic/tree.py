@@ -1,8 +1,7 @@
 from collections.abc import Awaitable, Callable
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.utils.output import (format_optional_records,
-                                                  format_records)
+from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import WALK_ERRORS
@@ -129,7 +128,9 @@ async def tree(
                                      warnings=warnings,
                                      index=index)
     root_label = path.raw_path or path.virtual
-    stderr = format_optional_records(warnings)
+    # GNU signals an unopenable path with the inline "[error opening dir]"
+    # marker and exit 2, and writes nothing to stderr. `warnings` therefore
+    # only decides the marker; emitting it would diverge.
     if warnings and not lines:
         # The root could not be opened (GNU prints the error marker inline
         # and exits 2).
@@ -137,13 +138,13 @@ async def tree(
             f"{root_label}  [error opening dir]", "",
             _summary(0, 0, dirs_only)
         ]
-        return format_records(body), IOResult(stderr=stderr, exit_code=2)
+        return format_records(body), IOResult(exit_code=2)
     # GNU counts the root as a directory once it has any listed entry (an
     # empty root reports 0), then a blank line and the summary (the file
     # count is omitted under -d).
     root_dirs = dirs + 1 if lines else 0
     body = [root_label] + lines + ["", _summary(root_dirs, files, dirs_only)]
-    return format_records(body), IOResult(stderr=stderr)
+    return format_records(body), IOResult()
 
 
 __all__ = ["tree"]

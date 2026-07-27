@@ -86,11 +86,14 @@ describe('RAMResource write + read', () => {
   })
 
   it('write under nested missing parent throws', async () => {
+    // The operand is what a GNU stderr line names, so the error carries the
+    // virtual path and an errno, not the internal parent phrasing.
     const { ram, registry } = setup()
     const payload = new TextEncoder().encode('x')
-    await expect(call(registry, 'write', ram, '/missing/x', payload)).rejects.toThrow(
-      /parent directory does not exist/,
-    )
+    await expect(call(registry, 'write', ram, '/missing/x', payload)).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/missing/x',
+    })
   })
 
   it('read missing file throws', async () => {
@@ -148,12 +151,13 @@ describe('RAMResource readdir', () => {
   })
 
   it('throws ENOENT for an orphan whose parent directory is missing', async () => {
-    // rename stores the destination key without adding its ancestors, so the
-    // store can hold a file under a parent that is not a directory. The walk
-    // must stop at /missing, the way the kernel would.
+    // The store can hold a file under a key whose ancestors are not in the
+    // dir set: a restored snapshot or another client writing to the same
+    // Redis can seed one, so readdir stays defensive about it. Seeded
+    // directly rather than through rename, which now refuses to create one.
+    // The walk must stop at /missing, the way the kernel would.
     const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/a.txt', new Uint8Array())
-    await call(registry, 'rename', ram, '/a.txt', PathSpec.fromStrPath('/missing/a.txt'))
+    ram.store.files.set('/missing/a.txt', new Uint8Array())
     for (const p of ['/missing', '/missing/a.txt/x', '/missing/a.txt/x/y']) {
       await expect(call(registry, 'readdir', ram, p)).rejects.toMatchObject({
         code: 'ENOENT',
@@ -277,8 +281,13 @@ describe('RAMResource mkdir -p parents', () => {
   })
 
   it('the mkdir op throws if an intermediate directory is missing', async () => {
+    // A bare Error here would not be classified as a filesystem failure, so
+    // the command layer could not report it with a GNU strerror.
     const { ram, registry } = setup()
-    await expect(call(registry, 'mkdir', ram, '/x/y')).rejects.toThrow(/parent directory/)
+    await expect(call(registry, 'mkdir', ram, '/x/y')).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/x/y',
+    })
   })
 })
 

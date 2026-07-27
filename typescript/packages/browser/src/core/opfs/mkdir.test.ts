@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { exists } from './exists.ts'
 import { mkdir } from './mkdir.ts'
+import { writeBytes } from './write.ts'
 
 describe('opfs/mkdir', () => {
   it('creates a single directory', async () => {
@@ -24,8 +25,16 @@ describe('opfs/mkdir', () => {
     expect(await exists(accessor, spec('/d'))).toBe(true)
   })
   it('throws when parent does not exist and parents=false', async () => {
+    // A bare Error would not be classified as a filesystem failure, so the
+    // command layer could not report it with a GNU strerror.
     const accessor = makeMockAccessor()
-    await expect(mkdir(accessor, spec('/a/b'))).rejects.toThrow(/parent directory does not exist/)
+    await expect(mkdir(accessor, spec('/a/b'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('is ENOTDIR when a parent component is a plain file', async () => {
+    const accessor = makeMockAccessor()
+    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('y'))
+    await expect(mkdir(accessor, spec('/plain/sub'))).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
   it('creates nested directories with parents=true', async () => {
     const accessor = makeMockAccessor()

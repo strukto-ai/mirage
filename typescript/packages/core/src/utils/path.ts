@@ -89,6 +89,18 @@ export function parent(path: string): string {
   return path.slice(0, i)
 }
 
+// The proper ancestors of a normalized key, outermost first: "/a/b/c" ->
+// ["/a", "/a/b"]; "/a" and "/" -> []. "/" is left out because every store
+// treats the mount root as an existing directory, so it is never a component
+// worth probing. Used by the store-backed backends (ram, redis) to walk a
+// destination's parent chain the way rename(2) resolves it.
+export function ancestors(path: string): string[] {
+  const parts = stripSlash(path).split('/')
+  const out: string[] = []
+  for (let i = 1; i < parts.length; i++) out.push(`/${parts.slice(0, i).join('/')}`)
+  return out
+}
+
 export const MAX_SYMLINK_HOPS = 40
 
 // Raised when symlink resolution exceeds the maximum hop count. Mirrors POSIX

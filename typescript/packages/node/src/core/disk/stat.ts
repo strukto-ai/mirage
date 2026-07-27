@@ -15,7 +15,8 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { stat as fsStat } from 'node:fs/promises'
 import path from 'node:path'
-import { enoent, FileStat, FileType, guessType, type PathSpec } from '@struktoai/mirage-core'
+import { FileStat, FileType, guessType, type PathSpec } from '@struktoai/mirage-core'
+import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
 
 export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileStat> {
@@ -25,10 +26,7 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
   try {
     st = await fsStat(full)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw enoent(p)
-    }
-    throw err
+    throw diskError(err, p)
   }
   const modified = st.mtime.toISOString()
   const name = path.basename(full)

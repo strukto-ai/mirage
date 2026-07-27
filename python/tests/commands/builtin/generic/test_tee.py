@@ -78,6 +78,31 @@ async def test_write_error_passes_stdout_and_exits_one():
 
 
 @pytest.mark.asyncio
+async def test_unusable_destination_reports_the_gnu_strerror():
+    # A recognized filesystem refusal carries only the path as its message,
+    # so the strerror has to come from the shared table (GNU:
+    # "tee: X: No such file or directory"). A transport error keeps its own
+    # message instead, which the test above pins.
+
+    async def _write(p, _d):
+        raise FileNotFoundError(p.virtual)
+
+    async def _read(_p):
+        if False:
+            yield b""
+
+    source, io = await tee([_spec("/nodir/out.txt")], (),
+                           read_stream=_read,
+                           write_bytes=_write,
+                           stdin=b"hello",
+                           flags={})
+    assert await materialize(source) == b"hello"
+    assert io.exit_code == 1
+    assert await materialize(
+        io.stderr) == (b"tee: /nodir/out.txt: No such file or directory\n")
+
+
+@pytest.mark.asyncio
 async def test_writes_stdin_and_reports_cache():
     written = {}
 

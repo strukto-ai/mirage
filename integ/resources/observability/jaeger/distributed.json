@@ -1,0 +1,173 @@
+{
+  "cases": [
+    {
+      "id": "jg_dist_00",
+      "seq": 612000,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j/services/web-frontend/traces",
+      "expect": {
+        "exit": 0,
+        "stdout": "ccccccccccccccccccccccccccccccc3.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_01",
+      "seq": 612001,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "ls /j/services/orders-api/traces",
+      "expect": {
+        "exit": 0,
+        "stdout": "ccccccccccccccccccccccccccccccc3.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_02",
+      "seq": 612002,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cmp /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json /j/services/orders-api/traces/ccccccccccccccccccccccccccccccc3.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_03",
+      "seq": 612003,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans | length' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_04",
+      "seq": 612004,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[].operationName' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "GET /cart\nPOST /orders\ndb.query\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_05",
+      "seq": 612005,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '[.processes[].serviceName] | sort | join(\",\")' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "orders-api,web-frontend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_06",
+      "seq": 612006,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '[.spans[] | select(.references | length > 0)] | length' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_07",
+      "seq": 612007,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"db.query\") | .references[0].refType' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "CHILD_OF\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_08",
+      "seq": 612008,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"POST /orders\") | .references[0].spanID' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "4444444444444444\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_09",
+      "seq": 612009,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"db.query\") | .tags[] | select(.key==\"error\") | .value' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_10",
+      "seq": 612010,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"db.query\") | .tags[] | select(.key==\"db.system\") | .value' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "postgresql\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_11",
+      "seq": 612011,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "jq -r '.spans[] | select(.operationName==\"db.query\") | .duration' /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_dist_12",
+      "seq": 612012,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "grep -c db.query /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

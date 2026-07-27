@@ -417,7 +417,9 @@ export async function readdir(
   const scope = detectScope(path)
   const container = scope.container
   const segments = key.split('/')
-  if (container !== 'channels' && container !== 'dms') return []
+  // Same reason as the fallback below: an unknown container is not an empty
+  // directory. Python raises here too.
+  if (container !== 'channels' && container !== 'dms') throw enoent(parts.path)
 
   if (segments.length === 2) {
     return readdirChannelDates(accessor, parts, container, index)
@@ -428,7 +430,9 @@ export async function readdir(
   if (scope.target === 'files' && segments.length === 4) {
     return readdirFilesDir(accessor, parts, container, segments, index)
   }
-  return []
+  // An unrecognized path is not an empty directory: returning [] made `ls`
+  // and `tree` report a bogus path as a real-but-empty one.
+  throw enoent(parts.path)
 }
 export function isDirName(child: string): boolean {
   // Entries are recognized by extension, so classification never needs

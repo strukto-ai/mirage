@@ -19,7 +19,8 @@ from pathlib import Path
 
 from mirage.types import FileStat, PathSpec
 
-CASE_DIRS = ("unix", "bash", "crossmount", "runtime", "resources", "cli")
+CASE_DIRS = ("unix", "bash", "crossmount", "runtime", "resources", "cli",
+             "session")
 
 
 def integ_root() -> Path:
@@ -94,6 +95,34 @@ def provision_line(result) -> str:
             f"hits={result.cache_hits} precision={result.precision.value}")
 
 
+def bind_mount(case: dict, mount_path: str) -> dict:
+    """Substitute {mount} in a case with a target's primary mount path.
+
+    Lets one case assert a behavior that every backend shares while each target
+    keeps its own mount path. Cases without the token are returned untouched,
+    so this is inert for the existing suite.
+
+    Args:
+        case (dict): case as loaded from disk.
+        mount_path (str): the target's primary mount path.
+
+    Returns:
+        dict: the case with {mount} replaced in command and expectations.
+    """
+    if "{mount}" not in json.dumps(case):
+        return case
+    bound = dict(case)
+    prefix = mount_path.rstrip("/")
+    if "command" in bound:
+        bound["command"] = bound["command"].replace("{mount}", prefix)
+    expect = dict(bound["expect"])
+    for name in ("stdout", "stderr"):
+        if isinstance(expect.get(name), str):
+            expect[name] = expect[name].replace("{mount}", prefix)
+    bound["expect"] = expect
+    return bound
+
+
 async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
     if case.get("clear_cache"):
         # A full clear means the file cache AND every mount's index cache:
@@ -109,7 +138,7 @@ async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
     if case.get("provision"):
         plan = await ws.execute(case["command"], provision=True)
         return 0, provision_line(plan) + "\n", "", time.monotonic() - start
-    result = await ws.execute(case["command"])
+    result = await ws.execute(case["command"], session_id=case.get("session"))
     elapsed = time.monotonic() - start
     out = await result.stdout_str()
     err = await result.stderr_str()
