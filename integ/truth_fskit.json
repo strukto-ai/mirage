@@ -1,0 +1,8 @@
+{
+  "under_volumes": true,
+  "tagged_fskit": true,
+  "cat": "{\"messages\": 2}",
+  "size": 16,
+  "read_bytes": 16,
+  "write_roundtrip": true
+}
