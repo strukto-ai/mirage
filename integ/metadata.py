@@ -77,7 +77,7 @@ def meta_stat_line(st: FileStat, fields: tuple[str, ...]) -> str:
 
 
 async def run_overlay_snapshot_roundtrip(ws: Workspace,
-                                        fresh: S3Resource) -> None:
+                                         fresh: S3Resource) -> None:
     # Overlay attrs live in namespace NODES, so they must survive a
     # snapshot even though the s3 resource is rebuilt fresh at load
     # (s3 snapshots redact creds and require a resources= override).

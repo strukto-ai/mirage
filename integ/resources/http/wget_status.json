@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "wget_404_exit_8",
+      "seq": 330028,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -O /data/w404.txt {http}/missing",
+      "expect": {
+        "exit": 8,
+        "stdout": "",
+        "stderr": "ERROR 404: Not Found.\n"
+      }
+    },
+    {
+      "id": "wget_404_creates_empty_dest",
+      "seq": 330029,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wc -c < /data/w404.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wget_404_quiet_exit_8",
+      "seq": 330030,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -q -O /data/w404b.txt {http}/missing",
+      "expect": {
+        "exit": 8,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wget_spider_404_exit_8",
+      "seq": 330031,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget --spider {http}/missing",
+      "expect": {
+        "exit": 8,
+        "stdout": "",
+        "stderr": "Remote file does not exist -- broken link!!!\n"
+      }
+    },
+    {
+      "id": "wget_unreachable_exit_4",
+      "seq": 330032,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -O /data/wnet.txt http://127.0.0.1:1/hello",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": "Connecting to 127.0.0.1:1... failed: Connection refused.\n"
+      }
+    },
+    {
+      "id": "wget_unreachable_quiet",
+      "seq": 330033,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -q -O /data/wnet2.txt http://127.0.0.1:1/hello",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wget_readonly_exit_1",
+      "seq": 330034,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -q -O /ro/w.txt {http}/hello; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

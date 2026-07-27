@@ -16,12 +16,25 @@ from typing import Any, Callable
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.general.curl import _resolve_target
-from mirage.commands.builtin.utils.http import _http_get
+from mirage.commands.builtin.utils.http import HttpConnectError, _http_get
+from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import OperationNotSupportedError
+from mirage.utils.errors import WALK_ERRORS
+
+# Exit codes GNU wget uses for the failures mirage can hit. Unlike curl, wget
+# treats any 4xx/5xx as a failure (EXIT_SERVER_ERROR) and needs no flag to do
+# so, and it reports a local write failure as a generic EXIT_GENERIC.
+EXIT_GENERIC = 1
+EXIT_NETWORK = 4
+EXIT_SERVER_ERROR = 8
+
+USAGE = ("wget: missing URL\n"
+         "Usage: wget [OPTION]... [URL]...\n"
+         "\n"
+         "Try `wget --help' for more options.")
 
 
 @command("wget", resource=None, spec=SPECS["wget"])
@@ -38,13 +51,26 @@ async def wget(
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
-        raise ValueError("wget: missing URL")
+        raise UsageError(USAGE, exit_code=EXIT_GENERIC)
     url = texts[0]
 
+    # wget follows redirects unconditionally; it has no -L equivalent.
+    try:
+        resp = _http_get(url)
+    except HttpConnectError as exc:
+        err = b"" if q else (f"Connecting to {exc.host}:{exc.port}... "
+                             f"failed: Connection refused.\n").encode()
+        return None, IOResult(exit_code=EXIT_NETWORK, stderr=err)
+
+    # --spider reports its verdict on stderr, not stdout, and inherits the
+    # same exit 8 an error status gives a real download.
     if spider:
-        data = _http_get(url)
-        output = "" if q else f"Spider mode: {url} exists ({len(data)} bytes)"
-        return output.encode(), IOResult()
+        if resp.is_error:
+            err = b"" if q else (
+                b"Remote file does not exist -- broken link!!!\n")
+            return None, IOResult(exit_code=EXIT_SERVER_ERROR, stderr=err)
+        err = b"" if q else b"Remote file exists.\n"
+        return None, IOResult(stderr=err)
 
     dest_raw: str | PathSpec
     if args_O:
@@ -54,14 +80,31 @@ async def wget(
     else:
         dest_raw = url.rsplit("/", 1)[-1]
     dest_str = dest_raw.virtual if isinstance(dest_raw, PathSpec) else dest_raw
-    data = _http_get(url)
+
+    # An error status still creates the destination, empty, the way GNU wget
+    # truncates the -O target before it learns the response code.
+    data = b"" if resp.is_error else resp.body
     if dispatch is not None:
         scope = _resolve_target(dest_raw, cwd)
         try:
             await dispatch("write", scope, data=data)
-        except (PermissionError, OperationNotSupportedError,
-                ValueError) as exc:
-            err = f"wget: {dest_str}: {exc}\n".encode()
-            return None, IOResult(exit_code=1, stderr=err)
-    output = "" if q else f"saved {len(data)} bytes to {dest_str}"
-    return output.encode(), IOResult(writes={dest_str: data})
+        # WALK_ERRORS is the shared recoverable set (every filesystem error
+        # plus the ValueError store backends raise for "not a directory"), so
+        # a missing parent cannot escape the way it did when this caught only
+        # three types.
+        except WALK_ERRORS as exc:
+            # str() on an OSError renders "[Errno 13] msg: 'path'", so the
+            # errno and a python repr would reach stderr; strerror is the
+            # message on its own.
+            detail = getattr(exc, "strerror", None) or str(exc)
+            err = b"" if q else f"{dest_str}: {detail}\n".encode()
+            return None, IOResult(exit_code=EXIT_GENERIC, stderr=err)
+    if resp.is_error:
+        err = b"" if q else (f"ERROR {resp.status}: {resp.reason}.\n").encode()
+        return None, IOResult(exit_code=EXIT_SERVER_ERROR,
+                              stderr=err,
+                              writes={dest_str: data})
+    # Real wget puts its progress report on stderr and nothing on stdout.
+    err = b"" if q else (
+        f"'{dest_str}' saved [{len(data)}/{len(data)}]\n").encode()
+    return None, IOResult(stderr=err, writes={dest_str: data})

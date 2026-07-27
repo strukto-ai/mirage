@@ -38,6 +38,10 @@ async def missing(_request: web.Request) -> web.Response:
     return web.Response(status=404, text="not found\n")
 
 
+async def boom(_request: web.Request) -> web.Response:
+    return web.Response(status=500, text="server error\n")
+
+
 async def redirect(_request: web.Request) -> web.Response:
     raise web.HTTPFound("/hello")
 
@@ -75,6 +79,7 @@ def build_app() -> web.Application:
     app.router.add_get("/data.json", json_body)
     app.router.add_get("/bytes.bin", binary)
     app.router.add_get("/missing", missing)
+    app.router.add_get("/boom", boom)
     app.router.add_get("/redirect", redirect)
     app.router.add_route("*", "/echo", echo)
     app.router.add_post("/form", form)

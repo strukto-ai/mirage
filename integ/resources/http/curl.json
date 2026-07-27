@@ -27,8 +27,21 @@
       }
     },
     {
-      "id": "curl_follow_redirect",
+      "id": "curl_no_follow_without_L",
       "seq": 330002,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s {http}/redirect",
+      "expect": {
+        "exit": 0,
+        "stdout": "302: Found",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_follow_redirect",
+      "seq": 330003,
       "targets": [
         "http-ram"
       ],
@@ -41,7 +54,7 @@
     },
     {
       "id": "curl_method_and_header",
-      "seq": 330003,
+      "seq": 330004,
       "targets": [
         "http-ram"
       ],
@@ -54,7 +67,7 @@
     },
     {
       "id": "curl_post_body",
-      "seq": 330004,
+      "seq": 330005,
       "targets": [
         "http-ram"
       ],
@@ -67,7 +80,7 @@
     },
     {
       "id": "curl_form_field",
-      "seq": 330005,
+      "seq": 330006,
       "targets": [
         "http-ram"
       ],

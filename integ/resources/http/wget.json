@@ -2,7 +2,7 @@
   "cases": [
     {
       "id": "wget_o_writes_vfs",
-      "seq": 330011,
+      "seq": 330023,
       "targets": [
         "http-ram"
       ],
@@ -15,7 +15,7 @@
     },
     {
       "id": "wget_o_content_landed",
-      "seq": 330012,
+      "seq": 330024,
       "targets": [
         "http-ram"
       ],
@@ -27,34 +27,34 @@
       }
     },
     {
-      "id": "wget_default_reports_path",
-      "seq": 330013,
+      "id": "wget_report_on_stderr",
+      "seq": 330025,
       "targets": [
         "http-ram"
       ],
       "command": "wget -O /data/wgot2.txt {http}/hello",
       "expect": {
         "exit": 0,
-        "stdout": "saved 16 bytes to /data/wgot2.txt",
-        "stderr": ""
+        "stdout": "",
+        "stderr": "'/data/wgot2.txt' saved [16/16]\n"
       }
     },
     {
-      "id": "wget_spider_reports_size",
-      "seq": 330014,
+      "id": "wget_spider_reports_exists",
+      "seq": 330026,
       "targets": [
         "http-ram"
       ],
       "command": "wget --spider {http}/hello",
       "expect": {
         "exit": 0,
-        "stdout": "Spider mode: {http}/hello exists (16 bytes)",
-        "stderr": ""
+        "stdout": "",
+        "stderr": "Remote file exists.\n"
       }
     },
     {
       "id": "wget_spider_quiet",
-      "seq": 330015,
+      "seq": 330027,
       "targets": [
         "http-ram"
       ],
@@ -63,19 +63,6 @@
         "exit": 0,
         "stdout": "",
         "stderr": ""
-      }
-    },
-    {
-      "id": "wget_missing_url",
-      "seq": 330016,
-      "targets": [
-        "http-ram"
-      ],
-      "command": "wget",
-      "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "wget: missing URL\n"
       }
     }
   ]

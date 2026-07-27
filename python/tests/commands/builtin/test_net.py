@@ -19,6 +19,7 @@ import pytest
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.commands.builtin.general.curl import curl
+from mirage.commands.builtin.utils.http import HttpResponse
 from mirage.resource.base import BaseResource
 
 curl_mod = sys.modules["mirage.commands.builtin.general.curl"]
@@ -40,11 +41,16 @@ class TestCurl:
 def mock_http(monkeypatch):
     payload = b"hello body"
 
-    def _fake_request(url, method="GET", headers=None, data=None, timeout=30):
-        return payload
+    def _fake_request(url,
+                      method="GET",
+                      headers=None,
+                      data=None,
+                      timeout=30,
+                      follow_redirects=False):
+        return HttpResponse(status=200, reason="OK", body=payload, url=url)
 
-    def _fake_get(url, headers=None, timeout=30):
-        return payload
+    def _fake_get(url, headers=None, timeout=30, follow_redirects=True):
+        return HttpResponse(status=200, reason="OK", body=payload, url=url)
 
     monkeypatch.setattr(curl_mod, "_http_request", _fake_request)
     monkeypatch.setattr(wget_mod, "_http_get", _fake_get)
@@ -77,8 +83,8 @@ async def test_curl_o_persists_to_writable_mount(multi_mount_ws, mock_http):
 @pytest.mark.asyncio
 async def test_curl_o_readonly_mount_fails(multi_mount_ws, mock_http):
     io = await multi_mount_ws.execute(
-        "curl -s https://x.test/file -o /readonly/foo.bin")
-    assert io.exit_code == 1
+        "curl -sS https://x.test/file -o /readonly/foo.bin")
+    assert io.exit_code == 23
     err = (io.stderr or b"").decode()
     assert "read-only" in err
     assert "/readonly/foo.bin" in err
@@ -90,8 +96,8 @@ async def test_curl_o_missing_parent_dir_fails(multi_mount_ws, mock_http):
     # longer fails with "no mount"; it routes to the root and fails because
     # the parent directory does not exist there (no silent success).
     io = await multi_mount_ws.execute(
-        "curl -s https://x.test/file -o /nope/foo.bin")
-    assert io.exit_code == 1
+        "curl -sS https://x.test/file -o /nope/foo.bin")
+    assert io.exit_code == 23
     err = (io.stderr or b"").decode()
     assert "No such file or directory" in err
     assert "/nope/foo.bin" in err
@@ -101,8 +107,8 @@ async def test_curl_o_missing_parent_dir_fails(multi_mount_ws, mock_http):
 async def test_curl_o_resource_without_write_op_fails(multi_mount_ws,
                                                       mock_http):
     io = await multi_mount_ws.execute(
-        "curl -s https://x.test/file -o /nowrite/foo.bin")
-    assert io.exit_code == 1
+        "curl -sS https://x.test/file -o /nowrite/foo.bin")
+    assert io.exit_code == 23
     err = (io.stderr or b"").decode()
     assert "no op" in err or "write" in err
     assert "/nowrite/foo.bin" in err
@@ -120,7 +126,7 @@ async def test_wget_O_persists_to_writable_mount(multi_mount_ws, mock_http):
 @pytest.mark.asyncio
 async def test_wget_O_readonly_mount_fails(multi_mount_ws, mock_http):
     io = await multi_mount_ws.execute(
-        "wget -q -O /readonly/wget.bin https://x.test/file")
+        "wget -O /readonly/wget.bin https://x.test/file")
     assert io.exit_code == 1
     err = (io.stderr or b"").decode()
     assert "read-only" in err
@@ -135,9 +141,7 @@ def captured_headers(monkeypatch):
 
         content = b""
         status_code = 200
-
-        def raise_for_status(self):
-            return None
+        reason_phrase = "OK"
 
     def _fake_request(self, method, url, headers=None, **_kw):
         captured["headers"] = dict(headers or {})

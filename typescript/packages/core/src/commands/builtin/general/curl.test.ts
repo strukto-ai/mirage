@@ -47,6 +47,7 @@ async function runCurl(
   flags: Record<string, string | boolean | string[]> = {},
 ): Promise<{
   out: string
+  err: string
   exitCode: number
   writes: Record<string, Uint8Array | AsyncIterable<Uint8Array>>
 }> {
@@ -60,7 +61,7 @@ async function runCurl(
     cwd: '/',
     resource,
   })
-  if (result === null) return { out: '', exitCode: -1, writes: {} }
+  if (result === null) return { out: '', err: '', exitCode: -1, writes: {} }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -68,7 +69,12 @@ async function runCurl(
       : out instanceof Uint8Array
         ? out
         : await materialize(out as AsyncIterable<Uint8Array>)
-  return { out: DEC.decode(buf), exitCode: ioResult.exitCode, writes: ioResult.writes }
+  return {
+    out: DEC.decode(buf),
+    err: DEC.decode(ioResult.stderr ?? new Uint8Array()),
+    exitCode: ioResult.exitCode,
+    writes: ioResult.writes,
+  }
 }
 
 describe('curl', () => {
@@ -86,14 +92,16 @@ describe('curl', () => {
     expect(r.exitCode).toBe(0)
   })
 
-  it('-o writes to file instead of stdout', async () => {
+  // Real curl prints nothing on stdout with -o: the body goes to the file and
+  // the only stdout-adjacent output is the progress meter, which is on stderr.
+  it('-o writes to file and prints nothing on stdout', async () => {
     const r = await runCurl(['https://x.test/file'], { o: '/tmp/out.txt' })
     const written = r.writes['/tmp/out.txt']
     expect(written).toBeInstanceOf(Uint8Array)
     if (written instanceof Uint8Array) {
       expect(DEC.decode(written)).toBe('hello body')
     }
-    expect(r.out).toContain('saved to /tmp/out.txt')
+    expect(r.out).toBe('')
   })
 
   it('-s with -o silences stdout', async () => {
@@ -137,8 +145,62 @@ describe('curl', () => {
     expect(headers['User-Agent']).toBe('from-H/1')
   })
 
-  it('missing URL returns exit 1', async () => {
-    const r = await runCurl([])
-    expect(r.exitCode).toBe(1)
+  it('missing URL is a usage error with exit 2', async () => {
+    await expect(runCurl([])).rejects.toMatchObject({ exitCode: 2 })
+  })
+
+  // Pinned against curl 8.14.1: an HTTP error status is a successful transfer.
+  // The body is printed and the exit code stays 0 unless -f is given.
+  it('prints the body and exits 0 on a 404 without -f', async () => {
+    mockFetch('not found', 404)
+    const r = await runCurl(['https://x.test/missing'])
+    expect(r.exitCode).toBe(0)
+    expect(r.out).toBe('not found')
+  })
+
+  it('writes the error body to -o and exits 0 on a 404 without -f', async () => {
+    mockFetch('not found', 404)
+    const r = await runCurl(['https://x.test/missing'], { o: '/tmp/e.txt' })
+    expect(r.exitCode).toBe(0)
+    const written = r.writes['/tmp/e.txt']
+    if (written instanceof Uint8Array) expect(DEC.decode(written)).toBe('not found')
+  })
+
+  it('-f turns a 404 into exit 22 and writes nothing', async () => {
+    mockFetch('not found', 404)
+    const r = await runCurl(['https://x.test/missing'], { f: true, o: '/tmp/e.txt' })
+    expect(r.exitCode).toBe(22)
+    expect(r.err).toContain('curl: (22) The requested URL returned error: 404')
+    expect(Object.keys(r.writes)).toHaveLength(0)
+  })
+
+  it('-sf keeps exit 22 but silences the message', async () => {
+    mockFetch('not found', 404)
+    const r = await runCurl(['https://x.test/missing'], { f: true, s: true })
+    expect(r.exitCode).toBe(22)
+    expect(r.err).toBe('')
+  })
+
+  it('-sSf restores the message', async () => {
+    mockFetch('not found', 404)
+    const r = await runCurl(['https://x.test/missing'], { f: true, s: true, S: true })
+    expect(r.exitCode).toBe(22)
+    expect(r.err).toContain('curl: (22)')
+  })
+
+  it('reports a refused connection as exit 7', async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new TypeError('fetch failed'))) as typeof fetch
+    const r = await runCurl(['http://127.0.0.1:1/x'])
+    expect(r.exitCode).toBe(7)
+    expect(r.err).toContain('curl: (7) Failed to connect to 127.0.0.1 port 1')
+  })
+
+  it('only follows redirects when -L is given', async () => {
+    const calls = mockFetch('ok')
+    await runCurl(['https://x.test/r'])
+    expect(calls[0]?.init?.redirect).toBe('manual')
+    const withL = mockFetch('ok')
+    await runCurl(['https://x.test/r'], { L: true })
+    expect(withL[0]?.init?.redirect).toBe('follow')
   })
 })
