@@ -96,13 +96,57 @@ async def test_mkdir_deep_under_a_plain_file_is_not_a_directory(mk_store):
 
 
 @pytest.mark.asyncio
-async def test_mkdir_already_exists(mk_store):
+async def test_mkdir_already_exists_needs_parents_to_be_idempotent(mk_store):
     a = await mk_store("test:mkdir:3:")
-    await mkdir(
-        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
-    await mkdir(
-        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
+    spec = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+    await mkdir(a, spec)
+    # Only -p is idempotent; plain mkdir refuses an existing target (GNU).
+    with pytest.raises(FileExistsError):
+        await mkdir(a, spec)
+    await mkdir(a, spec, parents=True)
     assert await a.store.has_dir("/dir")
+
+
+@pytest.mark.asyncio
+async def test_mkdir_p_across_a_file_names_the_component(mk_store):
+    a = await mk_store("test:mkdir:p1:")
+    await a.store.set_file("/a.txt", b"hi")
+    with pytest.raises(NotADirectoryError) as excinfo:
+        await mkdir(a,
+                    PathSpec(resource_path="a.txt/sub",
+                             virtual="/a.txt/sub",
+                             directory="/a.txt/sub"),
+                    parents=True)
+    # GNU quotes the component it tripped on, not the operand, and the file
+    # it collided with is left alone.
+    assert str(excinfo.value) == "/a.txt"
+    assert not await a.store.has_dir("/a.txt")
+    assert await a.store.get_file("/a.txt") == b"hi"
+
+
+@pytest.mark.asyncio
+async def test_mkdir_p_onto_a_file_target_is_eexist(mk_store):
+    a = await mk_store("test:mkdir:p2:")
+    await a.store.set_file("/a.txt", b"hi")
+    with pytest.raises(FileExistsError, match="/a.txt"):
+        await mkdir(a,
+                    PathSpec(resource_path="a.txt",
+                             virtual="/a.txt",
+                             directory="/a.txt"),
+                    parents=True)
+
+
+@pytest.mark.asyncio
+async def test_mkdir_refuses_an_existing_file(mk_store):
+    a = await mk_store("test:mkdir:p3:")
+    await a.store.set_file("/a.txt", b"hi")
+    with pytest.raises(FileExistsError, match="/a.txt"):
+        await mkdir(
+            a,
+            PathSpec(resource_path="a.txt",
+                     virtual="/a.txt",
+                     directory="/a.txt"))
+    assert await a.store.get_file("/a.txt") == b"hi"
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
+from mirage.utils.errors import FS_ERRORS, error_path, fs_strerror
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_mode
 
 
@@ -61,9 +61,11 @@ async def mkdir(
             await mkdir_fn(accessor, path, parents=parents)
         except FS_ERRORS as exc:
             # One unusable operand is not an aborted command: GNU reports
-            # it and still makes the remaining directories.
+            # it and still makes the remaining directories. The error names
+            # the path to quote: usually the operand, but `mkdir -p` blames
+            # the component of the chain it tripped on.
             errors.append(f"mkdir: cannot create directory "
-                          f"'{path.virtual}': {fs_strerror(exc)}")
+                          f"'{error_path(exc)}': {fs_strerror(exc)}")
             continue
         if mode is not None and ops.set_attrs is not None:
             # -m applies to the named directory only; any parents made by

@@ -1269,7 +1269,7 @@ export {
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './utils/slash.ts'
-export { mountKey, mountPrefixOf, rekey, stripMount } from './utils/key_prefix.ts'
+export { mountKey, mountPrefixOf, mountedPath, rekey, stripMount } from './utils/key_prefix.ts'
 export * as keyPrefix from './utils/key_prefix.ts'
 export { fnmatch } from './utils/fnmatch.ts'
 export {
@@ -1286,6 +1286,7 @@ export {
   treeHasEmpty,
 } from './commands/builtin/findEval.ts'
 export {
+  eexist,
   eisdir,
   enoent,
   enoentWithMessage,

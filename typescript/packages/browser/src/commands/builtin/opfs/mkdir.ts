@@ -17,6 +17,7 @@ import {
   ResourceName,
   command,
   formatRecords,
+  errorVirtualPath,
   fsStrerror,
   isFsError,
   specOf,
@@ -54,7 +55,11 @@ async function mkdirCommand(
       // Mirrors the generic builder: one unusable operand is reported and
       // the rest still run, with the GNU "cannot create directory" wording.
       if (!isFsError(err)) throw err
-      errors.push(`mkdir: cannot create directory '${p.virtual}': ${String(fsStrerror(err))}`)
+      // The error names the path to quote: usually the operand, but
+      // `mkdir -p` blames the component of the chain it tripped on.
+      errors.push(
+        `mkdir: cannot create directory '${errorVirtualPath(err)}': ${String(fsStrerror(err))}`,
+      )
       continue
     }
     if (verbose) lines.push(`mkdir: created directory '${p.virtual.replace(/\/+$/, '') || '/'}'`)

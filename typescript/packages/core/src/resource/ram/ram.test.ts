@@ -289,6 +289,32 @@ describe('RAMResource mkdir -p parents', () => {
       virtualPath: '/x/y',
     })
   })
+
+  it('mkdir -p across a plain file names the component and keeps the file', async () => {
+    const { ram } = setup()
+    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('hi'))
+    await expect(
+      ram.mkdir(PathSpec.fromStrPath('/f.txt/y'), { recursive: true }),
+    ).rejects.toMatchObject({ code: 'ENOTDIR', virtualPath: '/f.txt' })
+    expect(ram.accessor.store.dirs.has('/f.txt')).toBe(false)
+    expect(ram.accessor.store.files.has('/f.txt')).toBe(true)
+  })
+
+  it('mkdir -p onto a plain file target is EEXIST', async () => {
+    const { ram } = setup()
+    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new Uint8Array())
+    await expect(
+      ram.mkdir(PathSpec.fromStrPath('/f.txt'), { recursive: true }),
+    ).rejects.toMatchObject({ code: 'EEXIST' })
+  })
+
+  it('mkdir refuses an existing target, and -p is the idempotent form (GNU)', async () => {
+    const { ram } = setup()
+    await ram.mkdir(PathSpec.fromStrPath('/d'))
+    await expect(ram.mkdir(PathSpec.fromStrPath('/d'))).rejects.toMatchObject({ code: 'EEXIST' })
+    await ram.mkdir(PathSpec.fromStrPath('/d'), { recursive: true })
+    expect(ram.accessor.store.dirs.has('/d')).toBe(true)
+  })
 })
 
 describe('RAMResource through Workspace', () => {

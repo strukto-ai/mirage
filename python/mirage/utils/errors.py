@@ -64,6 +64,10 @@ def enotdir(path: object) -> NotADirectoryError:
     return NotADirectoryError(_virtual_of(path))
 
 
+def eexist(path: object) -> FileExistsError:
+    return FileExistsError(_virtual_of(path))
+
+
 def eisdir(path: object) -> IsADirectoryError:
     return IsADirectoryError(_virtual_of(path))
 
@@ -130,6 +134,26 @@ def fs_strerror(exc: BaseException) -> str | None:
     return None
 
 
+def error_path(exc: BaseException) -> str:
+    """The path an fs error is about.
+
+    Two conventions meet here and both mean the same thing. The store
+    backends raise with the bare operand as the message
+    (``enoent(spec)``), while the real-filesystem backends stamp
+    ``filename`` (``disk_errors``, and the kernel before it). An error may
+    also name something other than the operand it was raised for:
+    ``mkdir -p`` reports the component of the chain it tripped on, so the
+    stamped path wins over what the caller was holding.
+
+    Args:
+        exc (BaseException): The filesystem error.
+    """
+    stamped = getattr(exc, "filename", None)
+    if isinstance(stamped, str) and stamped:
+        return stamped
+    return str(exc)
+
+
 def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
     """GNU coreutils stderr line for one failed path operand.
 
@@ -181,7 +205,7 @@ def format_fs_error(cmd_name: str,
         if message.startswith(f"{cmd_name}: "):
             return f"{message}\n".encode()
         return f"{cmd_name}: {message}\n".encode()
-    path = getattr(exc, "filename", None) or str(exc)
+    path = error_path(exc)
     if paths:
         for p in paths:
             if p.virtual == path:

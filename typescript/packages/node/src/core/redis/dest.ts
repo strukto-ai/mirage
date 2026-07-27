@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ancestors, enoent, enotdir, type PathSpec } from '@struktoai/mirage-core'
+import {
+  ancestors,
+  eexist,
+  enoent,
+  enotdir,
+  mountedPath,
+  type PathSpec,
+} from '@struktoai/mirage-core'
 import type { RedisStore } from '../../resource/redis/store.ts'
 
 // Reject a destination whose parent chain is not all directories. Mirrors how
@@ -34,5 +41,40 @@ export async function checkDestParents(store: RedisStore, dst: PathSpec, d: stri
     if (await store.hasDir(ancestor)) continue
     if (await store.hasFile(ancestor)) throw enotdir(dst)
     throw enoent(dst)
+  }
+}
+
+// Reject a `mkdir` the store cannot satisfy. The companion of
+// checkDestParents for the one op that may create its own parents, and the two
+// flag modes fail differently because GNU implements them differently:
+//
+//   * Plain mkdir issues one mkdir(2) on the whole path, so an existing target
+//     is EEXIST whichever kind it is. Its parent chain stays checkDestParents'
+//     job, which reports the operand because that is what the kernel resolves.
+//   * mkdir -p walks the chain itself, creating as it goes, so it reports the
+//     *component* it tripped on rather than the operand: `mkdir -p a.txt/sub`
+//     is "cannot create directory 'a.txt': Not a directory". Reaching the
+//     target itself as a plain file is EEXIST, not ENOTDIR. An existing
+//     directory anywhere in the chain is success, which is what makes -p
+//     idempotent.
+//
+// Without this a store has no kernel to refuse a directory key that collides
+// with a file key: -p added it anyway, the directory shadowed the file, and
+// reading it started reporting EISDIR while the bytes stayed orphaned in the
+// store. Pinned against GNU coreutils in docker.
+export async function checkMkdirTarget(
+  store: RedisStore,
+  spec: PathSpec,
+  key: string,
+  parents: boolean,
+): Promise<void> {
+  if (!parents) {
+    if ((await store.hasDir(key)) || (await store.hasFile(key))) throw eexist(spec)
+    return
+  }
+  for (const component of [...ancestors(key), key]) {
+    if (!(await store.hasFile(component))) continue
+    const named = mountedPath(spec, component)
+    throw component === key ? eexist(named) : enotdir(named)
   }
 }

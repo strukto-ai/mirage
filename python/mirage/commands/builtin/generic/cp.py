@@ -30,7 +30,7 @@ from mirage.types import (CopyStrategy, FileType, NativeCopy, NativeMove,
                           StatFn)
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.errors import FS_ERRORS, fs_strerror
-from mirage.utils.key_prefix import mount_prefix_of, rekey
+from mirage.utils.key_prefix import mounted_path, rekey
 from mirage.utils.path import norm, parent
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
@@ -544,12 +544,6 @@ def transfer_line(src: PathSpec, target: PathSpec,
 def descendant_path(root: PathSpec, virtual: str) -> PathSpec:
     return PathSpec.from_str_path(
         virtual, rekey(root.virtual, root.resource_path, virtual))
-
-
-def mounted_path(root: PathSpec, mount_path: str) -> PathSpec:
-    prefix = mount_prefix_of(root.virtual, root.resource_path)
-    virtual = prefix + mount_path if prefix else mount_path
-    return PathSpec.from_str_path(virtual, mount_path.strip("/"))
 
 
 async def _tree_lines(strategy: NativeCopy, src: PathSpec, target: PathSpec,

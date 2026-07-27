@@ -14,7 +14,7 @@
 
 import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { checkDestParents } from './dest.ts'
+import { checkDestParents, checkMkdirTarget } from './dest.ts'
 import { norm, nowIso } from './utils.ts'
 import { stripSlash } from '@struktoai/mirage-core'
 
@@ -25,6 +25,7 @@ export async function mkdir(
 ): Promise<void> {
   const p = norm(path.mountPath)
   const store = accessor.store
+  await checkMkdirTarget(store, path, p, parents)
   if (parents) {
     const parts = stripSlash(p).split('/')
     let current = ''

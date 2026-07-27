@@ -1,0 +1,180 @@
+{
+  "cases": [
+    {
+      "id": "mkdir_conf_seed",
+      "seq": 601070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/mkc/deep/inner && printf 'hi' > /data/mkc/f.txt && printf 'hi' > /data/mkc/deep/g.txt && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mkdir_p_across_a_file_names_the_component",
+      "seq": 601071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/mkc/f.txt/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/mkc/f.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "mkdir_p_across_a_deeper_file_component",
+      "seq": 601072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/mkc/deep/g.txt/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/mkc/deep/g.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "mkdir_p_stops_at_the_first_bad_component",
+      "seq": 601073,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/mkc/f.txt/x/y/z",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/mkc/f.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "mkdir_p_onto_a_file_target_is_eexist",
+      "seq": 601074,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/mkc/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/mkc/f.txt': File exists\n"
+      }
+    },
+    {
+      "id": "mkdir_p_existing_directory_is_success",
+      "seq": 601075,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/mkc/deep && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mkdir_existing_directory_is_eexist",
+      "seq": 601076,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir /data/mkc/deep",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/mkc/deep': File exists\n"
+      }
+    },
+    {
+      "id": "mkdir_existing_file_is_eexist",
+      "seq": 601077,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir /data/mkc/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data/mkc/f.txt': File exists\n"
+      }
+    },
+    {
+      "id": "mkdir_p_continues_past_bad_operand",
+      "seq": 601078,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/mkc/f.txt/sub /data/mkc/okp 2>/dev/null; test -d /data/mkc/okp && echo made",
+      "expect": {
+        "exit": 0,
+        "stdout": "made\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mkdir_p_left_the_file_intact",
+      "seq": 601079,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/mkc/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mkdir_conf_state_after",
+      "seq": 601080,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/mkc",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nf.txt\nokp\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

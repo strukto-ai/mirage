@@ -81,15 +81,85 @@ async def test_mkdir_deep_under_a_plain_file_is_not_a_directory():
 
 
 @pytest.mark.asyncio
-async def test_mkdir_already_exists():
+async def test_mkdir_already_exists_needs_parents_to_be_idempotent():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await mkdir(
-        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
-    await mkdir(
-        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
+    spec = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+    await mkdir(a, spec)
+    # Only -p is idempotent; plain mkdir refuses an existing target (GNU).
+    with pytest.raises(FileExistsError):
+        await mkdir(a, spec)
+    await mkdir(a, spec, parents=True)
     assert "/dir" in s.dirs
+
+
+@pytest.mark.asyncio
+async def test_mkdir_p_across_a_file_names_the_component():
+    s = RAMStore()
+    s.dirs.add("/")
+    s.dirs.add("/g")
+    s.files["/g/a.txt"] = b"hi"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError) as excinfo:
+        await mkdir(a,
+                    PathSpec(resource_path="g/a.txt/sub",
+                             virtual="/g/a.txt/sub",
+                             directory="/g/a.txt/sub"),
+                    parents=True)
+    # GNU quotes the component it tripped on, not the operand, and the file
+    # it collided with is left alone.
+    assert str(excinfo.value) == "/g/a.txt"
+    assert "/g/a.txt" not in s.dirs
+    assert s.files["/g/a.txt"] == b"hi"
+
+
+@pytest.mark.asyncio
+async def test_mkdir_p_stops_at_the_first_bad_component():
+    s = RAMStore()
+    s.dirs.add("/")
+    s.files["/a.txt"] = b"hi"
+
+    a = RAMAccessor(s)
+    with pytest.raises(NotADirectoryError) as excinfo:
+        await mkdir(a,
+                    PathSpec(resource_path="a.txt/x/y/z",
+                             virtual="/a.txt/x/y/z",
+                             directory="/a.txt/x/y/z"),
+                    parents=True)
+    assert str(excinfo.value) == "/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_mkdir_p_onto_a_file_target_is_eexist():
+    s = RAMStore()
+    s.dirs.add("/")
+    s.files["/a.txt"] = b"hi"
+
+    a = RAMAccessor(s)
+    with pytest.raises(FileExistsError, match="/a.txt"):
+        await mkdir(a,
+                    PathSpec(resource_path="a.txt",
+                             virtual="/a.txt",
+                             directory="/a.txt"),
+                    parents=True)
+
+
+@pytest.mark.asyncio
+async def test_mkdir_refuses_an_existing_file():
+    s = RAMStore()
+    s.dirs.add("/")
+    s.files["/a.txt"] = b"hi"
+
+    a = RAMAccessor(s)
+    with pytest.raises(FileExistsError, match="/a.txt"):
+        await mkdir(
+            a,
+            PathSpec(resource_path="a.txt",
+                     virtual="/a.txt",
+                     directory="/a.txt"))
+    assert s.files["/a.txt"] == b"hi"
 
 
 @pytest.mark.asyncio

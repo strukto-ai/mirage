@@ -15,7 +15,8 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { ancestors } from '../../utils/path.ts'
-import { enoent, enotdir } from '../../utils/errors.ts'
+import { eexist, enoent, enotdir } from '../../utils/errors.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
 
 // Reject a destination whose parent chain is not all directories. Mirrors how
 // rename(2) resolves the destination: a component that does not exist is
@@ -31,5 +32,41 @@ export function checkDestParents(accessor: RAMAccessor, dst: PathSpec, d: string
     if (accessor.store.dirs.has(ancestor)) continue
     if (accessor.store.files.has(ancestor)) throw enotdir(dst)
     throw enoent(dst)
+  }
+}
+
+// Reject a `mkdir` the store cannot satisfy. The companion of
+// checkDestParents for the one op that may create its own parents, and the two
+// flag modes fail differently because GNU implements them differently:
+//
+//   * Plain mkdir issues one mkdir(2) on the whole path, so an existing target
+//     is EEXIST whichever kind it is. Its parent chain stays checkDestParents'
+//     job, which reports the operand because that is what the kernel resolves.
+//   * mkdir -p walks the chain itself, creating as it goes, so it reports the
+//     *component* it tripped on rather than the operand: `mkdir -p a.txt/sub`
+//     is "cannot create directory 'a.txt': Not a directory". Reaching the
+//     target itself as a plain file is EEXIST, not ENOTDIR. An existing
+//     directory anywhere in the chain is success, which is what makes -p
+//     idempotent.
+//
+// Without this a store has no kernel to refuse a directory key that collides
+// with a file key: -p added it anyway, the directory shadowed the file, and
+// reading it started reporting EISDIR while the bytes stayed orphaned in the
+// store. Pinned against GNU coreutils in docker.
+export function checkMkdirTarget(
+  accessor: RAMAccessor,
+  spec: PathSpec,
+  key: string,
+  parents: boolean,
+): void {
+  const store = accessor.store
+  if (!parents) {
+    if (store.dirs.has(key) || store.files.has(key)) throw eexist(spec)
+    return
+  }
+  for (const component of [...ancestors(key), key]) {
+    if (!store.files.has(component)) continue
+    const named = mountedPath(spec, component)
+    throw component === key ? eexist(named) : enotdir(named)
   }
 }
