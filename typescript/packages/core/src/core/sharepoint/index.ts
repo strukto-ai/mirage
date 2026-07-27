@@ -356,7 +356,7 @@ export async function du(
   return duTreeTotal(accessor.config, accessor.loc(resolved, path.resourcePath))
 }
 
-export async function duAll(
+export async function duEntries(
   accessor: SharePointAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

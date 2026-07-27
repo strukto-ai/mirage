@@ -28,7 +28,7 @@ import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
 import { appendBytes as appendCore } from '../../core/opfs/append.ts'
 import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 import { copy as copyCore } from '../../core/opfs/copy.ts'
-import { du as duCore } from '../../core/opfs/du.ts'
+import { size as duSizeCore } from '../../core/opfs/du/index.ts'
 import { exists as existsCore } from '../../core/opfs/exists.ts'
 import { find as findCore, type FindOptions as OPFSFindOptions } from '../../core/opfs/find.ts'
 import { mkdir as mkdirCore } from '../../core/opfs/mkdir.ts'
@@ -232,7 +232,7 @@ export class OPFSResource implements Resource {
 
   async du(p: PathSpec): Promise<number> {
     await this.ensureOpen()
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   async find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

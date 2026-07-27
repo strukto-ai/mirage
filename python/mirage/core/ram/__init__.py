@@ -14,7 +14,8 @@
 
 from mirage.core.ram.copy import copy
 from mirage.core.ram.create import create
-from mirage.core.ram.du import du, du_all
+from mirage.core.ram.du import entries as du_entries
+from mirage.core.ram.du import size as du_size
 from mirage.core.ram.exists import exists
 from mirage.core.ram.find import find
 from mirage.core.ram.mkdir import mkdir
@@ -33,8 +34,8 @@ from mirage.core.ram.write import write_bytes
 __all__ = [
     "copy",
     "create",
-    "du",
-    "du_all",
+    "du_size",
+    "du_entries",
     "exists",
     "find",
     "mkdir",

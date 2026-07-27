@@ -96,7 +96,16 @@ async def test_du_max_depth_one(workspace):
 
 
 @pytest.mark.asyncio
-async def test_du_missing_operand_errors(workspace):
+async def test_du_without_operand_measures_the_working_directory(workspace):
+    """GNU du with no operand summarises '.'; it does not error."""
+    await workspace.ops.write("/a.txt", b"hello")
     io = await workspace.execute("du")
-    assert io.exit_code != 0
-    assert b"missing operand" in (io.stderr or b"")
+    assert io.exit_code == 0
+    assert io.stdout.decode().splitlines()[-1] == "5\t/"
+
+
+@pytest.mark.asyncio
+async def test_du_reports_an_unreadable_operand(workspace):
+    io = await workspace.execute("du /nope")
+    assert io.exit_code == 1
+    assert b"du: cannot access '/nope'" in (io.stderr or b"")

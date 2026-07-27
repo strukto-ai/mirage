@@ -16,22 +16,11 @@ from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.onedrive._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.onedrive.du import du
 from mirage.commands.builtin.onedrive.io import IO as _IO
 from mirage.core.onedrive.read import read_bytes as _read
-
-# du keeps a wrapper because OneDrive's du_all
-# returns a flat list (du_multi contract) rather than the generic (list,
-# total) tuple, matching the s3 override.
-_ONEDRIVE_OVERRIDES = {"du"}
 
 COMMANDS = [
     *make_filetype_commands(
         "onedrive", _IO.resolve_glob, _read, provision=_ft_provision),
-    *make_generic_commands(
-        "onedrive",
-        _IO,
-        overrides=_ONEDRIVE_OVERRIDES,
-    ),
-    du,
+    *make_generic_commands("onedrive", _IO),
 ]

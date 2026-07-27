@@ -91,11 +91,23 @@ name: a big orange cat
 === du_file ===
 70	/db/animals/cat/big/1.md
 === du_group ===
+70	/db/animals/cat/big
+72	/db/animals/cat/small
 142	/db/animals/cat
 === du_table ===
+70	/db/animals/cat/big
+72	/db/animals/cat/small
+142	/db/animals/cat
+68	/db/animals/dog/big
+74	/db/animals/dog/small
+142	/db/animals/dog
 284	/db/animals
 === du_c_multi ===
+70	/db/animals/cat/big
+72	/db/animals/cat/small
 142	/db/animals/cat
+68	/db/animals/dog/big
+74	/db/animals/dog/small
 142	/db/animals/dog
 284	total
 === grep_q_match ===

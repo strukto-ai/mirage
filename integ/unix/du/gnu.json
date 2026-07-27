@@ -1,0 +1,251 @@
+{
+  "cases": [
+    {
+      "id": "du_d_short_max_depth",
+      "seq": 271,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -d 1 /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\t/data/sub/deep\n20\t/data/sub\n",
+        "stderr": ""
+      },
+      "flags": [
+        "max-depth"
+      ]
+    },
+    {
+      "id": "du_a_lists_files_then_directories",
+      "seq": 272,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -a /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\n15\t/data/sub/nested.txt\n20\t/data/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_summarize_with_all_conflicts",
+      "seq": 276,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -sa /data 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "du: cannot both summarize and show all entries\nTry 'du --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_summarize_with_max_depth_conflicts",
+      "seq": 277,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -s --max-depth=1 /data 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "du: warning: summarizing conflicts with --max-depth=1\nTry 'du --help' for more information.\ncode=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "max-depth"
+      ]
+    },
+    {
+      "id": "du_invalid_max_depth",
+      "seq": 278,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du --max-depth=abc /data 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "du: invalid maximum depth 'abc'\nTry 'du --help' for more information.\ncode=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "max-depth"
+      ]
+    },
+    {
+      "id": "du_missing_operand_reported",
+      "seq": 279,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du /data/nosuch 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "du: cannot access '/data/nosuch': No such file or directory\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_c_totals_even_when_all_missing",
+      "seq": 280,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -c /data/nosuch 2>/dev/null; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ttotal\ncode=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

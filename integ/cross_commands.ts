@@ -662,6 +662,29 @@ async function checkWhoami(ws: Workspace): Promise<void> {
   check("whoami: ignores $USER (GNU effective user)", out === "integ-agent\n");
 }
 
+// Every other check copies ram -> dst. A cross-mount copy is asymmetric
+// (read path out of the source backend, write path into the destination),
+// so seed the tree on dst and bring it back the other way.
+async function checkReverse(ws: Workspace, dst: string, label: string): Promise<void> {
+  await run(ws, `mkdir -p ${dst}/rev/sub`);
+  await run(ws, `printf 'rrr\\n' > ${dst}/rev/a.txt`);
+  await run(ws, `printf 'sss\\n' > ${dst}/rev/sub/b.txt`);
+  await run(ws, `cp -r ${dst}/rev /ram/rev_${label}`);
+  let [out, , code] = await run(ws, `cat /ram/rev_${label}/a.txt`);
+  check(`${label}: cp -r back to ram a.txt`, out === "rrr\n");
+  [out, , code] = await run(ws, `cat /ram/rev_${label}/sub/b.txt`);
+  check(`${label}: cp -r back to ram sub/b.txt`, out === "sss\n");
+  [out, , code] = await run(ws, `cat ${dst}/rev/a.txt /ram/rev_${label}/sub/b.txt`);
+  check(`${label}: cat aggregates dst-first`, out === "rrr\nsss\n");
+  await run(ws, `mkdir -p ${dst}/revmove/sub`);
+  await run(ws, `printf 'm\\n' > ${dst}/revmove/sub/c.txt`);
+  await run(ws, `mv ${dst}/revmove /ram/revmoved_${label}`);
+  [out, , code] = await run(ws, `cat /ram/revmoved_${label}/sub/c.txt`);
+  check(`${label}: mv back to ram`, out === "m\n");
+  [out, , code] = await run(ws, `cat ${dst}/revmove/sub/c.txt`);
+  check(`${label}: mv back removes source`, code !== 0);
+}
+
 async function exercise(
   ws: Workspace,
   dst: string,
@@ -680,6 +703,7 @@ async function exercise(
   await checkMove(ws, dst, label);
   await checkSymlinks(ws, dst, label);
   await checkMetadata(ws, dst, label, nativeAttrs);
+  await checkReverse(ws, dst, label);
 }
 
 async function main(): Promise<void> {

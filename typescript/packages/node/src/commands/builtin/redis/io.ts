@@ -18,7 +18,7 @@ import { appendBytes as redisAppend } from '../../../core/redis/append.ts'
 import { SCOPE_ERROR } from '../../../core/redis/constants.ts'
 import { copy as redisCopy } from '../../../core/redis/copy.ts'
 import { create as redisCreate } from '../../../core/redis/create.ts'
-import { du as redisDu, duAll as redisDuAll } from '../../../core/redis/du.ts'
+import { size as redisDu, entries as redisDuEntries } from '../../../core/redis/du/index.ts'
 import { exists as redisExists } from '../../../core/redis/exists.ts'
 import { find as redisFind } from '../../../core/redis/find.ts'
 import { mkdir as redisMkdir } from '../../../core/redis/mkdir.ts'
@@ -55,9 +55,6 @@ export const REDIS_IO: CommandIO<RedisAccessor> = {
   append: redisAppend,
   setAttrs: redisSetAttrs,
   find: redisFind,
-  duTotal: redisDu,
-  duAll: async (accessor, path) => {
-    const { entries, total } = await redisDuAll(accessor, path)
-    return [entries, total]
-  },
+  duSize: redisDu,
+  duEntries: redisDuEntries,
 }

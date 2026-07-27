@@ -498,6 +498,30 @@ async def check_whoami(ws: Workspace) -> None:
     check("whoami: ignores $USER (GNU effective user)", out == "integ-agent\n")
 
 
+async def check_reverse(ws: Workspace, dst: str, label: str) -> None:
+    # Every other check copies ram -> dst. A cross-mount copy is asymmetric
+    # (read path out of the source backend, write path into the destination),
+    # so seed the tree on dst and bring it back the other way.
+    await run(ws, f"mkdir -p {dst}/rev/sub")
+    await run(ws, f"printf 'rrr\\n' > {dst}/rev/a.txt")
+    await run(ws, f"printf 'sss\\n' > {dst}/rev/sub/b.txt")
+    await run(ws, f"cp -r {dst}/rev /ram/rev_{label}")
+    out, _, _ = await run(ws, f"cat /ram/rev_{label}/a.txt")
+    check(f"{label}: cp -r back to ram a.txt", out == "rrr\n")
+    out, _, _ = await run(ws, f"cat /ram/rev_{label}/sub/b.txt")
+    check(f"{label}: cp -r back to ram sub/b.txt", out == "sss\n")
+    out, _, _ = await run(ws,
+                          f"cat {dst}/rev/a.txt /ram/rev_{label}/sub/b.txt")
+    check(f"{label}: cat aggregates dst-first", out == "rrr\nsss\n")
+    await run(ws, f"mkdir -p {dst}/revmove/sub")
+    await run(ws, f"printf 'm\\n' > {dst}/revmove/sub/c.txt")
+    await run(ws, f"mv {dst}/revmove /ram/revmoved_{label}")
+    out, _, _ = await run(ws, f"cat /ram/revmoved_{label}/sub/c.txt")
+    check(f"{label}: mv back to ram", out == "m\n")
+    _, _, code = await run(ws, f"cat {dst}/revmove/sub/c.txt")
+    check(f"{label}: mv back removes source", code != 0)
+
+
 async def exercise(ws: Workspace,
                    dst: str,
                    label: str,
@@ -514,6 +538,7 @@ async def exercise(ws: Workspace,
     await check_move(ws, dst, label)
     await check_symlinks(ws, dst, label)
     await check_metadata(ws, dst, label, native_attrs)
+    await check_reverse(ws, dst, label)
 
 
 async def main() -> None:

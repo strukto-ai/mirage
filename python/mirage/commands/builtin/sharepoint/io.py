@@ -15,8 +15,8 @@
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.sharepoint.copy import copy as _copy
 from mirage.core.sharepoint.create import create as _create
-from mirage.core.sharepoint.du import du as _du
-from mirage.core.sharepoint.du import du_all as _du_all
+from mirage.core.sharepoint.du import entries as _du_entries
+from mirage.core.sharepoint.du import size as _du_size
 from mirage.core.sharepoint.exists import exists as _exists
 from mirage.core.sharepoint.find import find as _find
 from mirage.core.sharepoint.mkdir import mkdir as _mkdir
@@ -32,8 +32,6 @@ from mirage.core.sharepoint.unlink import unlink as _unlink
 from mirage.core.sharepoint.write import write_bytes as _write
 
 # SharePoint files are read and written through the generic factory (with
-# filetype commands for columnar files); du keeps a wrapper because its
-# du_all returns a flat list (du_multi contract)
 # rather than the generic (list, total) tuple, matching OneDrive. Folder copy
 # is server-side via the dir_copy field.
 IO = CommandIO(
@@ -55,8 +53,8 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du_size=_du_size,
+    du_entries=_du_entries,
 )
 
 resolve_glob = IO.resolve_glob

@@ -404,7 +404,16 @@ async def du_tree_total(config: MsGraphConfig, loc: DriveLoc) -> int:
 
 
 async def du_tree_entries(config: MsGraphConfig,
-                          loc: DriveLoc) -> list[tuple[str, int]]:
+                          loc: DriveLoc) -> tuple[list[tuple[str, int]], int]:
+    """Per-file sizes under a drive item plus their total.
+
+    Paths are mount-relative and leaf files only; the caller lifts them
+    onto virtual paths and renders any roll-up line itself.
+
+    Args:
+        config (MsGraphConfig): Graph credentials and endpoint.
+        loc (DriveLoc): the drive item to walk.
+    """
     results: list[tuple[str, int]] = []
     total = 0
     async with new_session(config) as session:
@@ -414,8 +423,8 @@ async def du_tree_entries(config: MsGraphConfig,
             size = item.get("size", 0)
             results.append(("/" + rel, size))
             total += size
-    results.append(("/" + loc.virt if loc.virt else "/", total))
-    return results
+    results.sort()
+    return results, total
 
 
 async def find_items(

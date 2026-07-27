@@ -22,8 +22,8 @@ import {
   S3_PROMPT,
   copy as copyCore,
   create as createCore,
-  du as duCore,
-  duAll as duAllCore,
+  s3DuSize as duSizeCore,
+  s3DuEntries as duEntriesCore,
   exists as existsCore,
   find as findCore,
   makeResolveGlob,
@@ -86,8 +86,8 @@ export class S3Resource extends BaseResource implements Resource {
     read_stream: streamCore,
     range_read: rangeReadCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -199,7 +199,7 @@ export class S3Resource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

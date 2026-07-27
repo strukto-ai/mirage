@@ -21,7 +21,6 @@ import {
 import type { GridFSAccessor } from '../../../accessor/gridfs.ts'
 import { read as gridfsRead } from '../../../core/gridfs/read.ts'
 import { stat as gridfsStat } from '../../../core/gridfs/stat.ts'
-import { GRIDFS_DU } from './du.ts'
 import { GRIDFS_IO } from './io.ts'
 import { GRIDFS_MKDIR } from './mkdir.ts'
 import { GRIDFS_RM } from './rm.ts'
@@ -32,7 +31,7 @@ import { GRIDFS_TOUCH } from './touch.ts'
 // gridfs-specific behaviours kept as overrides: no real directories
 // (mkdir -p, rm not-empty), write-tracking (touch/tee), du_multi
 // aggregation, and the index-threaded, missing-operand stat.
-const GRIDFS_OVERRIDES = new Set(['stat', 'du', 'rm', 'mkdir', 'tee', 'touch'])
+const GRIDFS_OVERRIDES = new Set(['stat', 'rm', 'mkdir', 'tee', 'touch'])
 
 export const GRIDFS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeFiletypeCommands<GridFSAccessor>({
@@ -44,7 +43,6 @@ export const GRIDFS_COMMANDS: readonly RegisteredCommand[] = [
     overrides: GRIDFS_OVERRIDES,
   }),
   ...GRIDFS_STAT,
-  ...GRIDFS_DU,
   ...GRIDFS_RM,
   ...GRIDFS_MKDIR,
   ...GRIDFS_TEE,

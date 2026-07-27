@@ -16,8 +16,8 @@ import { mountKey, mountPrefixOf } from '@struktoai/mirage-core'
 import {
   copy as copyCore,
   create as createCore,
-  du as duCore,
-  duAll as duAllCore,
+  s3DuSize as duSizeCore,
+  s3DuEntries as duEntriesCore,
   exists as existsCore,
   type FileStat,
   type FindOptions,
@@ -164,7 +164,7 @@ export class S3Resource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
@@ -199,10 +199,10 @@ export class S3Resource implements Resource {
     return Promise.resolve()
   }
 
-  // Ignored — duAll is not yet on the public Resource interface, but keeping
+  // Ignored — duEntries is not yet on the public Resource interface, but keeping
   // it around matches the node-side S3Resource.opsMap hook for completeness.
-  _duAll(p: PathSpec): Promise<[[string, number][], number]> {
-    return duAllCore(this.accessor, p)
+  _duEntries(p: PathSpec): Promise<[[string, number][], number]> {
+    return duEntriesCore(this.accessor, p)
   }
 
   _rangeRead(p: PathSpec, offset: number, size: number): Promise<Uint8Array> {

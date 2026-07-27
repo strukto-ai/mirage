@@ -31,7 +31,7 @@ import { GRIDFS_COMMANDS } from '../../commands/builtin/gridfs/index.ts'
 import { SCOPE_ERROR } from '../../core/gridfs/constants.ts'
 import { copy as copyCore } from '../../core/gridfs/copy.ts'
 import { create as createCore } from '../../core/gridfs/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/gridfs/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/gridfs/du/index.ts'
 import { exists as existsCore } from '../../core/gridfs/exists.ts'
 import { find as findCore } from '../../core/gridfs/find.ts'
 import { mkdir as mkdirCore } from '../../core/gridfs/mkdir.ts'
@@ -77,8 +77,8 @@ export class GridFSResource extends BaseResource implements Resource {
     read_stream: streamCore,
     range_read: rangeReadCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -184,7 +184,7 @@ export class GridFSResource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
