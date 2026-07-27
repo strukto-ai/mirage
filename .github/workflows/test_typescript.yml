@@ -101,6 +101,7 @@ jobs:
           run disk/disk.ts integ/truth/typescript/disk.txt
           run disk/disk_vfs.ts integ/truth/typescript/disk_vfs.txt
           run other/custom_command.ts integ/truth/typescript/custom_command.txt
+          run filetype/filetype.ts integ/truth/typescript/filetype.txt
           run pyodide/basic.ts integ/truth/typescript/pyodide_basic.txt
           run pyodide/env.ts integ/truth/typescript/pyodide_env.txt
           run pyodide/heredoc.ts integ/truth/typescript/pyodide_heredoc.txt

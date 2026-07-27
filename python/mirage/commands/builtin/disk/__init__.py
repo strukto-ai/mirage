@@ -13,11 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.disk.io import IO as _IO
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.core.disk.read import read_bytes as _read
 
 COMMANDS = [
-    *make_filetype_commands("disk", _IO.resolve_glob, _read),
     *make_generic_commands("disk", _IO),
 ]

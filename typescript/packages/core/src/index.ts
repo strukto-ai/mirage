@@ -194,10 +194,6 @@ export { guessType } from './utils/filetype.ts'
 export { newSessionId, newWorkspaceId, uuid7 } from './utils/ids.ts'
 export { Accessor, NOOPAccessor, RAMAccessor } from './accessor/index.ts'
 export {
-  makeFiletypeCommands,
-  type FiletypeCommandsOptions,
-} from './commands/builtin/filetype_factory/factory.ts'
-export {
   type Builder,
   type BuilderFn,
   type CommandIO,
@@ -219,13 +215,6 @@ export {
   withDefaultProvisions,
   writeMetadataProvision,
 } from './commands/builtin/generic_bind/index.ts'
-export {
-  FILETYPE_ENTRIES,
-  type FiletypeEntry,
-  type FiletypeModule,
-  type FiletypeReadBytesFn,
-  type StatEntryFn,
-} from './commands/builtin/filetype_factory/extensions.ts'
 export { numberLines } from './commands/builtin/generic/cat.ts'
 export { CUT_OPEN_END, cutBytes, cutStream, parseCutRanges } from './commands/builtin/cut_helper.ts'
 export { cutGeneric } from './commands/builtin/generic/cut.ts'

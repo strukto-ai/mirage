@@ -42,17 +42,7 @@ export interface OpsTable<A extends Accessor = Accessor> {
   setAttrs?: OpCoreFn
 }
 
-// Extension point: map an extension to a renderer. mirage ships none, so a
-// file with an unregistered extension is read as raw bytes.
-const FILETYPE_CATS: Record<string, (raw: Uint8Array) => unknown> = {}
-
 export interface MakeGenericOpsOptions {
-  /**
-   * Extensions to emit rendered `read` ops for (keys of FILETYPE_CATS).
-   * Explicit list rather than Python's `filetype_read` bool: TS has no
-   * ORC support and backends opt in per extension.
-   */
-  filetypeRead?: readonly string[]
   /** Synthesize truncate from readBytes + write (no native partial write). */
   emulateTruncate?: boolean
   /** Forward `parents=true` to the core mkdir (disk). */
@@ -134,20 +124,6 @@ export function makeGenericOps<A extends Accessor>(
     (accessor, path, _args, kwargs) => table.stat(asA(accessor), path, pickIndex(kwargs)),
     false,
   )
-
-  for (const ext of options.filetypeRead ?? []) {
-    const cat = FILETYPE_CATS[ext]
-    if (!cat) throw new Error(`no filetype cat registered for ${ext}`)
-    emit(
-      'read',
-      async (accessor, path, _args, kwargs) => {
-        const raw = await table.readBytes(asA(accessor), path, pickIndex(kwargs))
-        return cat(raw)
-      },
-      false,
-      ext,
-    )
-  }
 
   const { write, mkdir, unlink, rmdir, rename, create, truncate, append, setAttrs } = table
   if (write) {

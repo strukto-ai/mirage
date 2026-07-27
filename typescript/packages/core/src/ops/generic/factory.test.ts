@@ -99,10 +99,8 @@ describe('makeGenericOps', () => {
     expect(new Set(ops.map((o) => o.name))).toEqual(new Set(['read', 'stat']))
   })
 
-  it('rejects unknown filetype extensions', () => {
-    expect(() => makeGenericOps('x', makeTable(), { filetypeRead: ['.nope'] })).toThrow(
-      'no filetype cat registered',
-    )
+  it('emits no filetype-scoped ops', () => {
+    expect(makeGenericOps('x', makeTable()).every((o) => o.filetype === null)).toBe(true)
   })
 
   it('forwards index into read-like wrappers', async () => {

@@ -21,15 +21,11 @@ from mirage.commands.builtin.email.find import find
 from mirage.commands.builtin.email.grep import grep
 from mirage.commands.builtin.email.io import IO as _IO
 from mirage.commands.builtin.email.rg import rg
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.core.email.read import read as _read
 
 _EMAIL_OVERRIDES = {"find", "grep", "rg"}
 
 COMMANDS = [
-    *make_filetype_commands(
-        "email", _IO.resolve_glob, _read, read_takes_index=True),
     *make_generic_commands(
         "email",
         _IO,
