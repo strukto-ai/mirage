@@ -19,8 +19,7 @@ import tempfile
 from threading import Thread
 
 from mirage.fuse.backend import (FSKIT_MOUNT_ROOT, MountBackend,
-                                 check_mountpoint, check_platform,
-                                 resolve_backend)
+                                 check_mountpoint, prepare_backend)
 from mirage.fuse.mount import mount_background
 from mirage.ops import Ops
 from mirage.workspace.session.session import Session
@@ -43,7 +42,7 @@ class FuseManager:
               prefix: str = "/",
               mountpoint: str | None = None,
               session: Session | None = None,
-              backend: str | MountBackend | None = None) -> str:
+              backend: str | MountBackend = MountBackend.FUSE) -> str:
         """Mount the ops tree and return the live mountpoint.
 
         Args:
@@ -52,14 +51,12 @@ class FuseManager:
             mountpoint (str | None): where to mount; None picks a temporary
                 directory appropriate for the backend.
             session (Session | None): bind ops to this session's grants.
-            backend (str | MountBackend | None): kernel interface to use;
-                None means FUSE.
+            backend (str | MountBackend): kernel interface to use.
 
         Returns:
             str: the mountpoint now serving the tree.
         """
-        resolved = resolve_backend(backend)
-        check_platform(resolved)
+        resolved = prepare_backend(backend)
         if mountpoint:
             # Caller/deployment-owned mountpoints may be reused across process
             # restarts, container lifecycles, or volume mounts. Mirage should

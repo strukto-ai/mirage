@@ -16,11 +16,13 @@ import pytest
 
 from mirage.fuse.backend import (FSKIT_MOUNT_ROOT, MountBackend,
                                  check_mountpoint, check_platform, check_sizes,
+                                 prepare_backend, require_kernel_backend,
                                  resolve_backend)
 from mirage.resource.ram import RAMResource
 from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
+from mirage.workspace.mount.spec import Mount
 
 
 def _slack():
@@ -28,8 +30,9 @@ def _slack():
 
 
 @pytest.mark.parametrize("value,expected", [
-    (None, MountBackend.FUSE),
-    ("", MountBackend.FUSE),
+    (None, MountBackend.VFS),
+    ("", MountBackend.VFS),
+    ("vfs", MountBackend.VFS),
     ("fuse", MountBackend.FUSE),
     ("fskit", MountBackend.FSKIT),
     ("FSKIT", MountBackend.FSKIT),
@@ -50,10 +53,45 @@ def test_no_auto_backend():
     assert [b.value for b in MountBackend] == ["vfs", "fuse", "fskit"]
 
 
-def test_resolve_backend_rejects_vfs():
-    # vfs registers nothing with the kernel, so it is not a mount target.
+def test_missing_backend_is_vfs_everywhere():
+    # One meaning for "absent": the Mount dataclass default, an absent YAML
+    # key, and None here all land on VFS. resolve_backend never reinterprets
+    # a missing value as a kernel mount.
+    assert resolve_backend(None) is MountBackend.VFS
+    assert Mount(RAMResource()).backend is MountBackend.VFS
+
+
+def test_require_kernel_backend_rejects_vfs():
     with pytest.raises(ValueError, match="does not register a mountpoint"):
-        resolve_backend("vfs")
+        require_kernel_backend(MountBackend.VFS)
+
+
+def test_prepare_backend_rejects_vfs():
+    with pytest.raises(ValueError, match="does not register a mountpoint"):
+        prepare_backend("vfs")
+
+
+def test_prepare_backend_asserts_macos_for_fskit(monkeypatch):
+    # The macOS assert must be unskippable: every mount path goes through
+    # prepare_backend, so a new one cannot pick up fskit and forget it.
+    monkeypatch.setattr("mirage.fuse.backend.sys.platform", "linux")
+    with pytest.raises(RuntimeError, match="macOS-only"):
+        prepare_backend("fskit")
+
+
+def test_prepare_backend_runs_every_fskit_guard(monkeypatch):
+    monkeypatch.setattr("mirage.fuse.backend.sys.platform", "darwin")
+    ws = Workspace({"/slack/": _slack()}, mode=MountMode.READ)
+    # mountpoint guard
+    with pytest.raises(ValueError, match="only mounts under /Volumes"):
+        prepare_backend("fskit", mountpoint="/tmp/x")
+    # size guard
+    with pytest.raises(RuntimeError, match="would return empty files"):
+        prepare_backend("fskit", ops=ws.ops)
+    # both satisfied
+    ram = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    assert prepare_backend("fskit", ops=ram.ops,
+                           mountpoint="/Volumes/m") is MountBackend.FSKIT
 
 
 def test_check_platform_allows_fuse_everywhere(monkeypatch):

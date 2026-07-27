@@ -18,8 +18,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Session, Workspace } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../optional_peer.ts'
-import type { MountBackend } from '@struktoai/mirage-core'
-import { checkMountpoint, checkPlatform, checkSizes, resolveBackend } from './backend.ts'
+import { MountBackend } from '@struktoai/mirage-core'
+import { checkMountpoint, prepareBackend } from './backend.ts'
 import { MirageFS } from './fs.ts'
 
 export interface FuseHandle {
@@ -126,9 +126,12 @@ export function forceUnmount(mountpoint: string): void {
 }
 
 export async function mount(ws: Workspace, options: MountOptions = {}): Promise<FuseHandle> {
-  const backend = resolveBackend(options.backend)
-  checkPlatform(backend)
-  checkSizes(backend, ws, options.rootPrefix ?? '')
+  const backend = prepareBackend(
+    options.backend ?? MountBackend.FUSE,
+    ws,
+    undefined,
+    options.rootPrefix ?? '',
+  )
   const Fuse = await loadFuse()
   let mountpoint: string
   let ownsMountpoint = false

@@ -28,25 +28,34 @@ import {
 export const FSKIT_MOUNT_ROOT = '/Volumes'
 
 /**
- * Coerce a user-supplied backend name into a kernel backend. undefined and
- * '' mean fuse, because reaching this function at all means a kernel mount
- * was asked for. Never returns vfs.
+ * Coerce a user-supplied backend name into a MountBackend.
+ *
+ * Missing means vfs, everywhere: an absent `backend` in YAML, `undefined`
+ * here, and the `MountSpecOptions` default all resolve to the same thing.
+ * Callers that need a kernel mount say so explicitly rather than relying on
+ * this function to reinterpret an absent value.
  */
 export function resolveBackend(value?: string | null): MountBackend {
-  if (value === undefined || value === null || value === '') return MountBackend.FUSE
+  if (value === undefined || value === null || value === '') return MountBackend.VFS
   const lowered = value.toLowerCase() as MountBackend
   if (!Object.values(MountBackend).includes(lowered)) {
     throw new Error(
-      `unknown mount backend ${JSON.stringify(value)}; expected one of: ${KERNEL_BACKENDS.join(', ')}`,
-    )
-  }
-  if (!KERNEL_BACKENDS.includes(lowered)) {
-    throw new Error(
-      `backend ${JSON.stringify(lowered)} does not register a mountpoint; it is served inside ` +
-        "mirage's own filesystem, so there is nothing to mount",
+      `unknown mount backend ${JSON.stringify(value)}; expected one of: ${Object.values(
+        MountBackend,
+      ).join(', ')}`,
     )
   }
   return lowered
+}
+
+/** Reject a backend that registers nothing with the kernel. */
+export function requireKernelBackend(backend: MountBackend): void {
+  if (!KERNEL_BACKENDS.includes(backend)) {
+    throw new Error(
+      `backend ${JSON.stringify(backend)} does not register a mountpoint; it is served inside ` +
+        "mirage's own filesystem, so there is nothing to mount",
+    )
+  }
 }
 
 /**
@@ -117,4 +126,24 @@ export function checkSizes(backend: MountBackend, ws: Workspace, rootPrefix = ''
       `read; these mounts would return empty files: ${listed}. Mount them with backend 'fuse', ` +
       'or scope the fskit mount to a byte-store resource (ram, disk, redis, s3, gridfs).',
   )
+}
+
+/**
+ * Resolve a backend for a kernel mount and run every guard it implies.
+ *
+ * One entry point, so a new mount path cannot pick up fskit support while
+ * silently skipping the macOS, /Volumes, or size checks.
+ */
+export function prepareBackend(
+  value: string | undefined,
+  ws?: Workspace,
+  mountpoint?: string,
+  rootPrefix = '',
+): MountBackend {
+  const backend = resolveBackend(value)
+  requireKernelBackend(backend)
+  checkPlatform(backend)
+  if (mountpoint !== undefined) checkMountpoint(backend, mountpoint)
+  if (ws !== undefined) checkSizes(backend, ws, rootPrefix)
+  return backend
 }

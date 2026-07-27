@@ -20,15 +20,18 @@ import {
   checkPlatform,
   checkSizes,
   FSKIT_MOUNT_ROOT,
+  prepareBackend,
+  requireKernelBackend,
   resolveBackend,
   unsizedMounts,
 } from './backend.ts'
 
 describe('resolveBackend', () => {
   it.each([
-    [undefined, MountBackend.FUSE],
-    [null, MountBackend.FUSE],
-    ['', MountBackend.FUSE],
+    [undefined, MountBackend.VFS],
+    [null, MountBackend.VFS],
+    ['', MountBackend.VFS],
+    ['vfs', MountBackend.VFS],
     ['fuse', MountBackend.FUSE],
     ['fskit', MountBackend.FSKIT],
     ['FSKIT', MountBackend.FSKIT],
@@ -46,8 +49,26 @@ describe('resolveBackend', () => {
     expect(Object.values(MountBackend)).toEqual(['vfs', 'fuse', 'fskit'])
   })
 
-  it('rejects vfs: it registers nothing with the kernel', () => {
-    expect(() => resolveBackend('vfs')).toThrow(/does not register a mountpoint/)
+  it('treats a missing value as vfs, never as a kernel mount', () => {
+    // One meaning for "absent": the MountSpecOptions default, an absent YAML
+    // key, and undefined here all land on vfs.
+    expect(resolveBackend(undefined)).toBe(MountBackend.VFS)
+  })
+
+  it('rejects vfs as a mount target via requireKernelBackend', () => {
+    expect(() => {
+      requireKernelBackend(MountBackend.VFS)
+    }).toThrow(/does not register a mountpoint/)
+  })
+
+  it('prepareBackend rejects vfs', () => {
+    expect(() => prepareBackend('vfs')).toThrow(/does not register a mountpoint/)
+  })
+
+  it('prepareBackend runs the fskit guards, so no mount path can skip them', () => {
+    // TypeScript cannot reach fskit at all, so the platform guard fires
+    // first and unconditionally — that is the assert being pinned here.
+    expect(() => prepareBackend('fskit')).toThrow(/fskit/)
   })
 })
 

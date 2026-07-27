@@ -25,33 +25,47 @@ FSKIT_MOUNT_ROOT = "/Volumes"
 
 
 def resolve_backend(value: "str | MountBackend | None") -> MountBackend:
-    """Coerce a user-supplied backend name into a kernel MountBackend.
+    """Coerce a user-supplied backend name into a MountBackend.
+
+    Missing means VFS, everywhere: an absent ``backend`` in YAML, ``None``
+    here, and the ``Mount`` dataclass default all resolve to the same thing.
+    Callers that need a kernel mount say so explicitly rather than relying
+    on this function to reinterpret an absent value.
 
     Args:
         value (str | MountBackend | None): the requested backend; None and
-            the empty string mean FUSE, because reaching this function at
-            all means a kernel mount was asked for.
+            the empty string mean VFS.
 
     Returns:
-        MountBackend: the resolved backend, never VFS.
+        MountBackend: the resolved backend.
 
     Raises:
-        ValueError: the name is not a known backend, or is VFS.
+        ValueError: the name is not a known backend.
     """
     if value is None or value == "":
-        return MountBackend.FUSE
+        return MountBackend.VFS
     try:
-        backend = MountBackend(str(value).lower())
+        return MountBackend(str(value).lower())
     except ValueError:
-        known = ", ".join(b.value for b in KERNEL_BACKENDS)
+        known = ", ".join(b.value for b in MountBackend)
         raise ValueError(
             f"unknown mount backend {value!r}; expected one of: {known}")
+
+
+def require_kernel_backend(backend: MountBackend) -> None:
+    """Reject a backend that registers nothing with the kernel.
+
+    Args:
+        backend (MountBackend): the resolved backend.
+
+    Raises:
+        ValueError: the backend is VFS, so there is no mount to make.
+    """
     if backend not in KERNEL_BACKENDS:
         raise ValueError(
             f"backend {backend.value!r} does not register a mountpoint; it "
             "is served inside mirage's own filesystem, so there is nothing "
             "to mount")
-    return backend
 
 
 def check_platform(backend: MountBackend) -> None:
@@ -123,3 +137,32 @@ def check_sizes(backend: MountBackend,
         f"files: {listed}. Mount them with backend='fuse', or scope the "
         f"fskit mount to a byte-store resource (ram, disk, redis, s3, "
         f"gridfs).")
+
+
+def prepare_backend(value: "str | MountBackend | None",
+                    ops: Ops | None = None,
+                    mountpoint: str | None = None,
+                    root_prefix: str = "") -> MountBackend:
+    """Resolve a backend for a kernel mount and run every guard it implies.
+
+    One entry point, so a new mount path cannot pick up fskit support while
+    silently skipping the macOS, /Volumes, or size checks. Callers that have
+    not chosen a mountpoint yet pass None and call check_mountpoint later.
+
+    Args:
+        value (str | MountBackend | None): the requested backend.
+        ops (Ops | None): op facade to size-check, when one is available.
+        mountpoint (str | None): intended mountpoint, when already known.
+        root_prefix (str): mount root, for scoping the size check.
+
+    Returns:
+        MountBackend: the validated kernel backend.
+    """
+    backend = resolve_backend(value)
+    require_kernel_backend(backend)
+    check_platform(backend)
+    if mountpoint is not None:
+        check_mountpoint(backend, mountpoint)
+    if ops is not None:
+        check_sizes(backend, ops, root_prefix)
+    return backend

@@ -23,8 +23,7 @@ try:
 except ImportError:
     fuse = None
 
-from mirage.fuse.backend import (MountBackend, check_mountpoint,
-                                 check_platform, check_sizes, resolve_backend)
+from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
 from mirage.workspace.session.session import Session
@@ -99,7 +98,7 @@ def mount_background(
         mountpoint: str,
         root_prefix: str = "",
         session: Session | None = None,
-        backend: str | MountBackend | None = None) -> threading.Thread:
+        backend: str | MountBackend = MountBackend.FUSE) -> threading.Thread:
     """Mount in a background thread and return once the tree is live.
 
     Args:
@@ -107,16 +106,15 @@ def mount_background(
         mountpoint (str): where to mount.
         root_prefix (str): mount root; non-empty scopes the tree.
         session (Session | None): bind ops to this session's mount grants.
-        backend (str | MountBackend | None): kernel interface to use;
-            None means FUSE.
+        backend (str | MountBackend): kernel interface to use.
 
     Returns:
         threading.Thread: the thread serving the mount.
     """
-    resolved = resolve_backend(backend)
-    check_platform(resolved)
-    check_mountpoint(resolved, mountpoint)
-    check_sizes(resolved, ops, root_prefix)
+    resolved = prepare_backend(backend,
+                               ops=ops,
+                               mountpoint=mountpoint,
+                               root_prefix=root_prefix)
     fs = MirageFS(ops, root_prefix=root_prefix, session=session)
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(target=_run_fuse,
@@ -133,12 +131,8 @@ def mount(ops: Ops | None = None,
           fs: MirageFS | None = None,
           daemon: bool = False,
           post_fork=None,
-          backend: str | MountBackend | None = None) -> None:
-    resolved = resolve_backend(backend)
-    check_platform(resolved)
-    check_mountpoint(resolved, mountpoint)
-    if ops is not None:
-        check_sizes(resolved, ops)
+          backend: str | MountBackend = MountBackend.FUSE) -> None:
+    resolved = prepare_backend(backend, ops=ops, mountpoint=mountpoint)
     if fs is None:
         if ops is None:
             raise ValueError("mount requires either ops or a prebuilt fs")

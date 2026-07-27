@@ -394,7 +394,7 @@ class Workspace:
                        prefix: str,
                        mountpoint: str | None = None,
                        session_id: str | None = None,
-                       backend: str | None = None) -> str:
+                       backend: str | MountBackend = MountBackend.FUSE) -> str:
         # Register a pinned path BEFORE mounting so a collision is rejected
         # without leaving a partial mount. Each mount gets its own manager,
         # so a workspace can expose any number of FUSE subtrees at once.
