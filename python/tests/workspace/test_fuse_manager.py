@@ -14,6 +14,7 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -181,11 +182,17 @@ def _capture_mount(monkeypatch):
     return seen
 
 
+def _as_macos(monkeypatch):
+    """Let fskit past check_platform on a Linux runner."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+
 def test_fskit_auto_mountpoint_is_named_not_created(monkeypatch):
     # /Volumes is root-owned (drwxr-xr-x root:wheel), so mkdtemp there raises
     # PermissionError for every non-root user. An FSKit mount is a volume:
     # the system creates the directory when the filesystem goes live, so
     # mirage only names it. Creating it here would break every fskit mount.
+    _as_macos(monkeypatch)
     _capture_mount(monkeypatch)
     made = []
     monkeypatch.setattr(tempfile, "mkdtemp",
@@ -202,6 +209,7 @@ def test_fskit_auto_mountpoint_is_named_not_created(monkeypatch):
 
 
 def test_fskit_pinned_mountpoint_is_not_created(monkeypatch):
+    _as_macos(monkeypatch)
     seen = _capture_mount(monkeypatch)
     calls = []
     monkeypatch.setattr(os, "makedirs", lambda *a, **k: calls.append(a))
@@ -230,6 +238,7 @@ def test_fuse_auto_mountpoint_still_uses_tempdir(monkeypatch):
 
 def test_unmount_never_rmdirs_a_volumes_entry(monkeypatch):
     # The /Volumes entry belongs to the system; rmdir would fail anyway.
+    _as_macos(monkeypatch)
     _capture_mount(monkeypatch)
     removed = []
     monkeypatch.setattr(os, "rmdir", lambda p: removed.append(p))
