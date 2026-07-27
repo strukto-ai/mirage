@@ -114,7 +114,11 @@ export async function kindAt(
   let name: string
   try {
     ;[dir, name] = await resolveParentDirHandle(root, key, { create: false })
-  } catch {
+  } catch (err) {
+    // A chain that stops short is "nothing here"; anything else (a
+    // SecurityError, an invalid state) is a real backend failure and must
+    // not read as an absent component.
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
     return null
   }
   try {

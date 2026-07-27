@@ -175,6 +175,38 @@
         "stdout": "deep\nf.txt\nokp\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mkdir_p_relative_component_spelling",
+      "seq": 601081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cd /data/mkc && mkdir -p f.txt/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory 'f.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "mkdir_relative_operand_spelling",
+      "seq": 601082,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cd /data/mkc && mkdir f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory 'f.txt': File exists\n"
+      }
     }
   ]
 }

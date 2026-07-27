@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import stat as stat_module
 from pathlib import Path
 
-from aiofiles.os import path as aio_path
+import aiofiles.os
 
 from mirage.types import PathSpec
 from mirage.utils.errors import enotdir
@@ -51,6 +52,12 @@ async def mkdir_component_error(root: Path, spec: PathSpec,
         key (str): Normalized target key.
     """
     for component in ancestors(key):
-        if await aio_path.isfile(_resolve(root, component)):
+        try:
+            st = await aiofiles.os.stat(_resolve(root, component))
+        except OSError:
+            return None
+        # Anything that is not a directory blocks traversal, not just a
+        # regular file: a FIFO, socket or device ancestor is ENOTDIR too.
+        if not stat_module.S_ISDIR(st.st_mode):
             return enotdir(mounted_path(spec, component))
     return None

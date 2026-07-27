@@ -20,7 +20,8 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS, error_path, fs_strerror
+from mirage.utils.errors import (FS_ERRORS, error_path, fs_strerror,
+                                 operand_spelling)
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_mode
 
 
@@ -64,8 +65,9 @@ async def mkdir(
             # it and still makes the remaining directories. The error names
             # the path to quote: usually the operand, but `mkdir -p` blames
             # the component of the chain it tripped on.
+            named = operand_spelling(error_path(exc), path)
             errors.append(f"mkdir: cannot create directory "
-                          f"'{error_path(exc)}': {fs_strerror(exc)}")
+                          f"'{named}': {fs_strerror(exc)}")
             continue
         if mode is not None and ops.set_attrs is not None:
             # -m applies to the named directory only; any parents made by

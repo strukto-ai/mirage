@@ -19,6 +19,7 @@ import {
   formatRecords,
   errorVirtualPath,
   fsStrerror,
+  operandSpelling,
   isFsError,
   specOf,
   type ByteSource,
@@ -57,9 +58,8 @@ async function mkdirCommand(
       if (!isFsError(err)) throw err
       // The error names the path to quote: usually the operand, but
       // `mkdir -p` blames the component of the chain it tripped on.
-      errors.push(
-        `mkdir: cannot create directory '${errorVirtualPath(err)}': ${String(fsStrerror(err))}`,
-      )
+      const named = operandSpelling(errorVirtualPath(err), p)
+      errors.push(`mkdir: cannot create directory '${named}': ${String(fsStrerror(err))}`)
       continue
     }
     if (verbose) lines.push(`mkdir: created directory '${p.virtual.replace(/\/+$/, '') || '/'}'`)

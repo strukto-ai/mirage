@@ -1300,6 +1300,7 @@ export {
   isFsError,
   isMissingOp,
   isMissingPath,
+  operandSpelling,
   type MissingOpError,
   noMount,
   type NoMountError,

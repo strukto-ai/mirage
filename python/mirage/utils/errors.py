@@ -16,6 +16,7 @@ import errno
 from collections.abc import Awaitable, Callable
 
 from mirage.types import PathSpec
+from mirage.utils.path import drop_trailing_segments, rebase_one
 
 
 class OperationNotSupportedError(OSError):
@@ -152,6 +153,40 @@ def error_path(exc: BaseException) -> str:
     if isinstance(stamped, str) and stamped:
         return stamped
     return str(exc)
+
+
+def operand_spelling(path: str, operand: PathSpec) -> str:
+    """Re-spell a reported path the way its operand was typed.
+
+    Backends name paths in virtual space, but GNU quotes the operand as
+    the user wrote it: ``cd /data && mkdir -p f.txt/sub`` reports
+    ``'f.txt'``, not ``'/data/f.txt'``. The path an error names is the
+    operand itself, an ancestor of it (``mkdir -p`` blames the component
+    of the chain it tripped on), or something under it, so all three are
+    rebased onto ``raw_path``. An absolute operand rebases to itself,
+    which is why this is a no-op for most invocations.
+
+    Args:
+        path (str): The virtual path the error named.
+        operand (PathSpec): The operand the command was given.
+    """
+    raw, virtual = operand.raw_path, operand.virtual
+    if raw == virtual:
+        return path
+    if path == virtual:
+        return raw
+    base = virtual.rstrip("/")
+    if path.startswith(base + "/"):
+        return rebase_one(path, virtual, raw)
+    trimmed = path.rstrip("/")
+    if base.startswith(trimmed + "/"):
+        depth = len(_segments(base)) - len(_segments(trimmed))
+        return drop_trailing_segments(raw, depth)
+    return path
+
+
+def _segments(path: str) -> list[str]:
+    return [part for part in path.split("/") if part]
 
 
 def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
