@@ -57,6 +57,8 @@ from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
 from mirage.resource.dify import DifyConfig, DifyResource
 from mirage.resource.digitalocean import (DigitalOceanConfig,
                                           DigitalOceanResource)
+from mirage.resource.discord.config import DiscordConfig
+from mirage.resource.discord.discord import DiscordResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
 from mirage.resource.email.config import EmailConfig
@@ -67,6 +69,8 @@ from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
 from mirage.resource.gdrive.gdrive import GoogleDriveResource
 from mirage.resource.github import GitHubConfig, GitHubResource
+from mirage.resource.github_ci.config import GitHubCIConfig
+from mirage.resource.github_ci.github_ci import GitHubCIResource
 from mirage.resource.gmail.config import GmailConfig
 from mirage.resource.gmail.gmail import GmailResource
 from mirage.resource.gridfs import GridFSConfig, GridFSResource
@@ -749,6 +753,46 @@ class Mem0Service:
                        default_page_size=2))
 
     async def teardown(self) -> None:
+        if self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
+
+
+class HttpService:
+    """The fixture web server curl and wget fetch from.
+
+    Exported through ``HTTP_ENDPOINT`` rather than a mount, because the cases
+    name it as a URL in the command text (the ``{http}`` token) instead of a
+    path. Owning the process here means ``--facet http`` needs no CI setup.
+    """
+
+    def __init__(self, endpoint: str,
+                 process: asyncio.subprocess.Process) -> None:
+        self.endpoint = endpoint
+        self.process = process
+
+    @classmethod
+    async def create(cls) -> "HttpService":
+        script = (Path(__file__).resolve().parents[2] / "server" /
+                  "http_server.py")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        line = (await process.stdout.readline()).decode().strip()
+        if not line.startswith("HTTP_ENDPOINT="):
+            assert process.stderr is not None
+            detail = (await process.stderr.read()).decode().strip()
+            raise RuntimeError(f"http fixture failed to start: {detail}")
+        endpoint = line.split("=", 1)[1]
+        os.environ["HTTP_ENDPOINT"] = endpoint
+        return cls(endpoint, process)
+
+    async def teardown(self) -> None:
+        os.environ.pop("HTTP_ENDPOINT", None)
         if self.process.returncode is None:
             self.process.terminate()
             await self.process.wait()
@@ -1689,6 +1733,88 @@ def build_slack(
     return service.resource(mount), _noop
 
 
+# Backends reachable with dummy credentials and no server, for the arg-error
+# battery: an invalid -maxdepth/-mindepth/-size/-mtime must be rejected while
+# flags are parsed, before any network call, so construction is all these
+# targets ever need. github, notion and hf_buckets are absent on purpose:
+# github needs a live repo at construct, notion an OAuth provider, and
+# hf_buckets validates the bucket id.
+ARG_ERROR_RESOURCES: dict[str, tuple[type, type, dict[str, object]]] = {
+    "databricks": (DatabricksVolumeResource, DatabricksVolumeConfig, {
+        "host": "h",
+        "token": "t",
+        "catalog": "c",
+        "schema": "s",
+        "volume": "v",
+    }),
+    "discord": (DiscordResource, DiscordConfig, {
+        "token": "x"
+    }),
+    "email": (EmailResource, EmailConfig, {
+        "imap_host": "h",
+        "smtp_host": "h",
+        "username": "u",
+        "password": "p",
+    }),
+    "gdocs": (GDocsResource, GDocsConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "gdrive": (GoogleDriveResource, GoogleDriveConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "github_ci": (GitHubCIResource, GitHubCIConfig, {
+        "token": "t",
+        "owner": "o",
+        "repo": "r"
+    }),
+    "gmail": (GmailResource, GmailConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "gsheets": (GSheetsResource, GSheetsConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "gslides": (GSlidesResource, GSlidesConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "langfuse": (LangfuseResource, LangfuseConfig, {
+        "public_key": "p",
+        "secret_key": "s"
+    }),
+    "linear": (LinearResource, LinearConfig, {
+        "api_key": "k"
+    }),
+    "mem0": (Mem0Resource, Mem0Config, {
+        "api_key": "k",
+        "user_id": "u"
+    }),
+    "onedrive": (OneDriveResource, OneDriveConfig, {
+        "access_token": "t"
+    }),
+    "sharepoint": (SharePointResource, SharePointConfig, {
+        "access_token": "t"
+    }),
+    "slack": (SlackResource, SlackConfig, {
+        "token": "x"
+    }),
+    "trello": (TrelloResource, TrelloConfig, {
+        "api_key": "k",
+        "api_token": "t"
+    }),
+}
+
+
+def build_arg_error(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    resource_cls, config_cls, kwargs = ARG_ERROR_RESOURCES[mount["backend"]]
+    return resource_cls(config_cls(**kwargs)), _noop
+
+
 BUILDERS = {
     "ram": build_ram,
     "disk": build_disk,
@@ -1737,6 +1863,9 @@ BUILDERS = {
     "langfuse": build_langfuse,
     "jaeger": build_jaeger,
     "dify": build_dify,
+    "arg_error": build_arg_error,
+    # The mounts are plain RAM; HttpService is what makes this target special.
+    "http_fixture": build_ram,
 }
 
 
@@ -1793,6 +1922,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await LangfuseService.create()
     if target.get("service") == "jaeger":
         return await JaegerService.create()
+    if target.get("service") == "http":
+        return await HttpService.create()
     return None
 
 

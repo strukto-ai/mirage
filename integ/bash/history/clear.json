@@ -1,0 +1,58 @@
+{
+  "cases": [
+    {
+      "id": "history_clear_s2",
+      "seq": 310014,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "history -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_s2_after_clear",
+      "seq": 310015,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "history",
+      "expect": {
+        "exit": 0,
+        "stdout": "1  history -c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_default_after_s2_clear",
+      "seq": 310016,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "12  ls -a /\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_survives_clear",
+      "seq": 310017,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -c marker-s2 /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

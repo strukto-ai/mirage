@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "prov_probe_cat",
+      "seq": 310037,
+      "targets": [
+        "ram-history"
+      ],
+      "provision": true,
+      "command": "cat /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=1241 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_probe_grep",
+      "seq": 310038,
+      "targets": [
+        "ram-history"
+      ],
+      "provision": true,
+      "command": "grep x /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=1241 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "prov_probe_ls",
+      "seq": 310039,
+      "targets": [
+        "ram-history"
+      ],
+      "provision": true,
+      "command": "ls /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

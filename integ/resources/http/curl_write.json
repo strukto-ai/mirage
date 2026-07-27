@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "id": "curl_o_writes_vfs",
+      "seq": 330006,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -o /data/fetched.txt {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_content_landed",
+      "seq": 330007,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "cat /data/fetched.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_size_visible",
+      "seq": 330008,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wc -c < /data/fetched.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "16\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_binary_landed",
+      "seq": 330009,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -o /data/fetched.bin {http}/bytes.bin && wc -c < /data/fetched.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "32\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_nested_parent_missing",
+      "seq": 330010,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -o /data/nope/fetched.txt {http}/hello",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "curl: /data/nope/fetched.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

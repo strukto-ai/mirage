@@ -243,20 +243,30 @@ function provisionLine(r: ProvisionInfo): string {
  * keeps its own mount path. Cases without the token are returned untouched, so
  * this is inert for the existing suite.
  */
+// {mount} lets one case assert a behavior every backend shares while each
+// target keeps its own mount path. {http} carries the fixture HTTP server's
+// base URL, which is only known once the server has bound a port.
 export function bindMount(c: Case, mountPath: string): Case {
-  const prefix = mountPath.replace(/\/+$/, '')
-  const hasToken =
-    c.command?.includes('{mount}') === true ||
-    c.expect.stdout.includes('{mount}') ||
-    c.expect.stderr.includes('{mount}')
-  if (!hasToken) return c
+  const tokens: ReadonlyArray<readonly [string, string]> = [
+    ['{mount}', mountPath.replace(/\/+$/, '')],
+    ['{http}', process.env.HTTP_ENDPOINT ?? ''],
+  ]
+  const subst = (text: string): string =>
+    tokens.reduce((acc, [token, value]) => acc.split(token).join(value), text)
+  const present = tokens.some(
+    ([token]) =>
+      c.command?.includes(token) === true ||
+      c.expect.stdout.includes(token) ||
+      c.expect.stderr.includes(token),
+  )
+  if (!present) return c
   return {
     ...c,
-    ...(c.command !== undefined ? { command: c.command.split('{mount}').join(prefix) } : {}),
+    ...(c.command !== undefined ? { command: subst(c.command) } : {}),
     expect: {
       ...c.expect,
-      stdout: c.expect.stdout.split('{mount}').join(prefix),
-      stderr: c.expect.stderr.split('{mount}').join(prefix),
+      stdout: subst(c.expect.stdout),
+      stderr: subst(c.expect.stderr),
     },
   }
 }

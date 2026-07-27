@@ -151,30 +151,21 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Run metadata suite (ram/disk/redis + s3 overlay via moto) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/metadata.py > /tmp/metadata.out
-          diff integ/truth_metadata.txt /tmp/metadata.out
-
       - name: Run Safeguard scenarios and diff against truth
         run: |
           ./python/.venv/bin/python integ/safeguard.py > /tmp/safeguard.out
           diff integ/truth_safeguard.txt /tmp/safeguard.out
-
-      - name: Run History scenarios and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/history.py > /tmp/history.out
-          diff integ/truth_history.txt /tmp/history.out
 
       - name: Run lancedb integ (embedded, JSON harness)
         env:
           LANCEDB_ENABLED: "1"
         run: ./python/.venv/bin/python integ/runners/python/main.py --target lancedb
 
-      - name: Run find arg-error suite (SaaS backends, dummy creds) and diff
-        run: |
-          ./python/.venv/bin/python integ/find_arg_errors.py > /tmp/fae.out
-          diff integ/truth_find_arg_errors.txt /tmp/fae.out
+      - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet argerr
+
+      - name: Run curl/wget battery (HTTP fixture started by the adapter)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet http
 
       - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
         run: ./python/.venv/bin/python integ/cross_commands.py
@@ -293,12 +284,6 @@ jobs:
           /tmp/mc mb local/mirage-integ-minio || true
 
 
-      - name: Run metadata suite (ram/disk/redis + s3 overlay via MinIO) and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx metadata.ts > /tmp/ts-metadata.out
-          diff truth_metadata.txt /tmp/ts-metadata.out
-
       - name: Run Safeguard scenarios and diff against truth
         working-directory: integ
         run: |
@@ -325,11 +310,9 @@ jobs:
           LANCEDB_ENABLED: "1"
         run: pnpm exec tsx runners/typescript/main.ts --target lancedb
 
-      - name: Run find arg-error suite (SaaS backends, dummy creds) and diff
+      - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
         working-directory: integ
-        run: |
-          pnpm exec tsx find_arg_errors.ts > /tmp/ts-fae.out
-          diff truth_find_arg_errors.txt /tmp/ts-fae.out
+        run: pnpm exec tsx runners/typescript/main.ts --facet argerr
 
   integ-shared-py:
     needs: changes
@@ -424,6 +407,13 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx runners/typescript/main.ts --facet core
 
+      # The fixture server is python (started by the adapter through
+      # startPythonServer), so this runs here rather than in integ-ts, which
+      # has no python toolchain.
+      - name: Run curl/wget battery (typescript host)
+        working-directory: integ
+        run: pnpm exec tsx runners/typescript/main.ts --facet http
+
   # The two jobs above prove each language passes its own battery. This one
   # runs both emitters and diffs them case by case, so a change that breaks
   # the same way in both languages still fails. Shared targets only (ram,
@@ -453,7 +443,9 @@ jobs:
       # Drive groups too. That would gate every core/TypeScript PR on the
       # whole credentialed battery, which has its own jobs already.
       - name: Diff python and typescript battery output
-        run: ./python/.venv/bin/python integ/runners/parity.py ram disk redis
+        run: >-
+          ./python/.venv/bin/python integ/runners/parity.py
+          ram disk redis ram-history
 
   integ-database:
     needs: changes

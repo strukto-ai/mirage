@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "bash_history_has_synthetic",
+      "seq": 310024,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -c 'synthetic entry one' /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_view_by_name",
+      "seq": 310025,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "find /.bash_history -name '*bash*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/.bash_history\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

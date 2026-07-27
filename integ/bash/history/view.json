@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "bash_history_commands",
+      "seq": 310008,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -v '^#' /.bash_history | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat /data/h.txt\necho marker-one\necho marker-s2\necho marker-two\necho persisted > /data/h.txt\nhistory\nhistory\nhistory 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_grep_marker",
+      "seq": 310009,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep marker-s2 /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "echo marker-s2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_timestamp_lines",
+      "seq": 310010,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -c '^#' /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "10\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_pipe",
+      "seq": 310011,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "cat /.bash_history | grep -c marker-one",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_root_hides_dotfile",
+      "seq": 310012,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "ls /",
+      "expect": {
+        "exit": 0,
+        "stdout": "data\ndev",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_a_root_shows_dotfile",
+      "seq": 310013,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "ls -a /",
+      "expect": {
+        "exit": 0,
+        "stdout": ".bash_history\ndata\ndev",
+        "stderr": ""
+      }
+    }
+  ]
+}

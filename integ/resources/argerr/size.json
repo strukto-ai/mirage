@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "find_arg_size",
+      "seq": 320002,
+      "targets": [
+        "argerr-databricks",
+        "argerr-discord",
+        "argerr-email",
+        "argerr-gdocs",
+        "argerr-gdrive",
+        "argerr-github_ci",
+        "argerr-gmail",
+        "argerr-gsheets",
+        "argerr-gslides",
+        "argerr-langfuse",
+        "argerr-linear",
+        "argerr-mem0",
+        "argerr-onedrive",
+        "argerr-sharepoint",
+        "argerr-slack",
+        "argerr-trello"
+      ],
+      "command": "find {mount} -size abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument 'abc' to '-size'\n"
+      }
+    }
+  ]
+}

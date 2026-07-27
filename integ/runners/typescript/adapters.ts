@@ -33,6 +33,7 @@ import {
   DatabricksVolumeResource,
   DifyResource,
   DigitalOceanResource,
+  DiscordResource,
   DiskResource,
   DropboxResource,
   EmailResource,
@@ -41,6 +42,7 @@ import {
   GmailResource,
   GCSResource,
   GitHubResource,
+  GitHubCIResource,
   GridFSResource,
   GSheetsResource,
   GSlidesResource,
@@ -64,6 +66,7 @@ import {
   R2Resource,
   RAMResource,
   RedisResource,
+  type Resource,
   S3Resource,
   ScalewayResource,
   SeaweedFSResource,
@@ -1342,6 +1345,73 @@ async function openLangfuse(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
+// Backends reachable with dummy credentials and no server, for the arg-error
+// battery: an invalid -maxdepth/-mindepth/-size/-mtime must be rejected while
+// flags are parsed, before any network call, so construction is all these
+// targets ever need. github, notion and hf_buckets are absent on purpose:
+// github needs a live repo at construct, notion an OAuth provider, and
+// hf_buckets validates the bucket id.
+const ARG_ERROR_RESOURCES: Record<string, () => Resource> = {
+  databricks: () =>
+    new DatabricksVolumeResource({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
+  discord: () => new DiscordResource({ token: 'x' }),
+  email: () =>
+    new EmailResource({
+      imapHost: 'h',
+      imapPort: 993,
+      smtpHost: 'h',
+      smtpPort: 587,
+      username: 'u',
+      password: 'p',
+      useSsl: true,
+      maxMessages: 200,
+    }),
+  gdocs: () => new GDocsResource({ clientId: 'c', refreshToken: 'r' }),
+  gdrive: () => new GDriveResource({ clientId: 'c', refreshToken: 'r' }),
+  github_ci: () => new GitHubCIResource({ token: 't', owner: 'o', repo: 'r' }),
+  gmail: () => new GmailResource({ clientId: 'c', refreshToken: 'r' }),
+  gsheets: () => new GSheetsResource({ clientId: 'c', refreshToken: 'r' }),
+  gslides: () => new GSlidesResource({ clientId: 'c', refreshToken: 'r' }),
+  langfuse: () => new LangfuseResource({ publicKey: 'p', secretKey: 's' }),
+  linear: () => new LinearResource({ apiKey: 'k' }),
+  mem0: () => new Mem0Resource({ apiKey: 'k', userId: 'u' }),
+  onedrive: () => new OneDriveResource({ accessToken: 't' }),
+  sharepoint: () => new SharePointResource({ accessToken: 't' }),
+  slack: () => new SlackResource({ token: 'x' }),
+  trello: () => new TrelloResource({ apiKey: 'k', apiToken: 't' }),
+}
+
+// The fixture web server curl and wget fetch from. Exported through
+// HTTP_ENDPOINT rather than a mount, because the cases name it as a URL in the
+// command text (the {http} token) instead of a path. Owning the process here
+// means --facet http needs no CI setup.
+async function openHttp(target: Target): Promise<Open> {
+  const server = await startPythonServer('http_server.py')
+  process.env.HTTP_ENDPOINT = server.endpoint.replace(/^HTTP_ENDPOINT=/, '')
+  const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
+  for (const m of target.mounts) {
+    const resource = new RAMResource()
+    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await server.close()
+    delete process.env.HTTP_ENDPOINT
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openArgError(target: Target): Promise<Open> {
+  const mounts: Record<string, Resource | [Resource, MountMode]> = {}
+  for (const m of target.mounts) {
+    const resource = ARG_ERROR_RESOURCES[m.backend]()
+    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
@@ -1377,6 +1447,8 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   langfuse: openLangfuse,
   jaeger: openJaeger,
   dify: openDify,
+  arg_error: openArgError,
+  http_fixture: openHttp,
 }
 
 export const CONSISTENCY_ADAPTERS: Record<
