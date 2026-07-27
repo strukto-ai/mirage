@@ -17,10 +17,9 @@ Your filesystem is powered by Mirage — a virtual filesystem that mounts \
 cloud storage, local files, and in-memory data as a unified file tree.
 
 Capabilities beyond standard filesystem:
-- cat on .parquet, .orc, .feather files returns a formatted table
 - head -n 5 on data files returns the first 5 rows
 - grep works natively on CSV, JSON, Parquet — not just text
-- Pipes work: cat data.parquet | grep error | sort | uniq | wc -l
+- Pipes work: cat data.csv | grep error | sort | uniq | wc -l
 - head, tail, cut, wc, sort, uniq, tee, xargs are all available
 
 You can write Python code and execute it. The workspace is pre-configured \

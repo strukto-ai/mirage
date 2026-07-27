@@ -14,19 +14,12 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.optional import try_load_command
 from mirage.ops.generic.table import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
 
-FILETYPE_CATS: dict[str, OpFn | None] = {
-    ".parquet": try_load_command("mirage.core.filetype.parquet", "cat",
-                                 "parquet"),
-    ".feather": try_load_command("mirage.core.filetype.feather", "cat",
-                                 "parquet"),
-    ".orc": try_load_command("mirage.core.filetype.orc", "cat", "parquet"),
-    ".hdf5": try_load_command("mirage.core.filetype.hdf5", "cat", "hdf5"),
-}
+# Extension point: map an extension to a renderer op. mirage ships none.
+FILETYPE_CATS: dict[str, OpFn | None] = {}
 
 
 def _make_read(fn: OpFn) -> OpFn:

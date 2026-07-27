@@ -18,12 +18,10 @@ from types import ModuleType
 
 _logger = logging.getLogger(__name__)
 
-_EXT_GROUPS = (
-    ((".parquet", ), "parquet"),
-    ((".orc", ), "orc"),
-    ((".feather", ".arrow", ".ipc"), "feather"),
-    ((".hdf5", ".h5"), "hdf5"),
-)
+# No filetype renderers ship with mirage. The dispatch machinery below is
+# the extension point: add a (extensions, module) entry here and the module
+# is imported lazily, or register a filetype-scoped command on a mount.
+_EXT_GROUPS: tuple[tuple[tuple[str, ...], str], ...] = ()
 
 
 def _load_modules() -> dict[str, ModuleType]:

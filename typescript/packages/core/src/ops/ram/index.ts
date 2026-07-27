@@ -18,6 +18,5 @@ import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
 export const RAM_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.RAM, RAM_IO, {
-  filetypeRead: ['.feather', '.h5', '.parquet'],
   forwardIndex: false,
 })

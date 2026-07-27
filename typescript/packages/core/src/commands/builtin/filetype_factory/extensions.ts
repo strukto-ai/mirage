@@ -14,9 +14,6 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import * as featherModule from '../../../core/filetype/feather.ts'
-import * as hdf5Module from '../../../core/filetype/hdf5.ts'
-import * as parquetModule from '../../../core/filetype/parquet.ts'
 import type { PathSpec, ReadBytesFn } from '../../../types.ts'
 
 export interface FiletypeModule {
@@ -36,11 +33,7 @@ export interface FiletypeEntry {
   module: FiletypeModule
 }
 
-export const FILETYPE_ENTRIES: readonly FiletypeEntry[] = [
-  { fmt: 'parquet', exts: ['.parquet'], module: parquetModule },
-  { fmt: 'feather', exts: ['.feather', '.arrow', '.ipc'], module: featherModule },
-  { fmt: 'hdf5', exts: ['.h5', '.hdf5'], module: hdf5Module },
-]
+export const FILETYPE_ENTRIES: readonly FiletypeEntry[] = []
 
 export type FiletypeReadBytesFn<A extends Accessor = Accessor> = ReadBytesFn<
   [accessor: A, path: PathSpec, index?: IndexCacheStore]
