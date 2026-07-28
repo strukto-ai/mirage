@@ -211,6 +211,14 @@ describe('workspace: subshell', () => {
     expect(stdoutStr(io)).toBe('subshell=1\n')
     await ws.close()
   })
+
+  it('$? sees lazily finalized exit codes inside a subshell', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('(grep missing /ram/notes.txt; echo s=$?)')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('s=1\n')
+    await ws.close()
+  })
 })
 
 describe('workspace: function', () => {
@@ -262,6 +270,14 @@ describe('workspace: brace group', () => {
     const io = await ws.execute('{ false; echo group=$?; }')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('group=1\n')
+    await ws.close()
+  })
+
+  it('$? sees lazily finalized exit codes inside a brace group', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('{ grep missing /ram/notes.txt; echo s=$?; }')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('s=1\n')
     await ws.close()
   })
 })

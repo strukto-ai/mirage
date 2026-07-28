@@ -322,11 +322,13 @@ export async function handleSubshell(
         })
         break
       }
+      // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
+      // grep) finalize only once stdout is consumed, and
+      // handleConnection does the same for top-level lists.
+      stdout = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       lastExec = childExec
-      // Seed $? between body commands (handleConnection does this for
-      // top-level lists; subshells iterate children directly).
       session.lastExitCode = io.exitCode
       if (
         io.exitCode !== 0 &&

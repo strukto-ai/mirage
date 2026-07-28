@@ -375,6 +375,17 @@ def test_status_inside_subshell_and_brace_group():
     assert _stdout(io) == b"group=1\n"
 
 
+def test_status_lazy_exit_code_inside_subshell_and_brace_group():
+    """grep's exit code is finalized lazily; $? must still see it."""
+    ws = _ws()
+    io = _exec(ws, "(grep missing /ram/notes.txt; echo s=$?)")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"s=1\n"
+    io = _exec(ws, "{ grep missing /ram/notes.txt; echo s=$?; }")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"s=1\n"
+
+
 # ── variable expansion ─────────────────────────
 
 
