@@ -70,11 +70,14 @@ class TestJqJsonl:
         with pytest.raises(json.JSONDecodeError):
             jq(backend, "/tmp/data.json", ".")
 
-    def test_jsonl_stdin_fallback(self):
+    def test_jsonl_stdin_is_a_value_stream(self):
+        # jq applies the program to each document on stdin, so `length` is
+        # each object's own key count, not the number of documents. Verified
+        # against the jq binary: three 2-key objects print "2" three times.
         ws = mem_ws()
         stdout, _ = run_raw(ws, "jq length", stdin=SAMPLE_JSONL)
-        result = json.loads(collect(stdout))
-        assert result == 3
+        lines = collect(stdout).decode().strip().splitlines()
+        assert [json.loads(line) for line in lines] == [2, 2, 2]
 
     def test_json_stdin_unchanged(self):
         ws = mem_ws()

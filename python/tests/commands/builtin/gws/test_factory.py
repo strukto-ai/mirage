@@ -87,6 +87,121 @@ async def test_files_list_passes_query(accessor):
 
 
 @pytest.mark.asyncio
+async def test_files_list_follows_next_page_token_by_default(accessor):
+    method = METHODS[("drive", "files", "list")]
+    pages = [
+        {
+            "files": [{
+                "id": "a"
+            }],
+            "nextPageToken": "t1"
+        },
+        {
+            "files": [{
+                "id": "b"
+            }],
+            "nextPageToken": "t2"
+        },
+        {
+            "files": [{
+                "id": "c"
+            }]
+        },
+    ]
+    with patch(
+            "mirage.commands.builtin.gws.factory.google_get",
+            new_callable=AsyncMock,
+            side_effect=pages,
+    ) as get:
+        out, io = await run_gws_method(method, accessor, [])
+    assert io.exit_code == 0
+    assert get.await_count == 3
+    tokens = [c.kwargs["params"].get("pageToken") for c in get.await_args_list]
+    assert tokens == [None, "t1", "t2"]
+    lines = (await materialize(out)).decode().splitlines()
+    assert [json.loads(line)["files"][0]["id"]
+            for line in lines] == ["a", "b", "c"]
+
+
+@pytest.mark.asyncio
+async def test_multi_page_output_is_newline_terminated_ndjson(accessor):
+    method = METHODS[("drive", "files", "list")]
+    pages = [{"files": [], "nextPageToken": "t1"}, {"files": []}]
+    with patch(
+            "mirage.commands.builtin.gws.factory.google_get",
+            new_callable=AsyncMock,
+            side_effect=pages,
+    ):
+        out, _io = await run_gws_method(method, accessor, [])
+    assert await materialize(out) == b'{"files":[],"nextPageToken":"t1"}\n' \
+        b'{"files":[]}\n'
+
+
+@pytest.mark.asyncio
+async def test_single_page_output_has_no_trailing_newline(accessor):
+    method = METHODS[("drive", "files", "list")]
+    with patch(
+            "mirage.commands.builtin.gws.factory.google_get",
+            new_callable=AsyncMock,
+            return_value={"files": []},
+    ):
+        out, _io = await run_gws_method(method, accessor, [])
+    assert await materialize(out) == b'{"files":[]}'
+
+
+@pytest.mark.asyncio
+async def test_page_limit_stops_early(accessor):
+    method = METHODS[("drive", "files", "list")]
+    pages = [
+        {
+            "files": [],
+            "nextPageToken": "t1"
+        },
+        {
+            "files": [],
+            "nextPageToken": "t2"
+        },
+        {
+            "files": []
+        },
+    ]
+    with patch(
+            "mirage.commands.builtin.gws.factory.google_get",
+            new_callable=AsyncMock,
+            side_effect=pages,
+    ) as get:
+        out, _io = await run_gws_method(method, accessor, [], page_limit="2")
+    assert get.await_count == 2
+    assert len((await materialize(out)).decode().splitlines()) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ["x", "-1", "1.5", "١٢", "²"])
+async def test_rejects_a_non_numeric_page_limit(accessor, raw):
+    # Non-ASCII digits are rejected too, so the flag accepts exactly what
+    # TypeScript's /^\d+$/ accepts.
+    method = METHODS[("drive", "files", "list")]
+    with pytest.raises(ValueError,
+                       match="--page-limit must be a whole number"):
+        await run_gws_method(method, accessor, [], page_limit=raw)
+
+
+@pytest.mark.asyncio
+async def test_non_list_get_is_never_paginated_twice(accessor):
+    method = METHODS[("docs", "documents", "get")]
+    with patch(
+            "mirage.commands.builtin.gws.factory.google_get",
+            new_callable=AsyncMock,
+            return_value={"documentId": "d1"},
+    ) as get:
+        out, _io = await run_gws_method(method,
+                                        accessor, [],
+                                        params='{"documentId": "d1"}')
+    assert get.await_count == 1
+    assert await materialize(out) == b'{"documentId":"d1"}'
+
+
+@pytest.mark.asyncio
 async def test_files_delete_outputs_nothing(accessor):
     method = METHODS[("drive", "files", "delete")]
     with patch(

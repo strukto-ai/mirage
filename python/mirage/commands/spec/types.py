@@ -117,6 +117,7 @@ class CommandSpec:
     rest: Operand | None = None
     ignore_tokens: frozenset[str] = frozenset()
     description: str | None = None
+    epilog: str | None = None
 
 
 class FlagView:

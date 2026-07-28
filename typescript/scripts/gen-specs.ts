@@ -78,6 +78,7 @@ function serializeSpec(spec: CommandSpec, rcs: RegisteredCommand[]): Record<stri
   return {
     _meta: metaFor(rcs),
     description: spec.description,
+    epilog: spec.epilog,
     ignore_tokens: [...spec.ignoreTokens].sort(),
     options: spec.options.map(serializeOption),
     positional: spec.positional.map(serializeOperand),

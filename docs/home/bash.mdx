@@ -108,6 +108,36 @@ Both bindings support cooperative cancellation observed at recursion boundaries 
 | Many isolated commands sharing scoped state | `session_id=...` (Py) / `sessionId` (TS) | a separate terminal |
 | Persistent shell mutations | run without options | `cd /data; cmd` |
 
+## JSON with `jq`
+
+`jq` reads a **stream of JSON values** and runs the program once per
+value, matching the real `jq` binary. The filename is irrelevant: a
+`.json` file holding several concatenated or pretty-printed values is a
+stream just like a `.jsonl` file, and so is multi-document input arriving
+on stdin.
+
+```bash
+# Two documents in one file -> the program runs twice, one line each
+cat /data/events.json
+{"id": 1}
+{"id": 2}
+jq -c '.id' /data/events.json
+1
+2
+
+# -s slurps the whole stream into a single array first
+jq -c -s 'map(.id)' /data/events.json
+[1,2]
+```
+
+Because evaluation is per document, commands that emit newline-delimited
+JSON (such as [paginated `gws` list calls](/python/resource/gdrive#pagination))
+pipe straight into `jq` with no reshaping.
+
+Output arity follows the program, not the input: a program that collects
+into an array (`[.a[] | .t]`) prints one array, and only a top-level
+iterator (`.a[]`) prints one line per element.
+
 ## Supported bash syntax
 
 Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements the constructs LLMs reach for most often. What is not supported returns a clear, parseable error so an agent can self-correct on its next turn.

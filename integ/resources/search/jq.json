@@ -1,0 +1,136 @@
+{
+  "cases": [
+    {
+      "id": "jq_collector_one_line",
+      "seq": 670000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gridfs",
+        "dropbox",
+        "onedrive",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "jq -c '[.users[] | .name]' /data/users.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"alice\",\"bob\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_top_spread_lines",
+      "seq": 670001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gridfs",
+        "dropbox",
+        "onedrive",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "jq -c '.users[] | .name' /data/users.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alice\"\n\"bob\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_collector_with_header",
+      "seq": 670002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gridfs",
+        "dropbox",
+        "onedrive",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "jq -c '[[\"H\"]] + [.users[] | [.name]]' /data/users.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"H\"],[\"alice\"],[\"bob\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_multidoc_json",
+      "seq": 670003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gridfs",
+        "dropbox",
+        "onedrive",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "printf '[1,2]\\n[3,4]\\n' | tee /data/stream.json > /dev/null && jq -c '.' /data/stream.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,2]\n[3,4]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_multidoc_slurp",
+      "seq": 670004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gridfs",
+        "dropbox",
+        "onedrive",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "printf '[1,2]\\n[3,4]\\n' | tee /data/stream.json > /dev/null && jq -s -c '.' /data/stream.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[1,2],[3,4]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_multidoc_index",
+      "seq": 670005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gridfs",
+        "dropbox",
+        "onedrive",
+        "ssh",
+        "nextcloud"
+      ],
+      "clear_cache": true,
+      "command": "printf '[1,2]\\n[3,4]\\n' | tee /data/stream.json > /dev/null && jq -c '.[0]' /data/stream.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n3\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

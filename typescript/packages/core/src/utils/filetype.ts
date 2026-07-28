@@ -34,13 +34,6 @@ const EXTENSION_MAP: Readonly<Record<string, FileType>> = Object.freeze({
   zip: FileType.ZIP,
   gz: FileType.GZIP,
   pdf: FileType.PDF,
-  parquet: FileType.PARQUET,
-  orc: FileType.ORC,
-  feather: FileType.FEATHER,
-  arrow: FileType.FEATHER,
-  ipc: FileType.FEATHER,
-  h5: FileType.HDF5,
-  hdf5: FileType.HDF5,
 })
 
 export function guessType(path: string): FileType {

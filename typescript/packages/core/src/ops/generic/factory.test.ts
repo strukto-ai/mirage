@@ -99,18 +99,8 @@ describe('makeGenericOps', () => {
     expect(new Set(ops.map((o) => o.name))).toEqual(new Set(['read', 'stat']))
   })
 
-  it('emits filetype reads through the shared cats', () => {
-    const ops = makeGenericOps('x', makeTable(), {
-      filetypeRead: ['.parquet', '.feather'],
-    })
-    const filetypes = ops.filter((o) => o.filetype).map((o) => o.filetype)
-    expect(filetypes.sort()).toEqual(['.feather', '.parquet'])
-  })
-
-  it('rejects unknown filetype extensions', () => {
-    expect(() => makeGenericOps('x', makeTable(), { filetypeRead: ['.nope'] })).toThrow(
-      'no filetype cat registered',
-    )
+  it('emits no filetype-scoped ops', () => {
+    expect(makeGenericOps('x', makeTable()).every((o) => o.filetype === null)).toBe(true)
   })
 
   it('forwards index into read-like wrappers', async () => {

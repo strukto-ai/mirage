@@ -24,7 +24,7 @@ Run Python commands from `python/`, TypeScript commands from `typescript/`.
 - Keep Python and TypeScript layout, architecture, and semantics mirrored as much as practical.
 - When changing one implementation, check the other for the matching pattern or feature. If one side is more correct, use it to improve the weaker side instead of copying a bad design.
 - For major Python or TypeScript changes, consider adding or updating integration coverage under `integ/`.
-- Known gap: TypeScript does not support ORC files. Python registers `.orc` in its filetype factory (`mirage/core/filetype/orc.py` plus per-backend `read_orc` ops); the TypeScript filetype factory only covers parquet, feather/arrow/ipc, and hdf5/h5. Do not assume `.orc` commands work in TypeScript.
+- **mirage ships no filetype renderers, and no factory for them.** Parquet, ORC, feather/arrow/ipc and hdf5/h5 rendering are gone, along with the `parquet`/`hdf5`/`pdf` extras, the `hyparquet`/`apache-arrow`/`h5wasm` dependencies, and the whole `commands/builtin/filetype_factory/` package in both languages (with its `filetype_read` / `filetypeRead` op knobs). A file with an unregistered extension is read as raw bytes. The one surviving extension point is registration on a mount: a command or op carrying a `filetype` resolves as `(name, filetype)` before `(name, resource)` before `(name,)`. `examples/{python,typescript}/filetype/` register a `.tally` renderer end to end and are gated in CI against `integ/truth/*/filetype.txt`; `tests/commands/custom/test_filetype_fns.py` and `test_unregister_removes_all_filetypes` cover the unit path.
 
 ## History
 

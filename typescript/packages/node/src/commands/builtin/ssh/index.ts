@@ -12,22 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type RegisteredCommand,
-  ResourceName,
-  makeFiletypeCommands,
-  makeGenericCommands,
-} from '@struktoai/mirage-core'
+import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
-import { read as sshRead } from '../../../core/ssh/read.ts'
-import { stat as sshStat } from '../../../core/ssh/stat.ts'
 import { SSH_IO } from './io.ts'
 
 export const SSH_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<SSHAccessor>({
-    resource: ResourceName.SSH,
-    readBytes: sshRead,
-    statEntry: sshStat,
-  }),
   ...makeGenericCommands<SSHAccessor>(ResourceName.SSH, SSH_IO),
 ]

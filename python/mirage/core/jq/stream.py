@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -27,17 +28,50 @@ def parse_jsonl(raw: bytes) -> list[Any]:
     return [orjson.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def parse_json_auto(raw: bytes) -> object:
+def parse_json_docs(raw: bytes) -> list[Any]:
+    """Parse a whitespace-separated stream of JSON values.
+
+    jq reads a stream of values from any input, not one document: `.json`
+    holding several values, newline-delimited JSONL, and pretty-printed
+    values run together are all valid and all evaluate per document. The
+    single-value case takes the fast orjson path; only a stream falls
+    back to incremental decoding.
+
+    Args:
+        raw (bytes): the whole input.
+
+    Returns:
+        list[Any]: every decoded document, in order.
+    """
     text = raw.decode("utf-8", errors="replace").strip()
     if not text:
         raise ValueError("jq: empty input")
     try:
-        return orjson.loads(text)
-    except orjson.JSONDecodeError:
-        lines = [line for line in text.splitlines() if line.strip()]
-        if len(lines) <= 1:
-            raise
-        return [orjson.loads(line) for line in lines]
+        return [orjson.loads(text)]
+    except orjson.JSONDecodeError as single_doc_error:
+        first_error = single_doc_error
+    decoder = json.JSONDecoder()
+    docs: list[Any] = []
+    idx = 0
+    end = len(text)
+    while idx < end:
+        try:
+            doc, offset = decoder.raw_decode(text, idx)
+        except ValueError:
+            # Not a value stream either, so the input is simply invalid.
+            # Re-raise the whole-document error: it is the one that names
+            # the real problem, and callers match on orjson's type.
+            raise first_error from None
+        docs.append(doc)
+        idx = offset
+        while idx < end and text[idx].isspace():
+            idx += 1
+    return docs
+
+
+def parse_json_auto(raw: bytes) -> object:
+    docs = parse_json_docs(raw)
+    return docs[0] if len(docs) == 1 else docs
 
 
 def parse_json_path(raw: bytes, path: str) -> object:

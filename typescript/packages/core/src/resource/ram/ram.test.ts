@@ -53,9 +53,6 @@ describe('RAMResource.kind / ops()', () => {
       'create',
       'mkdir',
       'read',
-      'read', // filetype variant (.feather)
-      'read', // filetype variant (.h5)
-      'read', // filetype variant (.parquet)
       'readdir',
       'rename',
       'rmdir',

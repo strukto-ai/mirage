@@ -7,6 +7,7 @@
     "resources": []
   },
   "description": "Retrieve files from the web.",
+  "epilog": null,
   "ignore_tokens": [],
   "options": [
     {

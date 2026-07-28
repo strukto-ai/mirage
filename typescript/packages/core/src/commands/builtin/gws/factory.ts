@@ -32,11 +32,11 @@ import {
 } from '../../config.ts'
 import type { GwsMethod, GwsService } from './methods.ts'
 import {
-  GWS_API_SPEC,
   GWS_METHODS,
   SERVICE_BASES,
   SERVICE_RESOURCES,
   gwsCommandName,
+  gwsMethodSpec,
 } from './methods.ts'
 
 const ENC = new TextEncoder()
@@ -150,10 +150,72 @@ export async function runGwsMethod(
     const data = await googleGetBytes(tm, withQuery(url, queryParams))
     return [data, new IOResult()]
   }
+  if (method.http === 'GET') {
+    let pageLimit: number | null
+    try {
+      pageLimit = parsePageLimit(opts.flags.page_limit)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
+    }
+    // Deliberate divergence from the official gws CLI, which stops at one
+    // page unless --page-all is passed: a truncated listing is
+    // indistinguishable from a complete one, so mirage follows the token by
+    // default and --page-limit is how you opt out.
+    const out = await paginate(method, tm, url, body, queryParams, pageLimit)
+    return [out, new IOResult()]
+  }
   const result = await CALLERS[method.http](tm, url, body, queryParams)
-  if (method.http !== 'GET') await invalidateMountListing()
+  await invalidateMountListing()
   if (result === NO_CONTENT) return [null, new IOResult()]
   return [ENC.encode(JSON.stringify(result)), new IOResult()]
+}
+
+function parsePageLimit(raw: unknown): number | null {
+  if (typeof raw !== 'string' || raw === '') return null
+  if (!/^\d+$/.test(raw)) throw new Error(`--page-limit must be a whole number, got '${raw}'`)
+  return Number(raw)
+}
+
+// Google list methods cap a page and hand back a token; a single call
+// silently returns a partial listing. Pages are emitted as NDJSON so a
+// caller can pipe straight into `jq`, which evaluates per document.
+async function paginate(
+  method: GwsMethod,
+  tm: TokenManager,
+  url: string,
+  body: Record<string, unknown>,
+  query: Record<string, string>,
+  pageLimit: number | null,
+): Promise<Uint8Array> {
+  const pages: string[] = []
+  let token: string | null = null
+  let fetched = 0
+  for (;;) {
+    // A fresh object per page: the callers keep the mapping they are handed,
+    // so a mutated one would let a later token leak backwards.
+    const params = { ...query }
+    if (token !== null) params.pageToken = token
+    const result = await CALLERS[method.http](tm, url, body, params)
+    if (result === NO_CONTENT) break
+    pages.push(JSON.stringify(result))
+    fetched += 1
+    if (pageLimit !== null && fetched >= pageLimit) break
+    const next =
+      result !== null && typeof result === 'object'
+        ? (result as Record<string, unknown>).nextPageToken
+        : undefined
+    // Google always sends a string token; anything else is not one, and
+    // stringifying it would send a request that can only 400.
+    if (typeof next !== 'string' && typeof next !== 'number') break
+    if (next === '') break
+    token = String(next)
+  }
+  // A single response keeps the exact bytes an unpaginated call produced, so
+  // every non-list GET is unchanged. Only a real multi-page stream is
+  // newline-terminated, per the NDJSON convention.
+  const out = pages.join('\n')
+  return ENC.encode(pages.length > 1 ? out + '\n' : out)
 }
 
 export function makeGwsApiCommands(service: GwsService): RegisteredCommand[] {
@@ -164,7 +226,7 @@ export function makeGwsApiCommands(service: GwsService): RegisteredCommand[] {
       ...command({
         name: gwsCommandName(m),
         resource: SERVICE_RESOURCES[service],
-        spec: GWS_API_SPEC,
+        spec: gwsMethodSpec(m),
         write: m.http !== 'GET',
         fn: (accessor, paths, texts, opts) =>
           runGwsMethod(m, accessor as GoogleApiAccessor, paths, texts, opts),

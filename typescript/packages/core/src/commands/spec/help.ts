@@ -20,6 +20,14 @@ const VALUE_LABEL: Record<OperandKind, string> = {
   [OperandKind.TEXT]: ' <text>',
 }
 
+// Python's rstrip('\n'). A `/\n+$/` regex is a polynomial ReDoS on a long
+// run of trailing newlines, so the trim walks backwards instead.
+function trimTrailingNewlines(text: string): string {
+  let end = text.length
+  while (end > 0 && text[end - 1] === '\n') end -= 1
+  return text.slice(0, end)
+}
+
 function flagDisplay(opt: Option): string {
   const parts: string[] = []
   if (opt.short !== null) parts.push(opt.short)
@@ -57,6 +65,11 @@ export function renderHelp(name: string, spec: CommandSpec): string {
       const padded = flagStr.padEnd(width, ' ')
       lines.push(descStr === '' ? `  ${flagStr}` : `  ${padded}  ${descStr}`)
     }
+  }
+
+  if (spec.epilog !== null && spec.epilog !== '') {
+    lines.push('')
+    lines.push(trimTrailingNewlines(spec.epilog))
   }
 
   return lines.join('\n') + '\n'

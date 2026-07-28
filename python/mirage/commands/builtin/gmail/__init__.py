@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gmail.grep import grep
 from mirage.commands.builtin.gmail.gws_gmail_forward import gws_gmail_forward
@@ -24,12 +23,10 @@ from mirage.commands.builtin.gmail.gws_gmail_send import gws_gmail_send
 from mirage.commands.builtin.gmail.gws_gmail_triage import gws_gmail_triage
 from mirage.commands.builtin.gmail.io import IO as _IO
 from mirage.commands.builtin.gmail.rg import rg
-from mirage.commands.builtin.gws import GWS_GMAIL_API_COMMANDS
-from mirage.core.gmail.read import read as _read
+from mirage.commands.builtin.gws import (GWS_GMAIL_API_COMMANDS,
+                                         gws_help_commands)
 
 COMMANDS = [
-    *make_filetype_commands(
-        "gmail", _IO.resolve_glob, _read, read_takes_index=True),
     *make_generic_commands(
         "gmail",
         _IO,
@@ -37,6 +34,7 @@ COMMANDS = [
     ),
     grep,
     rg,
+    *gws_help_commands("gmail"),
     gws_gmail_send,
     gws_gmail_reply,
     gws_gmail_reply_all,

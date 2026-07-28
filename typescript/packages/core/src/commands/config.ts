@@ -196,6 +196,10 @@ function withHelpSupport(
     ignoreTokens: [...spec.ignoreTokens],
   }
   if (spec.description !== null) init.description = spec.description
+  // Python rebuilds via dataclasses.replace, which keeps every other field;
+  // this init is hand-listed, so a new CommandSpec field must be added here
+  // too or --help silently loses it.
+  if (spec.epilog !== null) init.epilog = spec.epilog
   const newSpec = extras.length === 0 ? spec : new CommandSpec(init)
   const helpText = renderHelp(name, newSpec)
   const versionText = versionLine(name)

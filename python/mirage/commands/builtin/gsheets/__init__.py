@@ -18,7 +18,8 @@ from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
 from mirage.commands.builtin.gsheets.gws_sheets_write import gws_sheets_write
 from mirage.commands.builtin.gsheets.io import IO as _IO
 from mirage.commands.builtin.gsheets.rm import rm
-from mirage.commands.builtin.gws import GWS_SHEETS_API_COMMANDS
+from mirage.commands.builtin.gws import (GWS_SHEETS_API_COMMANDS,
+                                         gws_help_commands)
 
 COMMANDS = [
     *make_generic_commands(
@@ -26,6 +27,7 @@ COMMANDS = [
         _IO,
     ),
     rm,
+    *gws_help_commands("gsheets"),
     gws_sheets_append,
     gws_sheets_read,
     gws_sheets_write,

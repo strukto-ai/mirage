@@ -7,6 +7,7 @@
     "resources": []
   },
   "description": "Arbitrary precision calculator language.",
+  "epilog": null,
   "ignore_tokens": [],
   "options": [
     {

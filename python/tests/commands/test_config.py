@@ -177,6 +177,17 @@ class TestVersionSupport:
             _collect(stdout)) == f"tsort (Mirage) {__version__}\n".encode()
         assert result.exit_code == 0
 
+    def test_help_keeps_the_spec_epilog(self):
+        registered = command(
+            "foo",
+            resource="disk",
+            spec=CommandSpec(epilog="Services:\n  drive"))(_noop_handler)
+        rc = registered._registered_commands[0]
+        assert rc.spec.epilog == "Services:\n  drive"
+        stdout, result = asyncio.run(rc.fn(None, [], help=True))
+        assert b"Services:\n  drive\n" in asyncio.run(_collect(stdout))
+        assert result.exit_code == 0
+
 
 class TestVersionRequest:
 

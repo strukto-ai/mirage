@@ -15,7 +15,8 @@
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gslides.io import IO as _IO
 from mirage.commands.builtin.gslides.rm import rm
-from mirage.commands.builtin.gws import GWS_SLIDES_API_COMMANDS
+from mirage.commands.builtin.gws import (GWS_SLIDES_API_COMMANDS,
+                                         gws_help_commands)
 
 COMMANDS = [
     *make_generic_commands(
@@ -23,5 +24,6 @@ COMMANDS = [
         _IO,
     ),
     rm,
+    *gws_help_commands("gslides"),
     *GWS_SLIDES_API_COMMANDS,
 ]

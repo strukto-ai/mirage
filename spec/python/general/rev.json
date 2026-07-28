@@ -43,6 +43,7 @@
     ]
   },
   "description": null,
+  "epilog": null,
   "ignore_tokens": [],
   "options": [],
   "positional": [],

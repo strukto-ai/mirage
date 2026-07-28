@@ -20,7 +20,7 @@ import { GDOCS_GWS_WRITE } from './gws_docs_write.ts'
 import { GDOCS_IO } from './io.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GDOCS_RM } from './rm.ts'
-import { GWS_DOCS_API_COMMANDS } from '../gws/index.ts'
+import { GWS_DOCS_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 
 export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GDocsAccessor>(ResourceName.GDOCS, GDOCS_IO, {
@@ -34,4 +34,5 @@ export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...GDOCS_RM,
   ...GDOCS_GWS_WRITE,
   ...GWS_DOCS_API_COMMANDS,
+  ...gwsHelpCommands(ResourceName.GDOCS),
 ]

@@ -15,4 +15,4 @@
 from mirage.commands.builtin.disk.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("disk", IO, filetype_read=True, mkdir_parents=True)
+OPS = make_generic_ops("disk", IO, mkdir_parents=True)

@@ -345,12 +345,21 @@ Every Gmail Discovery method is also reachable directly. `--params`
 carries the path and query parameters (JSON), `--json` the request body,
 and the output is the raw API response. The user id is always `me`.
 
+List methods follow `nextPageToken` to the end by default and print one
+JSON response per line; `--page-limit N` stops early. See
+[Pagination](/python/resource/gdrive#pagination) for the details and the
+reasoning. `gws --help` and `gws gmail --help` list the surface.
+
 ```bash
 # List labels
 gws gmail users labels list --params '{"userId": "me"}'
 
-# List message ids matching a query
-gws gmail users messages list --params '{"userId": "me", "q": "is:unread"}'
+# Every unread message id, across all pages
+gws gmail users messages list --params '{"userId": "me", "q": "is:unread"}' \
+  | jq -r '.messages[]?.id'
+
+# Just the first page
+gws gmail users messages list --params '{"userId": "me"}' --page-limit 1
 
 # Fetch one message
 gws gmail users messages get --params '{"userId": "me", "id": "msg123"}'

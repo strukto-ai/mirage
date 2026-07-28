@@ -15,4 +15,4 @@
 from mirage.commands.builtin.gridfs.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("gridfs", IO, filetype_read=True, emulate_truncate=True)
+OPS = make_generic_ops("gridfs", IO, emulate_truncate=True)

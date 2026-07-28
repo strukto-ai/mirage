@@ -128,10 +128,63 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               "/users/{userId}/messages/{messageId}/attachments/{id}"),
 )
 
-GWS_API_SPEC = CommandSpec(options=(
-    Option(long="--params", value_kind=OperandKind.TEXT),
-    Option(long="--json", value_kind=OperandKind.TEXT),
-), )
+_PARAMS_HELP = ("JSON object of path and query parameters, e.g. "
+                "'{\"fileId\":\"abc\"}'")
+_JSON_HELP = "JSON request body, the API resource for this method"
+_PAGE_ALL_HELP = ("Follow nextPageToken to the end (the default); pages "
+                  "print as one JSON response per line")
+_PAGE_LIMIT_HELP = "Stop after this many pages instead of reading them all"
+
+BESPOKE_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("gws sheets +read", "Read a cell range: --spreadsheet <id> --range <A1>"),
+    ("gws sheets +write",
+     "Overwrite a range: --spreadsheet <id> --range <A1> --json-values <2D>"),
+    ("gws sheets +append",
+     "Append rows: --spreadsheet <id> --range <A1> --json-values <2D>"),
+    ("gws docs +write", "Replace a document's text: --document <id>"),
+    ("gws gmail +read", "Read a message by id"),
+    ("gws gmail +send", "Send a message"),
+    ("gws gmail +reply", "Reply to a message"),
+    ("gws gmail +forward", "Forward a message"),
+    ("gws gmail +triage", "Label / archive a message"),
+)
+
+
+def gws_method_description(method: "GwsMethod") -> str:
+    """Render the one-line help description for a passthrough method.
+
+    Args:
+        method (GwsMethod): the Discovery method being wrapped.
+    """
+    return (f"{method.http} {method.path} "
+            f"(Google {method.service} API passthrough)")
+
+
+def gws_method_spec(method: GwsMethod) -> CommandSpec:
+    """Build a documented spec for one passthrough method.
+
+    The options are identical across methods; only the description
+    differs, so `--help` names the HTTP call the command stands for.
+
+    Args:
+        method (GwsMethod): the Discovery method being wrapped.
+    """
+    return CommandSpec(
+        options=(
+            Option(long="--params",
+                   value_kind=OperandKind.TEXT,
+                   description=_PARAMS_HELP),
+            Option(long="--json",
+                   value_kind=OperandKind.TEXT,
+                   description=_JSON_HELP),
+            Option(long="--page-all", description=_PAGE_ALL_HELP),
+            Option(long="--page-limit",
+                   value_kind=OperandKind.TEXT,
+                   description=_PAGE_LIMIT_HELP),
+        ),
+        description=gws_method_description(method),
+    )
+
 
 SERVICE_BASES: dict[str, Callable[[TokenManager], str]] = {
     "drive": drive_base,

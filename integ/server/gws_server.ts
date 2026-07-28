@@ -23,7 +23,8 @@
 //   - ids and timestamps are counters over a fixed clock, not random
 //   - `fields` masks are ignored (full resources are returned)
 //   - sheets store literal values; formulas are not evaluated
-//   - list pagination is single-page (pageToken is never emitted)
+//   - files.list paginates on pageSize/pageToken; the token is the next
+//     item's index, so pages are stable for a fixed query
 //   - Gmail search matches case-insensitive substrings, not word stems
 // Faithful behaviors that matter to the backends: Drive allows duplicate
 // sibling names, folder deletes are recursive, creating a file with a
@@ -346,6 +347,9 @@ function matchClause(item: DriveItem, clause: QueryClause): boolean {
   }
 }
 
+const DEFAULT_PAGE_SIZE = 100
+const MAX_PAGE_SIZE = 1000
+
 function listFiles(query: URLSearchParams): [number, object] {
   const q = query.get('q')
   let items = [...state.files.values()]
@@ -375,7 +379,30 @@ function listFiles(query: URLSearchParams): [number, object] {
         : b.modifiedTime.localeCompare(a.modifiedTime),
     )
   }
-  return [200, { kind: 'drive#fileList', incompleteSearch: false, files: items.map(fmtFile) }]
+  // Drive caps a page at pageSize (default 100) and hands back a token when
+  // more remain. Backends that ignore it silently see a truncated listing.
+  const rawSize = query.get('pageSize')
+  const parsedSize = rawSize === null ? DEFAULT_PAGE_SIZE : Number.parseInt(rawSize, 10)
+  const pageSize =
+    Number.isNaN(parsedSize) || parsedSize < 1
+      ? DEFAULT_PAGE_SIZE
+      : Math.min(parsedSize, MAX_PAGE_SIZE)
+  const rawToken = query.get('pageToken')
+  const parsedStart = rawToken === null ? 0 : Number.parseInt(rawToken, 10)
+  if (rawToken !== null && (Number.isNaN(parsedStart) || parsedStart < 0)) {
+    return googleError(400, `Invalid page token: ${rawToken}`, 'INVALID_ARGUMENT')
+  }
+  const start = rawToken === null ? 0 : parsedStart
+  const page = items.slice(start, start + pageSize)
+  const body: Record<string, unknown> = {
+    kind: 'drive#fileList',
+    incompleteSearch: false,
+    files: page.map(fmtFile),
+  }
+  if (start + pageSize < items.length) {
+    body.nextPageToken = String(start + pageSize)
+  }
+  return [200, body]
 }
 
 function deleteTree(id: string): void {

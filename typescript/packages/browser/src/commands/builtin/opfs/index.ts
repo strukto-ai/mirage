@@ -13,15 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  makeFiletypeCommands,
   makeResolveGlob,
-  ResourceName,
   withDefaultProvisions,
   type RegisteredCommand,
 } from '@struktoai/mirage-core'
-import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { SCOPE_ERROR } from '../../../core/opfs/constants.ts'
-import { read as opfsRead } from '../../../core/opfs/read.ts'
 import { readdir as opfsReaddir } from '../../../core/opfs/readdir.ts'
 import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import { OPFS_AWK } from './awk.ts'
@@ -100,11 +96,6 @@ const opfsResolveGlob = makeResolveGlob(opfsReaddir, SCOPE_ERROR)
 // would attach, so estimates match factory-built backends.
 export const OPFS_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions(
   [
-    ...makeFiletypeCommands<OPFSAccessor>({
-      resource: ResourceName.OPFS,
-      readBytes: opfsRead,
-      statEntry: opfsStat,
-    }),
     ...OPFS_AWK,
     ...OPFS_BASE64,
     ...OPFS_BASENAME,

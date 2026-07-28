@@ -16,11 +16,11 @@ import {
   concatBytes,
   evalJsonlStream,
   formatJqOutput,
+  hasTopLevelSpread,
   isJsonlPath,
   isStreamableJsonlExpr,
   jqEval,
-  parseJsonAuto,
-  parseJsonPath,
+  parseJsonDocs,
 } from '../../../core/jq/index.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -40,6 +40,10 @@ export async function jqGeneric(
   const raw = opts.flags.r === true
   const compact = opts.flags.c === true
   const slurp = opts.flags.s === true
+  // Must match the arity rule jqEval used: a nested `[]` inside a
+  // collector still yields one output, so a substring test would
+  // explode a single array one element per line.
+  const spread = hasTopLevelSpread(expression)
 
   if (paths.length > 0) {
     const first = paths[0]
@@ -48,20 +52,21 @@ export async function jqGeneric(
       return [evalJsonlStream(stream(first), expression, raw), new IOResult()]
     }
     const outputs: Uint8Array[] = []
-    const spread = expression.includes('[]')
     for (const p of paths) {
       const bytes = await materialize(stream(p))
-      let data = parseJsonPath(bytes, p.virtual)
-      if (isJsonlPath(p.virtual) && Array.isArray(data) && !slurp) {
-        for (const item of data) {
-          const result = await jqEval(item, expression.trim())
-          outputs.push(formatJqOutput(result, raw, compact, spread))
-        }
+      const docs = parseJsonDocs(bytes)
+      if (slurp) {
+        const result = await jqEval(docs, expression.trim())
+        outputs.push(formatJqOutput(result, raw, compact, spread))
         continue
       }
-      if (slurp && !Array.isArray(data)) data = [data]
-      const result = await jqEval(data, expression.trim())
-      outputs.push(formatJqOutput(result, raw, compact, spread))
+      // jq applies the program to every document in the stream, so a
+      // multi-value file evaluates per document whatever it is named;
+      // only slurp collapses the stream into one array.
+      for (const doc of docs) {
+        const result = await jqEval(doc, expression.trim())
+        outputs.push(formatJqOutput(result, raw, compact, spread))
+      }
     }
     const out: ByteSource = concatBytes(outputs)
     return [out, new IOResult()]
@@ -69,9 +74,17 @@ export async function jqGeneric(
 
   const stdinBytes = await readStdinAsync(opts.stdin)
   if (stdinBytes === null) return [null, new IOResult()]
-  let stdinData = parseJsonAuto(stdinBytes)
-  if (slurp && !Array.isArray(stdinData)) stdinData = [stdinData]
-  const stdinResult = await jqEval(stdinData, expression.trim())
-  const stdinSpread = expression.includes('[]')
-  return [formatJqOutput(stdinResult, raw, compact, stdinSpread), new IOResult()]
+  const stdinDocs = parseJsonDocs(stdinBytes)
+  if (slurp) {
+    const slurped = await jqEval(stdinDocs, expression.trim())
+    return [formatJqOutput(slurped, raw, compact, spread), new IOResult()]
+  }
+  // Same stream rule as the path branch: piped input is a stream of
+  // values, so each document is evaluated on its own.
+  const stdinOut: Uint8Array[] = []
+  for (const doc of stdinDocs) {
+    const result = await jqEval(doc, expression.trim())
+    stdinOut.push(formatJqOutput(result, raw, compact, spread))
+  }
+  return [concatBytes(stdinOut), new IOResult()]
 }
