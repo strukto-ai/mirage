@@ -12,17 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.s3._provision import \
-    file_read_provision as _ft_provision
 from mirage.commands.builtin.s3.io import IO as _IO
 from mirage.commands.builtin.s3.mkdir import mkdir
 from mirage.commands.builtin.s3.rm import rm
 from mirage.commands.builtin.s3.stat import stat
 from mirage.commands.builtin.s3.tee import tee
 from mirage.commands.builtin.s3.touch import touch
-from mirage.core.s3.read import read_bytes as _read
 
 # s3-specific behaviours kept as overrides: no real directories (mkdir -p,
 # rm not-empty), write-tracking (touch/tee), and the
@@ -31,8 +27,6 @@ from mirage.core.s3.read import read_bytes as _read
 _S3_OVERRIDES = {"stat", "rm", "mkdir", "tee", "touch"}
 
 COMMANDS = [
-    *make_filetype_commands(
-        "s3", _IO.resolve_glob, _read, provision=_ft_provision),
     *make_generic_commands(
         "s3",
         _IO,

@@ -111,9 +111,6 @@ redis    = ["redis[hiredis]>=5.0"]
 email    = ["aioimaplib>=2.0.1", "aiosmtplib>=5.1.0"]
 
 # --- data ---
-parquet  = ["pandas>=3.0.1", "pyarrow>=15.0"]
-hdf5     = ["h5py>=3.16.0", "tables>=3.11.1", "pandas>=3.0.1"]
-pdf      = ["pypdfium2>=5.7.0", "pillow>=12.2.0"]
 
 # --- observability ---
 langfuse = ["langfuse>=4.2.0"]
@@ -140,7 +137,6 @@ pydantic-ai = [
 # --- deepagents ---
 deepagents  = [
     "deepagents>=0.6.12",
-    "mirage-ai[pdf]",
 ]
 
 # --- openhands ---
@@ -184,9 +180,6 @@ all = [
     "mirage-ai[postgres]",
     "mirage-ai[redis]",
     "mirage-ai[email]",
-    "mirage-ai[parquet]",
-    "mirage-ai[hdf5]",
-    "mirage-ai[pdf]",
     "mirage-ai[langfuse]",
     "mirage-ai[mem0]",
     "mirage-ai[chroma]",

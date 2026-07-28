@@ -14,7 +14,6 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
@@ -52,7 +51,6 @@ __all__ = [
     "build_resource",
     "command",
     "known_resources",
-    "make_filetype_commands",
     "make_generic_commands",
     "make_generic_ops",
     "make_resolve_glob",

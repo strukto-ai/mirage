@@ -18,7 +18,7 @@ export const BOX_PROMPT = `{prefix}
     <name>.boxcanvas    Box Canvas  (raw canvas JSON; pipe to jq)
     <name>.gdoc/.gsheet/.gslides  Box's Google-Workspace files, stored as
                         Office Open XML (docx/xlsx/pptx) - opaque binary
-    <other-files>       PDFs, images, parquet, etc. - raw bytes
+    <other-files>       PDFs, images, binaries, etc. - raw bytes
 
   IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
   Box uses numeric folder IDs internally (root = 0); mirage caches the

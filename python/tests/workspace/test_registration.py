@@ -16,6 +16,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.config import command
+from mirage.commands.registry import RegisteredCommand
 from mirage.commands.spec import SPECS
 from mirage.io.types import IOResult
 from mirage.ops.registry import op
@@ -53,12 +54,6 @@ def test_commands_introspection(ws):
     assert isinstance(cmds, dict)
     assert "cat" in cmds
     assert None in cmds["cat"]
-
-
-def test_commands_has_filetype_variants(ws):
-    m = ws.mount("/data/")
-    cmds = m.commands()
-    assert len(cmds.get("cat", [])) > 1
 
 
 def test_registered_ops_introspection(ws):
@@ -101,9 +96,20 @@ def test_unregister_removes_command(ws):
 
 
 def test_unregister_removes_all_filetypes(ws):
+    # mirage ships no filetype renderers, so register one to prove the
+    # extension point still works and that unregister clears every variant.
     m = ws.mount("/data/")
-    cmds = m.commands()
-    assert len(cmds.get("cat", [])) > 1
+
+    async def demo_cat(store, paths, *texts, **kwargs):
+        return b"demo", IOResult()
+
+    m.register(
+        RegisteredCommand("cat",
+                          spec=SPECS["cat"],
+                          resource="ram",
+                          filetype=".demo",
+                          fn=demo_cat))
+    assert len(m.commands().get("cat", [])) > 1
     m.unregister(["cat"])
     assert "cat" not in m.commands()
 

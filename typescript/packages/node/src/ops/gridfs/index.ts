@@ -15,6 +15,8 @@
 import { ResourceName, makeGenericOps, type RegisteredOp } from '@struktoai/mirage-core'
 import { GRIDFS_IO } from '../../commands/builtin/gridfs/io.ts'
 
-export const GRIDFS_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.GRIDFS, GRIDFS_IO, {
-  filetypeRead: ['.feather', '.hdf5', '.parquet'],
-})
+export const GRIDFS_OPS: readonly RegisteredOp[] = makeGenericOps(
+  ResourceName.GRIDFS,
+  GRIDFS_IO,
+  {},
+)

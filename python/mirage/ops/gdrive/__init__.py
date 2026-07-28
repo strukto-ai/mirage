@@ -15,4 +15,4 @@
 from mirage.commands.builtin.gdrive.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("gdrive", IO, filetype_read=True)
+OPS = make_generic_ops("gdrive", IO)

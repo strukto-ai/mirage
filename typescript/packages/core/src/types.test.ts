@@ -169,10 +169,6 @@ describe('FileType', () => {
     expect(FileType.ZIP).toBe('application/zip')
     expect(FileType.GZIP).toBe('application/gzip')
     expect(FileType.PDF).toBe('application/pdf')
-    expect(FileType.PARQUET).toBe('parquet')
-    expect(FileType.ORC).toBe('orc')
-    expect(FileType.FEATHER).toBe('feather')
-    expect(FileType.HDF5).toBe('hdf5')
   })
 
   it('is frozen at runtime', () => {

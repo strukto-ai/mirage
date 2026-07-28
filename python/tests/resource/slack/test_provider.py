@@ -44,5 +44,4 @@ def test_resource_commands_registered(config):
     resource = SlackResource(config)
     # 58 native (generic factory read set incl. find and sed + bespoke
     # grep/rg + slack_* writers + md5sum/sha1sum/sha384sum/sha512sum)
-    # + 9 filetype cmds x 7 columnar exts
-    assert len(resource._commands) == 58 + 9 * 7
+    assert len(resource._commands) == 58

@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { cat as featherCat } from '../../core/filetype/feather.ts'
-import { cat as hdf5Cat } from '../../core/filetype/hdf5.ts'
-import { cat as parquetCat } from '../../core/filetype/parquet.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { extractWriteData } from '../write_args.ts'
 import type { PathSpec } from '../../types.ts'
@@ -45,20 +42,7 @@ export interface OpsTable<A extends Accessor = Accessor> {
   setAttrs?: OpCoreFn
 }
 
-const FILETYPE_CATS: Record<string, (raw: Uint8Array) => unknown> = {
-  '.parquet': parquetCat,
-  '.feather': featherCat,
-  '.hdf5': hdf5Cat,
-  '.h5': hdf5Cat,
-}
-
 export interface MakeGenericOpsOptions {
-  /**
-   * Extensions to emit rendered `read` ops for (keys of FILETYPE_CATS).
-   * Explicit list rather than Python's `filetype_read` bool: TS has no
-   * ORC support and backends opt in per extension.
-   */
-  filetypeRead?: readonly string[]
   /** Synthesize truncate from readBytes + write (no native partial write). */
   emulateTruncate?: boolean
   /** Forward `parents=true` to the core mkdir (disk). */
@@ -141,20 +125,6 @@ export function makeGenericOps<A extends Accessor>(
     false,
   )
 
-  for (const ext of options.filetypeRead ?? []) {
-    const cat = FILETYPE_CATS[ext]
-    if (!cat) throw new Error(`no filetype cat registered for ${ext}`)
-    emit(
-      'read',
-      async (accessor, path, _args, kwargs) => {
-        const raw = await table.readBytes(asA(accessor), path, pickIndex(kwargs))
-        return cat(raw)
-      },
-      false,
-      ext,
-    )
-  }
-
   const { write, mkdir, unlink, rmdir, rename, create, truncate, append, setAttrs } = table
   if (write) {
     emit(
@@ -213,7 +183,7 @@ export function makeGenericOps<A extends Accessor>(
         try {
           data = await table.readBytes(asA(accessor), path)
         } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+          if ((err as { code?: string }).code !== 'ENOENT') throw err
           data = new Uint8Array(0)
         }
         const out = new Uint8Array(length)

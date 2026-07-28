@@ -15,4 +15,4 @@
 from mirage.commands.builtin.ram.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("ram", IO, filetype_read=True, emulate_truncate=True)
+OPS = make_generic_ops("ram", IO, emulate_truncate=True)
