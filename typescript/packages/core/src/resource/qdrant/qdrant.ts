@@ -34,7 +34,7 @@ export interface QdrantResourceOptions {
 
 export class QdrantResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.QDRANT
-  readonly isRemote: boolean = true
+  readonly remote: boolean = true
   readonly supportsSnapshot: boolean = false
   readonly prompt: string = QDRANT_PROMPT
   readonly config: QdrantConfigResolved

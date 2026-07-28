@@ -35,12 +35,13 @@ class BaseResource:
 
     name: str = "base"
     caches_reads: bool = False
-    # Whether a remote mirage (e.g. inside a sandbox) may reconstruct
-    # this resource from its config and mount the same backing store.
-    # Opt-in per backend because it serializes credentials out to the
-    # remote; leave False for anything local (RAM, disk) or that must
+    # Whether the backing store lives remotely, reachable from its
+    # config alone. True unlocks reconstructing the resource elsewhere
+    # (e.g. FUSE-mounting it inside a sandbox), which serializes the
+    # config, credentials included, out to that remote. Opt-in per
+    # backend: leave False for anything local (RAM, disk) or that must
     # not ship its secrets.
-    remotely_mountable: bool = False
+    remote: bool = False
     accessor: Accessor = Accessor()
     _ops: dict[str, Callable[..., Any]] = {}
     PROMPT: str = ""
@@ -96,12 +97,12 @@ class BaseResource:
         {...}}`` including credentials, enough for another mirage
         process (e.g. inside a sandbox) to construct the same resource
         and mount it. Generic for any backend that opts in with
-        ``remotely_mountable`` and holds a pydantic ``config``; None
-        (the default) means the backing store is not remotely
-        reachable, e.g. RAM or a local disk.
+        ``remote`` and holds a pydantic ``config``; None (the default)
+        means the backing store is not remotely reachable, e.g. RAM or
+        a local disk.
         """
         config = getattr(self, "config", None)
-        if not self.remotely_mountable or not isinstance(config, BaseModel):
+        if not self.remote or not isinstance(config, BaseModel):
             return None
         dumped = config.model_dump(exclude_none=True)
         spec_config = {

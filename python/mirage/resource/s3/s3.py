@@ -71,7 +71,7 @@ class S3Resource(BaseResource):
     accessor: S3Accessor
     name: str = ResourceName.S3
     caches_reads: bool = True
-    remotely_mountable: bool = True
+    remote: bool = True
     _ops: dict[str, Any] = _S3_OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
