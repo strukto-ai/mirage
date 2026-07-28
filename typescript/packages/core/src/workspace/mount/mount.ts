@@ -28,11 +28,12 @@ import { getExtension } from '../../commands/resolve.ts'
 import { resolveSafeguard } from '../../commands/safeguard.ts'
 import { applyOpSafeguard, runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import type { CommandSpec } from '../../commands/spec/types.ts'
+import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { runWithCacheManager } from '../../cache/context.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { runWithRevisions, setVirtualPrefix } from '../../observe/context.ts'
+import { pushMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
@@ -440,7 +441,7 @@ export class MountEntry {
       ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
     }
 
-    setVirtualPrefix(mountPrefix)
+    const prevPrefix = pushMountPrefix(mountPrefix)
     try {
       return await runWithCacheManager(this.cacheManager, () =>
         runWithRevisions(
@@ -485,7 +486,7 @@ export class MountEntry {
                 // TODO: hand back a finalization context separately
                 // instead of stamping policy onto io.safeguard.
                 result[1].safeguard = resolvedSafeguard
-                return result
+                return wrapMountStreams(result, mountPrefix)
               }
             }
             return [null, new IOResult()]
@@ -493,7 +494,7 @@ export class MountEntry {
         ),
       )
     } finally {
-      setVirtualPrefix('')
+      pushMountPrefix(prevPrefix)
     }
   }
 
@@ -528,18 +529,53 @@ export class MountEntry {
     const accessor = this.resource.accessor ?? NOOP_ACCESSOR
     const opOverride = this.commandSafeguards.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    return runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
-      for (const op of levels) {
-        const result = await runWithTimeout(
-          Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
-          opTimeout,
-          opName,
-        )
-        if (result !== null && result !== undefined) return applyOpSafeguard(result, opOverride)
-      }
-      return null
-    })
+    const prevPrefix = pushMountPrefix(mountPrefix)
+    try {
+      return await runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
+        for (const op of levels) {
+          const result = await runWithTimeout(
+            Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
+            opTimeout,
+            opName,
+          )
+          if (result !== null && result !== undefined) return applyOpSafeguard(result, opOverride)
+        }
+        return null
+      })
+    } finally {
+      pushMountPrefix(prevPrefix)
+    }
   }
+}
+
+// Push `mountPrefix` back during lazy consumption of anything the command
+// handed back, so a deferred backend read names its record the same way an
+// eager one does. Dedup by identity: a stream that appears both as the
+// primary stdout and in IOResult.reads/writes is wrapped once.
+// Mirrors python's _wrap_cmd_streams.
+function wrapMountStreams(
+  result: [ByteSource | null, IOResult],
+  mountPrefix: string,
+): [ByteSource | null, IOResult] {
+  const [stream, io] = result
+  const seen = new Map<ByteSource, ByteSource>()
+  const wrap = (obj: ByteSource): ByteSource => {
+    if (obj instanceof Uint8Array) return obj
+    const hit = seen.get(obj)
+    if (hit !== undefined) return hit
+    let wrapped: ByteSource
+    if (obj instanceof CachableAsyncIterator) {
+      obj.wrapSource((src) => withMountPrefix(mountPrefix, src))
+      wrapped = obj
+    } else {
+      wrapped = withMountPrefix(mountPrefix, obj)
+    }
+    seen.set(obj, wrapped)
+    return wrapped
+  }
+  for (const [k, v] of Object.entries(io.reads)) io.reads[k] = wrap(v)
+  for (const [k, v] of Object.entries(io.writes)) io.writes[k] = wrap(v)
+  return [stream !== null ? wrap(stream) : null, io]
 }
 
 function sortFiletypeMap(m: Map<string, (string | null)[]>): Record<string, (string | null)[]> {

@@ -81,10 +81,9 @@ export async function read(
     }
     const bytes = await streamToBuffer(resp.Body)
     const { fingerprint, revision } = fpRevFromS3Response(resp)
-    // Use the virtual (mount-prefixed) path here rather than rawPath +
-    // an applyPrefix lookup, because lazy stream consumption can outlive
-    // the mount's setVirtualPrefix scope. Passing virtual makes record's
-    // path independent of the active recording context state.
+    // Naming the virtual path rather than rawPath keeps the record exact
+    // without consulting the active mount prefix; record() leaves an
+    // already-prefixed path alone.
     record('read', virtual, ResourceName.S3, bytes.byteLength, startMs, {
       fingerprint,
       revision,

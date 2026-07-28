@@ -13,12 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> {
-  private readonly source: AsyncIterator<Uint8Array>
+  private source: AsyncIterator<Uint8Array>
   private readonly buffer: Uint8Array[] = []
   private exhaustedFlag = false
 
   constructor(source: AsyncIterable<Uint8Array>) {
     this.source = source[Symbol.asyncIterator]()
+  }
+
+  // Re-wrap the underlying source in place, keeping whatever is already
+  // buffered. The mount seam uses this to restore its recording context
+  // around each pull without replacing the object commands hold on to.
+  // Mirrors python's CachableAsyncIterator.replace_source.
+  wrapSource(fn: (src: AsyncIterable<Uint8Array>) => AsyncIterable<Uint8Array>): void {
+    const inner = this.source
+    this.source = fn({ [Symbol.asyncIterator]: () => inner })[Symbol.asyncIterator]()
   }
 
   get exhausted(): boolean {

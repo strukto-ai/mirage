@@ -20,10 +20,11 @@ import {
   revisionFor,
   runWithRecording,
   runWithRevisions,
-  setVirtualPrefix,
+  pushMountPrefix,
+  withMountPrefix,
 } from './context.ts'
 
-describe('runWithRecording / record / setVirtualPrefix', () => {
+describe('runWithRecording / record / pushMountPrefix', () => {
   it('record outside recording scope is a no-op', () => {
     record('read', '/a.txt', 's3', 100, 0)
   })
@@ -57,7 +58,7 @@ describe('runWithRecording / record / setVirtualPrefix', () => {
 
   it('prepends virtual prefix when path lacks it', async () => {
     const [, records] = await runWithRecording(async () => {
-      setVirtualPrefix('/s3')
+      pushMountPrefix('/s3')
       record('read', '/data/file.json', 's3', 100, 0)
     })
     expect(records[0]?.path).toBe('/s3/data/file.json')
@@ -72,10 +73,36 @@ describe('runWithRecording / record / setVirtualPrefix', () => {
 
   it('does not double-apply prefix when path already has it', async () => {
     const [, records] = await runWithRecording(async () => {
-      setVirtualPrefix('/s3')
+      pushMountPrefix('/s3')
       record('read', '/s3/data/file.json', 's3', 100, 0)
     })
     expect(records[0]?.path).toBe('/s3/data/file.json')
+  })
+
+  it('restores the previous prefix instead of clearing it', async () => {
+    const [, records] = await runWithRecording(async () => {
+      const outer = pushMountPrefix('/s3')
+      const inner = pushMountPrefix('/db')
+      record('read', '/a.txt', 'postgres', 1, 0)
+      pushMountPrefix(inner)
+      record('read', '/b.txt', 's3', 1, 0)
+      pushMountPrefix(outer)
+    })
+    expect(records.map((r) => r.path)).toEqual(['/db/a.txt', '/s3/b.txt'])
+  })
+
+  it('withMountPrefix restores the prefix for a stream consumed after the scope', async () => {
+    const lazy = async function* (): AsyncGenerator<Uint8Array> {
+      record('read', '/a.txt', 's3', 3, 0)
+      yield new Uint8Array([1, 2, 3])
+    }
+    const [, records] = await runWithRecording(async () => {
+      const prev = pushMountPrefix('/s3')
+      const wrapped = withMountPrefix('/s3', lazy())
+      pushMountPrefix(prev)
+      for await (const _chunk of wrapped) void _chunk
+    })
+    expect(records[0]?.path).toBe('/s3/a.txt')
   })
 })
 

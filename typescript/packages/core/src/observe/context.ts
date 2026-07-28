@@ -18,7 +18,7 @@ import { rstripSlash } from '../utils/slash.ts'
 
 interface RecordingState {
   records: OpRecord[]
-  virtualPrefix: string
+  mountPrefix: string
 }
 
 const storage = createAsyncContext<RecordingState>()
@@ -35,14 +35,54 @@ interface RevisionsState {
 const revisionsStorage = createAsyncContext<RevisionsState>()
 
 export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
-  const state: RecordingState = { records: [], virtualPrefix: '' }
+  const state: RecordingState = { records: [], mountPrefix: '' }
   const value = await storage.run(state, fn)
   return [value, state.records]
 }
 
-export function setVirtualPrefix(prefix: string): void {
+/**
+ * Set the mount prefix records are named against, returning the prefix that
+ * was active before. Callers restore that value rather than clearing to '',
+ * so a mount whose command dispatches into another mount gets its own prefix
+ * back. Mirrors python's `push_mount_prefix`.
+ *
+ * No-op (and returns '') when no recording context is active.
+ */
+export function pushMountPrefix(prefix: string): string {
   const state = storage.getStore()
-  if (state !== undefined) state.virtualPrefix = prefix
+  if (state === undefined) return ''
+  const prev = state.mountPrefix
+  state.mountPrefix = prefix
+  return prev
+}
+
+/**
+ * Wrap a stream so `prefix` is the active mount prefix during each pull from
+ * the underlying source. A command may return a stream that defers its
+ * backend read to the first chunk request, by which point the mount's own
+ * push/restore pair has already run, so without this the record lands with no
+ * prefix. Mirrors python's `with_mount_prefix`.
+ */
+export async function* withMountPrefix(
+  prefix: string,
+  it: AsyncIterable<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
+  const iter = it[Symbol.asyncIterator]()
+  try {
+    for (;;) {
+      const prev = pushMountPrefix(prefix)
+      let step: IteratorResult<Uint8Array>
+      try {
+        step = await iter.next()
+      } finally {
+        pushMountPrefix(prev)
+      }
+      if (step.done === true) return
+      yield step.value
+    }
+  } finally {
+    await iter.return?.(undefined)
+  }
 }
 
 // Whether a recording context is active. Backends that need an extra API
@@ -71,7 +111,7 @@ export function record(
   state.records.push(
     new OpRecord({
       op,
-      path: applyPrefix(state.virtualPrefix, path),
+      path: applyPrefix(state.mountPrefix, path),
       source,
       bytes: nbytes,
       timestamp: Date.now(),
@@ -92,7 +132,7 @@ export function recordStream(
   if (state === undefined) return null
   const rec = new OpRecord({
     op,
-    path: applyPrefix(state.virtualPrefix, path),
+    path: applyPrefix(state.mountPrefix, path),
     source,
     bytes: 0,
     timestamp: Date.now(),

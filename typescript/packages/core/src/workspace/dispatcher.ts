@@ -21,7 +21,7 @@ import { IOResult } from '../io/types.ts'
 import { eaccesReadOnly } from '../utils/errors.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import { runWithRevisions } from '../observe/context.ts'
+import { pushMountPrefix, runWithRevisions } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
@@ -125,6 +125,10 @@ export class Dispatcher {
     const opOverride = mount?.commandSafeguards.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
+    // Backends name their records against the mount-relative key, so the
+    // prefix has to be active while the op runs or the record loses the
+    // mount it belongs to. Mirrors Python's Ops._call.
+    const prevPrefix = pushMountPrefix(rstripSlash(mountPrefix))
     try {
       result = await runWithRevisions(
         mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
@@ -147,6 +151,8 @@ export class Dispatcher {
     } catch (err) {
       await this.reconciler.onOpMissing(opName, p.virtual, err)
       throw err
+    } finally {
+      pushMountPrefix(prevPrefix)
     }
     result = await applyOpSafeguard(result, opOverride)
     if (DISPATCH_WRITE_OPS.has(opName)) {
