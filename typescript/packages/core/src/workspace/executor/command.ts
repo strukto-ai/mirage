@@ -23,6 +23,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
 import type { ShellArray } from '../../shell/array.ts'
+import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
@@ -951,7 +952,10 @@ async function executeShellFunction(
     for (const cmd of body) {
       try {
         const cmdNode = cmd as Parameters<ExecuteNodeFn>[0]
-        const [stdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
+        const [rawStdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
+        // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
+        // grep) finalize only once stdout is consumed.
+        const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
         if (stdout !== null) allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
         lastExec = execNode

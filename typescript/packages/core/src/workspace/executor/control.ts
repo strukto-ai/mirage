@@ -82,10 +82,15 @@ async function executeBody(
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
   for (const cmd of body) {
     try {
-      const [stdout, io, execNode] = await executeNode(cmd, session, stdin, callStack)
+      const [rawStdout, io, execNode] = await executeNode(cmd, session, stdin, callStack)
       lastExec = execNode
+      // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
+      // grep) finalize only once stdout is consumed; bash updates $?
+      // after every body statement.
+      const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      session.lastExitCode = io.exitCode
       if (
         io.exitCode !== 0 &&
         session.shellOptions.errexit === true &&
@@ -325,11 +330,16 @@ export async function handleCase(
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p.trim())))) continue
     ran = true
     for (const stmt of body) {
-      const [stdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
+      const [rawStdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
       stageStdin = null
       lastExec = execNode
+      // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
+      // grep) finalize only once stdout is consumed; bash updates $?
+      // after every arm statement.
+      const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      session.lastExitCode = io.exitCode
     }
     if (terminator === ';&') {
       // Fall through: run the next arm's body without testing it.

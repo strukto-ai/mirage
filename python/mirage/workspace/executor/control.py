@@ -78,8 +78,13 @@ async def _execute_body(
             raise ContinueSignal(stdout=combined,
                                  io=merged_io,
                                  levels=sig.levels)
+        # Barrier before seeding $?: lazy exit codes (exit_on_empty in
+        # grep) finalize only once stdout is consumed; bash updates $?
+        # after every body statement.
+        stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
         all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)
+        session.last_exit_code = io.exit_code
         if (io.exit_code != 0 and session.shell_options.get("errexit")
                 and cmd.type not in ERREXIT_EXEMPT_TYPES
                 and not session.errexit_immune):
@@ -332,9 +337,14 @@ async def handle_case(
             stdout, io, last_exec = await execute_node(stmt, session, stdin,
                                                        call_stack)
             stdin = None
+            # Barrier before seeding $?: lazy exit codes (exit_on_empty
+            # in grep) finalize only once stdout is consumed; bash
+            # updates $? after every arm statement.
+            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            session.last_exit_code = io.exit_code
         if terminator == ";&":
             # Fall through: run the next arm's body without testing it.
             fallthrough = True

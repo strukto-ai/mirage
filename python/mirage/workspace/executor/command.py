@@ -40,6 +40,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.route import RoutingDecision
 from mirage.runtime.table import VfsRuntime
 from mirage.shell.array import ShellArray
+from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -607,6 +608,10 @@ async def handle_command(
                             IOResult(stderr=sig.stderr))
                     merged_io.exit_code = sig.exit_code
                     break
+                # Barrier before seeding $?: lazy exit codes
+                # (exit_on_empty in grep) finalize only once stdout is
+                # consumed.
+                stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
                 if stdout is not None:
                     all_stdout.append(stdout)
                 merged_io = await merged_io.merge(io)

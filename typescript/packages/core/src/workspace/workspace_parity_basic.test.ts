@@ -282,6 +282,29 @@ describe('workspace: brace group', () => {
   })
 })
 
+describe('workspace: $? in construct bodies', () => {
+  const cases = [
+    'if true; then false; echo s=$?; fi',
+    'for i in 1; do false; echo s=$?; done',
+    'while true; do false; echo s=$?; break; done',
+    'case x in x) false; echo s=$?;; esac',
+    'f() { false; echo s=$?; }; f',
+    'if true; then grep missing /ram/notes.txt; echo s=$?; fi',
+    'for i in 1; do grep missing /ram/notes.txt; echo s=$?; done',
+    'case x in x) grep missing /ram/notes.txt; echo s=$?;; esac',
+    'g() { grep missing /ram/notes.txt; echo s=$?; }; g',
+  ]
+  for (const cmd of cases) {
+    it(`tracks the previous statement: ${cmd}`, async () => {
+      const { ws } = await makeWorkspace()
+      const io = await ws.execute(cmd)
+      expect(io.exitCode).toBe(0)
+      expect(stdoutStr(io)).toBe('s=1\n')
+      await ws.close()
+    })
+  }
+})
+
 describe('workspace: variable expansion', () => {
   it('$F expands to full path', async () => {
     const { ws } = await makeWorkspace()
