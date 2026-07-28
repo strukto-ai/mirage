@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
-import { MountMode } from '../../types.ts'
-import { Workspace } from '../workspace.ts'
-import { RemoteSandbox, type MountSpecs, type RemoteSandboxOptions } from './sandbox.ts'
-import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
-import type { RunResult } from './runtime.ts'
+import { getTestParser } from '../../fixtures/workspace_fixture.ts'
+import { RAMResource } from '../../../resource/ram/ram.ts'
+import { MountMode } from '../../../types.ts'
+import { Workspace } from '../../workspace.ts'
+import { RemoteSandbox, type MountSpecs, type RemoteSandboxOptions } from './base.ts'
+import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
+import type { RunResult } from '../runtime.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -182,7 +182,7 @@ describe('RemoteSandbox', () => {
   })
 
   it('resolves cwd under workspaceRoot and merges env', async () => {
-    const box = new RecordingSandbox({ captures: ['*'], env: { BASE: '1' } })
+    const box = new RecordingSandbox({ captures: ['*'], config: { env: { BASE: '1' } } })
     const ws = await sandboxWorkspace(box)
     try {
       const result = await box.runLine('nvidia-smi', null, { LINE: '2' }, '/data/deep')
@@ -232,6 +232,11 @@ describe('RemoteSandbox', () => {
     await expect(box.run({ code: 'x', args: [], env: {}, stdin: null })).rejects.toThrow(
       'whole lines',
     )
+  })
+
+  it('rejects unknown config keys', () => {
+    const options = { config: { snapshot: 'mirage-fuse' } } as Record<string, unknown>
+    expect(() => new RecordingSandbox(options)).toThrow("unknown sandbox config key 'snapshot'")
   })
 
   it('mount failure points at the image', async () => {

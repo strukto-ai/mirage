@@ -14,7 +14,8 @@
 
 import { buildRuntime } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
-import { E2BRuntime, type E2BRuntimeOptions, type E2bSdk } from './e2b.ts'
+import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import { E2BRuntime, type E2bSdk } from './runtime.ts'
 
 const DEC = new TextDecoder()
 
@@ -99,7 +100,7 @@ class FakedE2BRuntime extends E2BRuntime {
   }
 }
 
-function makeRuntime(options: E2BRuntimeOptions = {}): FakedE2BRuntime {
+function makeRuntime(options: RemoteSandboxOptions = {}): FakedE2BRuntime {
   FakeSandbox.created = []
   FakeSandbox.connected = []
   FakeSandbox.killed = 0
@@ -110,8 +111,7 @@ function makeRuntime(options: E2BRuntimeOptions = {}): FakedE2BRuntime {
 describe('E2BRuntime', () => {
   it('maps template, env, and apiKey onto create params', async () => {
     const runtime = makeRuntime({
-      template: 'mirage-base',
-      env: { A: '1' },
+      config: { template: 'mirage-base', env: { A: '1' } },
       apiKey: 'k-123',
     })
     const sandboxId = await runtime.createSandbox()
@@ -123,10 +123,9 @@ describe('E2BRuntime', () => {
     })
   })
 
-  it('sandboxParams merge last with snake_case keys camelized', async () => {
+  it('params merge last with snake_case keys camelized', async () => {
     const runtime = makeRuntime({
-      template: 'mirage-base',
-      sandboxParams: { template: 'override', timeout_ms: 600 },
+      config: { template: 'mirage-base', params: { template: 'override', timeout_ms: 600 } },
     })
     await runtime.createSandbox()
     const params = FakeSandbox.created[0] ?? {}
@@ -135,11 +134,15 @@ describe('E2BRuntime', () => {
   })
 
   it('image fails loud', () => {
-    expect(() => makeRuntime({ image: 'python:3.12' })).toThrow('template')
+    expect(() => makeRuntime({ config: { image: 'python:3.12' } })).toThrow('template')
   })
 
-  it('resources fail loud', () => {
-    expect(() => makeRuntime({ resources: { cpu: 2 } })).toThrow('template')
+  it('sizing fails loud', () => {
+    expect(() => makeRuntime({ config: { cpu: 2 } })).toThrow('template')
+  })
+
+  it('cli args fail loud', () => {
+    expect(() => makeRuntime({ config: { args: ['--network', 'host'] } })).toThrow('params')
   })
 
   it('threads env and cwd and reports real stderr', async () => {
@@ -203,7 +206,7 @@ describe('E2BRuntime', () => {
   })
 
   it("registers under the config name 'e2b'", () => {
-    const runtime = buildRuntime('e2b', { template: 'mirage-base' })
+    const runtime = buildRuntime('e2b', { config: { template: 'mirage-base' } })
     expect(runtime).toBeInstanceOf(E2BRuntime)
     expect(runtime.captures).toEqual(['*'])
   })

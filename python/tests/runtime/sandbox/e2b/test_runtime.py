@@ -15,8 +15,8 @@
 import pytest
 from e2b import CommandExitException
 
-from mirage.runtime.sandbox import E2BRuntime, SandboxResources
-from mirage.runtime.sandbox import e2b as e2b_mod
+from mirage.runtime.sandbox import E2BRuntime
+from mirage.runtime.sandbox.e2b import sdk
 
 
 class FakeResult:
@@ -96,13 +96,17 @@ def fake_sdk(monkeypatch):
     FakeSandbox.connected = []
     FakeSandbox.killed = 0
     FakeSandbox.last = None
-    monkeypatch.setattr(e2b_mod, "AsyncSandbox", FakeSandbox)
+    monkeypatch.setattr(sdk, "AsyncSandbox", FakeSandbox)
 
 
 @pytest.mark.asyncio
 async def test_create_maps_template_env_and_api_key():
-    runtime = E2BRuntime(template="mirage-base",
-                         env={"A": "1"},
+    runtime = E2BRuntime(config={
+        "template": "mirage-base",
+        "env": {
+            "A": "1"
+        },
+    },
                          api_key="k-123")
     sandbox_id = await runtime.create_sandbox()
     assert sandbox_id == "sb-e2b"
@@ -117,12 +121,15 @@ async def test_create_maps_template_env_and_api_key():
 
 
 @pytest.mark.asyncio
-async def test_sandbox_params_merge_last_over_named_options():
-    runtime = E2BRuntime(template="mirage-base",
-                         sandbox_params={
-                             "template": "override",
-                             "timeout": 600
-                         })
+async def test_params_merge_last_over_config_fields():
+    runtime = E2BRuntime(
+        config={
+            "template": "mirage-base",
+            "params": {
+                "template": "override",
+                "timeout": 600
+            },
+        })
     await runtime.create_sandbox()
     params = FakeSandbox.created[0]
     assert params["template"] == "override"
@@ -131,12 +138,17 @@ async def test_sandbox_params_merge_last_over_named_options():
 
 def test_image_fails_loud():
     with pytest.raises(ValueError, match="template"):
-        E2BRuntime(image="python:3.12")
+        E2BRuntime(config={"image": "python:3.12"})
 
 
-def test_resources_fail_loud():
+def test_sizing_fails_loud():
     with pytest.raises(ValueError, match="template"):
-        E2BRuntime(resources=SandboxResources(cpu=2))
+        E2BRuntime(config={"cpu": 2})
+
+
+def test_cli_args_fail_loud():
+    with pytest.raises(ValueError, match="params"):
+        E2BRuntime(config={"args": ["--network", "host"]})
 
 
 @pytest.mark.asyncio
@@ -202,7 +214,7 @@ async def test_close_kills_only_an_owned_sandbox():
 
 @pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
-    monkeypatch.setattr(e2b_mod, "AsyncSandbox", None)
+    monkeypatch.setattr(sdk, "AsyncSandbox", None)
     runtime = E2BRuntime()
     with pytest.raises(ImportError, match="mirage-ai\\[e2b\\]"):
         await runtime.create_sandbox()

@@ -19,11 +19,8 @@ from typing import Any
 
 from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
-
-_DEFAULT_IMAGE = "python:3.12-slim"
-
-_INSTALL_HINT = ("the docker runtime needs the docker CLI on PATH "
-                 "(Docker Desktop, colima, or a podman alias)")
+from mirage.runtime.sandbox.constants import (DOCKER_CLI_HINT,
+                                              DOCKER_DEFAULT_IMAGE)
 
 
 class DockerRuntime(RemoteSandbox):
@@ -31,31 +28,35 @@ class DockerRuntime(RemoteSandbox):
 
     Drives the docker CLI directly (Docker Desktop, colima, or a
     podman alias all work), so there is no SDK dependency and no
-    daemon socket wiring. `image` defaults to python:3.12-slim and is
-    pulled on first use; `resources` maps onto --cpus/--memory/--gpus
-    (disk fails loud: the default storage driver has no per-container
-    limit). Containers get real stdin and separated stderr, and bind
-    mounts make local files free: run_args=["-v", "/host:/mnt/data"].
+    daemon socket wiring. The general SandboxConfig maps onto the CLI:
+    ``image`` is pulled on first use (python:3.12-slim when omitted),
+    sizing becomes --cpus/--memory/--gpus (``disk`` fails loud: the
+    default storage driver has no per-container limit), and ``args``
+    passes any extra `docker run` flag verbatim before the image
+    (binds, --cap-add, --network, --user, ...). ``template`` and
+    ``params`` are SDK concepts and fail loud. Containers get real
+    stdin and separated stderr.
 
     Args:
-        run_args (list[str] | None): extra `docker run` flags passed
-            verbatim before the image (binds, --network, --user, ...),
-            the CLI-flavored sibling of the SDK runtimes'
-            sandbox_params.
-        options (Any): the uniform RemoteSandbox constructor fields.
+        options (Any): the RemoteSandbox constructor fields.
     """
 
     name = "docker"
 
-    def __init__(self,
-                 run_args: list[str] | None = None,
-                 **options: Any) -> None:
+    def __init__(self, **options: Any) -> None:
         super().__init__(**options)
-        if self.resources is not None and self.resources.disk is not None:
+        if self.config.template is not None:
+            raise ValueError(
+                "docker boots images, not prebuilt templates; pass the "
+                "built image's name as config image instead")
+        if self.config.disk is not None:
             raise ValueError(
                 "docker has no per-container disk limit on the default "
-                "storage driver; omit disk from resources")
-        self.run_args = list(run_args) if run_args else []
+                "storage driver; omit disk from the config")
+        if self.config.params:
+            raise ValueError(
+                "docker is CLI-driven and takes no SDK create params; "
+                "pass `docker run` flags through config args instead")
 
     async def _docker(self,
                       args: list[str],
@@ -71,26 +72,25 @@ class DockerRuntime(RemoteSandbox):
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError:
-            raise RuntimeError(_INSTALL_HINT) from None
+            raise RuntimeError(DOCKER_CLI_HINT) from None
         stdout, stderr = await process.communicate(stdin)
         return stdout, stderr, process.returncode or 0
 
     def _resource_args(self) -> list[str]:
         args: list[str] = []
-        if self.resources is None:
-            return args
-        if self.resources.cpu is not None:
-            args += ["--cpus", str(self.resources.cpu)]
-        if self.resources.memory is not None:
-            args += ["--memory", f"{self.resources.memory}g"]
-        if self.resources.gpu is not None:
-            args += ["--gpus", str(self.resources.gpu)]
+        if self.config.cpu is not None:
+            args += ["--cpus", str(self.config.cpu)]
+        if self.config.memory is not None:
+            args += ["--memory", f"{self.config.memory}g"]
+        if self.config.gpu is not None:
+            args += ["--gpus", str(self.config.gpu)]
         return args
 
     async def create_sandbox(self) -> str:
-        image = self.image if self.image is not None else _DEFAULT_IMAGE
+        image = (self.config.image
+                 if self.config.image is not None else DOCKER_DEFAULT_IMAGE)
         args = [
-            "run", "-d", *self._resource_args(), *self.run_args, image,
+            "run", "-d", *self._resource_args(), *self.config.args, image,
             "sleep", "infinity"
         ]
         stdout, stderr, code = await self._docker(args)

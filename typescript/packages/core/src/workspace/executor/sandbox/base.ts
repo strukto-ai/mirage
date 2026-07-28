@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HISTORY_PREFIX } from '../../resource/history/history.ts'
-import { lstripSlash, rstripSlash } from '../../utils/slash.ts'
-import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
-import { ScriptSource, type RouteScript } from './route/types.ts'
-import { scriptStringError, type RunArgs, type RunResult, type Runtime } from './runtime.ts'
-
-// Virtual mounts the workspace synthesizes; the sandbox has its own.
-export const SYSTEM_MOUNTS: ReadonlySet<string> = new Set(['/dev', HISTORY_PREFIX])
+import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
+import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
+import { ScriptSource, type RouteScript } from '../route/types.ts'
+import { scriptStringError, type RunArgs, type RunResult, type Runtime } from '../runtime.ts'
+import { coerceConfig, type NormalizedSandboxConfig, type SandboxConfig } from './config.ts'
+import { DEFAULT_WORKSPACE_ROOT, MOUNT_SPEC_ENV, SYSTEM_MOUNTS } from './constants.ts'
 
 // Shell-quote one token, leaving already-safe path tokens bare
 // (mirrors Python's shlex.quote output for the same inputs).
@@ -31,32 +29,14 @@ function shQuote(s: string): string {
 /** Per-prefix remote mount specs; null = not remotely mountable. */
 export type MountSpecs = Record<string, Record<string, unknown> | null>
 
-/**
- * Sandbox sizing, mapped onto each provider's create call.
- *
- * Providers that fix sizing in the image or template ignore the fields
- * they cannot honor. `cpu` is cores, `memory`/`disk` are GiB, `gpu` is
- * a count or a type spec for providers that take one.
- */
-export interface SandboxResources {
-  cpu?: number
-  memory?: number
-  disk?: number
-  gpu?: number | string
-}
-
 /** Constructor options for a RemoteSandbox subclass (a yaml entry's keys). */
 export interface RemoteSandboxOptions {
   /** Commands that place a whole line here; ["*"] claims every line. */
   captures?: readonly string[]
   /** Provider credential; absent reads the provider's own env variable. */
   apiKey?: string
-  /** Image or template name; absent uses the provider default. */
-  image?: string
-  /** Environment set in the sandbox. */
-  env?: Record<string, string>
-  /** Sizing, where the provider supports per-sandbox resources. */
-  resources?: SandboxResources
+  /** How the sandbox machine is built (a yaml entry's `config` block). */
+  config?: SandboxConfig
   /** Reattach to this live sandbox instead of creating one. */
   sandboxId?: string
   /**
@@ -89,9 +69,7 @@ export abstract class RemoteSandbox implements Runtime {
   readonly runsLines = true
   readonly captures: readonly string[]
   readonly apiKey: string | undefined
-  readonly image: string | undefined
-  readonly env: Record<string, string>
-  readonly resources: SandboxResources | undefined
+  readonly config: NormalizedSandboxConfig
   workspaceRoot: string | null
   script?: RouteScript
   private sandboxIdValue: string | null
@@ -109,9 +87,7 @@ export abstract class RemoteSandbox implements Runtime {
     if (typeof opts.script === 'string') throw scriptStringError()
     this.captures = opts.captures !== undefined ? opts.captures.slice() : ['*']
     this.apiKey = opts.apiKey
-    this.image = opts.image
-    this.env = opts.env !== undefined ? { ...opts.env } : {}
-    this.resources = opts.resources
+    this.config = coerceConfig(opts.config)
     this.workspaceRoot = opts.workspaceRoot ?? null
     if (typeof opts.script === 'function' || opts.script instanceof ScriptSource) {
       this.script = opts.script
@@ -163,7 +139,7 @@ export abstract class RemoteSandbox implements Runtime {
     cwd: string,
   ): Promise<RunResult> {
     await this.ensureStarted()
-    const merged = { ...this.env, ...env }
+    const merged = { ...this.config.env, ...env }
     return this.execLine(line, stdin, merged, this.sandboxCwd(cwd))
   }
 
@@ -196,12 +172,12 @@ export abstract class RemoteSandbox implements Runtime {
    * directory its user can write.
    */
   defaultWorkspaceRoot(): Promise<string> {
-    return Promise.resolve('/workspace')
+    return Promise.resolve(DEFAULT_WORKSPACE_ROOT)
   }
 
   /** The session cwd as a path inside the sandbox. */
   sandboxCwd(cwd: string): string {
-    const root = this.workspaceRoot ?? '/workspace'
+    const root = this.workspaceRoot ?? DEFAULT_WORKSPACE_ROOT
     const rel = lstripSlash(cwd)
     if (rel === '') return root
     return `${rstripSlash(root)}/${rel}`
@@ -229,7 +205,7 @@ export abstract class RemoteSandbox implements Runtime {
    */
   private desiredMounts(): Record<string, [Record<string, unknown>, string]> {
     const specs = this.mountSpecs?.() ?? {}
-    const root = rstripSlash(this.workspaceRoot ?? '/workspace')
+    const root = rstripSlash(this.workspaceRoot ?? DEFAULT_WORKSPACE_ROOT)
     const desired: Record<string, [Record<string, unknown>, string]> = {}
     for (const prefix of this.userMountPrefixes()) {
       const spec = specs[prefix] ?? null
@@ -260,7 +236,7 @@ export abstract class RemoteSandbox implements Runtime {
     if (this.dispatch === null || this.mountPrefixes === null) return
     for (const [prefix, [spec, mountpoint]] of Object.entries(this.desiredMounts())) {
       await this.mountCommand(`mirage mount add ${shQuote(prefix)} --fuse ${shQuote(mountpoint)}`, {
-        MIRAGE_MOUNT_SPEC: JSON.stringify(spec),
+        [MOUNT_SPEC_ENV]: JSON.stringify(spec),
       })
     }
   }

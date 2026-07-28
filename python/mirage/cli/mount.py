@@ -22,10 +22,9 @@ import typer
 
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, handle_response
+from mirage.runtime.sandbox.constants import MOUNT_SPEC_ENV as SPEC_ENV
 
 app = typer.Typer(help="Mount a single backend as a live FUSE tree.")
-
-SPEC_ENV = "MIRAGE_MOUNT_SPEC"
 
 _ID_PREFIX = "mnt-"
 

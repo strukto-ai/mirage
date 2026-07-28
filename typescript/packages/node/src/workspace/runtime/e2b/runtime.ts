@@ -20,81 +20,68 @@ import {
   type RemoteSandboxOptions,
   rstripSlash,
   type RunResult,
+  sizedConfig,
+  STDIN_PATH,
 } from '@struktoai/mirage-core'
 import type { CommandResult, Sandbox } from 'e2b'
 import type * as e2bSdk from 'e2b'
 
 export type E2bSdk = typeof e2bSdk
 
-const STDIN_PATH = '/tmp/.mirage_stdin'
-
 const ENC = new TextEncoder()
 
 export const E2B_OPTION_KEYS: readonly string[] = [
   'captures',
   'apiKey',
-  'env',
+  'config',
   'sandboxId',
   'workspaceRoot',
   'script',
-  'template',
-  'sandboxParams',
   'mount',
 ]
-
-/** E2BRuntime options: the uniform surface plus the E2B template. */
-export interface E2BRuntimeOptions extends RemoteSandboxOptions {
-  /**
-   * Name or id of the E2B template to boot (E2B's default template
-   * when omitted). E2B has no inline image builds and no per-sandbox
-   * sizing: both are baked into the template (`e2b template build`).
-   */
-  template?: string
-  /**
-   * Extra Sandbox.create options passed through to the SDK, merged
-   * last so they can also override anything computed here (timeoutMs,
-   * metadata, allowInternetAccess, ...). Keys are camelized, so yaml
-   * snake_case and SDK camelCase both work.
-   */
-  sandboxParams?: Record<string, unknown>
-}
 
 /**
  * An E2B sandbox as a whole-line runtime.
  *
  * E2B has no inline image builds and no per-sandbox sizing: both are
- * baked into a named template, so `image` and `resources` fail loud
- * and `template` selects the prebuilt environment. `apiKey` falls
- * back to E2B_API_KEY. E2B's exec reports stdout and stderr
- * separately, so both stream back real.
+ * baked into a named template (`e2b template build`), so `image` and
+ * sizing fail loud, `template` selects the prebuilt environment
+ * (E2B's default template when omitted), and `params` passes any
+ * other Sandbox.create option verbatim (timeoutMs, metadata,
+ * allowInternetAccess, ...), merged last so it can override anything
+ * computed here. `apiKey` falls back to E2B_API_KEY. E2B's exec
+ * reports stdout and stderr separately, so both stream back real.
  */
 export class E2BRuntime extends RemoteSandbox {
   readonly name = 'e2b'
-  readonly template: string | undefined
-  readonly sandboxParams: Record<string, unknown>
+  // Config-borne dicts keep yaml snake_case inner keys; the SDK
+  // wants camelCase. Camelizing here makes both spellings work.
+  private readonly params: Record<string, unknown>
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: E2BRuntimeOptions | Record<string, unknown> = {}) {
-    const { template, sandboxParams, ...rest } = options as E2BRuntimeOptions
-    super(rest)
-    if (this.image !== undefined) {
+  constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
+    super(options)
+    if (this.config.image !== undefined) {
       throw new Error(
         "e2b has no inline image builds: build a template with 'e2b template " +
           'build' +
-          "' and pass template= instead of image=",
+          "' and pass template instead of image",
       )
     }
-    if (this.resources !== undefined) {
+    if (sizedConfig(this.config)) {
       throw new Error(
         'e2b fixes sizing in the template, not per sandbox: bake cpu/memory ' +
-          'into the template instead of resources=',
+          'into the template instead of sizing the config',
       )
     }
-    this.template = template
-    // Config-borne dicts keep yaml snake_case inner keys; the SDK
-    // wants camelCase. Camelizing here makes both spellings work.
-    this.sandboxParams = normalizeFields(sandboxParams ?? {})
+    if (this.config.args.length > 0) {
+      throw new Error(
+        'e2b is SDK-driven and takes no CLI args; pass create options ' +
+          'through config params instead',
+      )
+    }
+    this.params = normalizeFields(this.config.params)
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -117,9 +104,9 @@ export class E2BRuntime extends RemoteSandbox {
   async createSandbox(): Promise<string> {
     const sdk = await this.ensureSdk()
     const params: Record<string, unknown> = this.apiParams()
-    if (this.template !== undefined) params.template = this.template
-    if (Object.keys(this.env).length > 0) params.envs = { ...this.env }
-    Object.assign(params, this.sandboxParams)
+    if (this.config.template !== undefined) params.template = this.config.template
+    if (Object.keys(this.config.env).length > 0) params.envs = { ...this.config.env }
+    Object.assign(params, this.params)
     this.sandbox = await sdk.Sandbox.create(params)
     return this.sandbox.sandboxId
   }

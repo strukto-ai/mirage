@@ -29,8 +29,12 @@
 #   - name: daytona
 #     captures: ["python3", "nvidia-smi"]
 #     api_key: ${DAYTONA_API_KEY}
-#     image: my-cuda-mirage-fuse:latest
-#     resources: {cpu: 1, memory: 2, disk: 10, gpu: 1}
+#     config:
+#       image: my-cuda-mirage-fuse:latest
+#       cpu: 1
+#       memory: 2
+#       disk: 10
+#       gpu: 1
 
 mode: EXEC
 
@@ -44,24 +48,21 @@ mounts:
       aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
       key_prefix: mirage-daytona-cli-demo
 
-# Lifecycle: the entry below stops the sandbox after 10 idle minutes
-# and deletes it 30 minutes later, so a forgotten demo cleans itself up
+# Lifecycle: the params below stop the sandbox after 10 idle minutes
+# and delete it 30 minutes later, so a forgotten demo cleans itself up
 # (deleting the workspace already deletes a sandbox it created; these
 # knobs are the safety net, and the whole lifecycle for a shared
 # sandbox_id: sandbox, which close never deletes). Daytona defaults:
 # stop after 15 idle minutes, never delete; 0 = never stop / delete
-# right on stop.
-#
-# Any other Daytona create param goes through sandbox_params verbatim
-# (merged last, so it can also override the options above):
-#   sandbox_params:
-#     auto_archive_interval: 30
-#     labels: {team: ml}
+# right on stop. Any other Daytona create param rides the same params
+# block verbatim (auto_archive_interval, labels, volumes, ...).
 runtimes:
   - name: daytona
     captures: ["python3", "pip"]
     api_key: ${DAYTONA_API_KEY}
-    snapshot: mirage-fuse # built once by prebake_snapshot.py
-    auto_stop_interval: 10 # idle minutes before stop
-    auto_delete_interval: 30 # minutes stopped before delete
+    config:
+      template: mirage-fuse # built once by prebake_snapshot.py
+      params:
+        auto_stop_interval: 10 # idle minutes before stop
+        auto_delete_interval: 30 # minutes stopped before delete
   - vfs

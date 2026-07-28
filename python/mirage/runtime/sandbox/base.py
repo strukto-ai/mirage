@@ -17,36 +17,13 @@ import json
 import posixpath
 import shlex
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from typing import Any
 
-from mirage.resource.history import HISTORY_PREFIX
 from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.route.types import RouteScript
-
-# Virtual mounts the workspace synthesizes; the sandbox has its own.
-SYSTEM_MOUNTS: frozenset[str] = frozenset({"/dev", HISTORY_PREFIX})
-
-
-@dataclass(frozen=True, slots=True)
-class SandboxResources:
-    """Sandbox sizing, mapped onto each provider's create call.
-
-    Providers that fix sizing in the image or template ignore the
-    fields they cannot honor.
-
-    Args:
-        cpu (int | None): CPU cores.
-        memory (int | None): memory in GiB.
-        disk (int | None): disk in GiB.
-        gpu (int | str | None): GPU count or type spec, for providers
-            that take one.
-    """
-
-    cpu: int | None = None
-    memory: int | None = None
-    disk: int | None = None
-    gpu: int | str | None = None
+from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.constants import (DEFAULT_WORKSPACE_ROOT,
+                                              MOUNT_SPEC_ENV, SYSTEM_MOUNTS)
 
 
 class RemoteSandbox(Runtime):
@@ -55,21 +32,19 @@ class RemoteSandbox(Runtime):
     Subclasses adapt one provider by implementing the hooks
     (create_sandbox, exec_line, upload, download, close); everything
     else is inherited: routing and captures, per-line scripts, lazy
-    provisioning on the first line, workspace mounting, control-plane
-    translation of virtual mount paths onto the provider's mountpoints,
-    and reattach to a live sandbox by id. The sandbox is created on the
-    first line, never at workspace construction.
+    provisioning on the first line, workspace mounting, and reattach
+    to a live sandbox by id. The sandbox is created on the first line,
+    never at workspace construction.
 
     Args:
         captures (Sequence[str]): commands that place a whole line
             here; ("*",) claims every line.
         api_key (str | None): provider credential; None reads the
             provider's own environment variable.
-        image (str | None): image or template name; None uses the
-            provider default.
-        env (dict[str, str] | None): environment set in the sandbox.
-        resources (SandboxResources | None): sizing, where the
-            provider supports per-sandbox resources.
+        config (SandboxConfig | dict[str, Any] | None): how the
+            sandbox machine is built (image or template, env, sizing,
+            provider params); the dict form is a yaml entry's
+            ``config`` block.
         sandbox_id (str | None): reattach to this live sandbox
             instead of creating one.
         workspace_root (str | None): where the workspace appears
@@ -91,19 +66,13 @@ class RemoteSandbox(Runtime):
     def __init__(self,
                  captures: Sequence[str] = ("*", ),
                  api_key: str | None = None,
-                 image: str | None = None,
-                 env: dict[str, str] | None = None,
-                 resources: SandboxResources | dict[str, Any] | None = None,
+                 config: SandboxConfig | dict[str, Any] | None = None,
                  sandbox_id: str | None = None,
                  workspace_root: str | None = None,
                  script: RouteScript | None = None) -> None:
         self.captures = tuple(captures)
         self.api_key = api_key
-        self.image = image
-        self.env = dict(env) if env is not None else {}
-        # The dict form is the yaml entry's resources block.
-        self.resources = (SandboxResources(
-            **resources) if isinstance(resources, dict) else resources)
+        self.config = SandboxConfig.coerce(config)
         self.workspace_root = workspace_root
         self.script = script
         self._sandbox_id = sandbox_id
@@ -179,7 +148,7 @@ class RemoteSandbox(Runtime):
                     self.workspace_root = await self.default_workspace_root()
                 await self.mount_workspace()
                 self._started = True
-        merged = {**self.env, **env}
+        merged = {**self.config.env, **env}
         return await self.exec_line(line, stdin, merged, self.sandbox_cwd(cwd))
 
     def sandbox_cwd(self, cwd: str) -> str:
@@ -188,7 +157,7 @@ class RemoteSandbox(Runtime):
         Args:
             cwd (str): the workspace-side working directory.
         """
-        root = self.workspace_root or "/workspace"
+        root = self.workspace_root or DEFAULT_WORKSPACE_ROOT
         return posixpath.join(root, cwd.lstrip("/"))
 
     async def default_workspace_root(self) -> str:
@@ -198,7 +167,7 @@ class RemoteSandbox(Runtime):
         workspace mounts, so adapters can ask the sandbox itself
         (e.g. $HOME) for a directory its user can write.
         """
-        return "/workspace"
+        return DEFAULT_WORKSPACE_ROOT
 
     def _user_mount_prefixes(self) -> list[str]:
         assert self._mount_prefixes is not None
@@ -218,7 +187,7 @@ class RemoteSandbox(Runtime):
         data. A user mount with no spec fails loud.
         """
         specs = self._mount_specs() if self._mount_specs is not None else {}
-        root = self.workspace_root or "/workspace"
+        root = self.workspace_root or DEFAULT_WORKSPACE_ROOT
         desired: dict[str, tuple[dict[str, Any], str]] = {}
         for prefix in self._user_mount_prefixes():
             spec = specs.get(prefix)
@@ -249,7 +218,7 @@ class RemoteSandbox(Runtime):
             await self._mount_command(
                 f"mirage mount add {shlex.quote(prefix)} "
                 f"--fuse {shlex.quote(mountpoint)}",
-                {"MIRAGE_MOUNT_SPEC": json.dumps(spec)})
+                {MOUNT_SPEC_ENV: json.dumps(spec)})
 
     async def _mount_command(self, command: str, env: dict[str, str]) -> None:
         """One in-sandbox mount command, failing loud.

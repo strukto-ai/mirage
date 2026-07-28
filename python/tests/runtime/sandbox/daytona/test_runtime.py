@@ -14,8 +14,8 @@
 
 import pytest
 
-from mirage.runtime.sandbox import DaytonaRuntime, SandboxResources
-from mirage.runtime.sandbox import daytona as daytona_mod
+from mirage.runtime.sandbox import DaytonaRuntime
+from mirage.runtime.sandbox.daytona import sdk
 
 
 class FakeProcess:
@@ -92,14 +92,19 @@ def fake_client(monkeypatch):
     FakeClient.deleted = []
     FakeClient.closed = 0
     FakeClient.last = None
-    monkeypatch.setattr(daytona_mod, "AsyncDaytona", FakeClient)
+    monkeypatch.setattr(sdk, "AsyncDaytona", FakeClient)
 
 
 @pytest.mark.asyncio
 async def test_create_maps_image_env_and_gpu_forces_ephemeral():
-    runtime = DaytonaRuntime(image="cuda:12",
-                             env={"A": "1"},
-                             resources=SandboxResources(cpu=4, gpu="H100"))
+    runtime = DaytonaRuntime(config={
+        "image": "cuda:12",
+        "env": {
+            "A": "1"
+        },
+        "cpu": 4,
+        "gpu": "H100",
+    })
     sandbox_id = await runtime.create_sandbox()
     assert sandbox_id == "sb-77"
     params = FakeClient.created[0]
@@ -119,57 +124,60 @@ async def test_create_without_image_uses_default_snapshot():
 
 
 @pytest.mark.asyncio
-async def test_snapshot_boots_by_name():
-    runtime = DaytonaRuntime(snapshot="mirage-fuse")
+async def test_template_boots_a_snapshot_by_name():
+    runtime = DaytonaRuntime(config={"template": "mirage-fuse"})
     await runtime.create_sandbox()
     params = FakeClient.created[0]
     assert params.snapshot == "mirage-fuse"
     assert not hasattr(params, "image")
 
 
-def test_snapshot_and_image_conflict():
+def test_template_and_image_conflict():
     with pytest.raises(ValueError, match="not both"):
-        DaytonaRuntime(snapshot="mirage-fuse", image="cuda:12")
+        DaytonaRuntime(config={"template": "mirage-fuse", "image": "cuda:12"})
+
+
+def test_cli_args_fail_loud():
+    with pytest.raises(ValueError, match="params"):
+        DaytonaRuntime(config={"args": ["--cap-add", "SYS_ADMIN"]})
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_intervals_reach_create_params():
-    runtime = DaytonaRuntime(auto_stop_interval=0, auto_delete_interval=60)
+async def test_params_pass_through_verbatim():
+    runtime = DaytonaRuntime(
+        config={
+            "params": {
+                "auto_stop_interval": 10,
+                "auto_delete_interval": 30,
+                "labels": {
+                    "team": "ml"
+                },
+            }
+        })
     await runtime.create_sandbox()
     params = FakeClient.created[0]
-    assert params.auto_stop_interval == 0
-    assert params.auto_delete_interval == 60
-
-
-@pytest.mark.asyncio
-async def test_sandbox_params_pass_through_verbatim():
-    runtime = DaytonaRuntime(sandbox_params={
-        "auto_archive_interval": 30,
-        "labels": {
-            "team": "ml"
-        },
-    })
-    await runtime.create_sandbox()
-    params = FakeClient.created[0]
-    assert params.auto_archive_interval == 30
+    assert params.auto_stop_interval == 10
+    assert params.auto_delete_interval == 30
     assert params.labels == {"team": "ml"}
 
 
 @pytest.mark.asyncio
-async def test_sandbox_params_merge_last_over_named_options():
-    runtime = DaytonaRuntime(image="cuda:12",
-                             auto_stop_interval=5,
-                             sandbox_params={"auto_stop_interval": 9})
+async def test_params_merge_last_over_config_fields():
+    runtime = DaytonaRuntime(config={
+        "image": "cuda:12",
+        "params": {
+            "image": "cuda:13"
+        },
+    })
     await runtime.create_sandbox()
     params = FakeClient.created[0]
-    assert params.image == "cuda:12"
-    assert params.auto_stop_interval == 9
+    assert params.image == "cuda:13"
 
 
 @pytest.mark.asyncio
-async def test_resources_without_image_fail_loud():
-    runtime = DaytonaRuntime(resources=SandboxResources(gpu=1))
-    with pytest.raises(ValueError, match="require an image"):
+async def test_sizing_without_image_fails_loud():
+    runtime = DaytonaRuntime(config={"gpu": 1})
+    with pytest.raises(ValueError, match="requires an image"):
         await runtime.create_sandbox()
 
 
@@ -218,7 +226,7 @@ async def test_default_workspace_root_derives_from_home():
 
 @pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
-    monkeypatch.setattr(daytona_mod, "AsyncDaytona", None)
+    monkeypatch.setattr(sdk, "AsyncDaytona", None)
     runtime = DaytonaRuntime()
     with pytest.raises(ImportError, match="mirage-ai\\[daytona\\]"):
         await runtime.create_sandbox()

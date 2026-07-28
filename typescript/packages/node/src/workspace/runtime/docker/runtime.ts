@@ -28,13 +28,10 @@ const INSTALL_HINT =
 
 export const DOCKER_OPTION_KEYS: readonly string[] = [
   'captures',
-  'image',
-  'env',
-  'resources',
+  'config',
   'sandboxId',
   'workspaceRoot',
   'script',
-  'runArgs',
   'mount',
 ]
 
@@ -44,41 +41,42 @@ interface DockerResult {
   code: number
 }
 
-/** DockerRuntime options: the uniform surface plus raw run flags. */
-export interface DockerRuntimeOptions extends RemoteSandboxOptions {
-  /**
-   * Extra `docker run` flags passed verbatim before the image (binds,
-   * --network, --user, ...), the CLI-flavored sibling of the SDK
-   * runtimes' sandboxParams.
-   */
-  runArgs?: string[]
-}
-
 /**
  * A local Docker container as a whole-line runtime.
  *
  * Drives the docker CLI directly (Docker Desktop, colima, or a podman
  * alias all work), so there is no SDK dependency and no daemon socket
- * wiring. `image` defaults to python:3.12-slim and is pulled on first
- * use; `resources` maps onto --cpus/--memory/--gpus (disk fails loud:
- * the default storage driver has no per-container limit). Containers
- * get real stdin and separated stderr, and bind mounts make local
- * files free: runArgs: ['-v', '/host:/mnt/data'].
+ * wiring. The general SandboxConfig maps onto the CLI: `image` is
+ * pulled on first use (python:3.12-slim when omitted), sizing becomes
+ * --cpus/--memory/--gpus (`disk` fails loud: the default storage
+ * driver has no per-container limit), and `args` passes any extra
+ * `docker run` flag verbatim before the image (binds, --cap-add,
+ * --network, --user, ...). `template` and `params` are SDK concepts
+ * and fail loud. Containers get real stdin and separated stderr.
  */
 export class DockerRuntime extends RemoteSandbox {
   readonly name = 'docker'
-  readonly runArgs: string[]
 
-  constructor(options: DockerRuntimeOptions | Record<string, unknown> = {}) {
-    const { runArgs, ...rest } = options as DockerRuntimeOptions
-    super(rest)
-    if (this.resources?.disk !== undefined) {
+  constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
+    super(options)
+    if (this.config.template !== undefined) {
       throw new Error(
-        'docker has no per-container disk limit on the default storage ' +
-          'driver; omit disk from resources',
+        'docker boots images, not prebuilt templates; pass the built ' +
+          "image's name as config image instead",
       )
     }
-    this.runArgs = runArgs !== undefined ? runArgs.slice() : []
+    if (this.config.disk !== undefined) {
+      throw new Error(
+        'docker has no per-container disk limit on the default storage ' +
+          'driver; omit disk from the config',
+      )
+    }
+    if (Object.keys(this.config.params).length > 0) {
+      throw new Error(
+        'docker is CLI-driven and takes no SDK create params; pass ' +
+          '`docker run` flags through config args instead',
+      )
+    }
   }
 
   // One docker CLI invocation; the seam tests override.
@@ -106,8 +104,7 @@ export class DockerRuntime extends RemoteSandbox {
 
   private resourceArgs(): string[] {
     const args: string[] = []
-    if (this.resources === undefined) return args
-    const { cpu, memory, gpu } = this.resources
+    const { cpu, memory, gpu } = this.config
     if (cpu !== undefined) args.push('--cpus', String(cpu))
     if (memory !== undefined) args.push('--memory', `${String(memory)}g`)
     if (gpu !== undefined) args.push('--gpus', String(gpu))
@@ -115,12 +112,12 @@ export class DockerRuntime extends RemoteSandbox {
   }
 
   async createSandbox(): Promise<string> {
-    const image = this.image ?? DEFAULT_IMAGE
+    const image = this.config.image ?? DEFAULT_IMAGE
     const result = await this.docker([
       'run',
       '-d',
       ...this.resourceArgs(),
-      ...this.runArgs,
+      ...this.config.args,
       image,
       'sleep',
       'infinity',

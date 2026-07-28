@@ -100,8 +100,10 @@ import { DockerRuntime } from '@struktoai/mirage-node'
 
 const runtime = new DockerRuntime({
   captures: ['python3'],
-  image: 'mirage-python-fuse',
-  runArgs: ['--cap-add', 'SYS_ADMIN', '--device', '/dev/fuse'],
+  config: {
+    image: 'mirage-python-fuse',
+    args: ['--cap-add', 'SYS_ADMIN', '--device', '/dev/fuse'],
+  },
 })
 const ws = new Workspace(
   { '/data': new S3Resource({ bucket: 'my-bucket' }) },
@@ -110,11 +112,13 @@ const ws = new Workspace(
 await ws.execute('python3 job.py', { cwd: '/data' })
 ```
 
-`resources` maps onto `--cpus` / `--memory` / `--gpus` (disk fails loud: the
-default storage driver has no per-container limit), and `runArgs` passes any
-extra `docker run` flag verbatim (binds, `--network`, `--user`). The
-container gets real stdin and separated stderr. Live FUSE mounts need
-`--cap-add SYS_ADMIN --device /dev/fuse` and run on Linux hosts.
+Every sandbox runtime takes one general `config`: how the machine is built.
+For docker, `cpu` / `memory` / `gpu` map onto `--cpus` / `--memory` /
+`--gpus` (`disk` fails loud: the default storage driver has no per-container
+limit), and `args` passes any extra `docker run` flag verbatim (binds,
+`--network`, `--user`). The container gets real stdin and separated stderr.
+Live FUSE mounts need `--cap-add SYS_ADMIN --device /dev/fuse` and run on
+Linux hosts.
 
 ## Daytona and e2b
 
@@ -127,9 +131,11 @@ runtimes:
   - name: daytona
     captures: ["python3", "pip"]
     apiKey: ${DAYTONA_API_KEY}
-    snapshot: mirage-fuse        # prebaked image with fuse3 + mirage
-    autoStopInterval: 10         # idle minutes before stop
-    autoDeleteInterval: 30       # minutes stopped before delete
+    config:
+      template: mirage-fuse # prebaked snapshot with fuse3 + mirage
+      params:
+        autoStopInterval: 10 # idle minutes before stop
+        autoDeleteInterval: 30 # minutes stopped before delete
   - vfs
 ```
 
@@ -139,8 +145,10 @@ They need the matching provider SDK:
 pnpm add @daytonaio/sdk   # or: pnpm add e2b
 ```
 
-`resources` (`cpu` / `memory` / `disk` / `gpu`) sizes an image sandbox;
-snapshot and template sandboxes fix their sizing when they are built.
+The config's `template` names the prebaked source (a Daytona snapshot or an
+e2b template), its sizing (`cpu` / `memory` / `disk` / `gpu`) sizes an image
+sandbox (a template fixes sizing when it is built), and `params` passes any
+other provider create option verbatim to the SDK.
 
 ## Reusing and reattaching
 
@@ -152,16 +160,18 @@ forgotten sandbox cleans itself up.
 
 ## Selecting in YAML
 
-Sandbox runtimes are ordinary `runtimes` entries: a name plus its options
-flat on the entry, with `vfs` as the in-process catch-all. Only the selected
-runtime consumes its block, so one config stays portable:
+Sandbox runtimes are ordinary `runtimes` entries: a name, its captures, and
+a `config` block describing the machine (mirroring a mount's `config`
+block), with `vfs` as the in-process catch-all. Only the selected runtime
+consumes its entry, so one file stays portable:
 
 ```yaml
 runtimes:
   - name: docker
     captures: ["python3"]
-    image: mirage-python-fuse
-    runArgs: ["--cap-add", "SYS_ADMIN", "--device", "/dev/fuse"]
+    config:
+      image: mirage-python-fuse
+      args: ["--cap-add", "SYS_ADMIN", "--device", "/dev/fuse"]
   - vfs
 
 mounts:

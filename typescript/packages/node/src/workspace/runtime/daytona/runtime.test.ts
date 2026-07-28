@@ -14,7 +14,8 @@
 
 import { buildRuntime } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
-import { DaytonaRuntime, type DaytonaRuntimeOptions, type DaytonaSdk } from './daytona.ts'
+import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import { DaytonaRuntime, type DaytonaSdk } from './runtime.ts'
 
 const DEC = new TextDecoder()
 
@@ -91,7 +92,7 @@ class FakedDaytonaRuntime extends DaytonaRuntime {
   }
 }
 
-function makeRuntime(options: DaytonaRuntimeOptions = {}): FakedDaytonaRuntime {
+function makeRuntime(options: RemoteSandboxOptions = {}): FakedDaytonaRuntime {
   FakeClient.created = []
   FakeClient.fetched = []
   FakeClient.deleted = []
@@ -103,9 +104,7 @@ function makeRuntime(options: DaytonaRuntimeOptions = {}): FakedDaytonaRuntime {
 describe('DaytonaRuntime', () => {
   it('maps image, env, and a gpu type onto create params', async () => {
     const runtime = makeRuntime({
-      image: 'cuda:12',
-      env: { A: '1' },
-      resources: { cpu: 4, gpu: 'H100' },
+      config: { image: 'cuda:12', env: { A: '1' }, cpu: 4, gpu: 'H100' },
     })
     const sandboxId = await runtime.createSandbox()
     expect(sandboxId).toBe('sb-77')
@@ -117,7 +116,7 @@ describe('DaytonaRuntime', () => {
   })
 
   it('a gpu count passes through as a count', async () => {
-    const runtime = makeRuntime({ image: 'cuda:12', resources: { gpu: 2 } })
+    const runtime = makeRuntime({ config: { image: 'cuda:12', gpu: 2 } })
     await runtime.createSandbox()
     const params = FakeClient.created[0] as Record<string, unknown>
     expect(params.resources).toEqual({ gpu: 2 })
@@ -132,51 +131,49 @@ describe('DaytonaRuntime', () => {
     expect('resources' in params).toBe(false)
   })
 
-  it('a snapshot boots by name', async () => {
-    const runtime = makeRuntime({ snapshot: 'mirage-fuse' })
+  it('a template boots a snapshot by name', async () => {
+    const runtime = makeRuntime({ config: { template: 'mirage-fuse' } })
     await runtime.createSandbox()
     const params = FakeClient.created[0] as Record<string, unknown>
     expect(params.snapshot).toBe('mirage-fuse')
     expect('image' in params).toBe(false)
   })
 
-  it('snapshot and image conflict', () => {
-    expect(() => makeRuntime({ snapshot: 'mirage-fuse', image: 'cuda:12' })).toThrow('not both')
+  it('template and image conflict', () => {
+    expect(() => makeRuntime({ config: { template: 'mirage-fuse', image: 'cuda:12' } })).toThrow(
+      'not both',
+    )
   })
 
-  it('lifecycle intervals reach the create params', async () => {
-    const runtime = makeRuntime({ autoStopInterval: 0, autoDeleteInterval: 60 })
-    await runtime.createSandbox()
-    const params = FakeClient.created[0] as Record<string, unknown>
-    expect(params.autoStopInterval).toBe(0)
-    expect(params.autoDeleteInterval).toBe(60)
+  it('cli args fail loud', () => {
+    expect(() => makeRuntime({ config: { args: ['--cap-add', 'SYS_ADMIN'] } })).toThrow('params')
   })
 
-  it('sandboxParams pass through with snake_case keys camelized', async () => {
+  it('params pass through with snake_case keys camelized', async () => {
     const runtime = makeRuntime({
-      sandboxParams: { auto_archive_interval: 30, labels: { team: 'ml' } },
+      config: {
+        params: { auto_stop_interval: 10, auto_archive_interval: 30, labels: { team: 'ml' } },
+      },
     })
     await runtime.createSandbox()
     const params = FakeClient.created[0] as Record<string, unknown>
+    expect(params.autoStopInterval).toBe(10)
     expect(params.autoArchiveInterval).toBe(30)
     expect(params.labels).toEqual({ team: 'ml' })
   })
 
-  it('sandboxParams merge last over named options', async () => {
+  it('params merge last over config fields', async () => {
     const runtime = makeRuntime({
-      image: 'cuda:12',
-      autoStopInterval: 5,
-      sandboxParams: { autoStopInterval: 9 },
+      config: { image: 'cuda:12', params: { image: 'cuda:13' } },
     })
     await runtime.createSandbox()
     const params = FakeClient.created[0] as Record<string, unknown>
-    expect(params.image).toBe('cuda:12')
-    expect(params.autoStopInterval).toBe(9)
+    expect(params.image).toBe('cuda:13')
   })
 
-  it('resources without an image fail loud', async () => {
-    const runtime = makeRuntime({ resources: { gpu: 1 } })
-    await expect(runtime.createSandbox()).rejects.toThrow('require an image')
+  it('sizing without an image fails loud', async () => {
+    const runtime = makeRuntime({ config: { gpu: 1 } })
+    await expect(runtime.createSandbox()).rejects.toThrow('requires an image')
   })
 
   it('redirects stdin through an uploaded file', async () => {
@@ -224,7 +221,7 @@ describe('DaytonaRuntime', () => {
   })
 
   it("registers under the config name 'daytona'", () => {
-    const runtime = buildRuntime('daytona', { image: 'cuda:12' })
+    const runtime = buildRuntime('daytona', { config: { image: 'cuda:12' } })
     expect(runtime).toBeInstanceOf(DaytonaRuntime)
     expect(runtime.captures).toEqual(['*'])
   })

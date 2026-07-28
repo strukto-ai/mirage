@@ -20,6 +20,8 @@ import {
   type RemoteSandboxOptions,
   rstripSlash,
   type RunResult,
+  sizedConfig,
+  STDIN_PATH,
 } from '@struktoai/mirage-core'
 import type {
   CreateSandboxFromImageParams,
@@ -33,95 +35,58 @@ import type * as daytonaSdk from '@daytonaio/sdk'
 
 export type DaytonaSdk = typeof daytonaSdk
 
-const STDIN_PATH = '/tmp/.mirage_stdin'
-
 const ENC = new TextEncoder()
 
 export const DAYTONA_OPTION_KEYS: readonly string[] = [
   'captures',
   'apiKey',
-  'image',
-  'env',
-  'resources',
+  'config',
   'sandboxId',
   'workspaceRoot',
   'script',
-  'autoStopInterval',
-  'autoDeleteInterval',
-  'snapshot',
-  'sandboxParams',
   'mount',
 ]
-
-/** DaytonaRuntime options: the uniform surface plus Daytona lifecycle. */
-export interface DaytonaRuntimeOptions extends RemoteSandboxOptions {
-  /**
-   * Name of a prebaked Daytona snapshot to boot from. Prefer this
-   * over image for anything heavy: image builds run in the
-   * sandbox-create path (slow, and large exports have wedged the
-   * SDK's log stream), while a snapshot boots in seconds. Mutually
-   * exclusive with image.
-   */
-  snapshot?: string
-  /**
-   * Minutes of inactivity before Daytona stops the sandbox (0 =
-   * never; Daytona defaults to 15). A stopped sandbox keeps its disk
-   * and can be reattached via sandboxId.
-   */
-  autoStopInterval?: number
-  /**
-   * Minutes after stopping before Daytona deletes the sandbox (0 =
-   * on stop; Daytona defaults to never). GPU sandboxes are ephemeral
-   * and always delete on stop.
-   */
-  autoDeleteInterval?: number
-  /**
-   * Extra Daytona create params passed through to the SDK, merged
-   * last so they can also override anything computed here. Covers the
-   * long tail (autoArchiveInterval, labels, volumes, ...) without a
-   * named option per key. Keys are camelized, so yaml snake_case and
-   * SDK camelCase both work.
-   */
-  sandboxParams?: Record<string, unknown>
-}
 
 /**
  * A Daytona sandbox as a whole-line runtime.
  *
- * The uniform RemoteSandbox surface maps directly: `image` becomes a
- * Daytona image sandbox (omitted = the account's default snapshot),
- * `resources` maps onto Daytona's per-sandbox sizing (`gpu` as a
- * number is a count, as a string a GPU type like "H100"; either
- * requests a GPU and forces the sandbox ephemeral, as Daytona
- * requires), `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec
- * has no stdin and reports combined output, so piped bytes are
- * uploaded and redirected in, and stderr comes back null.
+ * The general SandboxConfig maps directly: `image` becomes a Daytona
+ * image sandbox built at create time, `template` names a prebaked
+ * Daytona snapshot (prefer it for anything heavy: an inline image
+ * build sits in the create path, a snapshot boots in seconds), sizing
+ * maps onto Daytona's per-sandbox resources (`gpu` as a number is a
+ * count, as a string a GPU type like "H100"; either requests a GPU
+ * and forces the sandbox ephemeral, as Daytona requires), and
+ * `params` passes any other Daytona create option verbatim
+ * (autoStopInterval, autoDeleteInterval, labels, volumes, ...),
+ * merged last so it can override anything computed here. `apiKey`
+ * falls back to DAYTONA_API_KEY. Daytona's exec has no stdin and
+ * reports combined output, so piped bytes are uploaded and redirected
+ * in, and stderr comes back null.
  */
 export class DaytonaRuntime extends RemoteSandbox {
   readonly name = 'daytona'
-  readonly snapshot: string | undefined
-  readonly autoStopInterval: number | undefined
-  readonly autoDeleteInterval: number | undefined
-  readonly sandboxParams: Record<string, unknown>
+  // Config-borne dicts keep yaml snake_case inner keys; the SDK
+  // wants camelCase. Camelizing here makes both spellings work.
+  private readonly params: Record<string, unknown>
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: DaytonaRuntimeOptions | Record<string, unknown> = {}) {
-    const { snapshot, autoStopInterval, autoDeleteInterval, sandboxParams, ...rest } =
-      options as DaytonaRuntimeOptions
-    super(rest)
-    if (snapshot !== undefined && this.image !== undefined) {
+  constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
+    super(options)
+    if (this.config.image !== undefined && this.config.template !== undefined) {
       throw new Error(
-        'daytona takes image or snapshot, not both: an image builds at ' +
-          'create time, a snapshot is already built',
+        'daytona takes image or template, not both: an image builds at ' +
+          'create time, a template names a snapshot that is already built',
       )
     }
-    this.snapshot = snapshot
-    this.autoStopInterval = autoStopInterval
-    this.autoDeleteInterval = autoDeleteInterval
-    // Config-borne dicts keep yaml snake_case inner keys; the SDK
-    // wants camelCase. Camelizing here makes both spellings work.
-    this.sandboxParams = normalizeFields(sandboxParams ?? {})
+    if (this.config.args.length > 0) {
+      throw new Error(
+        'daytona is SDK-driven and takes no CLI args; pass create ' +
+          'options through config params instead',
+      )
+    }
+    this.params = normalizeFields(this.config.params)
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -166,37 +131,35 @@ export class DaytonaRuntime extends RemoteSandbox {
     return `${home}/workspace`
   }
 
-  /** Map the uniform constructor fields onto Daytona params. */
+  /** Map the general config onto Daytona create params. */
   private createParams(): CreateSandboxFromImageParams | CreateSandboxFromSnapshotParams {
     const shared: CreateSandboxFromSnapshotParams = {}
-    if (Object.keys(this.env).length > 0) shared.envVars = { ...this.env }
-    if (this.autoStopInterval !== undefined) shared.autoStopInterval = this.autoStopInterval
-    if (this.autoDeleteInterval !== undefined) shared.autoDeleteInterval = this.autoDeleteInterval
+    if (Object.keys(this.config.env).length > 0) shared.envVars = { ...this.config.env }
     const resources = this.createResources()
-    if (this.image === undefined) {
+    if (this.config.image === undefined) {
       // Snapshot sandboxes fix sizing when the snapshot is created;
-      // dropping a resources block silently would hide that no GPU
-      // was ever requested.
+      // dropping sizing silently would hide that no GPU was ever
+      // requested.
       if (resources !== null) {
         throw new Error(
-          'daytona resources (cpu/memory/disk/gpu) require an image; a ' +
+          'daytona sizing (cpu/memory/disk/gpu) requires an image; a ' +
             'snapshot sandbox fixes its sizing when the snapshot is created',
         )
       }
-      if (this.snapshot !== undefined) shared.snapshot = this.snapshot
-      return { ...shared, ...this.sandboxParams } as CreateSandboxFromSnapshotParams
+      if (this.config.template !== undefined) shared.snapshot = this.config.template
+      return { ...shared, ...this.params } as CreateSandboxFromSnapshotParams
     }
-    if (this.resources?.gpu !== undefined && this.resources.gpu !== 0) {
+    if (this.config.gpu !== undefined && this.config.gpu !== 0) {
       shared.ephemeral = true
     }
-    const params: CreateSandboxFromImageParams = { ...shared, image: this.image }
+    const params: CreateSandboxFromImageParams = { ...shared, image: this.config.image }
     if (resources !== null) params.resources = resources
-    return { ...params, ...this.sandboxParams } as CreateSandboxFromImageParams
+    return { ...params, ...this.params } as CreateSandboxFromImageParams
   }
 
   private createResources(): Resources | null {
-    if (this.resources === undefined) return null
-    const { cpu, memory, disk, gpu } = this.resources
+    if (!sizedConfig(this.config)) return null
+    const { cpu, memory, disk, gpu } = this.config
     const mapped: Resources = {}
     if (cpu !== undefined) mapped.cpu = cpu
     if (memory !== undefined) mapped.memory = memory

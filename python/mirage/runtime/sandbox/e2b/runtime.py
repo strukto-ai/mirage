@@ -18,83 +18,66 @@ from typing import Any
 
 from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
-
-AsyncSandbox: Any
-CommandExitException: Any
-try:
-    from e2b import AsyncSandbox as _AsyncSandbox
-    from e2b import CommandExitException as _CommandExitException
-except ImportError:
-    AsyncSandbox = None
-    CommandExitException = None
-else:
-    AsyncSandbox = _AsyncSandbox
-    CommandExitException = _CommandExitException
-
-_INSTALL_HINT = ("the e2b runtime needs the e2b SDK; install with: "
-                 "pip install mirage-ai[e2b]")
-
-_STDIN_PATH = "/tmp/.mirage_stdin"
+from mirage.runtime.sandbox.constants import STDIN_PATH, sdk_install_hint
+from mirage.runtime.sandbox.e2b import sdk
 
 
 class E2BRuntime(RemoteSandbox):
     """An E2B sandbox as a whole-line runtime.
 
     E2B has no inline image builds and no per-sandbox sizing: both are
-    baked into a named template (`e2b template build`), so `image` and
-    `resources` fail loud and `template` selects the prebuilt
-    environment. `api_key` falls back to E2B_API_KEY. E2B's exec
-    reports stdout and stderr separately, so both stream back real.
+    baked into a named template (`e2b template build`), so ``image``
+    and sizing fail loud, ``template`` selects the prebuilt
+    environment (E2B's default template when omitted), and ``params``
+    passes any other AsyncSandbox create kwarg verbatim (timeout,
+    metadata, allow_internet_access, ...), merged last so it can
+    override anything computed here. ``api_key`` falls back to
+    E2B_API_KEY. E2B's exec reports stdout and stderr separately, so
+    both stream back real; it takes no stdin, so piped bytes are
+    uploaded and redirected in.
 
     Args:
-        template (str | None): name or id of the E2B template to boot
-            (E2B's default template when omitted).
-        sandbox_params (dict[str, Any] | None): extra AsyncSandbox
-            create kwargs passed verbatim to the SDK, merged last so
-            they can also override anything computed here (timeout,
-            metadata, allow_internet_access, ...).
-        options (Any): the uniform RemoteSandbox constructor fields.
+        options (Any): the RemoteSandbox constructor fields.
     """
 
     name = "e2b"
     _sandbox: Any = None
 
-    def __init__(self,
-                 template: str | None = None,
-                 sandbox_params: dict[str, Any] | None = None,
-                 **options: Any) -> None:
+    def __init__(self, **options: Any) -> None:
         super().__init__(**options)
-        if self.image is not None:
+        if self.config.image is not None:
             raise ValueError(
                 "e2b has no inline image builds: build a template with "
-                "'e2b template build' and pass template= instead of image=")
-        if self.resources is not None:
+                "'e2b template build' and pass template instead of image")
+        if self.config.sized():
             raise ValueError(
                 "e2b fixes sizing in the template, not per sandbox: bake "
-                "cpu/memory into the template instead of resources=")
-        self.template = template
-        self.sandbox_params = dict(sandbox_params) if sandbox_params else {}
+                "cpu/memory into the template instead of sizing the config")
+        if self.config.args:
+            raise ValueError(
+                "e2b is SDK-driven and takes no CLI args; pass create "
+                "options through config params instead")
 
     def _api_params(self) -> dict[str, Any]:
         return {"api_key": self.api_key} if self.api_key is not None else {}
 
     async def create_sandbox(self) -> str:
-        if AsyncSandbox is None:
-            raise ImportError(_INSTALL_HINT)
+        if sdk.AsyncSandbox is None:
+            raise ImportError(sdk_install_hint("e2b"))
         params: dict[str, Any] = self._api_params()
-        if self.template is not None:
-            params["template"] = self.template
-        if self.env:
-            params["envs"] = dict(self.env)
-        params.update(self.sandbox_params)
-        self._sandbox = await AsyncSandbox.create(**params)
+        if self.config.template is not None:
+            params["template"] = self.config.template
+        if self.config.env:
+            params["envs"] = dict(self.config.env)
+        params.update(self.config.params)
+        self._sandbox = await sdk.AsyncSandbox.create(**params)
         return str(self._sandbox.sandbox_id)
 
     async def connect_sandbox(self, sandbox_id: str) -> None:
-        if AsyncSandbox is None:
-            raise ImportError(_INSTALL_HINT)
-        self._sandbox = await AsyncSandbox.connect(sandbox_id,
-                                                   **self._api_params())
+        if sdk.AsyncSandbox is None:
+            raise ImportError(sdk_install_hint("e2b"))
+        self._sandbox = await sdk.AsyncSandbox.connect(sandbox_id,
+                                                       **self._api_params())
 
     async def default_workspace_root(self) -> str:
         """$HOME/workspace: the default template user is `user` (uid
@@ -107,13 +90,13 @@ class E2BRuntime(RemoteSandbox):
                         env: dict[str, str], cwd: str) -> RunResult:
         command = line
         if stdin is not None:
-            await self.upload(_STDIN_PATH, stdin)
-            command = f"( {line} ) < {shlex.quote(_STDIN_PATH)}"
+            await self.upload(STDIN_PATH, stdin)
+            command = f"( {line} ) < {shlex.quote(STDIN_PATH)}"
         try:
             result = await self._sandbox.commands.run(command,
                                                       envs=env,
                                                       cwd=cwd)
-        except CommandExitException as exc:
+        except sdk.CommandExitException as exc:
             result = exc
         return RunResult(stdout=str(result.stdout).encode(),
                          stderr=str(result.stderr).encode(),

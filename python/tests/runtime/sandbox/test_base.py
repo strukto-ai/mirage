@@ -20,7 +20,7 @@ from mirage import MountMode, RAMResource, Workspace
 from mirage.cache.index.config import IndexEntry
 from mirage.io.types import materialize
 from mirage.runtime.base import RunArgs, RunResult
-from mirage.runtime.sandbox import RemoteSandbox, SandboxResources
+from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 
 FAKE_SPEC = {"resource": "s3", "config": {"bucket": "b"}}
 
@@ -154,7 +154,7 @@ async def test_root_only_workspace_mounts_from_root():
 
 @pytest.mark.asyncio
 async def test_cwd_resolves_under_workspace_root_and_env_merges():
-    box = RecordingSandbox(captures=("*", ), env={"BASE": "1"})
+    box = RecordingSandbox(captures=("*", ), config={"env": {"BASE": "1"}})
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[box, "vfs"])
@@ -205,9 +205,9 @@ async def test_run_raises_sandboxes_take_lines():
         await box.run(RunArgs(code="x", args=[], env={}, stdin=None, flags={}))
 
 
-def test_resources_dict_form_coerces():
-    box = RecordingSandbox(resources={"cpu": 4, "gpu": "H100"})
-    assert box.resources == SandboxResources(cpu=4, gpu="H100")
+def test_config_dict_form_coerces():
+    box = RecordingSandbox(config={"cpu": 4, "gpu": "H100"})
+    assert box.config == SandboxConfig(cpu=4, gpu="H100")
 
 
 class FailingMountSandbox(FuseSandbox):

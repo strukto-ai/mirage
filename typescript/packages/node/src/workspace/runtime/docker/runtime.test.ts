@@ -14,7 +14,8 @@
 
 import { buildRuntime } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
-import { DockerRuntime, type DockerRuntimeOptions } from './docker.ts'
+import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import { DockerRuntime } from './runtime.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -59,16 +60,14 @@ class FakeDockerRuntime extends DockerRuntime {
   }
 }
 
-function makeRuntime(options: DockerRuntimeOptions = {}): FakeDockerRuntime {
+function makeRuntime(options: RemoteSandboxOptions = {}): FakeDockerRuntime {
   return new FakeDockerRuntime(options)
 }
 
 describe('DockerRuntime', () => {
-  it('maps image, resources, and runArgs onto docker run', async () => {
+  it('maps image, sizing, and args onto docker run', async () => {
     const runtime = makeRuntime({
-      image: 'python:3.13',
-      resources: { cpu: 2, memory: 4, gpu: 1 },
-      runArgs: ['-v', '/host:/mnt/data'],
+      config: { image: 'python:3.13', cpu: 2, memory: 4, gpu: 1, args: ['-v', '/host:/mnt/data'] },
     })
     const sandboxId = await runtime.createSandbox()
     expect(sandboxId).toBe('cid-42')
@@ -95,8 +94,16 @@ describe('DockerRuntime', () => {
     expect(runtime.calls[0]?.[0]).toContain('python:3.12-slim')
   })
 
-  it('a disk resource fails loud', () => {
-    expect(() => makeRuntime({ resources: { disk: 10 } })).toThrow('disk')
+  it('disk sizing fails loud', () => {
+    expect(() => makeRuntime({ config: { disk: 10 } })).toThrow('disk')
+  })
+
+  it('a template fails loud', () => {
+    expect(() => makeRuntime({ config: { template: 'mirage-fuse' } })).toThrow('image')
+  })
+
+  it('sdk params fail loud', () => {
+    expect(() => makeRuntime({ config: { params: { labels: { team: 'ml' } } } })).toThrow('args')
   })
 
   it('derives the default workspace root from $HOME', async () => {
@@ -163,7 +170,7 @@ describe('DockerRuntime', () => {
   })
 
   it("registers under the config name 'docker'", () => {
-    const runtime = buildRuntime('docker', { image: 'python:3.13' })
+    const runtime = buildRuntime('docker', { config: { image: 'python:3.13' } })
     expect(runtime).toBeInstanceOf(DockerRuntime)
     expect(runtime.captures).toEqual(['*'])
   })

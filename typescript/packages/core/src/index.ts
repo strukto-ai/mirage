@@ -502,11 +502,15 @@ export {
 } from './workspace/executor/runtime_table.ts'
 export {
   RemoteSandbox,
-  SYSTEM_MOUNTS,
   type MountSpecs,
   type RemoteSandboxOptions,
-  type SandboxResources,
-} from './workspace/executor/sandbox.ts'
+} from './workspace/executor/sandbox/base.ts'
+export { sizedConfig, type SandboxConfig } from './workspace/executor/sandbox/config.ts'
+export {
+  MOUNT_SPEC_ENV,
+  STDIN_PATH,
+  SYSTEM_MOUNTS,
+} from './workspace/executor/sandbox/constants.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'

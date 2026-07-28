@@ -12,12 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.sandbox.base import RemoteSandbox, SandboxResources
-from mirage.runtime.sandbox.daytona import DaytonaRuntime
-from mirage.runtime.sandbox.docker import DockerRuntime
-from mirage.runtime.sandbox.e2b import E2BRuntime
+import importlib
+from typing import TYPE_CHECKING
+
+from mirage.runtime.sandbox.base import RemoteSandbox
+from mirage.runtime.sandbox.config import SandboxConfig
+
+if TYPE_CHECKING:
+    from mirage.runtime.sandbox.daytona import DaytonaRuntime
+    from mirage.runtime.sandbox.docker import DockerRuntime
+    from mirage.runtime.sandbox.e2b import E2BRuntime
+
+# Provider modules import their (heavy, optional) SDKs at module load,
+# so the package resolves them lazily: importing the base or a sibling
+# provider must not pull every SDK in.
+_PROVIDERS: dict[str, str] = {
+    "DaytonaRuntime": "mirage.runtime.sandbox.daytona",
+    "DockerRuntime": "mirage.runtime.sandbox.docker",
+    "E2BRuntime": "mirage.runtime.sandbox.e2b",
+}
 
 __all__ = [
     "DaytonaRuntime", "DockerRuntime", "E2BRuntime", "RemoteSandbox",
-    "SandboxResources"
+    "SandboxConfig"
 ]
+
+
+def __getattr__(name: str) -> type[RemoteSandbox]:
+    module = _PROVIDERS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    runtime: type[RemoteSandbox] = getattr(importlib.import_module(module),
+                                           name)
+    return runtime

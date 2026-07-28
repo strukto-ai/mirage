@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.runtime.sandbox import DockerRuntime, SandboxResources
+from mirage.runtime.sandbox import DockerRuntime
 
 
 class FakeDockerRuntime(DockerRuntime):
@@ -47,12 +47,15 @@ class FakeDockerRuntime(DockerRuntime):
 
 
 @pytest.mark.asyncio
-async def test_create_maps_image_resources_and_run_args():
-    runtime = FakeDockerRuntime(image="python:3.13",
-                                resources=SandboxResources(cpu=2,
-                                                           memory=4,
-                                                           gpu=1),
-                                run_args=["-v", "/host:/mnt/data"])
+async def test_create_maps_image_sizing_and_args():
+    runtime = FakeDockerRuntime(
+        config={
+            "image": "python:3.13",
+            "cpu": 2,
+            "memory": 4,
+            "gpu": 1,
+            "args": ["-v", "/host:/mnt/data"],
+        })
     sandbox_id = await runtime.create_sandbox()
     assert sandbox_id == "cid-42"
     args, _ = runtime.calls[0]
@@ -70,9 +73,19 @@ async def test_create_defaults_the_image():
     assert "python:3.12-slim" in args
 
 
-def test_disk_resource_fails_loud():
+def test_disk_sizing_fails_loud():
     with pytest.raises(ValueError, match="disk"):
-        DockerRuntime(resources=SandboxResources(disk=10))
+        DockerRuntime(config={"disk": 10})
+
+
+def test_template_fails_loud():
+    with pytest.raises(ValueError, match="image"):
+        DockerRuntime(config={"template": "mirage-fuse"})
+
+
+def test_sdk_params_fail_loud():
+    with pytest.raises(ValueError, match="args"):
+        DockerRuntime(config={"params": {"labels": {"team": "ml"}}})
 
 
 @pytest.mark.asyncio
