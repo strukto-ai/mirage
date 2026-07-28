@@ -183,10 +183,10 @@ export { NamespaceStore, type NodeFields } from './workspace/mount/namespace/sto
 export { RAMNamespaceStore } from './workspace/mount/namespace/ram.ts'
 export { HISTORY_PREFIX, HistoryViewResource } from './resource/history/history.ts'
 export {
-  pushMountPrefix,
   record,
   recordStream,
   revisionFor,
+  runWithMountPrefix,
   runWithRecording,
   runWithRevisions,
   withMountPrefix,

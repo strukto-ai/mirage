@@ -33,7 +33,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { runWithCacheManager } from '../../cache/context.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { pushMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
+import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
@@ -441,9 +441,8 @@ export class MountEntry {
       ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
     }
 
-    const prevPrefix = pushMountPrefix(mountPrefix)
-    try {
-      return await runWithCacheManager(this.cacheManager, () =>
+    return runWithMountPrefix(mountPrefix, () =>
+      runWithCacheManager(this.cacheManager, () =>
         runWithRevisions(
           this.revisions.size > 0 ? this.revisions : null,
           async (): Promise<[ByteSource | null, IOResult]> => {
@@ -492,10 +491,8 @@ export class MountEntry {
             return [null, new IOResult()]
           },
         ),
-      )
-    } finally {
-      pushMountPrefix(prevPrefix)
-    }
+      ),
+    )
   }
 
   async executeOp(
@@ -529,9 +526,8 @@ export class MountEntry {
     const accessor = this.resource.accessor ?? NOOP_ACCESSOR
     const opOverride = this.commandSafeguards.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    const prevPrefix = pushMountPrefix(mountPrefix)
-    try {
-      return await runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
+    return runWithMountPrefix(mountPrefix, () =>
+      runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
         for (const op of levels) {
           const result = await runWithTimeout(
             Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
@@ -541,10 +537,8 @@ export class MountEntry {
           if (result !== null && result !== undefined) return applyOpSafeguard(result, opOverride)
         }
         return null
-      })
-    } finally {
-      pushMountPrefix(prevPrefix)
-    }
+      }),
+    )
   }
 }
 

@@ -41,27 +41,27 @@ export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpR
 }
 
 /**
- * Set the mount prefix records are named against, returning the prefix that
- * was active before. Callers restore that value rather than clearing to '',
- * so a mount whose command dispatches into another mount gets its own prefix
- * back. Mirrors python's `push_mount_prefix`.
+ * Run `fn` with `prefix` as the mount prefix records are named against.
  *
- * No-op (and returns '') when no recording context is active.
+ * Derives a state for this async branch and shares only the records array,
+ * so two mounts consumed concurrently (`cat /s3/a & cat /db/b`) cannot see
+ * or clobber each other's prefix. Mirrors python's `push_mount_prefix`,
+ * whose `Recorder` is frozen and re-set per task for the same reason.
+ *
+ * Inert (runs `fn` unchanged) when no recording context is active.
  */
-export function pushMountPrefix(prefix: string): string {
+export function runWithMountPrefix<T>(prefix: string, fn: () => Promise<T>): Promise<T> {
   const state = storage.getStore()
-  if (state === undefined) return ''
-  const prev = state.mountPrefix
-  state.mountPrefix = prefix
-  return prev
+  if (state === undefined) return fn()
+  return Promise.resolve(storage.run({ records: state.records, mountPrefix: prefix }, fn))
 }
 
 /**
  * Wrap a stream so `prefix` is the active mount prefix during each pull from
  * the underlying source. A command may return a stream that defers its
  * backend read to the first chunk request, by which point the mount's own
- * push/restore pair has already run, so without this the record lands with no
- * prefix. Mirrors python's `with_mount_prefix`.
+ * scope has already exited, so without this the record lands with no prefix.
+ * Mirrors python's `with_mount_prefix`.
  */
 export async function* withMountPrefix(
   prefix: string,
@@ -70,13 +70,7 @@ export async function* withMountPrefix(
   const iter = it[Symbol.asyncIterator]()
   try {
     for (;;) {
-      const prev = pushMountPrefix(prefix)
-      let step: IteratorResult<Uint8Array>
-      try {
-        step = await iter.next()
-      } finally {
-        pushMountPrefix(prev)
-      }
+      const step = await runWithMountPrefix(prefix, () => iter.next())
       if (step.done === true) return
       yield step.value
     }
@@ -171,9 +165,13 @@ export function revisionFor(path: string): string | null {
   return map.get(path) ?? null
 }
 
+// Backends name the mount-relative path ('/report.json') and a few name the
+// virtual one already ('/s3/report.json'), so tell them apart before
+// prefixing. The test has to be for a path boundary, not a bare startsWith:
+// a mount at /s3 holding s3-report.txt would otherwise look already-prefixed
+// and record as '/s3-report.txt'. Mirrors python's _virtual.
 function applyPrefix(prefix: string, path: string): string {
-  if (prefix !== '' && !path.startsWith(prefix)) {
-    return rstripSlash(prefix) + path
-  }
-  return path
+  const root = rstripSlash(prefix)
+  if (root === '' || path === root || path.startsWith(`${root}/`)) return path
+  return root + path
 }

@@ -20,11 +20,11 @@ import {
   revisionFor,
   runWithRecording,
   runWithRevisions,
-  pushMountPrefix,
+  runWithMountPrefix,
   withMountPrefix,
 } from './context.ts'
 
-describe('runWithRecording / record / pushMountPrefix', () => {
+describe('runWithRecording / record / runWithMountPrefix', () => {
   it('record outside recording scope is a no-op', () => {
     record('read', '/a.txt', 's3', 100, 0)
   })
@@ -57,10 +57,11 @@ describe('runWithRecording / record / pushMountPrefix', () => {
   })
 
   it('prepends virtual prefix when path lacks it', async () => {
-    const [, records] = await runWithRecording(async () => {
-      pushMountPrefix('/s3')
-      record('read', '/data/file.json', 's3', 100, 0)
-    })
+    const [, records] = await runWithRecording(() =>
+      runWithMountPrefix('/s3', async () => {
+        record('read', '/data/file.json', 's3', 100, 0)
+      }),
+    )
     expect(records[0]?.path).toBe('/s3/data/file.json')
   })
 
@@ -72,34 +73,66 @@ describe('runWithRecording / record / pushMountPrefix', () => {
   })
 
   it('does not double-apply prefix when path already has it', async () => {
-    const [, records] = await runWithRecording(async () => {
-      pushMountPrefix('/s3')
-      record('read', '/s3/data/file.json', 's3', 100, 0)
-    })
+    const [, records] = await runWithRecording(() =>
+      runWithMountPrefix('/s3', async () => {
+        record('read', '/s3/data/file.json', 's3', 100, 0)
+      }),
+    )
     expect(records[0]?.path).toBe('/s3/data/file.json')
   })
 
-  it('restores the previous prefix instead of clearing it', async () => {
-    const [, records] = await runWithRecording(async () => {
-      const outer = pushMountPrefix('/s3')
-      const inner = pushMountPrefix('/db')
-      record('read', '/a.txt', 'postgres', 1, 0)
-      pushMountPrefix(inner)
-      record('read', '/b.txt', 's3', 1, 0)
-      pushMountPrefix(outer)
-    })
+  // A bare startsWith test would read this as already-prefixed and record
+  // '/s3-report.txt', dropping the mount.
+  it('prefixes a filename that merely shares the prefix leading text', async () => {
+    const [, records] = await runWithRecording(() =>
+      runWithMountPrefix('/s3', async () => {
+        record('read', '/s3-report.txt', 's3', 1, 0)
+      }),
+    )
+    expect(records[0]?.path).toBe('/s3/s3-report.txt')
+  })
+
+  it('restores the enclosing prefix when a nested mount scope ends', async () => {
+    const [, records] = await runWithRecording(() =>
+      runWithMountPrefix('/s3', async () => {
+        await runWithMountPrefix('/db', async () => {
+          record('read', '/a.txt', 'postgres', 1, 0)
+        })
+        record('read', '/b.txt', 's3', 1, 0)
+      }),
+    )
     expect(records.map((r) => r.path)).toEqual(['/db/a.txt', '/s3/b.txt'])
   })
 
-  it('withMountPrefix restores the prefix for a stream consumed after the scope', async () => {
+  // Two mounts consumed concurrently must not see each other's prefix. The
+  // interleave is forced: each branch records only after the other has
+  // opened its own scope, which a prefix mutated on shared state would
+  // already have overwritten.
+  it('keeps the prefix task-local across concurrent branches', async () => {
+    const gate = { s3: false, db: false }
+    const branch = async (prefix: string, key: 's3' | 'db', other: 's3' | 'db', file: string) => {
+      await runWithMountPrefix(prefix, async () => {
+        gate[key] = true
+        while (!gate[other]) await new Promise((r) => setTimeout(r, 0))
+        record('read', file, key, 1, 0)
+      })
+    }
+    const [, records] = await runWithRecording(async () => {
+      await Promise.all([
+        branch('/s3', 's3', 'db', '/alpha.txt'),
+        branch('/db', 'db', 's3', '/beta.txt'),
+      ])
+    })
+    expect(new Set(records.map((r) => r.path))).toEqual(new Set(['/s3/alpha.txt', '/db/beta.txt']))
+  })
+
+  it('withMountPrefix carries the prefix into a stream consumed after the scope', async () => {
     const lazy = async function* (): AsyncGenerator<Uint8Array> {
       record('read', '/a.txt', 's3', 3, 0)
       yield new Uint8Array([1, 2, 3])
     }
     const [, records] = await runWithRecording(async () => {
-      const prev = pushMountPrefix('/s3')
-      const wrapped = withMountPrefix('/s3', lazy())
-      pushMountPrefix(prev)
+      const wrapped = await runWithMountPrefix('/s3', async () => withMountPrefix('/s3', lazy()))
       for await (const _chunk of wrapped) void _chunk
     })
     expect(records[0]?.path).toBe('/s3/a.txt')
