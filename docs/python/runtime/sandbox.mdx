@@ -39,11 +39,17 @@ captured line and deleted when the workspace closes.
 ## The workspace inside the sandbox
 
 The point of a sandbox runtime is that the job sees your mounts as ordinary
-files. On the first captured line, the sandbox runs Mirage itself and
-**FUSE-mounts each mount's backing store live** under a workspace root, so a
-read pulls from the backend and a write streams straight back to it, with no
-upload or sync step. Inside the sandbox, `/data` backed by S3 is a real
-directory.
+files. The sandbox runs Mirage itself and **FUSE-mounts each mount's backing
+store live** under a workspace root, so a read pulls from the backend and a
+write streams straight back to it, with no upload or sync step. Inside the
+sandbox, `/data` backed by S3 is a real directory.
+
+Mounting is a reconcile, not a one-shot setup: every captured line diffs the
+workspace's mounts against what the sandbox has, issuing
+`mirage mount add <prefix>` / `mirage mount remove <prefix>` inside the
+sandbox only for what changed (the mount spec travels in the exec
+environment, never as a file). Mounts added to or removed from the workspace
+after the sandbox booted converge live.
 
 This needs an image or snapshot with `fuse3` and Mirage installed (see
 [The sandbox image](#the-sandbox-image)), and a backend that is remotely

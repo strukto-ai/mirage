@@ -18,6 +18,7 @@ from mirage.cli import config as config_module
 from mirage.cli import daemon as daemon_module
 from mirage.cli import execute as execute_module
 from mirage.cli import job as job_module
+from mirage.cli import mount as mount_module
 from mirage.cli import provision as provision_module
 from mirage.cli import session as session_module
 from mirage.cli import workspace as workspace_module
@@ -30,6 +31,7 @@ app = typer.Typer(
 )
 app.add_typer(workspace_module.app, name="workspace")
 app.add_typer(session_module.app, name="session")
+app.add_typer(mount_module.app, name="mount")
 app.add_typer(job_module.app, name="job")
 app.add_typer(execute_module.app, name="execute")
 app.add_typer(provision_module.app, name="provision")

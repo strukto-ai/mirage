@@ -119,11 +119,14 @@ class RemoteSandbox(Runtime):
         self._mount_specs: Callable[[], dict[str, dict[str, Any]
                                              | None]] | None = None
         # virtual mount prefix -> its physical mountpoint in this sandbox,
-        # and the same as MIRAGE_<PREFIX> env vars, both built once the
-        # workspace is mounted. mirage is the control plane: the agent
-        # speaks virtual paths and these rewrite them onto the provider.
+        # and the same as MIRAGE_<PREFIX> env vars, both rebuilt per
+        # line. mirage is the control plane: the agent speaks virtual
+        # paths and these rewrite them onto the provider.
         self._mount_map: dict[str, str] | None = None
         self._mount_env: dict[str, str] = {}
+        # prefix -> fingerprint of the mount the sandbox actually has,
+        # the reconciler's record of applied state.
+        self._applied_mounts: dict[str, str] = {}
 
     @property
     def sandbox_id(self) -> str | None:
@@ -160,10 +163,11 @@ class RemoteSandbox(Runtime):
         """Run one raw line in the sandbox, provisioning it lazily.
 
         The first line creates the sandbox (or reattaches when a
-        sandbox_id was given) and mounts the workspace; every line
-        then executes with the session environment merged over the
-        sandbox environment and the cwd resolved under
-        workspace_root.
+        sandbox_id was given). Every line then reconciles the
+        sandbox's mounts against the workspace's current mounts
+        (sync_mounts, a no-op when nothing changed) and executes with
+        the session environment merged over the sandbox environment
+        and the cwd resolved under workspace_root.
 
         Args:
             line (str): the raw typed line.
@@ -180,9 +184,9 @@ class RemoteSandbox(Runtime):
                     await self.connect_sandbox(self._sandbox_id)
                 if self.workspace_root is None:
                     self.workspace_root = await self.default_workspace_root()
-                await self.mount_workspace()
-                self._build_translation()
                 self._started = True
+            await self.sync_mounts()
+            self._build_translation()
         merged = {**self.env, **self._mount_env, **env}
         return await self.exec_line(self._translate_line(line), stdin, merged,
                                     self.sandbox_cwd(cwd))
@@ -258,65 +262,78 @@ class RemoteSandbox(Runtime):
             prefixes.discard("/")
         return sorted(prefixes)
 
-    async def mount_workspace(self) -> None:
-        """Make the workspace visible inside the sandbox.
+    def _desired_mounts(self) -> dict[str, tuple[dict[str, Any], str]]:
+        """The workspace's current mounts as (spec, sandbox mountpoint).
 
-        Starts mirage inside the sandbox and FUSE-mounts each mount's
-        backing store live under workspace_root, so reads and writes
-        flow both ways with no sync. Virtual system mounts (/dev, the
-        history view) never appear: the sandbox has its own. Subclasses
-        may replace this wholesale (e.g. a provider volume).
-        """
-        if self._dispatch is None or self._mount_prefixes is None:
-            return
-        await self._mount_remote_fuse()
-
-    def _fuse_workspace_config(self) -> dict[str, Any]:
-        """The sandbox-side workspace config, in the public schema.
-
-        Each remotable mount is re-declared exactly as a user would
-        write it in a workspace yaml, with ``fuse:`` naming its live
-        mountpoint under workspace_root.
+        Read fresh per reconcile, so mounts added to or removed from
+        the workspace after the sandbox booted are picked up.
         """
         specs = self._mount_specs() if self._mount_specs is not None else {}
         root = self.workspace_root or "/workspace"
-        mounts: dict[str, Any] = {}
+        desired: dict[str, tuple[dict[str, Any], str]] = {}
         for prefix in self._user_mount_prefixes():
             spec = specs.get(prefix)
             if spec is None:
                 raise ValueError(
                     f"mount {prefix!r} is not remotely mountable; "
-                    f"sandbox runtimes FUSE-mount S3-backed mounts today")
-            mounts[prefix] = {
-                **spec, "fuse": posixpath.join(root, prefix.lstrip("/"))
-            }
-        return {"mode": "exec", "mounts": mounts}
+                    f"sandbox runtimes FUSE-mount remote-backed mounts")
+            mountpoint = (root if prefix == "/" else posixpath.join(
+                root, prefix.lstrip("/")))
+            desired[prefix] = (spec, mountpoint)
+        return desired
 
-    async def _mount_remote_fuse(self) -> None:
-        """Mount every remotable mount live via the in-sandbox mirage.
+    async def sync_mounts(self) -> None:
+        """Reconcile the sandbox's live mounts with the workspace's.
 
-        Fuse mode is plain mirage usage inside the sandbox: the
-        workspace mounts are re-declared in the standard config
-        schema and created with the same command a user would type,
-        ``mirage workspace create``. The CLI auto-spawns the
-        in-sandbox daemon and mounts synchronously, so the exit code
-        is the ready signal and failures arrive on stderr. Needs an
-        image with mirage baked in (e.g. mirage-python-fuse).
+        The workspace is the desired state; the sandbox is the actual
+        state. Each divergence becomes one in-sandbox mirage command,
+        issued through the provider's own exec API: a new or changed
+        mount runs ``mirage mount add <prefix> --fuse <path>`` (the
+        spec travels in the exec environment, never as a file), a
+        dropped mount runs ``mirage mount remove <prefix>``. Unchanged
+        mounts cost nothing. Needs an image with mirage baked in
+        (e.g. mirage-python-fuse). Subclasses may replace this
+        wholesale (e.g. a provider volume).
         """
-        root = self.workspace_root or "/workspace"
-        config = self._fuse_workspace_config()
-        parent = posixpath.dirname(root.rstrip("/")) or "/"
-        config_path = posixpath.join(parent, ".mirage-workspace.json")
-        await self.upload(config_path, json.dumps(config).encode())
-        result = await self.exec_line(
-            f"mirage workspace create {shlex.quote(config_path)}", None, {},
-            parent)
+        if self._dispatch is None or self._mount_prefixes is None:
+            return
+        desired = self._desired_mounts()
+        fingerprints = {
+            prefix: json.dumps({
+                **spec, "fuse": mountpoint
+            }, sort_keys=True)
+            for prefix, (spec, mountpoint) in desired.items()
+        }
+        for prefix in list(self._applied_mounts):
+            if fingerprints.get(prefix) == self._applied_mounts[prefix]:
+                continue
+            await self._mount_command(
+                f"mirage mount remove {shlex.quote(prefix)}", {})
+            del self._applied_mounts[prefix]
+        for prefix, (spec, mountpoint) in desired.items():
+            if prefix in self._applied_mounts:
+                continue
+            await self._mount_command(
+                f"mirage mount add {shlex.quote(prefix)} "
+                f"--fuse {shlex.quote(mountpoint)}",
+                {"MIRAGE_MOUNT_SPEC": json.dumps(spec)})
+            self._applied_mounts[prefix] = fingerprints[prefix]
+
+    async def _mount_command(self, command: str, env: dict[str, str]) -> None:
+        """One in-sandbox mount reconcile command, failing loud.
+
+        Args:
+            command (str): the mirage mount CLI line to run.
+            env (dict[str, str]): extra environment for the line (the
+                mount spec rides here, never on disk or argv).
+        """
+        result = await self.exec_line(command, None, env, "/")
         if result.exit_code != 0:
             detail = (result.stderr
                       or result.stdout).decode(errors="replace").strip()
             raise RuntimeError(
-                "the in-sandbox mirage FUSE mount failed (mount='fuse' "
-                "needs an image with mirage installed, e.g. "
+                "the in-sandbox mirage mount failed (sandbox runtimes "
+                "need an image with mirage installed, e.g. "
                 f"mirage-python-fuse): {detail}")
 
     async def create_sandbox(self) -> str:

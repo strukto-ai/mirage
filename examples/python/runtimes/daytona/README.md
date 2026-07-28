@@ -13,7 +13,7 @@ a guest), here the guest has its own `/dev/fuse` and runs Mirage itself.
 
 ```
 your machine (control plane)                 Daytona sandbox
-  Workspace: /data -> S3Resource               mirage workspace create
+  Workspace: /data -> S3Resource               mirage mount add /data --fuse ...
   captures ["python3"] -> DaytonaRuntime  -->    -> in-sandbox daemon
   vfs runs every other line locally             -> FUSE-mounts S3 at
                                                     /home/daytona/workspace/data
@@ -22,9 +22,11 @@ your machine (control plane)                 Daytona sandbox
 
 1. The workspace declares `/data` as an `S3Resource`. A `DaytonaRuntime` captures
    `python3` lines; everything else stays on the local vfs.
-1. On the first captured line the sandbox boots, Mirage writes a small workspace
-   config into it, and runs `mirage workspace create`, which FUSE-mounts the
-   bucket live under the sandbox's workspace root.
+1. Every captured line reconciles the sandbox's mounts against the workspace's:
+   a new mount runs `mirage mount add <prefix> --fuse <path>` inside the sandbox
+   (the spec travels in the exec environment, never as a file), a dropped mount
+   runs `mirage mount remove <prefix>`, and unchanged mounts cost nothing. So
+   mounts added or removed after the sandbox booted converge live.
 1. **Mirage is the control plane.** The agent speaks the virtual path
    (`/data/train.py`); Mirage rewrites it to wherever the mount physically lands
    in the sandbox (`/home/daytona/workspace/data/train.py`). Each mount is also

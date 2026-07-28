@@ -31,7 +31,7 @@ class RecordingSandbox extends RemoteSandbox {
   readonly execs: [string, Uint8Array | null, Record<string, string>, string][] = []
   created = 0
   connected: string[] = []
-  mounted = false
+  synced = 0
   attached: [BridgeDispatchFn, () => string[], (() => MountSpecs) | undefined] | null = null
 
   constructor(options: RemoteSandboxOptions = {}) {
@@ -80,17 +80,17 @@ class RecordingSandbox extends RemoteSandbox {
     return Promise.resolve()
   }
 
-  // Base-machinery tests exercise provisioning, not the FUSE mount, so
-  // record the mount call and skip the real one; FuseSandbox restores it.
-  override mountWorkspace(): Promise<void> {
-    this.mounted = true
+  // Base-machinery tests exercise provisioning, not mount reconcile, so
+  // record the sync call and skip the real one; FuseSandbox restores it.
+  override syncMounts(): Promise<void> {
+    this.synced += 1
     return Promise.resolve()
   }
 }
 
 class FuseSandbox extends RecordingSandbox {
-  override mountWorkspace(): Promise<void> {
-    return RemoteSandbox.prototype.mountWorkspace.call(this)
+  override syncMounts(): Promise<void> {
+    return RemoteSandbox.prototype.syncMounts.call(this)
   }
 }
 
@@ -109,11 +109,15 @@ async function sandboxWorkspace(
 function attachSpecs(box: RecordingSandbox, specs: MountSpecs): void {
   const attached = box.attached
   if (attached === null) throw new Error('box not attached')
-  box.attach(attached[0], attached[1], () => specs)
+  box.attach(attached[0], attached[1], () => ({ ...specs }))
+}
+
+function mountCmds(box: RecordingSandbox): string[] {
+  return box.execs.map(([line]) => line).filter((line) => line.startsWith('mirage mount'))
 }
 
 describe('RemoteSandbox', () => {
-  it('provisions on the first line and mounts the workspace', async () => {
+  it('provisions on the first line and syncs mounts per line', async () => {
     const box = new RecordingSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
@@ -122,28 +126,75 @@ describe('RemoteSandbox', () => {
       expect(box.created).toBe(1)
       expect(box.ownedSandbox).toBe(true)
       expect(box.sandboxId).toBe('sb-rec')
-      expect(box.mounted).toBe(true)
+      expect(box.synced).toBe(1)
       await ws.execute('python3 x')
       expect(box.created).toBe(1)
+      // The reconciler runs per line, not once at provision.
+      expect(box.synced).toBe(2)
     } finally {
       await ws.close()
     }
   })
 
-  it('fuse config excludes system mounts', async () => {
+  it('sync issues mount add with the spec in the env', async () => {
+    const box = new FuseSandbox({ captures: ['python3'] })
+    const ws = await sandboxWorkspace(box)
+    try {
+      attachSpecs(box, { '/data': FAKE_SPEC })
+      await ws.execute('python3 /data/train.py')
+      const adds = box.execs.filter(([line]) => line.startsWith('mirage mount add'))
+      expect(adds).toHaveLength(1)
+      const [line, , env] = adds[0] ?? ['', null, {} as Record<string, string>, '']
+      expect(line).toBe('mirage mount add /data --fuse /workspace/data')
+      expect(JSON.parse(env.MIRAGE_MOUNT_SPEC ?? '')).toEqual(FAKE_SPEC)
+      // The spec travels in the environment, never as a file.
+      expect(Object.keys(box.files)).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('sync excludes system mounts and is idempotent', async () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
       attachSpecs(box, { '/data': FAKE_SPEC })
       await ws.execute('python3 x')
-      const config = JSON.parse(DEC.decode(box.files['/.mirage-workspace.json'])) as {
-        mounts: Record<string, unknown>
-      }
-      expect(Object.keys(config.mounts)).toEqual(['/data'])
-      for (const m of Object.keys(config.mounts)) {
-        expect(m).not.toContain('/dev')
-        expect(m).not.toContain('bash_history')
-      }
+      await ws.execute('python3 x')
+      // One add for /data, nothing for /dev or the history view, and
+      // no repeat work on the unchanged second line.
+      expect(mountCmds(box)).toEqual(['mirage mount add /data --fuse /workspace/data'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('sync reconciles added and removed mounts', async () => {
+    const box = new FuseSandbox({ captures: ['python3'] })
+    const ws = await sandboxWorkspace(box)
+    try {
+      const specs: MountSpecs = { '/data': FAKE_SPEC }
+      const prefixes = ['/data']
+      const attached = box.attached
+      if (attached === null) throw new Error('box not attached')
+      box.attach(
+        attached[0],
+        () => [...prefixes],
+        () => ({ ...specs }),
+      )
+      await ws.execute('python3 x')
+      // The workspace's desired state changes: /data goes away, /docs
+      // appears. The next line converges the sandbox.
+      delete specs['/data']
+      specs['/docs'] = { resource: 's3', config: { bucket: 'docs' } }
+      prefixes.splice(0, prefixes.length, '/docs')
+      await ws.execute('python3 x')
+      await ws.execute('python3 x')
+      expect(mountCmds(box)).toEqual([
+        'mirage mount add /data --fuse /workspace/data',
+        'mirage mount remove /data',
+        'mirage mount add /docs --fuse /workspace/docs',
+      ])
     } finally {
       await ws.close()
     }
@@ -155,10 +206,7 @@ describe('RemoteSandbox', () => {
     try {
       attachSpecs(box, { '/': FAKE_SPEC })
       await ws.execute('python3 x')
-      const config = JSON.parse(DEC.decode(box.files['/.mirage-workspace.json'])) as {
-        mounts: Record<string, unknown>
-      }
-      expect(Object.keys(config.mounts)).toEqual(['/'])
+      expect(mountCmds(box)).toEqual(['mirage mount add / --fuse /workspace'])
     } finally {
       await ws.close()
     }
@@ -251,39 +299,15 @@ describe('RemoteSandbox', () => {
     )
   })
 
-  it('fuse mode runs mirage workspace create', async () => {
-    const box = new FuseSandbox({ captures: ['python3'] })
-    const ws = await sandboxWorkspace(box)
-    try {
-      attachSpecs(box, { '/data': FAKE_SPEC })
-      await ws.execute('python3 /data/train.py')
-      // No tree upload: the only file is the standard workspace
-      // config, declaring each mount with its live fuse target.
-      expect(Object.keys(box.files)).toEqual(['/.mirage-workspace.json'])
-      const config = JSON.parse(DEC.decode(box.files['/.mirage-workspace.json'])) as {
-        mode: string
-        mounts: Record<string, unknown>
-      }
-      expect(config.mode).toBe('exec')
-      expect(config.mounts).toEqual({ '/data': { ...FAKE_SPEC, fuse: '/workspace/data' } })
-      const created = box.execs.filter(
-        ([line]) => line === 'mirage workspace create /.mirage-workspace.json',
-      )
-      expect(created).toHaveLength(1)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('fuse mount failure points at the image', async () => {
-    class FailingCreateSandbox extends FuseSandbox {
+  it('mount failure points at the image', async () => {
+    class FailingMountSandbox extends FuseSandbox {
       override execLine(
         line: string,
         stdin: Uint8Array | null,
         env: Record<string, string>,
         cwd: string,
       ): Promise<RunResult> {
-        if (line.startsWith('mirage workspace create')) {
+        if (line.startsWith('mirage mount')) {
           this.execs.push([line, stdin, env, cwd])
           return Promise.resolve({
             stdout: new Uint8Array(),
@@ -294,7 +318,7 @@ describe('RemoteSandbox', () => {
         return super.execLine(line, stdin, env, cwd)
       }
     }
-    const box = new FailingCreateSandbox({ captures: ['python3'] })
+    const box = new FailingMountSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
       attachSpecs(box, { '/data': { resource: 's3', config: {} } })
@@ -307,7 +331,7 @@ describe('RemoteSandbox', () => {
     }
   })
 
-  it('fuse mode rejects unmountable mounts', async () => {
+  it('sync rejects unmountable mounts', async () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
