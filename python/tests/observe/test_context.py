@@ -103,6 +103,18 @@ def test_record_prefix_already_applied():
     assert records[0].path == "/s3/data/file.json"
 
 
+def test_record_prefixes_name_sharing_prefix_leading_text():
+    # A bare startswith test would read this as already-prefixed and record
+    # "/s3-report.txt", dropping the mount.
+    scope = RecordingScope()
+    records = scope.records
+    push_mount_prefix("/s3")
+    record("read", "/s3-report.txt", "s3", 1, 0)
+    push_mount_prefix("")
+    scope.close()
+    assert records[0].path == "/s3/s3-report.txt"
+
+
 def test_push_mount_prefix_returns_previous():
     scope = RecordingScope()
     assert push_mount_prefix("/s3") == ""
