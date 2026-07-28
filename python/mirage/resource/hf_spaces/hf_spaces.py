@@ -60,6 +60,7 @@ class HfSpacesResource(BaseResource):
 
     accessor: HfSpacesAccessor
     name: str = ResourceName.HF_SPACES
+    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _OPS
     PROMPT: str = PROMPT

@@ -36,6 +36,7 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactLinearConfig, type LinearConfig, type LinearConfigRedacted } from './config.ts'
+import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveLinearGlob = (
   accessor: LinearAccessor,
@@ -119,6 +120,10 @@ export class LinearResource extends BaseResource implements Resource {
           )
         : paths
     return resolveLinearGlob(this.accessor, effective, this.index, this.filter())
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('linear', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<LinearResourceState> {

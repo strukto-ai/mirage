@@ -36,6 +36,7 @@ import {
   type TrelloReaddirFilter,
 } from '@struktoai/mirage-core'
 import { redactTrelloConfig, type TrelloConfig, type TrelloConfigRedacted } from './config.ts'
+import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveTrelloGlob = (
   accessor: TrelloAccessor,
@@ -123,6 +124,10 @@ export class TrelloResource extends BaseResource implements Resource {
           )
         : paths
     return resolveTrelloGlob(this.accessor, effective, this.index, this.filter())
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('trello', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<TrelloResourceState> {

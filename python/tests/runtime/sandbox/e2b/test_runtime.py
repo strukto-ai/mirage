@@ -137,17 +137,19 @@ async def test_params_merge_last_over_config_fields():
 
 
 def test_image_fails_loud():
-    with pytest.raises(ValueError, match="template"):
+    # Not an E2BConfig field: e2b boots templates, never inline images.
+    with pytest.raises(TypeError, match="image"):
         E2BRuntime(config={"image": "python:3.12"})
 
 
 def test_sizing_fails_loud():
-    with pytest.raises(ValueError, match="template"):
+    # Not an E2BConfig field: sizing is baked into the template.
+    with pytest.raises(TypeError, match="cpu"):
         E2BRuntime(config={"cpu": 2})
 
 
 def test_cli_args_fail_loud():
-    with pytest.raises(ValueError, match="params"):
+    with pytest.raises(TypeError, match="args"):
         E2BRuntime(config={"args": ["--network", "host"]})
 
 

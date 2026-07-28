@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime.sandbox.docker.config import DockerConfig
 from mirage.runtime.sandbox.docker.runtime import DockerRuntime
 
-__all__ = ["DockerRuntime"]
+__all__ = ["DockerConfig", "DockerRuntime"]

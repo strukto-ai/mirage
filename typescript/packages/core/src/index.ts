@@ -91,6 +91,7 @@ export type {
   WorkspaceStateDict,
 } from './workspace/snapshot/types.ts'
 export { BaseResource, type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
+export { remoteSpec } from './resource/spec.ts'
 export {
   hasRedactedSecret,
   REDACTED_SECRET,
@@ -505,7 +506,11 @@ export {
   type MountSpecs,
   type RemoteSandboxOptions,
 } from './workspace/executor/sandbox/base.ts'
-export { sizedConfig, type SandboxConfig } from './workspace/executor/sandbox/config.ts'
+export {
+  coerceConfig,
+  type NormalizedSandboxConfig,
+  type SandboxConfig,
+} from './workspace/executor/sandbox/config.ts'
 export {
   MOUNT_SPEC_ENV,
   STDIN_PATH,

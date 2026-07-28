@@ -69,6 +69,7 @@ class OneDriveResource(BaseResource):
 
     accessor: OneDriveAccessor
     name: str = ResourceName.ONEDRIVE
+    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _ONEDRIVE_OPS
     PROMPT: str = PROMPT

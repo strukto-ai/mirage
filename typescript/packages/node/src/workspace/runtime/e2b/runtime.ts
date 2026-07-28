@@ -20,9 +20,9 @@ import {
   type RemoteSandboxOptions,
   rstripSlash,
   type RunResult,
-  sizedConfig,
   STDIN_PATH,
 } from '@struktoai/mirage-core'
+import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
 import type * as e2bSdk from 'e2b'
 
@@ -43,16 +43,14 @@ export const E2B_OPTION_KEYS: readonly string[] = [
 /**
  * An E2B sandbox as a whole-line runtime.
  *
- * E2B has no inline image builds and no per-sandbox sizing: both are
- * baked into a named template (`e2b template build`), so `image` and
- * sizing fail loud, `template` selects the prebuilt environment
- * (E2B's default template when omitted), and `params` passes any
- * other Sandbox.create option verbatim (timeoutMs, metadata,
- * allowInternetAccess, ...), merged last so it can override anything
- * computed here. `apiKey` falls back to E2B_API_KEY. E2B's exec
- * reports stdout and stderr separately, so both stream back real.
+ * E2BConfig has no image and no sizing fields: E2B bakes both into a
+ * named template (`e2b template build`), so `template` selects the
+ * prebuilt environment (E2B's default template when omitted) and
+ * `params` passes any other Sandbox.create option verbatim, merged
+ * last. `apiKey` falls back to E2B_API_KEY. E2B's exec reports stdout
+ * and stderr separately, so both stream back real.
  */
-export class E2BRuntime extends RemoteSandbox {
+export class E2BRuntime extends RemoteSandbox<E2BConfig> {
   readonly name = 'e2b'
   // Config-borne dicts keep yaml snake_case inner keys; the SDK
   // wants camelCase. Camelizing here makes both spellings work.
@@ -60,28 +58,9 @@ export class E2BRuntime extends RemoteSandbox {
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
-    super(options)
-    if (this.config.image !== undefined) {
-      throw new Error(
-        "e2b has no inline image builds: build a template with 'e2b template " +
-          'build' +
-          "' and pass template instead of image",
-      )
-    }
-    if (sizedConfig(this.config)) {
-      throw new Error(
-        'e2b fixes sizing in the template, not per sandbox: bake cpu/memory ' +
-          'into the template instead of sizing the config',
-      )
-    }
-    if (this.config.args.length > 0) {
-      throw new Error(
-        'e2b is SDK-driven and takes no CLI args; pass create options ' +
-          'through config params instead',
-      )
-    }
-    this.params = normalizeFields(this.config.params)
+  constructor(options: RemoteSandboxOptions<E2BConfig> | Record<string, unknown> = {}) {
+    super(options, E2B_CONFIG_KEYS)
+    this.params = normalizeFields(this.config.params ?? {})
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.

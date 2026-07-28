@@ -62,6 +62,7 @@ _DATABRICKS_VOLUME_OPS = {
 class DatabricksVolumeResource(BaseResource):
     accessor: DatabricksVolumeAccessor
     name: str = ResourceName.DATABRICKS_VOLUME
+    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _DATABRICKS_VOLUME_OPS
     PROMPT: str = PROMPT

@@ -20,29 +20,29 @@ from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import STDIN_PATH, sdk_install_hint
 from mirage.runtime.sandbox.daytona import sdk
+from mirage.runtime.sandbox.daytona.config import DaytonaConfig
 
 
 class DaytonaRuntime(RemoteSandbox):
     """A Daytona sandbox as a whole-line runtime.
 
-    The general SandboxConfig maps directly: ``image`` becomes a
-    Daytona image sandbox built at create time, ``template`` names a
-    prebaked Daytona snapshot (prefer it for anything heavy: an inline
-    image build sits in the create path, a snapshot boots in seconds),
-    sizing maps onto Daytona's per-sandbox resources (``gpu`` truthy
-    requests a GPU and forces the sandbox ephemeral, as Daytona
-    requires), and ``params`` passes any other Daytona create option
-    verbatim (auto_stop_interval, auto_delete_interval, labels,
-    volumes, ...), merged last so it can override anything computed
-    here. ``api_key`` falls back to DAYTONA_API_KEY. Daytona's exec
-    has no stdin and reports combined output, so piped bytes are
-    uploaded and redirected in, and stderr comes back None.
+    DaytonaConfig maps directly onto the create params: ``image``
+    becomes an image sandbox built at create time, ``template`` names
+    a prebaked snapshot, sizing maps onto Daytona's per-sandbox
+    resources (``gpu`` truthy requests a GPU and forces the sandbox
+    ephemeral, as Daytona requires), and ``params`` passes any other
+    create option verbatim, merged last. ``api_key`` falls back to
+    DAYTONA_API_KEY. Daytona's exec has no stdin and reports combined
+    output, so piped bytes are uploaded and redirected in, and stderr
+    comes back None.
 
     Args:
         options (Any): the RemoteSandbox constructor fields.
     """
 
     name = "daytona"
+    config_cls = DaytonaConfig
+    config: DaytonaConfig
     _client: Any = None
     _sandbox: Any = None
 
@@ -53,10 +53,6 @@ class DaytonaRuntime(RemoteSandbox):
                 "daytona takes image or template, not both: an image "
                 "builds at create time, a template names a snapshot "
                 "that is already built")
-        if self.config.args:
-            raise ValueError(
-                "daytona is SDK-driven and takes no CLI args; pass "
-                "create options through config params instead")
 
     def _ensure_client(self) -> Any:
         if sdk.AsyncDaytona is None:

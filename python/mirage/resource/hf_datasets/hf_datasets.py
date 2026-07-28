@@ -60,6 +60,7 @@ class HfDatasetsResource(BaseResource):
 
     accessor: HfDatasetsAccessor
     name: str = ResourceName.HF_DATASETS
+    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _OPS
     PROMPT: str = PROMPT

@@ -33,6 +33,7 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
+import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveLangfuseGlob = makeResolveGlob(langfuseReaddir)
 
@@ -118,6 +119,10 @@ export class LangfuseResource extends BaseResource implements Resource {
           )
         : paths
     return resolveLangfuseGlob(this.accessor, effective, this.index)
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('langfuse', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<LangfuseResourceState> {

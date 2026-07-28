@@ -15,6 +15,7 @@
 import { buildRuntime } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import type { DaytonaConfig } from './config.ts'
 import { DaytonaRuntime, type DaytonaSdk } from './runtime.ts'
 
 const DEC = new TextDecoder()
@@ -92,7 +93,9 @@ class FakedDaytonaRuntime extends DaytonaRuntime {
   }
 }
 
-function makeRuntime(options: RemoteSandboxOptions = {}): FakedDaytonaRuntime {
+function makeRuntime(
+  options: RemoteSandboxOptions<DaytonaConfig> | Record<string, unknown> = {},
+): FakedDaytonaRuntime {
   FakeClient.created = []
   FakeClient.fetched = []
   FakeClient.deleted = []

@@ -34,6 +34,7 @@ class BoxResource(BaseResource):
 
     accessor: BoxAccessor
     name: str = ResourceName.BOX
+    remote: bool = True
     caches_reads: bool = True
     index_ttl: float = 86_400
     PROMPT: str = PROMPT

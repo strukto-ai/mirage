@@ -74,17 +74,18 @@ async def test_create_defaults_the_image():
 
 
 def test_disk_sizing_fails_loud():
-    with pytest.raises(ValueError, match="disk"):
+    # Not a DockerConfig field: docker has no per-container disk limit.
+    with pytest.raises(TypeError, match="disk"):
         DockerRuntime(config={"disk": 10})
 
 
 def test_template_fails_loud():
-    with pytest.raises(ValueError, match="image"):
+    with pytest.raises(TypeError, match="template"):
         DockerRuntime(config={"template": "mirage-fuse"})
 
 
 def test_sdk_params_fail_loud():
-    with pytest.raises(ValueError, match="args"):
+    with pytest.raises(TypeError, match="params"):
         DockerRuntime(config={"params": {"labels": {"team": "ml"}}})
 
 

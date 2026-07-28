@@ -29,6 +29,7 @@ class GitHubCIResource(BaseResource):
 
     accessor: GitHubCIAccessor
     name: str = ResourceName.GITHUB_CI
+    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
 

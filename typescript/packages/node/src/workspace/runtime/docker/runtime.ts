@@ -20,6 +20,7 @@ import {
   rstripSlash,
   type RunResult,
 } from '@struktoai/mirage-core'
+import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 
 const DEFAULT_IMAGE = 'python:3.12-slim'
 
@@ -46,37 +47,17 @@ interface DockerResult {
  *
  * Drives the docker CLI directly (Docker Desktop, colima, or a podman
  * alias all work), so there is no SDK dependency and no daemon socket
- * wiring. The general SandboxConfig maps onto the CLI: `image` is
- * pulled on first use (python:3.12-slim when omitted), sizing becomes
- * --cpus/--memory/--gpus (`disk` fails loud: the default storage
- * driver has no per-container limit), and `args` passes any extra
- * `docker run` flag verbatim before the image (binds, --cap-add,
- * --network, --user, ...). `template` and `params` are SDK concepts
- * and fail loud. Containers get real stdin and separated stderr.
+ * wiring. DockerConfig maps onto the CLI: `image` is pulled on first
+ * use (python:3.12-slim when omitted), sizing becomes
+ * --cpus/--memory/--gpus, and `args` passes any extra `docker run`
+ * flag verbatim before the image (binds, --cap-add, --network,
+ * --user, ...). Containers get real stdin and separated stderr.
  */
-export class DockerRuntime extends RemoteSandbox {
+export class DockerRuntime extends RemoteSandbox<DockerConfig> {
   readonly name = 'docker'
 
-  constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
-    super(options)
-    if (this.config.template !== undefined) {
-      throw new Error(
-        'docker boots images, not prebuilt templates; pass the built ' +
-          "image's name as config image instead",
-      )
-    }
-    if (this.config.disk !== undefined) {
-      throw new Error(
-        'docker has no per-container disk limit on the default storage ' +
-          'driver; omit disk from the config',
-      )
-    }
-    if (Object.keys(this.config.params).length > 0) {
-      throw new Error(
-        'docker is CLI-driven and takes no SDK create params; pass ' +
-          '`docker run` flags through config args instead',
-      )
-    }
+  constructor(options: RemoteSandboxOptions<DockerConfig> | Record<string, unknown> = {}) {
+    super(options, DOCKER_CONFIG_KEYS)
   }
 
   // One docker CLI invocation; the seam tests override.
@@ -117,7 +98,7 @@ export class DockerRuntime extends RemoteSandbox {
       'run',
       '-d',
       ...this.resourceArgs(),
-      ...this.config.args,
+      ...(this.config.args ?? []),
       image,
       'sleep',
       'infinity',

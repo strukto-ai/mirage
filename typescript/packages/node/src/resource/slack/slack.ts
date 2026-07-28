@@ -34,6 +34,7 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
+import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveSlackGlob = makeResolveGlob(slackReaddir)
 
@@ -103,6 +104,10 @@ export class SlackResource extends BaseResource implements Resource {
           )
         : paths
     return resolveSlackGlob(this.accessor, effective, this.index)
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('slack', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<SlackResourceState> {

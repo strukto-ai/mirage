@@ -20,9 +20,9 @@ import {
   type RemoteSandboxOptions,
   rstripSlash,
   type RunResult,
-  sizedConfig,
   STDIN_PATH,
 } from '@struktoai/mirage-core'
+import { DAYTONA_CONFIG_KEYS, sizedConfig, type DaytonaConfig } from './config.ts'
 import type {
   CreateSandboxFromImageParams,
   CreateSandboxFromSnapshotParams,
@@ -50,21 +50,17 @@ export const DAYTONA_OPTION_KEYS: readonly string[] = [
 /**
  * A Daytona sandbox as a whole-line runtime.
  *
- * The general SandboxConfig maps directly: `image` becomes a Daytona
- * image sandbox built at create time, `template` names a prebaked
- * Daytona snapshot (prefer it for anything heavy: an inline image
- * build sits in the create path, a snapshot boots in seconds), sizing
- * maps onto Daytona's per-sandbox resources (`gpu` as a number is a
- * count, as a string a GPU type like "H100"; either requests a GPU
- * and forces the sandbox ephemeral, as Daytona requires), and
- * `params` passes any other Daytona create option verbatim
- * (autoStopInterval, autoDeleteInterval, labels, volumes, ...),
- * merged last so it can override anything computed here. `apiKey`
- * falls back to DAYTONA_API_KEY. Daytona's exec has no stdin and
- * reports combined output, so piped bytes are uploaded and redirected
- * in, and stderr comes back null.
+ * DaytonaConfig maps directly onto the create params: `image` becomes
+ * an image sandbox built at create time, `template` names a prebaked
+ * snapshot, sizing maps onto Daytona's per-sandbox resources (`gpu`
+ * as a number is a count, as a string a GPU type like "H100"; either
+ * requests a GPU and forces the sandbox ephemeral, as Daytona
+ * requires), and `params` passes any other create option verbatim,
+ * merged last. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec
+ * has no stdin and reports combined output, so piped bytes are
+ * uploaded and redirected in, and stderr comes back null.
  */
-export class DaytonaRuntime extends RemoteSandbox {
+export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   readonly name = 'daytona'
   // Config-borne dicts keep yaml snake_case inner keys; the SDK
   // wants camelCase. Camelizing here makes both spellings work.
@@ -72,21 +68,15 @@ export class DaytonaRuntime extends RemoteSandbox {
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
-    super(options)
+  constructor(options: RemoteSandboxOptions<DaytonaConfig> | Record<string, unknown> = {}) {
+    super(options, DAYTONA_CONFIG_KEYS)
     if (this.config.image !== undefined && this.config.template !== undefined) {
       throw new Error(
         'daytona takes image or template, not both: an image builds at ' +
           'create time, a template names a snapshot that is already built',
       )
     }
-    if (this.config.args.length > 0) {
-      throw new Error(
-        'daytona is SDK-driven and takes no CLI args; pass create ' +
-          'options through config params instead',
-      )
-    }
-    this.params = normalizeFields(this.config.params)
+    this.params = normalizeFields(this.config.params ?? {})
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.

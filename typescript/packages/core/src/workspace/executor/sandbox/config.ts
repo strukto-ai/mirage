@@ -13,76 +13,42 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * How the sandbox machine is built: one shape for every provider.
+ * How the sandbox machine is built: the fields every provider has.
  *
- * Each provider consumes the fields it can honor and rejects the rest
- * loudly. `image` boots an image (docker: local/registry, pulled on
- * first use; daytona: an inline build at create time); `template`
- * names a prebuilt boot source (a Daytona snapshot or an e2b
- * template); `cpu` is cores, `memory`/`disk` are GiB, `gpu` is a count
- * or type spec; `args` are CLI flags passed verbatim where the
- * provider is CLI-driven (docker run flags); `params` are provider
- * create options passed verbatim to the SDK, merged last so they can
- * override anything computed from the fields above. In yaml this is
- * the runtime entry's `config` block, mirroring a mount's.
+ * This base carries only what all providers support; each provider
+ * extends it with its own fields (DockerConfig, DaytonaConfig,
+ * E2BConfig) and its own key list, so an option a provider cannot
+ * honor fails loud at construction. In yaml this is the runtime
+ * entry's `config` block, mirroring a mount's.
  */
 export interface SandboxConfig {
-  image?: string
-  template?: string
+  /** Environment set in the sandbox. */
   env?: Record<string, string>
-  cpu?: number
-  memory?: number
-  disk?: number
-  gpu?: number | string
-  args?: readonly string[]
-  params?: Record<string, unknown>
 }
 
-/** A SandboxConfig with its collection fields always present. */
-export type NormalizedSandboxConfig = Required<Pick<SandboxConfig, 'env' | 'args' | 'params'>> &
-  SandboxConfig
+/** A provider config with the shared collection fields always present. */
+export type NormalizedSandboxConfig<C extends SandboxConfig = SandboxConfig> = C &
+  Required<Pick<SandboxConfig, 'env'>>
 
-// Python gets unknown-key rejection for free (the dataclass raises
-// TypeError); a TS object spread would silently swallow a typo key
-// without this list.
-const CONFIG_KEYS: readonly string[] = [
-  'image',
-  'template',
-  'env',
-  'cpu',
-  'memory',
-  'disk',
-  'gpu',
-  'args',
-  'params',
-]
+const BASE_CONFIG_KEYS: readonly string[] = ['env']
 
 /**
- * A constructor's config option as a normalized config, mirroring
- * Python's SandboxConfig.coerce: unknown keys fail loud, collection
- * fields are copied and always present.
+ * A constructor's config option as the provider's normalized config,
+ * mirroring Python's SandboxConfig.coerce: keys outside the
+ * provider's list fail loud (Python gets this from the dataclass
+ * raising TypeError; a TS object spread would silently swallow a
+ * typo key without it).
  */
-export function coerceConfig(value: SandboxConfig | undefined): NormalizedSandboxConfig {
-  for (const key of Object.keys(value ?? {})) {
-    if (!CONFIG_KEYS.includes(key)) {
-      const known = CONFIG_KEYS.map((k) => `'${k}'`).join(', ')
+export function coerceConfig<C extends SandboxConfig>(
+  value: C | undefined,
+  keys: readonly string[] = BASE_CONFIG_KEYS,
+): NormalizedSandboxConfig<C> {
+  const config = value ?? ({} as C)
+  for (const key of Object.keys(config)) {
+    if (!keys.includes(key)) {
+      const known = keys.map((k) => `'${k}'`).join(', ')
       throw new Error(`unknown sandbox config key '${key}' (expected: ${known})`)
     }
   }
-  return {
-    ...value,
-    env: { ...value?.env },
-    args: [...(value?.args ?? [])],
-    params: { ...value?.params },
-  }
-}
-
-/** Whether any per-sandbox sizing field is set. */
-export function sizedConfig(config: SandboxConfig): boolean {
-  return (
-    config.cpu !== undefined ||
-    config.memory !== undefined ||
-    config.disk !== undefined ||
-    config.gpu !== undefined
-  )
+  return { ...config, env: { ...config.env } }
 }

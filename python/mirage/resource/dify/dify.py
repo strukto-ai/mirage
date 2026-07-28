@@ -26,6 +26,7 @@ class DifyResource(BaseResource):
 
     accessor: DifyAccessor
     name: str = ResourceName.DIFY
+    remote: bool = True
     caches_reads: bool = True
     _ops = _DIFY_OPS
     PROMPT: str = PROMPT

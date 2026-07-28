@@ -32,6 +32,7 @@ import { stat as emailStat } from '../../core/email/stat.ts'
 import { EMAIL_OPS } from '../../ops/email/index.ts'
 import { redactEmailConfig, type EmailConfig, type EmailConfigRedacted } from './config.ts'
 import { EMAIL_PROMPT } from './prompt.ts'
+import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveGlob = makeResolveGlob(emailReaddir)
 
@@ -98,6 +99,10 @@ export class EmailResource extends BaseResource implements Resource {
           )
         : paths
     return resolveGlob(this.accessor, effective, this.index)
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('email', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<EmailResourceState> {

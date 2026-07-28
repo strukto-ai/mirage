@@ -29,6 +29,7 @@ class EmailResource(BaseResource):
 
     accessor: EmailAccessor
     name: str = ResourceName.EMAIL
+    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT

@@ -50,9 +50,15 @@ the spec in the exec environment, never as a file.
 
 This needs an image or snapshot with `fuse3` and Mirage installed (see
 [The sandbox image](#the-sandbox-image)), and a backend that is remotely
-mountable. Object storage (S3 and S3-compatible: R2, GCS, minio) is
-supported and tested end to end; other backends are mountable as their
-support lands.
+mountable: one whose config alone (credentials, endpoints) can reproduce
+the mount from another machine. Nearly every API-backed backend qualifies:
+object storage (S3 and compatibles), cloud drives (Drive, OneDrive,
+Dropbox, Box, Nextcloud), SaaS APIs (Slack, Discord, GitHub, Notion, ...),
+databases (Postgres, MongoDB, Redis, GridFS) and vector stores (Qdrant,
+Chroma). Only host-local stores (RAM, disk, OPFS) and host-synthesized
+views (/dev, the history view) are not. The backend's package must be in
+the sandbox image (the `sandbox` extra covers the mountable set); S3 is
+tested end to end.
 
 ## Paths inside the sandbox
 
@@ -112,13 +118,14 @@ ws = Workspace({"/data": S3Resource(S3Config(bucket="my-bucket"))},
 await ws.execute("python3 job.py", cwd="/data")
 ```
 
-Every sandbox runtime takes one general `config`: how the machine is built.
-For docker, `cpu` / `memory` / `gpu` map onto `--cpus` / `--memory` /
-`--gpus` (`disk` fails loud: the default storage driver has no per-container
-limit), and `args` passes any extra `docker run` flag verbatim (binds,
-`--network`, `--user`). The container gets real stdin and separated stderr.
-Live FUSE mounts need `--cap-add SYS_ADMIN --device /dev/fuse` and run on
-Linux hosts.
+Every sandbox runtime takes a `config`: how the machine is built. Each
+provider's config carries exactly the fields that provider supports, and an
+unknown field fails loud. For docker, `cpu` / `memory` / `gpu` map onto
+`--cpus` / `--memory` / `--gpus` (there is no `disk`: the default storage
+driver has no per-container limit), and `args` passes any extra
+`docker run` flag verbatim (binds, `--network`, `--user`). The container
+gets real stdin and separated stderr. Live FUSE mounts need
+`--cap-add SYS_ADMIN --device /dev/fuse` and run on Linux hosts.
 
 ## Daytona and e2b
 

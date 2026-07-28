@@ -25,6 +25,7 @@ import { ResourceName, type FileStat, type PathSpec } from '../../types.ts'
 import { BaseResource, type Resource } from '../base.ts'
 import { resolveQdrantConfig, type QdrantConfig, type QdrantConfigResolved } from './config.ts'
 import { QDRANT_PROMPT } from './prompt.ts'
+import { remoteSpec } from '../spec.ts'
 
 const resolveGlob = makeResolveGlob(qdrantReaddir)
 
@@ -34,7 +35,6 @@ export interface QdrantResourceOptions {
 
 export class QdrantResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.QDRANT
-  readonly remote: boolean = true
   readonly supportsSnapshot: boolean = false
   readonly prompt: string = QDRANT_PROMPT
   readonly config: QdrantConfigResolved
@@ -77,5 +77,9 @@ export class QdrantResource extends BaseResource implements Resource {
 
   stat(p: PathSpec): Promise<FileStat> {
     return qdrantStat(this.accessor, p, this.index)
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('qdrant', this.config as unknown as Record<string, unknown>)
   }
 }

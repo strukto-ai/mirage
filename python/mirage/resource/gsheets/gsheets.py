@@ -30,6 +30,7 @@ class GSheetsResource(BaseResource):
 
     accessor: GSheetsAccessor
     name: str = ResourceName.GSHEETS
+    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT

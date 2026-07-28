@@ -15,6 +15,7 @@
 import { buildRuntime } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import type { DockerConfig } from './config.ts'
 import { DockerRuntime } from './runtime.ts'
 
 const ENC = new TextEncoder()
@@ -60,7 +61,9 @@ class FakeDockerRuntime extends DockerRuntime {
   }
 }
 
-function makeRuntime(options: RemoteSandboxOptions = {}): FakeDockerRuntime {
+function makeRuntime(
+  options: RemoteSandboxOptions<DockerConfig> | Record<string, unknown> = {},
+): FakeDockerRuntime {
   return new FakeDockerRuntime(options)
 }
 

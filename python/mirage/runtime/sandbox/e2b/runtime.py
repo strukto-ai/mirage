@@ -20,43 +20,29 @@ from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import STDIN_PATH, sdk_install_hint
 from mirage.runtime.sandbox.e2b import sdk
+from mirage.runtime.sandbox.e2b.config import E2BConfig
 
 
 class E2BRuntime(RemoteSandbox):
     """An E2B sandbox as a whole-line runtime.
 
-    E2B has no inline image builds and no per-sandbox sizing: both are
-    baked into a named template (`e2b template build`), so ``image``
-    and sizing fail loud, ``template`` selects the prebuilt
-    environment (E2B's default template when omitted), and ``params``
-    passes any other AsyncSandbox create kwarg verbatim (timeout,
-    metadata, allow_internet_access, ...), merged last so it can
-    override anything computed here. ``api_key`` falls back to
-    E2B_API_KEY. E2B's exec reports stdout and stderr separately, so
-    both stream back real; it takes no stdin, so piped bytes are
-    uploaded and redirected in.
+    E2BConfig has no image and no sizing fields: E2B bakes both into
+    a named template (`e2b template build`), so ``template`` selects
+    the prebuilt environment (E2B's default template when omitted)
+    and ``params`` passes any other AsyncSandbox create kwarg
+    verbatim, merged last. ``api_key`` falls back to E2B_API_KEY.
+    E2B's exec reports stdout and stderr separately, so both stream
+    back real; it takes no stdin, so piped bytes are uploaded and
+    redirected in.
 
     Args:
         options (Any): the RemoteSandbox constructor fields.
     """
 
     name = "e2b"
+    config_cls = E2BConfig
+    config: E2BConfig
     _sandbox: Any = None
-
-    def __init__(self, **options: Any) -> None:
-        super().__init__(**options)
-        if self.config.image is not None:
-            raise ValueError(
-                "e2b has no inline image builds: build a template with "
-                "'e2b template build' and pass template instead of image")
-        if self.config.sized():
-            raise ValueError(
-                "e2b fixes sizing in the template, not per sandbox: bake "
-                "cpu/memory into the template instead of sizing the config")
-        if self.config.args:
-            raise ValueError(
-                "e2b is SDK-driven and takes no CLI args; pass create "
-                "options through config params instead")
 
     def _api_params(self) -> dict[str, Any]:
         return {"api_key": self.api_key} if self.api_key is not None else {}

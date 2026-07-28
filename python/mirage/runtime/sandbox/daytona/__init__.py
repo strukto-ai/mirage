@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime.sandbox.daytona.config import DaytonaConfig
 from mirage.runtime.sandbox.daytona.runtime import DaytonaRuntime
 
-__all__ = ["DaytonaRuntime"]
+__all__ = ["DaytonaConfig", "DaytonaRuntime"]

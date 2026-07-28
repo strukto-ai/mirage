@@ -35,6 +35,7 @@ class Mem0Resource(BaseResource):
 
     accessor: Mem0Accessor
     name: str = ResourceName.MEM0
+    remote: bool = True
     caches_reads: bool = True
     _ops = _MEM0_OPS
     PROMPT: str = PROMPT

@@ -12,7 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.sandbox.e2b.config import E2BConfig
-from mirage.runtime.sandbox.e2b.runtime import E2BRuntime
+from mirage.runtime.sandbox.daytona import DaytonaConfig
 
-__all__ = ["E2BConfig", "E2BRuntime"]
+
+def test_sized_reflects_any_sizing_field():
+    assert DaytonaConfig().sized() is False
+    assert DaytonaConfig(image="cuda:12").sized() is False
+    assert DaytonaConfig(cpu=1).sized() is True
+    assert DaytonaConfig(gpu="H100").sized() is True
+
+
+def test_coerce_dict_covers_all_fields():
+    config = DaytonaConfig.coerce({
+        "template": "mirage-fuse",
+        "env": {
+            "A": "1"
+        },
+        "params": {
+            "auto_stop_interval": 10
+        },
+    })
+    assert config.template == "mirage-fuse"
+    assert config.env == {"A": "1"}
+    assert config.params == {"auto_stop_interval": 10}

@@ -15,6 +15,7 @@
 import { buildRuntime } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import type { E2BConfig } from './config.ts'
 import { E2BRuntime, type E2bSdk } from './runtime.ts'
 
 const DEC = new TextDecoder()
@@ -100,7 +101,9 @@ class FakedE2BRuntime extends E2BRuntime {
   }
 }
 
-function makeRuntime(options: RemoteSandboxOptions = {}): FakedE2BRuntime {
+function makeRuntime(
+  options: RemoteSandboxOptions<E2BConfig> | Record<string, unknown> = {},
+): FakedE2BRuntime {
   FakeSandbox.created = []
   FakeSandbox.connected = []
   FakeSandbox.killed = 0

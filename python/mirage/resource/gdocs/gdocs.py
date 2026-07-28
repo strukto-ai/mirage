@@ -30,6 +30,7 @@ class GDocsResource(BaseResource):
 
     accessor: GDocsAccessor
     name: str = ResourceName.GDOCS
+    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT

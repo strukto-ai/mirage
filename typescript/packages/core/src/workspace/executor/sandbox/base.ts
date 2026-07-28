@@ -30,13 +30,13 @@ function shQuote(s: string): string {
 export type MountSpecs = Record<string, Record<string, unknown> | null>
 
 /** Constructor options for a RemoteSandbox subclass (a yaml entry's keys). */
-export interface RemoteSandboxOptions {
+export interface RemoteSandboxOptions<C extends SandboxConfig = SandboxConfig> {
   /** Commands that place a whole line here; ["*"] claims every line. */
   captures?: readonly string[]
   /** Provider credential; absent reads the provider's own env variable. */
   apiKey?: string
   /** How the sandbox machine is built (a yaml entry's `config` block). */
-  config?: SandboxConfig
+  config?: C
   /** Reattach to this live sandbox instead of creating one. */
   sandboxId?: string
   /**
@@ -64,12 +64,12 @@ export interface RemoteSandboxOptions {
  * a live sandbox by id. The sandbox is created on the first line,
  * never at workspace construction.
  */
-export abstract class RemoteSandbox implements Runtime {
+export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig> implements Runtime {
   abstract readonly name: string
   readonly runsLines = true
   readonly captures: readonly string[]
   readonly apiKey: string | undefined
-  readonly config: NormalizedSandboxConfig
+  readonly config: NormalizedSandboxConfig<C>
   workspaceRoot: string | null
   script?: RouteScript
   private sandboxIdValue: string | null
@@ -79,15 +79,19 @@ export abstract class RemoteSandbox implements Runtime {
   ownedSandbox = false
   private starting: Promise<void> | null = null
   private dispatch: BridgeDispatchFn | null = null
-  private mountPrefixes: (() => string[]) | null = null
   private mountSpecs: (() => MountSpecs) | null = null
 
-  constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
-    const opts = options as RemoteSandboxOptions
+  // Each provider passes its own config key list, so a field the
+  // provider does not have fails loud (mirrors Python's config_cls).
+  constructor(
+    options: RemoteSandboxOptions<C> | Record<string, unknown> = {},
+    configKeys?: readonly string[],
+  ) {
+    const opts = options as RemoteSandboxOptions<C>
     if (typeof opts.script === 'string') throw scriptStringError()
     this.captures = opts.captures !== undefined ? opts.captures.slice() : ['*']
     this.apiKey = opts.apiKey
-    this.config = coerceConfig(opts.config)
+    this.config = coerceConfig(opts.config, configKeys)
     this.workspaceRoot = opts.workspaceRoot ?? null
     if (typeof opts.script === 'function' || opts.script instanceof ScriptSource) {
       this.script = opts.script
@@ -100,13 +104,15 @@ export abstract class RemoteSandbox implements Runtime {
     return this.sandboxIdValue
   }
 
+  // The shared runtime contract carries listMounts for the
+  // interpreter runtimes; a sandbox needs only the spec map, whose
+  // keys already name every mount.
   attach(
     dispatch: BridgeDispatchFn,
-    listMounts: () => string[],
+    _listMounts: () => string[],
     listMountSpecs?: () => MountSpecs,
   ): void {
     this.dispatch = dispatch
-    this.mountPrefixes = listMounts
     this.mountSpecs = listMountSpecs ?? null
   }
 
@@ -183,31 +189,28 @@ export abstract class RemoteSandbox implements Runtime {
     return `${rstripSlash(root)}/${rel}`
   }
 
-  private userMountPrefixes(): string[] {
-    const prefixes = new Set<string>()
-    for (const raw of this.mountPrefixes?.() ?? []) {
+  /**
+   * The workspace's user mounts as [spec, sandbox mountpoint].
+   *
+   * The spec map's keys name every mount, so no separate mount lister
+   * is needed. System mounts (/dev, the history view) are excluded:
+   * the sandbox has its own, and they are host machinery, not user
+   * data. A user mount with no spec fails loud.
+   */
+  private desiredMounts(): Record<string, [Record<string, unknown>, string]> {
+    const specs: MountSpecs = {}
+    for (const [raw, spec] of Object.entries(this.mountSpecs?.() ?? {})) {
       const prefix = rstripSlash(raw)
-      prefixes.add(prefix === '' ? '/' : prefix)
+      specs[prefix === '' ? '/' : prefix] = spec
     }
+    const prefixes = new Set(Object.keys(specs))
     for (const system of SYSTEM_MOUNTS) prefixes.delete(system)
     // A bare "/" next to real mounts is the synthetic default root,
     // not a user mount; walk it only when it is the whole world.
     if (prefixes.size > 1) prefixes.delete('/')
-    return [...prefixes].sort()
-  }
-
-  /**
-   * The workspace's user mounts as [spec, sandbox mountpoint].
-   *
-   * System mounts (/dev, the history view) are excluded: the sandbox
-   * has its own, and they are host machinery, not user data. A user
-   * mount with no spec fails loud.
-   */
-  private desiredMounts(): Record<string, [Record<string, unknown>, string]> {
-    const specs = this.mountSpecs?.() ?? {}
     const root = rstripSlash(this.workspaceRoot ?? DEFAULT_WORKSPACE_ROOT)
     const desired: Record<string, [Record<string, unknown>, string]> = {}
-    for (const prefix of this.userMountPrefixes()) {
+    for (const prefix of [...prefixes].sort()) {
       const spec = specs[prefix] ?? null
       if (spec === null) {
         throw new Error(
@@ -233,7 +236,7 @@ export abstract class RemoteSandbox implements Runtime {
    * may replace this wholesale (e.g. a provider volume).
    */
   async mountWorkspace(): Promise<void> {
-    if (this.dispatch === null || this.mountPrefixes === null) return
+    if (this.dispatch === null || this.mountSpecs === null) return
     for (const [prefix, [spec, mountpoint]] of Object.entries(this.desiredMounts())) {
       await this.mountCommand(`mirage mount add ${shQuote(prefix)} --fuse ${shQuote(mountpoint)}`, {
         [MOUNT_SPEC_ENV]: JSON.stringify(spec),

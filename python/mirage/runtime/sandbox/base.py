@@ -17,7 +17,7 @@ import json
 import posixpath
 import shlex
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 from mirage.runtime.base import RunArgs, RunResult, Runtime
 from mirage.runtime.route.types import RouteScript
@@ -42,8 +42,9 @@ class RemoteSandbox(Runtime):
         api_key (str | None): provider credential; None reads the
             provider's own environment variable.
         config (SandboxConfig | dict[str, Any] | None): how the
-            sandbox machine is built (image or template, env, sizing,
-            provider params); the dict form is a yaml entry's
+            sandbox machine is built, coerced through the provider's
+            own config class (config_cls), so a field the provider
+            does not have fails loud; the dict form is a yaml entry's
             ``config`` block.
         sandbox_id (str | None): reattach to this live sandbox
             instead of creating one.
@@ -62,6 +63,9 @@ class RemoteSandbox(Runtime):
 
     runs_lines = True
     captures: tuple[str, ...] = ("*", )
+    # Each provider's config class; coerce() makes unknown fields
+    # fail loud, so providers need no per-field rejection code.
+    config_cls: ClassVar[type[SandboxConfig]] = SandboxConfig
 
     def __init__(self,
                  captures: Sequence[str] = ("*", ),
@@ -72,7 +76,7 @@ class RemoteSandbox(Runtime):
                  script: RouteScript | None = None) -> None:
         self.captures = tuple(captures)
         self.api_key = api_key
-        self.config = SandboxConfig.coerce(config)
+        self.config = self.config_cls.coerce(config)
         self.workspace_root = workspace_root
         self.script = script
         self._sandbox_id = sandbox_id
@@ -83,7 +87,6 @@ class RemoteSandbox(Runtime):
         self._started = False
         self._start_lock = asyncio.Lock()
         self._dispatch: Callable[..., Any] | None = None
-        self._mount_prefixes: Callable[[], list[str]] | None = None
         self._mount_specs: Callable[[], dict[str, dict[str, Any]
                                              | None]] | None = None
 
@@ -103,13 +106,15 @@ class RemoteSandbox(Runtime):
 
         Args:
             dispatch (Callable): the workspace op dispatch.
-            mount_prefixes (Callable): the workspace mount lister.
+            mount_prefixes (Callable): the workspace mount lister; the
+                shared runtime contract carries it for the interpreter
+                runtimes, but a sandbox needs only the spec map, whose
+                keys already name every mount.
             mount_specs (Callable | None): per-prefix remote mount
                 specs (a resource's remote_mount_spec()), used to
                 reproduce the mounts in the sandbox.
         """
         self._dispatch = dispatch
-        self._mount_prefixes = mount_prefixes
         self._mount_specs = mount_specs
 
     async def run(self, args: RunArgs) -> RunResult:
@@ -169,27 +174,28 @@ class RemoteSandbox(Runtime):
         """
         return DEFAULT_WORKSPACE_ROOT
 
-    def _user_mount_prefixes(self) -> list[str]:
-        assert self._mount_prefixes is not None
-        prefixes = {p.rstrip("/") or "/" for p in self._mount_prefixes()}
-        prefixes -= SYSTEM_MOUNTS
+    def _desired_mounts(self) -> dict[str, tuple[dict[str, Any], str]]:
+        """The workspace's user mounts as (spec, sandbox mountpoint).
+
+        The spec map's keys name every mount, so no separate mount
+        lister is needed. System mounts (/dev, the history view) are
+        excluded: the sandbox has its own, and they are host
+        machinery, not user data. A user mount with no spec fails
+        loud.
+        """
+        assert self._mount_specs is not None
+        specs = {
+            raw.rstrip("/") or "/": spec
+            for raw, spec in self._mount_specs().items()
+        }
+        prefixes = set(specs) - SYSTEM_MOUNTS
         # A bare "/" next to real mounts is the synthetic default root,
         # not a user mount; walk it only when it is the whole world.
         if len(prefixes) > 1:
             prefixes.discard("/")
-        return sorted(prefixes)
-
-    def _desired_mounts(self) -> dict[str, tuple[dict[str, Any], str]]:
-        """The workspace's user mounts as (spec, sandbox mountpoint).
-
-        System mounts (/dev, the history view) are excluded: the
-        sandbox has its own, and they are host machinery, not user
-        data. A user mount with no spec fails loud.
-        """
-        specs = self._mount_specs() if self._mount_specs is not None else {}
         root = self.workspace_root or DEFAULT_WORKSPACE_ROOT
         desired: dict[str, tuple[dict[str, Any], str]] = {}
-        for prefix in self._user_mount_prefixes():
+        for prefix in sorted(prefixes):
             spec = specs.get(prefix)
             if spec is None:
                 raise ValueError(
@@ -212,7 +218,7 @@ class RemoteSandbox(Runtime):
         mirage-python-fuse). Subclasses may replace this wholesale
         (e.g. a provider volume).
         """
-        if self._dispatch is None or self._mount_prefixes is None:
+        if self._dispatch is None or self._mount_specs is None:
             return
         for prefix, (spec, mountpoint) in self._desired_mounts().items():
             await self._mount_command(

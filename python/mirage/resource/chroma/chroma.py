@@ -26,6 +26,7 @@ class ChromaResource(BaseResource):
 
     accessor: ChromaAccessor
     name: str = ResourceName.CHROMA
+    remote: bool = True
     caches_reads: bool = False
     _ops = _CHROMA_OPS
     PROMPT: str = PROMPT

@@ -35,6 +35,7 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } from './config.ts'
+import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveDiscordGlob = makeResolveGlob(discordReaddir)
 
@@ -114,6 +115,10 @@ export class DiscordResource extends BaseResource implements Resource {
           )
         : paths
     return resolveDiscordGlob(this.accessor, effective, this.index)
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('discord', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<DiscordResourceState> {

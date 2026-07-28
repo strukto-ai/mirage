@@ -138,7 +138,8 @@ def test_template_and_image_conflict():
 
 
 def test_cli_args_fail_loud():
-    with pytest.raises(ValueError, match="params"):
+    # Not a DaytonaConfig field: daytona is SDK-driven.
+    with pytest.raises(TypeError, match="args"):
         DaytonaRuntime(config={"args": ["--cap-add", "SYS_ADMIN"]})
 
 

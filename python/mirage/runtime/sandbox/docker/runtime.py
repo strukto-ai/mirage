@@ -15,12 +15,12 @@
 import asyncio
 import posixpath
 import shlex
-from typing import Any
 
 from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (DOCKER_CLI_HINT,
                                               DOCKER_DEFAULT_IMAGE)
+from mirage.runtime.sandbox.docker.config import DockerConfig
 
 
 class DockerRuntime(RemoteSandbox):
@@ -28,35 +28,20 @@ class DockerRuntime(RemoteSandbox):
 
     Drives the docker CLI directly (Docker Desktop, colima, or a
     podman alias all work), so there is no SDK dependency and no
-    daemon socket wiring. The general SandboxConfig maps onto the CLI:
-    ``image`` is pulled on first use (python:3.12-slim when omitted),
-    sizing becomes --cpus/--memory/--gpus (``disk`` fails loud: the
-    default storage driver has no per-container limit), and ``args``
-    passes any extra `docker run` flag verbatim before the image
-    (binds, --cap-add, --network, --user, ...). ``template`` and
-    ``params`` are SDK concepts and fail loud. Containers get real
-    stdin and separated stderr.
+    daemon socket wiring. DockerConfig maps onto the CLI: ``image``
+    is pulled on first use (python:3.12-slim when omitted), sizing
+    becomes --cpus/--memory/--gpus, and ``args`` passes any extra
+    `docker run` flag verbatim before the image (binds, --cap-add,
+    --network, --user, ...). Containers get real stdin and separated
+    stderr.
 
     Args:
         options (Any): the RemoteSandbox constructor fields.
     """
 
     name = "docker"
-
-    def __init__(self, **options: Any) -> None:
-        super().__init__(**options)
-        if self.config.template is not None:
-            raise ValueError(
-                "docker boots images, not prebuilt templates; pass the "
-                "built image's name as config image instead")
-        if self.config.disk is not None:
-            raise ValueError(
-                "docker has no per-container disk limit on the default "
-                "storage driver; omit disk from the config")
-        if self.config.params:
-            raise ValueError(
-                "docker is CLI-driven and takes no SDK create params; "
-                "pass `docker run` flags through config args instead")
+    config_cls = DockerConfig
+    config: DockerConfig
 
     async def _docker(self,
                       args: list[str],

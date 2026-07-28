@@ -15,43 +15,39 @@
 import pytest
 
 from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.docker import DockerConfig
+from mirage.runtime.sandbox.e2b import E2BConfig
 
 
 def test_coerce_none_gives_defaults():
     config = SandboxConfig.coerce(None)
     assert config == SandboxConfig()
     assert config.env == {}
-    assert config.args == []
-    assert config.params == {}
 
 
 def test_coerce_passes_an_instance_through():
-    config = SandboxConfig(image="python:3.13")
+    config = SandboxConfig(env={"A": "1"})
     assert SandboxConfig.coerce(config) is config
 
 
 def test_coerce_dict_form_is_a_yaml_config_block():
-    config = SandboxConfig.coerce({
-        "template": "mirage-fuse",
-        "env": {
-            "A": "1"
-        },
-        "params": {
-            "auto_stop_interval": 10
-        },
-    })
-    assert config.template == "mirage-fuse"
+    config = SandboxConfig.coerce({"env": {"A": "1"}})
     assert config.env == {"A": "1"}
-    assert config.params == {"auto_stop_interval": 10}
 
 
 def test_coerce_unknown_key_fails_loud():
-    with pytest.raises(TypeError, match="snapshot"):
-        SandboxConfig.coerce({"snapshot": "mirage-fuse"})
+    # A provider-only field is unknown on the base config.
+    with pytest.raises(TypeError, match="image"):
+        SandboxConfig.coerce({"image": "python:3.13"})
 
 
-def test_sized_reflects_any_sizing_field():
-    assert SandboxConfig().sized() is False
-    assert SandboxConfig(image="x").sized() is False
-    assert SandboxConfig(cpu=1).sized() is True
-    assert SandboxConfig(gpu="H100").sized() is True
+def test_coerce_lifts_a_base_config_into_a_provider_config():
+    lifted = DockerConfig.coerce(SandboxConfig(env={"A": "1"}))
+    assert lifted == DockerConfig(env={"A": "1"})
+
+
+def test_coerce_rejects_a_sibling_provider_config():
+    # A DockerConfig is a SandboxConfig, so the base passes it
+    # through; a sibling provider rejects its foreign fields.
+    with pytest.raises(TypeError, match="image"):
+        E2BConfig.coerce(DockerConfig(args=["-v", "/host:/mnt"]))

@@ -68,7 +68,7 @@ class FuseSandbox(RecordingSandbox):
 
 
 def _attach_specs(box: RecordingSandbox, specs: dict) -> None:
-    box.attach(box._dispatch, box._mount_prefixes, lambda: dict(specs))
+    box.attach(box._dispatch, lambda: list(specs), lambda: dict(specs))
 
 
 def _mount_cmds(box: RecordingSandbox) -> list[str]:
@@ -206,8 +206,8 @@ async def test_run_raises_sandboxes_take_lines():
 
 
 def test_config_dict_form_coerces():
-    box = RecordingSandbox(config={"cpu": 4, "gpu": "H100"})
-    assert box.config == SandboxConfig(cpu=4, gpu="H100")
+    box = RecordingSandbox(config={"env": {"A": "1"}})
+    assert box.config == SandboxConfig(env={"A": "1"})
 
 
 class FailingMountSandbox(FuseSandbox):

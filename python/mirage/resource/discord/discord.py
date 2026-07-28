@@ -29,6 +29,7 @@ class DiscordResource(BaseResource):
 
     accessor: DiscordAccessor
     name: str = ResourceName.DISCORD
+    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT

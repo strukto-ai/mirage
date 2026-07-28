@@ -37,6 +37,7 @@ class NotionResource(BaseResource):
 
     accessor: NotionAccessor
     name: str = ResourceName.NOTION
+    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _NOTION_OPS
     PROMPT: str = PROMPT

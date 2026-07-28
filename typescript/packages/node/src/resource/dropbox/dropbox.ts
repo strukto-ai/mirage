@@ -33,6 +33,7 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
+import { remoteSpec } from '@struktoai/mirage-core'
 
 const dropboxResolveGlob = makeResolveGlob(dropboxReaddir)
 
@@ -110,6 +111,10 @@ export class DropboxResource extends BaseResource implements Resource {
           )
         : paths
     return dropboxResolveGlob(this.accessor, effective, this.index)
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('dropbox', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<DropboxResourceState> {

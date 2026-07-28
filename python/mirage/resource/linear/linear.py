@@ -37,6 +37,7 @@ class LinearResource(BaseResource):
 
     accessor: LinearAccessor
     name: str = ResourceName.LINEAR
+    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _LINEAR_OPS
     PROMPT: str = PROMPT

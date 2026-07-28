@@ -31,6 +31,7 @@ class LanceDBResource(BaseResource):
 
     accessor: LanceDBAccessor
     name: str = ResourceName.LANCEDB
+    remote: bool = True
     PROMPT: str = PROMPT
 
     def __init__(self, config: LanceDBConfig) -> None:

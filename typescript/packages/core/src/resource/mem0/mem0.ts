@@ -9,6 +9,7 @@ import { ResourceName, type FileStat, type PathSpec } from '../../types.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import { BaseResource, type Resource } from '../base.ts'
 import { MEM0_PROMPT } from './prompt.ts'
+import { remoteSpec } from '../spec.ts'
 
 const resolveGlob = makeResolveGlob(readdir)
 
@@ -57,6 +58,10 @@ export class Mem0Resource extends BaseResource implements Resource {
 
   stat(path: PathSpec): Promise<FileStat> {
     return stat(this.accessor, path, this.index)
+  }
+
+  remoteMountSpec(): Record<string, unknown> {
+    return remoteSpec('mem0', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Record<string, unknown> {
