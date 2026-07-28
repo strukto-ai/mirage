@@ -22,11 +22,7 @@ import { GSHEETS_GWS_WRITE } from './gws_sheets_write.ts'
 import { GSHEETS_IO } from './io.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GSHEETS_RM } from './rm.ts'
-import {
-  GWS_SHEETS_API_COMMANDS,
-  GWS_ROOT_COMMANDS,
-  GWS_SERVICE_HELP_COMMANDS,
-} from '../gws/index.ts'
+import { GWS_SHEETS_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 
 export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSheetsAccessor>(ResourceName.GSHEETS, GSHEETS_IO, {
@@ -42,6 +38,5 @@ export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
   ...GSHEETS_GWS_WRITE,
   ...GSHEETS_GWS_APPEND,
   ...GWS_SHEETS_API_COMMANDS,
-  ...GWS_ROOT_COMMANDS.filter((c) => c.resource === ResourceName.GSHEETS),
-  ...GWS_SERVICE_HELP_COMMANDS.filter((c) => c.resource === ResourceName.GSHEETS),
+  ...gwsHelpCommands(ResourceName.GSHEETS),
 ]

@@ -15,8 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { renderHelp } from '../../spec/help.ts'
 import {
-  GWS_SERVICE_HELP_COMMANDS,
   ROOT_SPEC,
+  gwsHelpCommands,
   renderServiceMethods,
   renderServices,
   serviceNames,
@@ -59,8 +59,21 @@ describe('gws help', () => {
     expect(out).toContain(renderServices())
   })
 
-  it('registers one help command per service', () => {
-    const names = new Set(GWS_SERVICE_HELP_COMMANDS.map((c) => c.name))
-    expect(names).toEqual(new Set(serviceNames().map((s) => `gws ${s}`)))
+  it('registers every reachable service for a drive mount', () => {
+    const cmds = gwsHelpCommands('gdrive')
+    expect(new Set(cmds.map((c) => c.name))).toEqual(
+      new Set(['gws', 'gws drive', 'gws sheets', 'gws docs', 'gws slides']),
+    )
+    expect(new Set(cmds.map((c) => c.resource))).toEqual(new Set(['gdrive']))
+  })
+
+  it('registers only the reachable services for a single-service mount', () => {
+    // A gdocs-only mount must not answer `gws gmail` or `gws drive`.
+    expect(new Set(gwsHelpCommands('gdocs').map((c) => c.name))).toEqual(
+      new Set(['gws', 'gws docs']),
+    )
+    expect(new Set(gwsHelpCommands('gmail').map((c) => c.name))).toEqual(
+      new Set(['gws', 'gws gmail']),
+    )
   })
 })

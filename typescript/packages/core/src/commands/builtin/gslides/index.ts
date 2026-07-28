@@ -19,11 +19,7 @@ import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GSLIDES_IO } from './io.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GSLIDES_RM } from './rm.ts'
-import {
-  GWS_SLIDES_API_COMMANDS,
-  GWS_ROOT_COMMANDS,
-  GWS_SERVICE_HELP_COMMANDS,
-} from '../gws/index.ts'
+import { GWS_SLIDES_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 
 export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSlidesAccessor>(ResourceName.GSLIDES, GSLIDES_IO, {
@@ -36,6 +32,5 @@ export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
   }),
   ...GSLIDES_RM,
   ...GWS_SLIDES_API_COMMANDS,
-  ...GWS_ROOT_COMMANDS.filter((c) => c.resource === ResourceName.GSLIDES),
-  ...GWS_SERVICE_HELP_COMMANDS.filter((c) => c.resource === ResourceName.GSLIDES),
+  ...gwsHelpCommands(ResourceName.GSLIDES),
 ]

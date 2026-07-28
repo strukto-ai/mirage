@@ -20,9 +20,9 @@ from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
 from mirage.commands.builtin.gsheets.gws_sheets_write import gws_sheets_write
 from mirage.commands.builtin.gws import (GWS_DOCS_API_COMMANDS,
                                          GWS_DRIVE_API_COMMANDS,
-                                         GWS_SERVICE_HELP_COMMANDS,
                                          GWS_SHEETS_API_COMMANDS,
-                                         GWS_SLIDES_API_COMMANDS, gws_root)
+                                         GWS_SLIDES_API_COMMANDS,
+                                         gws_help_commands)
 
 _GDRIVE_OVERRIDES: set[str] = set()
 
@@ -33,8 +33,7 @@ COMMANDS = [
         overrides=_GDRIVE_OVERRIDES,
     ),
     gws_docs_write,
-    gws_root,
-    *GWS_SERVICE_HELP_COMMANDS,
+    *gws_help_commands("gdrive"),
     gws_sheets_read,
     gws_sheets_write,
     gws_sheets_append,

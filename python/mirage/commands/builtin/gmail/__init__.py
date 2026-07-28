@@ -24,7 +24,7 @@ from mirage.commands.builtin.gmail.gws_gmail_triage import gws_gmail_triage
 from mirage.commands.builtin.gmail.io import IO as _IO
 from mirage.commands.builtin.gmail.rg import rg
 from mirage.commands.builtin.gws import (GWS_GMAIL_API_COMMANDS,
-                                         GWS_SERVICE_HELP_COMMANDS, gws_root)
+                                         gws_help_commands)
 
 COMMANDS = [
     *make_generic_commands(
@@ -34,8 +34,7 @@ COMMANDS = [
     ),
     grep,
     rg,
-    gws_root,
-    *GWS_SERVICE_HELP_COMMANDS,
+    *gws_help_commands("gmail"),
     gws_gmail_send,
     gws_gmail_reply,
     gws_gmail_reply_all,

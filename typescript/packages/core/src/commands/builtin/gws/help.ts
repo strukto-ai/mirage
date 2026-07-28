@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../io/types.ts'
-import { ResourceName } from '../../../types.ts'
 import { command, type RegisteredCommand } from '../../config.ts'
 import { CommandSpec } from '../../spec/types.ts'
 import type { GwsService } from './methods.ts'
@@ -70,36 +69,42 @@ export function renderServices(): string {
   return lines.join('\n')
 }
 
+const ROOT_DESCRIPTION = 'Google Workspace API commands'
+
 export const ROOT_SPEC = new CommandSpec({
-  description: 'Google Workspace API commands',
+  description: ROOT_DESCRIPTION,
   epilog: renderServices(),
 })
 
-function makeServiceHelpCommand(service: GwsService): RegisteredCommand[] {
-  const body = renderServiceMethods(service)
+function helpCommand(
+  name: string,
+  description: string,
+  body: string,
+  resource: string,
+): RegisteredCommand[] {
   return command({
-    name: `gws ${service}`,
-    resource: SERVICE_RESOURCES[service],
-    spec: new CommandSpec({
-      description: `Google ${service} API commands`,
-      epilog: body,
-    }),
+    name,
+    resource: [resource],
+    spec: new CommandSpec({ description, epilog: body }),
     fn: () => Promise.resolve([ENC.encode(body + '\n'), new IOResult()]),
   })
 }
 
-export const GWS_ROOT_COMMANDS: readonly RegisteredCommand[] = command({
-  name: 'gws',
-  resource: [
-    ResourceName.GDRIVE,
-    ResourceName.GSHEETS,
-    ResourceName.GDOCS,
-    ResourceName.GSLIDES,
-    ResourceName.GMAIL,
-  ],
-  spec: ROOT_SPEC,
-  fn: () => Promise.resolve([ENC.encode(renderServices() + '\n'), new IOResult()]),
-})
-
-export const GWS_SERVICE_HELP_COMMANDS: readonly RegisteredCommand[] =
-  serviceNames().flatMap(makeServiceHelpCommand)
+// Each command is registered against the single resource asked for, so a
+// mount only ever answers for the services it can actually reach: a
+// gdocs-only mount must not serve `gws gmail`.
+export function gwsHelpCommands(resource: string): RegisteredCommand[] {
+  const out = [...helpCommand('gws', ROOT_DESCRIPTION, renderServices(), resource)]
+  for (const service of serviceNames()) {
+    if (!SERVICE_RESOURCES[service].includes(resource)) continue
+    out.push(
+      ...helpCommand(
+        `gws ${service}`,
+        `Google ${service} API commands`,
+        renderServiceMethods(service),
+        resource,
+      ),
+    )
+  }
+  return out
+}

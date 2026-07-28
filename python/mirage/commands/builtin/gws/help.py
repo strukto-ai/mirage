@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 from collections.abc import Callable
 
 from mirage.accessor.base import Accessor
@@ -85,72 +86,76 @@ def render_services() -> str:
     return "\n".join(lines)
 
 
-ROOT_SPEC = CommandSpec(
-    description="Google Workspace API commands",
-    epilog=render_services(),
-)
+_ROOT_DESCRIPTION = "Google Workspace API commands"
 
 
-def make_service_help_command(service: str) -> Callable[..., object]:
-    """Build the ``gws <service>`` help command for one service.
-
-    Args:
-        service (str): the gws service name.
-    """
-    spec = CommandSpec(
-        description=f"Google {service} API commands",
-        epilog=render_service_methods(service),
-    )
-    body = render_service_methods(service)
-
-    async def run(
-        accessor: Accessor,
-        paths: list[PathSpec],
-        *texts: str,
-        **_flags: object,
-    ) -> tuple[ByteSource | None, IOResult]:
-        return yield_bytes((body + "\n").encode()), IOResult()
-
-    run.__name__ = f"gws_{service}_help"
-    run.__doc__ = (
-        f"List the gws {service} commands.\n\n"
-        "    Args:\n"
-        "        accessor (Accessor): bound mount handle, unused.\n"
-        "        paths (list[PathSpec]): unused; takes no operands.\n"
-        "        texts (str): unused positional operands.\n"
-        "    ")
-    return command(f"gws {service}",
-                   resource=SERVICE_RESOURCES[service],
-                   spec=spec)(run)
-
-
-@command("gws",
-         resource=["gdrive", "gsheets", "gdocs", "gslides", "gmail"],
-         spec=ROOT_SPEC)
-async def gws_root(
+async def run_help(
+    body: str,
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     **_flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    """List the gws services so the surface is discoverable.
+    """Print one prerendered help listing.
+
+    Bound to its listing with `functools.partial`, mirroring how
+    `run_gws_method` is bound to its method.
 
     Args:
+        body (str): the listing to print, without a trailing newline.
         accessor (Accessor): the bound mount handle, unused.
         paths (list[PathSpec]): unused; the command takes no operands.
         texts (str): unused positional operands.
     """
-    return yield_bytes((render_services() + "\n").encode()), IOResult()
+    return yield_bytes((body + "\n").encode()), IOResult()
 
 
-GWS_SERVICE_HELP_COMMANDS = [
-    make_service_help_command(s) for s in service_names()
-]
+def _help_command(
+    name: str,
+    description: str,
+    body: str,
+    resource: str,
+) -> Callable[..., object]:
+    """Register one help command against one resource.
+
+    Args:
+        name (str): the command name, `gws` or `gws <service>`.
+        description (str): the one-line description for `--help`.
+        body (str): the listing, used as both output and help epilog.
+        resource (str): the single resource this registration serves.
+    """
+    spec = CommandSpec(description=description, epilog=body)
+    return command(name, resource=[resource],
+                   spec=spec)(functools.partial(run_help, body))
+
+
+def gws_help_commands(resource: str) -> list[Callable[..., object]]:
+    """Build the `gws` and `gws <service>` help commands for one resource.
+
+    Each command is registered against the single resource asked for, so a
+    mount only ever answers for the services it can actually reach: a
+    gdocs-only mount must not serve `gws gmail`. This mirrors the
+    TypeScript wiring, which filters the same registrations by resource.
+
+    Args:
+        resource (str): the mounted resource name.
+    """
+    out = [
+        _help_command("gws", _ROOT_DESCRIPTION, render_services(), resource)
+    ]
+    for service in service_names():
+        if resource not in SERVICE_RESOURCES[service]:
+            continue
+        out.append(
+            _help_command(f"gws {service}", f"Google {service} API commands",
+                          render_service_methods(service), resource))
+    return out
+
 
 __all__ = [
-    "GWS_SERVICE_HELP_COMMANDS",
-    "gws_root",
+    "gws_help_commands",
     "render_service_methods",
     "render_services",
+    "run_help",
     "service_names",
 ]

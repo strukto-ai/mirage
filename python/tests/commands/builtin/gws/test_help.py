@@ -14,10 +14,10 @@
 
 import pytest
 
-from mirage.commands.builtin.gws.help import (GWS_SERVICE_HELP_COMMANDS,
-                                              ROOT_SPEC, gws_root,
+from mirage.commands.builtin.gws.help import (gws_help_commands,
                                               render_service_methods,
-                                              render_services, service_names)
+                                              render_services, run_help,
+                                              service_names)
 from mirage.commands.builtin.gws.methods import GWS_METHODS
 from mirage.commands.spec.help import render_help
 from mirage.io.stream import materialize
@@ -52,23 +52,52 @@ def test_a_service_without_helpers_omits_the_helper_block():
     assert "Helpers:" not in render_service_methods("slides")
 
 
+def _names(resource):
+    return {
+        rc.name
+        for cmd in gws_help_commands(resource)
+        for rc in cmd._registered_commands
+    }
+
+
+def _resources(resource):
+    return {
+        rc.resource
+        for cmd in gws_help_commands(resource)
+        for rc in cmd._registered_commands
+    }
+
+
 def test_root_help_renders_the_service_index_as_the_epilog():
-    out = render_help("gws", ROOT_SPEC)
-    assert out.startswith("gws: Google Workspace API commands")
+    root = gws_help_commands("gdrive")[0]
+    spec = root._registered_commands[0].spec
+    out = render_help("gws", spec)
+    assert out.startswith(f"gws: {spec.description}")
     assert render_services() in out
 
 
-def test_one_help_command_is_registered_per_service():
-    names = {
-        rc.name
-        for cmd in GWS_SERVICE_HELP_COMMANDS
-        for rc in cmd._registered_commands
+def test_a_drive_mount_reaches_every_service():
+    assert _names("gdrive") == {
+        "gws", "gws drive", "gws sheets", "gws docs", "gws slides"
     }
-    assert names == {f"gws {s}" for s in service_names()}
+    assert _resources("gdrive") == {"gdrive"}
+
+
+@pytest.mark.parametrize("resource,expected", [
+    ("gdocs", {"gws", "gws docs"}),
+    ("gmail", {"gws", "gws gmail"}),
+    ("gslides", {"gws", "gws slides"}),
+    ("gsheets", {"gws", "gws sheets"}),
+])
+def test_a_single_service_mount_registers_only_what_it_reaches(
+        resource, expected):
+    # A gdocs-only mount must not answer `gws gmail` or `gws drive`.
+    assert _names(resource) == expected
+    assert _resources(resource) == {resource}
 
 
 @pytest.mark.asyncio
-async def test_gws_root_prints_the_service_index():
-    out, io = await gws_root(None, [])
+async def test_run_help_prints_the_bound_listing():
+    out, io = await run_help(render_services(), None, [])
     assert io.exit_code == 0
     assert await materialize(out) == (render_services() + "\n").encode()
