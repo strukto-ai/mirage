@@ -44,12 +44,9 @@ store live** under a workspace root, so a read pulls from the backend and a
 write streams straight back to it, with no upload or sync step. Inside the
 sandbox, `/data` backed by S3 is a real directory.
 
-Mounting is a reconcile, not a one-shot setup: every captured line diffs the
-workspace's mounts against what the sandbox has, issuing
-`mirage mount add <prefix>` / `mirage mount remove <prefix>` inside the
-sandbox only for what changed (the mount spec travels in the exec
-environment, never as a file). Mounts added to or removed from the workspace
-after the sandbox booted converge live.
+Mounting happens once, when the sandbox boots: each mount becomes one
+`mirage mount add <prefix> --fuse <path>` command inside the sandbox, with
+the spec in the exec environment, never as a file.
 
 This needs an image or snapshot with `fuse3` and Mirage installed (see
 [The sandbox image](#the-sandbox-image)), and a backend that is remotely
@@ -57,20 +54,16 @@ mountable. Object storage (S3 and S3-compatible: R2, GCS, minio) is
 supported and tested end to end; other backends are mountable as their
 support lands.
 
-## Virtual paths are translated for you
+## Paths inside the sandbox
 
-Mirage is the **control plane**: your code speaks the virtual path, and
-Mirage rewrites it to wherever the mount physically lands in that provider.
-
-```
-you run:      python3 /data/train.py
-daytona runs: python3 /home/daytona/workspace/data/train.py
-docker runs:  python3 /workspace/data/train.py
-```
-
-Only paths under a mount are rewritten; system paths (`/usr/bin`) and
-relative paths are left alone. Each mount is also exported as an env var
-(`MIRAGE_DATA`) for code that builds paths at runtime.
+Mounts appear at `<workspace_root>/<prefix>` (Daytona:
+`/home/daytona/workspace/data`; Docker: `/workspace/data`). The session cwd
+is rebased under the workspace root for you, so **paths relative to the cwd
+just work**: `cd /data` then `python3 train.py` reads and writes the mount.
+Mirage does not rewrite paths inside your command: an absolute virtual path
+like `/data/train.py` is passed through verbatim and will not resolve in the
+sandbox. Keep paths relative to the cwd, or address the mount by its sandbox
+path explicitly.
 
 ## The sandbox image
 
@@ -114,7 +107,7 @@ runtime = DockerRuntime(
 ws = Workspace({"/data": S3Resource(S3Config(bucket="my-bucket"))},
                mode=MountMode.EXEC,
                runtimes=[runtime, "vfs"])
-await ws.execute("python3 /data/job.py", cwd="/data")
+await ws.execute("python3 job.py", cwd="/data")
 ```
 
 `resources` maps onto `--cpus` / `--memory` / `--gpus` (disk fails loud: the

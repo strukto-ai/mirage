@@ -21,27 +21,11 @@ import { scriptStringError, type RunArgs, type RunResult, type Runtime } from '.
 // Virtual mounts the workspace synthesizes; the sandbox has its own.
 export const SYSTEM_MOUNTS: ReadonlySet<string> = new Set(['/dev', HISTORY_PREFIX])
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 // Shell-quote one token, leaving already-safe path tokens bare
 // (mirrors Python's shlex.quote output for the same inputs).
 function shQuote(s: string): string {
   if (/^[\w@%+=:,./-]+$/.test(s)) return s
   return `'${s.replace(/'/g, `'"'"'`)}'`
-}
-
-// JSON with sorted keys, so mount fingerprints are order-independent.
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`)
-    return `{${entries.join(',')}}`
-  }
-  return JSON.stringify(value)
 }
 
 /** Per-prefix remote mount specs; null = not remotely mountable. */
@@ -119,16 +103,6 @@ export abstract class RemoteSandbox implements Runtime {
   private dispatch: BridgeDispatchFn | null = null
   private mountPrefixes: (() => string[]) | null = null
   private mountSpecs: (() => MountSpecs) | null = null
-  // virtual mount prefix -> its physical mountpoint in this sandbox, and
-  // the same as MIRAGE_<PREFIX> env vars, both rebuilt per line. mirage
-  // is the control plane: the agent speaks virtual paths and these
-  // rewrite them onto the provider.
-  private mountMap: Record<string, string> | null = null
-  private mountEnv: Record<string, string> = {}
-  // prefix -> fingerprint of the mount the sandbox actually has, the
-  // reconciler's record of applied state.
-  private appliedMounts = new Map<string, string>()
-  private syncChain: Promise<void> = Promise.resolve()
 
   constructor(options: RemoteSandboxOptions | Record<string, unknown> = {}) {
     const opts = options as RemoteSandboxOptions
@@ -173,10 +147,14 @@ export abstract class RemoteSandbox implements Runtime {
    * Run one raw line in the sandbox, provisioning it lazily.
    *
    * The first line creates the sandbox (or reattaches when a sandboxId
-   * was given). Every line then reconciles the sandbox's mounts against
-   * the workspace's current mounts (syncMounts, a no-op when nothing
-   * changed) and executes with the session environment merged over the
-   * sandbox environment and the cwd resolved under workspaceRoot.
+   * was given) and mounts the workspace; every line then executes with
+   * the session environment merged over the sandbox environment and
+   * the cwd resolved under workspaceRoot.
+   *
+   * The line itself runs verbatim: mounts appear at
+   * `<workspaceRoot>/<prefix>`, so paths relative to the session cwd
+   * resolve for free, and absolute paths are the caller's
+   * responsibility (mirage does not rewrite them).
    */
   async runLine(
     line: string,
@@ -185,58 +163,8 @@ export abstract class RemoteSandbox implements Runtime {
     cwd: string,
   ): Promise<RunResult> {
     await this.ensureStarted()
-    await this.serializedSync()
-    const merged = { ...this.env, ...this.mountEnv, ...env }
-    return this.execLine(this.translateLine(line), stdin, merged, this.sandboxCwd(cwd))
-  }
-
-  // Reconciles are serialized so concurrent lines never race the
-  // sandbox's mount state; each waiter still surfaces its own failure.
-  private serializedSync(): Promise<void> {
-    const next = this.syncChain.then(async () => {
-      await this.syncMounts()
-      this.buildTranslation()
-    })
-    this.syncChain = next.catch(() => undefined)
-    return next
-  }
-
-  // Named mounts (/s3, /data) rewrite cleanly; a bare "/" world mount is
-  // skipped, as rebasing every absolute path would capture the sandbox's
-  // own /usr and /bin.
-  private buildTranslation(): void {
-    const root = rstripSlash(this.workspaceRoot ?? '/workspace')
-    const mountMap: Record<string, string> = {}
-    const mountEnv: Record<string, string> = {}
-    if (this.mountPrefixes !== null) {
-      for (const prefix of this.userMountPrefixes()) {
-        if (prefix === '/') continue
-        const mountpoint = `${root}/${lstripSlash(prefix)}`
-        mountMap[prefix] = mountpoint
-        const name = prefix
-          .replace(/^\/+|\/+$/g, '')
-          .toUpperCase()
-          .replace(/[^A-Z0-9]+/g, '_')
-        mountEnv[`MIRAGE_${name}`] = mountpoint
-      }
-    }
-    this.mountMap = mountMap
-    this.mountEnv = mountEnv
-  }
-
-  // Rewrite path tokens that begin exactly at a mount prefix (/s3 or
-  // /s3/...); siblings (/s3.txt), system paths (/usr/bin), and relative
-  // paths are left alone. Longest prefix wins so nested mounts stay right.
-  private translateLine(line: string): string {
-    const map = this.mountMap
-    if (map === null) return line
-    let out = line
-    for (const prefix of Object.keys(map).sort((a, b) => b.length - a.length)) {
-      const target = map[prefix] ?? ''
-      const re = new RegExp(`(?<![\\w/.\\-])${escapeRegExp(prefix)}(?=/|$|[^\\w.\\-])`, 'g')
-      out = out.replace(re, () => target)
-    }
-    return out
+    const merged = { ...this.env, ...env }
+    return this.execLine(line, stdin, merged, this.sandboxCwd(cwd))
   }
 
   // Single-flight provisioning: concurrent first lines share one start,
@@ -257,6 +185,7 @@ export abstract class RemoteSandbox implements Runtime {
       await this.connectSandbox(this.sandboxIdValue)
     }
     this.workspaceRoot ??= await this.defaultWorkspaceRoot()
+    await this.mountWorkspace()
   }
 
   /**
@@ -292,9 +221,11 @@ export abstract class RemoteSandbox implements Runtime {
   }
 
   /**
-   * The workspace's current mounts as [spec, sandbox mountpoint], read
-   * fresh per reconcile so mounts added to or removed from the
-   * workspace after the sandbox booted are picked up.
+   * The workspace's user mounts as [spec, sandbox mountpoint].
+   *
+   * System mounts (/dev, the history view) are excluded: the sandbox
+   * has its own, and they are host machinery, not user data. A user
+   * mount with no spec fails loud.
    */
   private desiredMounts(): Record<string, [Record<string, unknown>, string]> {
     const specs = this.mountSpecs?.() ?? {}
@@ -315,40 +246,27 @@ export abstract class RemoteSandbox implements Runtime {
   }
 
   /**
-   * Reconcile the sandbox's live mounts with the workspace's.
+   * Mount the workspace's backends inside the sandbox, once.
    *
-   * The workspace is the desired state; the sandbox is the actual
-   * state. Each divergence becomes one in-sandbox mirage command,
-   * issued through the provider's own exec API: a new or changed mount
-   * runs `mirage mount add <prefix> --fuse <path>` (the spec travels in
-   * the exec environment, never as a file), a dropped mount runs
-   * `mirage mount remove <prefix>`. Unchanged mounts cost nothing.
-   * Needs an image with mirage baked in (e.g. mirage-python-fuse).
-   * Subclasses may replace this wholesale (e.g. a provider volume).
+   * Each user mount becomes one in-sandbox mirage command through the
+   * provider's own exec API: `mirage mount add <prefix> --fuse <path>`,
+   * with the spec in the exec environment (never a file). The sandbox
+   * then serves `<workspaceRoot>/<prefix>` live; keeping paths
+   * consistent beyond the rebased cwd is the caller's job. Needs an
+   * image with mirage baked in (e.g. mirage-python-fuse). Subclasses
+   * may replace this wholesale (e.g. a provider volume).
    */
-  async syncMounts(): Promise<void> {
+  async mountWorkspace(): Promise<void> {
     if (this.dispatch === null || this.mountPrefixes === null) return
-    const desired = this.desiredMounts()
-    const fingerprints: Record<string, string> = {}
-    for (const [prefix, [spec, mountpoint]] of Object.entries(desired)) {
-      fingerprints[prefix] = stableStringify({ ...spec, fuse: mountpoint })
-    }
-    for (const [prefix, applied] of [...this.appliedMounts]) {
-      if (fingerprints[prefix] === applied) continue
-      await this.mountCommand(`mirage mount remove ${shQuote(prefix)}`, {})
-      this.appliedMounts.delete(prefix)
-    }
-    for (const [prefix, [spec, mountpoint]] of Object.entries(desired)) {
-      if (this.appliedMounts.has(prefix)) continue
+    for (const [prefix, [spec, mountpoint]] of Object.entries(this.desiredMounts())) {
       await this.mountCommand(`mirage mount add ${shQuote(prefix)} --fuse ${shQuote(mountpoint)}`, {
         MIRAGE_MOUNT_SPEC: JSON.stringify(spec),
       })
-      this.appliedMounts.set(prefix, fingerprints[prefix] ?? '')
     }
   }
 
-  // One in-sandbox mount reconcile command, failing loud; the mount
-  // spec rides in the env, never on disk or argv.
+  // One in-sandbox mount command, failing loud; the mount spec rides
+  // in the env, never on disk or argv.
   private async mountCommand(command: string, env: Record<string, string>): Promise<void> {
     const result = await this.execLine(command, null, env, '/')
     if (result.exitCode !== 0) {

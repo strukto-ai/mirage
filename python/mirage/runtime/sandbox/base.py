@@ -15,7 +15,6 @@
 import asyncio
 import json
 import posixpath
-import re
 import shlex
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -118,15 +117,6 @@ class RemoteSandbox(Runtime):
         self._mount_prefixes: Callable[[], list[str]] | None = None
         self._mount_specs: Callable[[], dict[str, dict[str, Any]
                                              | None]] | None = None
-        # virtual mount prefix -> its physical mountpoint in this sandbox,
-        # and the same as MIRAGE_<PREFIX> env vars, both rebuilt per
-        # line. mirage is the control plane: the agent speaks virtual
-        # paths and these rewrite them onto the provider.
-        self._mount_map: dict[str, str] | None = None
-        self._mount_env: dict[str, str] = {}
-        # prefix -> fingerprint of the mount the sandbox actually has,
-        # the reconciler's record of applied state.
-        self._applied_mounts: dict[str, str] = {}
 
     @property
     def sandbox_id(self) -> str | None:
@@ -163,11 +153,14 @@ class RemoteSandbox(Runtime):
         """Run one raw line in the sandbox, provisioning it lazily.
 
         The first line creates the sandbox (or reattaches when a
-        sandbox_id was given). Every line then reconciles the
-        sandbox's mounts against the workspace's current mounts
-        (sync_mounts, a no-op when nothing changed) and executes with
-        the session environment merged over the sandbox environment
-        and the cwd resolved under workspace_root.
+        sandbox_id was given) and mounts the workspace; every line
+        then executes with the session environment merged over the
+        sandbox environment and the cwd resolved under workspace_root.
+
+        The line itself runs verbatim: mounts appear at
+        ``<workspace_root>/<prefix>``, so paths relative to the session
+        cwd resolve for free, and absolute paths are the caller's
+        responsibility (mirage does not rewrite them).
 
         Args:
             line (str): the raw typed line.
@@ -184,55 +177,10 @@ class RemoteSandbox(Runtime):
                     await self.connect_sandbox(self._sandbox_id)
                 if self.workspace_root is None:
                     self.workspace_root = await self.default_workspace_root()
+                await self.mount_workspace()
                 self._started = True
-            await self.sync_mounts()
-            self._build_translation()
-        merged = {**self.env, **self._mount_env, **env}
-        return await self.exec_line(self._translate_line(line), stdin, merged,
-                                    self.sandbox_cwd(cwd))
-
-    def _build_translation(self) -> None:
-        """Map each virtual mount onto its physical sandbox mountpoint.
-
-        Named mounts (``/s3``, ``/data``) rewrite cleanly; a bare ``/``
-        world mount is skipped, as rebasing every absolute path would
-        capture the sandbox's own ``/usr`` and ``/bin``.
-        """
-        root = self.workspace_root or "/workspace"
-        mount_map: dict[str, str] = {}
-        mount_env: dict[str, str] = {}
-        if self._mount_prefixes is not None:
-            for prefix in self._user_mount_prefixes():
-                if prefix == "/":
-                    continue
-                mountpoint = posixpath.join(root, prefix.lstrip("/"))
-                mount_map[prefix] = mountpoint
-                var = "MIRAGE_" + re.sub(r"[^A-Z0-9]+", "_",
-                                         prefix.strip("/").upper())
-                mount_env[var] = mountpoint
-        self._mount_map = mount_map
-        self._mount_env = mount_env
-
-    def _translate_line(self, line: str) -> str:
-        """Rewrite virtual mount paths in a line to sandbox mountpoints.
-
-        Only path tokens that begin exactly at a mount prefix (``/s3``
-        or ``/s3/...``) are rewritten; siblings (``/s3.txt``), deeper
-        system paths (``/usr/bin``), and relative paths are left alone.
-        Longest prefix wins so nested mounts stay correct.
-
-        Args:
-            line (str): the raw line in the virtual namespace.
-        """
-        if not self._mount_map:
-            return line
-        for prefix in sorted(self._mount_map, key=len, reverse=True):
-            # A mountpoint is a plain posix path: no backslashes or group
-            # refs, so it is safe as a literal replacement string.
-            target = self._mount_map[prefix].replace("\\", r"\\")
-            pattern = rf"(?<![\w/.\-]){re.escape(prefix)}(?=/|\Z|[^\w.\-])"
-            line = re.sub(pattern, target, line)
-        return line
+        merged = {**self.env, **env}
+        return await self.exec_line(line, stdin, merged, self.sandbox_cwd(cwd))
 
     def sandbox_cwd(self, cwd: str) -> str:
         """The session cwd as a path inside the sandbox.
@@ -263,10 +211,11 @@ class RemoteSandbox(Runtime):
         return sorted(prefixes)
 
     def _desired_mounts(self) -> dict[str, tuple[dict[str, Any], str]]:
-        """The workspace's current mounts as (spec, sandbox mountpoint).
+        """The workspace's user mounts as (spec, sandbox mountpoint).
 
-        Read fresh per reconcile, so mounts added to or removed from
-        the workspace after the sandbox booted are picked up.
+        System mounts (/dev, the history view) are excluded: the
+        sandbox has its own, and they are host machinery, not user
+        data. A user mount with no spec fails loud.
         """
         specs = self._mount_specs() if self._mount_specs is not None else {}
         root = self.workspace_root or "/workspace"
@@ -282,45 +231,28 @@ class RemoteSandbox(Runtime):
             desired[prefix] = (spec, mountpoint)
         return desired
 
-    async def sync_mounts(self) -> None:
-        """Reconcile the sandbox's live mounts with the workspace's.
+    async def mount_workspace(self) -> None:
+        """Mount the workspace's backends inside the sandbox, once.
 
-        The workspace is the desired state; the sandbox is the actual
-        state. Each divergence becomes one in-sandbox mirage command,
-        issued through the provider's own exec API: a new or changed
-        mount runs ``mirage mount add <prefix> --fuse <path>`` (the
-        spec travels in the exec environment, never as a file), a
-        dropped mount runs ``mirage mount remove <prefix>``. Unchanged
-        mounts cost nothing. Needs an image with mirage baked in
-        (e.g. mirage-python-fuse). Subclasses may replace this
-        wholesale (e.g. a provider volume).
+        Each user mount becomes one in-sandbox mirage command through
+        the provider's own exec API: ``mirage mount add <prefix>
+        --fuse <path>``, with the spec in the exec environment (never
+        a file). The sandbox then serves ``<workspace_root>/<prefix>``
+        live; keeping paths consistent beyond the rebased cwd is the
+        caller's job. Needs an image with mirage baked in (e.g.
+        mirage-python-fuse). Subclasses may replace this wholesale
+        (e.g. a provider volume).
         """
         if self._dispatch is None or self._mount_prefixes is None:
             return
-        desired = self._desired_mounts()
-        fingerprints = {
-            prefix: json.dumps({
-                **spec, "fuse": mountpoint
-            }, sort_keys=True)
-            for prefix, (spec, mountpoint) in desired.items()
-        }
-        for prefix in list(self._applied_mounts):
-            if fingerprints.get(prefix) == self._applied_mounts[prefix]:
-                continue
-            await self._mount_command(
-                f"mirage mount remove {shlex.quote(prefix)}", {})
-            del self._applied_mounts[prefix]
-        for prefix, (spec, mountpoint) in desired.items():
-            if prefix in self._applied_mounts:
-                continue
+        for prefix, (spec, mountpoint) in self._desired_mounts().items():
             await self._mount_command(
                 f"mirage mount add {shlex.quote(prefix)} "
                 f"--fuse {shlex.quote(mountpoint)}",
                 {"MIRAGE_MOUNT_SPEC": json.dumps(spec)})
-            self._applied_mounts[prefix] = fingerprints[prefix]
 
     async def _mount_command(self, command: str, env: dict[str, str]) -> None:
-        """One in-sandbox mount reconcile command, failing loud.
+        """One in-sandbox mount command, failing loud.
 
         Args:
             command (str): the mirage mount CLI line to run.

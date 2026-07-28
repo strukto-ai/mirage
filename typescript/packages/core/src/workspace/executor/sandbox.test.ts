@@ -80,17 +80,17 @@ class RecordingSandbox extends RemoteSandbox {
     return Promise.resolve()
   }
 
-  // Base-machinery tests exercise provisioning, not mount reconcile, so
-  // record the sync call and skip the real one; FuseSandbox restores it.
-  override syncMounts(): Promise<void> {
+  // Base-machinery tests exercise provisioning, not the mount setup, so
+  // record the call and skip the real one; FuseSandbox restores it.
+  override mountWorkspace(): Promise<void> {
     this.synced += 1
     return Promise.resolve()
   }
 }
 
 class FuseSandbox extends RecordingSandbox {
-  override syncMounts(): Promise<void> {
-    return RemoteSandbox.prototype.syncMounts.call(this)
+  override mountWorkspace(): Promise<void> {
+    return RemoteSandbox.prototype.mountWorkspace.call(this)
   }
 }
 
@@ -117,7 +117,7 @@ function mountCmds(box: RecordingSandbox): string[] {
 }
 
 describe('RemoteSandbox', () => {
-  it('provisions on the first line and syncs mounts per line', async () => {
+  it('provisions on the first line and mounts once', async () => {
     const box = new RecordingSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
@@ -129,14 +129,14 @@ describe('RemoteSandbox', () => {
       expect(box.synced).toBe(1)
       await ws.execute('python3 x')
       expect(box.created).toBe(1)
-      // The reconciler runs per line, not once at provision.
-      expect(box.synced).toBe(2)
+      // The workspace mounts once at provision, not per line.
+      expect(box.synced).toBe(1)
     } finally {
       await ws.close()
     }
   })
 
-  it('sync issues mount add with the spec in the env', async () => {
+  it('mount issues mount add with the spec in the env', async () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
@@ -154,47 +154,16 @@ describe('RemoteSandbox', () => {
     }
   })
 
-  it('sync excludes system mounts and is idempotent', async () => {
+  it('mount excludes system mounts and runs once', async () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
       attachSpecs(box, { '/data': FAKE_SPEC })
       await ws.execute('python3 x')
       await ws.execute('python3 x')
-      // One add for /data, nothing for /dev or the history view, and
-      // no repeat work on the unchanged second line.
+      // One add for /data at provision, nothing for /dev or the
+      // history view, and no mount work on later lines.
       expect(mountCmds(box)).toEqual(['mirage mount add /data --fuse /workspace/data'])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('sync reconciles added and removed mounts', async () => {
-    const box = new FuseSandbox({ captures: ['python3'] })
-    const ws = await sandboxWorkspace(box)
-    try {
-      const specs: MountSpecs = { '/data': FAKE_SPEC }
-      const prefixes = ['/data']
-      const attached = box.attached
-      if (attached === null) throw new Error('box not attached')
-      box.attach(
-        attached[0],
-        () => [...prefixes],
-        () => ({ ...specs }),
-      )
-      await ws.execute('python3 x')
-      // The workspace's desired state changes: /data goes away, /docs
-      // appears. The next line converges the sandbox.
-      delete specs['/data']
-      specs['/docs'] = { resource: 's3', config: { bucket: 'docs' } }
-      prefixes.splice(0, prefixes.length, '/docs')
-      await ws.execute('python3 x')
-      await ws.execute('python3 x')
-      expect(mountCmds(box)).toEqual([
-        'mirage mount add /data --fuse /workspace/data',
-        'mirage mount remove /data',
-        'mirage mount add /docs --fuse /workspace/docs',
-      ])
     } finally {
       await ws.close()
     }
@@ -227,40 +196,6 @@ describe('RemoteSandbox', () => {
       expect(cwd).toBe('/workspace/data/deep')
       expect(env.BASE).toBe('1')
       expect(env.LINE).toBe('2')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('rewrites virtual mount paths in a line to sandbox mountpoints', async () => {
-    const box = new RecordingSandbox({ captures: ['python3'] })
-    const ws = await sandboxWorkspace(box)
-    try {
-      await ws.execute('python3 /data/a.py --out /data/r.json /tmp/x /data.txt')
-      const [line] = box.execs[box.execs.length - 1] ?? ['']
-      expect(line).toContain('/workspace/data/a.py')
-      expect(line).toContain('/workspace/data/r.json')
-      // A system path and a sibling file are left untouched.
-      expect(line).toContain(' /tmp/x ')
-      expect(line).toContain('/data.txt')
-      expect(line).not.toContain('/workspace/data.txt')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('exposes mount mountpoints as env vars', async () => {
-    const box = new RecordingSandbox({ captures: ['python3'] })
-    const ws = await sandboxWorkspace(box)
-    try {
-      await ws.execute('python3 x')
-      const [, , env] = box.execs[box.execs.length - 1] ?? [
-        '',
-        null,
-        {} as Record<string, string>,
-        '',
-      ]
-      expect(env.MIRAGE_DATA).toBe('/workspace/data')
     } finally {
       await ws.close()
     }
@@ -331,7 +266,7 @@ describe('RemoteSandbox', () => {
     }
   })
 
-  it('sync rejects unmountable mounts', async () => {
+  it('mount rejects unmountable mounts', async () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {

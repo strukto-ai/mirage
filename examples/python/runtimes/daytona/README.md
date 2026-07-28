@@ -17,21 +17,16 @@ your machine (control plane)                 Daytona sandbox
   captures ["python3"] -> DaytonaRuntime  -->    -> in-sandbox daemon
   vfs runs every other line locally             -> FUSE-mounts S3 at
                                                     /home/daytona/workspace/data
-  python3 /data/train.py  --rewritten-->        python3 /home/daytona/workspace/data/train.py
+  cd /data; python3 train.py  ------------>      cwd rebased; train.py reads the mount
 ```
 
 1. The workspace declares `/data` as an `S3Resource`. A `DaytonaRuntime` captures
    `python3` lines; everything else stays on the local vfs.
-1. Every captured line reconciles the sandbox's mounts against the workspace's:
-   a new mount runs `mirage mount add <prefix> --fuse <path>` inside the sandbox
-   (the spec travels in the exec environment, never as a file), a dropped mount
-   runs `mirage mount remove <prefix>`, and unchanged mounts cost nothing. So
-   mounts added or removed after the sandbox booted converge live.
-1. **Mirage is the control plane.** The agent speaks the virtual path
-   (`/data/train.py`); Mirage rewrites it to wherever the mount physically lands
-   in the sandbox (`/home/daytona/workspace/data/train.py`). Each mount is also
-   exported as an env var (`MIRAGE_DATA`) for paths built at runtime. Relative
-   paths work too, via the rebased cwd.
+1. When the sandbox boots, each mount becomes one `mirage mount add <prefix> --fuse <path>` command inside the sandbox (the spec travels in the exec
+   environment, never as a file), and the mount is served live from then on.
+1. Mounts appear at `<workspace_root>/<prefix>` and the session cwd is rebased
+   under the workspace root, so paths relative to the cwd just work. Mirage does
+   not rewrite paths inside your command: keep them relative to the cwd.
 1. The sandbox is created lazily on the first captured line and deleted when the
    workspace closes (or reused across runs when you pass a `sandbox_id`).
 
@@ -67,19 +62,18 @@ the `mirage-fuse` snapshot. From the repo root:
 set -a; source .env.development; set +a
 mirage workspace create examples/python/runtimes/daytona/daytona_workspace.yaml --id daytona-demo
 
-printf 'print(open("/data/hello.py").read())\n' \
+printf 'print("hello from the sandbox")\n' \
   | mirage execute -w daytona-demo -c 'cat > /data/hello.py'
 
-# Absolute virtual path: the control plane rewrites it for the sandbox.
-mirage execute -w daytona-demo -c 'python3 /data/hello.py'
-# Relative path works too (rebased cwd):
-mirage execute -w daytona-demo -c 'python3 data/hello.py'
+# Relative path from the rebased cwd; mirage does not rewrite absolute paths.
+mirage execute -w daytona-demo -c 'cd /data && python3 hello.py'
 
 mirage workspace delete daytona-demo   # deletes the sandbox it created
 ```
 
-The `cat > /data/hello.py` write lands in S3 through the live mount, and the
-`python3` line reads it back inside the sandbox.
+The `cat > /data/hello.py` write runs on the local vfs and lands in S3; the
+`python3` line then reads the same file inside the sandbox through the live
+mount.
 
 ## Run: standalone SDK demos (no snapshot needed)
 

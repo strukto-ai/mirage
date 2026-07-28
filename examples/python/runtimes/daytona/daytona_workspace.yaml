@@ -5,7 +5,7 @@
 #   mirage workspace create daytona_workspace.yaml --id daytona-demo
 #   printf 'print("hello from the sandbox")\n' \
 #     | mirage execute -w daytona-demo -c 'cat > /data/hello.py'
-#   mirage execute -w daytona-demo -c 'python3 /data/hello.py'
+#   mirage execute -w daytona-demo -c 'cd /data && python3 hello.py'
 #   mirage workspace delete daytona-demo
 #
 # Captured lines (python3, pip) run whole inside a Daytona sandbox;
@@ -14,14 +14,13 @@
 #
 # The sandbox runs mirage itself and FUSE-mounts the same S3 bucket
 # live under its workspace root, so a remote write shows up in /data
-# immediately with no sync step. mirage is the control plane: the agent
-# speaks the virtual path (/data/hello.py) and mirage rewrites it to
-# wherever the mount physically lands in the sandbox
-# (/home/daytona/workspace/data/hello.py). Relative paths work too, via
-# the rebased cwd. This needs a snapshot with fuse3 and
-# mirage-ai[s3,fuse] baked in: build it once with prebake_snapshot.py
-# (the API key needs snapshot-write scope), which is the `mirage-fuse`
-# snapshot named below.
+# immediately with no sync step. Mounts appear at
+# <workspace_root>/<prefix> and the session cwd is rebased under the
+# workspace root, so paths relative to the cwd just work; mirage does
+# not rewrite absolute paths in the command. This needs a snapshot with
+# fuse3 and mirage-ai[s3,fuse] baked in: build it once with
+# prebake_snapshot.py (the API key needs snapshot-write scope), which
+# is the `mirage-fuse` snapshot named below.
 #
 # For a GPU sandbox (needs GPU quota on the Daytona org), size it with
 # an image instead of a snapshot (sizing requires an image; snapshot

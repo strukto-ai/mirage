@@ -55,17 +55,16 @@ class RecordingSandbox(RemoteSandbox):
     async def upload(self, path: str, data: bytes) -> None:
         self.files[path] = data
 
-    # Base-machinery tests exercise provisioning, not mount reconcile,
-    # so record the sync call and skip the real one; FuseSandbox
-    # restores it.
-    async def sync_mounts(self) -> None:
+    # Base-machinery tests exercise provisioning, not the mount setup,
+    # so record the call and skip the real one; FuseSandbox restores it.
+    async def mount_workspace(self) -> None:
         self.synced += 1
 
 
 class FuseSandbox(RecordingSandbox):
 
-    async def sync_mounts(self) -> None:
-        await RemoteSandbox.sync_mounts(self)
+    async def mount_workspace(self) -> None:
+        await RemoteSandbox.mount_workspace(self)
 
 
 def _attach_specs(box: RecordingSandbox, specs: dict) -> None:
@@ -79,7 +78,7 @@ def _mount_cmds(box: RecordingSandbox) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_first_line_provisions_and_syncs_mounts():
+async def test_first_line_provisions_and_mounts_once():
     box = RecordingSandbox(captures=("python3", ))
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
@@ -93,14 +92,14 @@ async def test_first_line_provisions_and_syncs_mounts():
         assert box.synced == 1
         await ws.execute("python3 x")
         assert box.created == 1
-        # The reconciler runs per line, not once at provision.
-        assert box.synced == 2
+        # The workspace mounts once at provision, not per line.
+        assert box.synced == 1
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_sync_issues_mount_add_with_spec_in_env():
+async def test_mount_issues_mount_add_with_spec_in_env():
     box = FuseSandbox(captures=("python3", ))
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
@@ -122,7 +121,7 @@ async def test_sync_issues_mount_add_with_spec_in_env():
 
 
 @pytest.mark.asyncio
-async def test_sync_excludes_system_mounts_and_is_idempotent():
+async def test_mount_excludes_system_mounts_and_runs_once():
     box = FuseSandbox(captures=("python3", ))
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
@@ -132,36 +131,9 @@ async def test_sync_excludes_system_mounts_and_is_idempotent():
         await ws.execute("python3 x")
         await ws.execute("python3 x")
         cmds = _mount_cmds(box)
-        # One add for /data, nothing for /dev or the history view, and
-        # no repeat work on the unchanged second line.
+        # One add for /data at provision, nothing for /dev or the
+        # history view, and no mount work on later lines.
         assert cmds == ["mirage mount add /data --fuse /workspace/data"]
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_sync_reconciles_added_and_removed_mounts():
-    box = FuseSandbox(captures=("python3", ))
-    ws = Workspace({"/data": RAMResource()},
-                   mode=MountMode.EXEC,
-                   runtimes=[box, "vfs"])
-    specs = {"/data": FAKE_SPEC}
-    prefixes = ["/data"]
-    box.attach(box._dispatch, lambda: list(prefixes), lambda: dict(specs))
-    try:
-        await ws.execute("python3 x")
-        # The workspace's desired state changes: /data goes away, /docs
-        # appears. The next line converges the sandbox.
-        del specs["/data"]
-        specs["/docs"] = {"resource": "s3", "config": {"bucket": "docs"}}
-        prefixes[:] = ["/docs"]
-        await ws.execute("python3 x")
-        await ws.execute("python3 x")
-        assert _mount_cmds(box) == [
-            "mirage mount add /data --fuse /workspace/data",
-            "mirage mount remove /data",
-            "mirage mount add /docs --fuse /workspace/docs",
-        ]
     finally:
         await ws.close()
 
@@ -193,39 +165,6 @@ async def test_cwd_resolves_under_workspace_root_and_env_merges():
         assert box.execs[-1][2] == "/workspace/data/deep"
         assert box.exec_envs[-1]["BASE"] == "1"
         assert box.exec_envs[-1]["LINE"] == "2"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_line_paths_translate_to_sandbox_mountpoints():
-    box = RecordingSandbox(captures=("python3", ))
-    ws = Workspace({"/data": RAMResource()},
-                   mode=MountMode.EXEC,
-                   runtimes=[box, "vfs"])
-    try:
-        await ws.execute(
-            "python3 /data/a.py --out /data/r.json /tmp/x /data.txt")
-        line = box.execs[-1][0]
-        assert "/workspace/data/a.py" in line
-        assert "/workspace/data/r.json" in line
-        # A system path and a sibling file are left untouched.
-        assert " /tmp/x " in line
-        assert "/data.txt" in line
-        assert "/workspace/data.txt" not in line
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_mount_mountpoints_exposed_as_env_vars():
-    box = RecordingSandbox(captures=("python3", ))
-    ws = Workspace({"/data": RAMResource()},
-                   mode=MountMode.EXEC,
-                   runtimes=[box, "vfs"])
-    try:
-        await ws.execute("python3 x")
-        assert box.exec_envs[-1]["MIRAGE_DATA"] == "/workspace/data"
     finally:
         await ws.close()
 
@@ -302,7 +241,7 @@ async def test_mount_failure_points_at_the_image():
 
 
 @pytest.mark.asyncio
-async def test_sync_rejects_unmountable_mounts():
+async def test_mount_rejects_unmountable_mounts():
     box = FuseSandbox(captures=("python3", ))
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
