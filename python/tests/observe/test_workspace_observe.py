@@ -101,6 +101,28 @@ def test_execute_records_op_source():
     assert "/data/test.txt" in {e["path"] for e in ops if e["op"] == "read"}
 
 
+def test_execute_records_op_path_per_mount():
+    ws = Workspace({
+        "/s3/": RAMResource(),
+        "/db/": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    for line in ("echo one > /s3/report.json", "echo two > /db/report.json",
+                 "cat /s3/report.json", "cat /db/report.json",
+                 "cp /s3/report.json /db/copy.json"):
+        asyncio.run(ws.execute(line))
+    events = asyncio.run(ws.observer.events())
+    ops = [(e["op"], e["path"]) for e in events if e["type"] == "op"]
+    assert ops == [
+        ("write", "/s3/report.json"),
+        ("write", "/db/report.json"),
+        ("read", "/s3/report.json"),
+        ("read", "/db/report.json"),
+        ("read", "/s3/report.json"),
+        ("write", "/db/copy.json"),
+    ]
+
+
 def test_execute_records_every_event_type():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     asyncio.run(ws.execute("echo hello > /data/test.txt"))

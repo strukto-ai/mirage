@@ -133,11 +133,11 @@ describe('Workspace observer wiring', () => {
     await ws.close()
   })
 
-  // The path form is deliberately not asserted here: this host records the
-  // op path mount-relative ('/test.txt') where python records the virtual path
-  // ('/data/test.txt'), so the prefix set by Mount.execute is not reaching
-  // record(). Python's test_execute_records_op_source pins the correct form;
-  // asserting the mount-relative one here would freeze the bug in place.
+  // Op events name the virtual path, mount prefix included, so two mounts
+  // holding the same filename stay distinguishable in the recording. The
+  // write arrives through executeOp and the read through a lazy stream, so
+  // this covers both routes the mount prefix has to survive. Mirrors
+  // python's test_execute_records_op_source.
   it('records a source and a read op on every op event', async () => {
     const ws = buildWorkspace()
     await ws.execute('echo hello > /data/test.txt')
@@ -147,6 +147,45 @@ describe('Workspace observer wiring', () => {
     expect(ops.length).toBeGreaterThan(0)
     expect(ops.every((e) => 'source' in e)).toBe(true)
     expect(ops.filter((e) => e.op === 'read').length).toBeGreaterThan(0)
+    expect(new Set(ops.map((e) => e.path))).toEqual(new Set(['/data/test.txt']))
+    await ws.close()
+  })
+
+  // Two mounts holding the same filename have to stay distinguishable, so
+  // every record carries its mount prefix whichever route it arrives by:
+  // an eager write (dispatch), a lazy read (stream), and a cp whose read
+  // and write land on different mounts. Mirrors python's
+  // test_execute_records_op_path_per_mount.
+  it('records the op path per mount, not mount-relative', async () => {
+    const s3 = new RAMResource()
+    const db = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(s3)
+    registry.registerResource(db)
+    const ws = new Workspace(
+      { '/s3': s3, '/db': db },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    for (const line of [
+      'echo one > /s3/report.json',
+      'echo two > /db/report.json',
+      'cat /s3/report.json',
+      'cat /db/report.json',
+      'cp /s3/report.json /db/copy.json',
+    ]) {
+      await ws.execute(line)
+    }
+    const ops = (await ws.observer.events())
+      .filter((e) => e.type === 'op')
+      .map((e) => [e.op, e.path])
+    expect(ops).toEqual([
+      ['write', '/s3/report.json'],
+      ['write', '/db/report.json'],
+      ['read', '/s3/report.json'],
+      ['read', '/db/report.json'],
+      ['read', '/s3/report.json'],
+      ['write', '/db/copy.json'],
+    ])
     await ws.close()
   })
 
