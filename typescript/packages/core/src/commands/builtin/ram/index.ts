@@ -13,19 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../../accessor/ram.ts'
-import { read as ramRead } from '../../../core/ram/read.ts'
-import { stat as ramStat } from '../../../core/ram/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { RAM_IO } from './io.ts'
 
 export const RAM_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<RAMAccessor>({
-    resource: ResourceName.RAM,
-    readBytes: ramRead,
-    statEntry: ramStat,
-  }),
   ...makeGenericCommands<RAMAccessor>(ResourceName.RAM, RAM_IO),
 ]

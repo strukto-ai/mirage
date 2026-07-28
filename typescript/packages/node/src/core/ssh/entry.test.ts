@@ -53,6 +53,6 @@ describe('attrsToFileStat', () => {
   it('carries the name through unchanged', () => {
     const stat = attrsToFileStat('weird-name.parquet', { mode: 0o100644, size: 100 })
     expect(stat.name).toBe('weird-name.parquet')
-    expect(stat.type).toBe(FileType.PARQUET)
+    expect(stat.type).toBe(FileType.BINARY)
   })
 })

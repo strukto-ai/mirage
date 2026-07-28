@@ -16,5 +16,4 @@ export const R2_PROMPT = `\
 {prefix}
   Remote Cloudflare R2 bucket.
   IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
-  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat.
-  cat on .parquet/.orc/.feather returns a formatted table.`
+  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat.`

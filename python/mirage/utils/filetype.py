@@ -34,13 +34,6 @@ EXTENSION_MAP: dict[str, FileType] = {
     "zip": FileType.ZIP,
     "gz": FileType.GZIP,
     "pdf": FileType.PDF,
-    "parquet": FileType.PARQUET,
-    "orc": FileType.ORC,
-    "feather": FileType.FEATHER,
-    "arrow": FileType.FEATHER,
-    "ipc": FileType.FEATHER,
-    "h5": FileType.HDF5,
-    "hdf5": FileType.HDF5,
 }
 
 DEFAULT_TYPE = FileType.BINARY

@@ -19,5 +19,4 @@ PROMPT = """\
 over full scans. Avoid cat on large files without piping to head/tail.
   find pushes -name/-type/-size filters into the fs.files query \
 server-side, so find is cheap even on large buckets.
-  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat.
-  cat on .parquet/.orc/.feather returns a formatted table."""
+  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat."""

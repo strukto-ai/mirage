@@ -67,10 +67,6 @@ class FileType(str, Enum):
     ZIP = "application/zip"
     GZIP = "application/gzip"
     PDF = "application/pdf"
-    PARQUET = "parquet"
-    ORC = "orc"
-    FEATHER = "feather"
-    HDF5 = "hdf5"
 
 
 class FileStat(BaseModel):

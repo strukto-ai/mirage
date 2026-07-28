@@ -15,4 +15,4 @@
 from mirage.commands.builtin.redis.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("redis", IO, filetype_read=True, emulate_truncate=True)
+OPS = make_generic_ops("redis", IO, emulate_truncate=True)

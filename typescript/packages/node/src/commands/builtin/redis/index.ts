@@ -12,22 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type RegisteredCommand,
-  ResourceName,
-  makeFiletypeCommands,
-  makeGenericCommands,
-} from '@struktoai/mirage-core'
+import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../../accessor/redis.ts'
-import { read as redisRead } from '../../../core/redis/read.ts'
-import { stat as redisStat } from '../../../core/redis/stat.ts'
 import { REDIS_IO } from './io.ts'
 
 export const REDIS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<RedisAccessor>({
-    resource: ResourceName.REDIS,
-    readBytes: redisRead,
-    statEntry: redisStat,
-  }),
   ...makeGenericCommands<RedisAccessor>(ResourceName.REDIS, REDIS_IO),
 ]
