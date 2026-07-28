@@ -135,6 +135,11 @@ class Dispatcher:
         the workspace, so per-path invalidation cannot apply: clear
         the read caches so the next local command refetches from the
         backends instead of serving pre-line state.
+
+        Example: `cat /data/x` caches "old" locally; `python3 job.py`
+        runs in the sandbox and writes "new" straight to S3 via its own
+        FUSE mount, which the local dispatch never saw; without this
+        reset the next `cat /data/x` would serve the stale "old".
         """
         if self._cache is not None:
             await self._cache.clear()
