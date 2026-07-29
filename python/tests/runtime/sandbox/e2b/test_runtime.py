@@ -15,8 +15,7 @@
 import pytest
 from e2b import CommandExitException
 
-from mirage.runtime.sandbox import E2BRuntime
-from mirage.runtime.sandbox.e2b import sdk
+from mirage.runtime.sandbox.e2b import E2BRuntime, sdk
 
 
 class FakeResult:

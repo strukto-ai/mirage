@@ -14,8 +14,7 @@
 
 import pytest
 
-from mirage.runtime.sandbox import DaytonaRuntime
-from mirage.runtime.sandbox.daytona import sdk
+from mirage.runtime.sandbox.daytona import DaytonaRuntime, sdk
 
 
 class FakeProcess:

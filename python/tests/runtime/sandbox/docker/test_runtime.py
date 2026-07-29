@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.runtime.sandbox import DockerRuntime
+from mirage.runtime.sandbox.docker import DockerRuntime
 
 
 class FakeDockerRuntime(DockerRuntime):
