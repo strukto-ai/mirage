@@ -13,5 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // Providers whose exec API has no stdin stream (Daytona, e2b) upload
-// piped bytes here and redirect them into the line.
-export const STDIN_PATH = '/tmp/.mirage_stdin'
+// piped bytes to a per-invocation file and redirect it into the line.
+const STDIN_PREFIX = '/tmp/.mirage_stdin'
+
+/**
+ * A unique in-sandbox path for one invocation's stdin bytes: unique
+ * per invocation so concurrent lines on the same runtime never
+ * overwrite each other's payload.
+ */
+export function stdinPath(): string {
+  return `${STDIN_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}`
+}
+
+/**
+ * The line rewritten to read its stdin from an uploaded file: runs
+ * the line in a subshell with stdin redirected from the path, removes
+ * the file afterward, and preserves the line's exit code.
+ */
+export function stdinRedirect(line: string, path: string): string {
+  return `( ${line} ) < ${path}; _s=$?; rm -f ${path}; exit $_s`
+}

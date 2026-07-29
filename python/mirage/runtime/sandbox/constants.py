@@ -12,9 +12,35 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import shlex
+import uuid
+
 # Providers whose exec API has no stdin stream (Daytona, e2b) upload
-# piped bytes here and redirect them into the line.
-STDIN_PATH = "/tmp/.mirage_stdin"
+# piped bytes to a per-invocation file and redirect it into the line.
+STDIN_PREFIX = "/tmp/.mirage_stdin"
+
+
+def stdin_path() -> str:
+    """A unique in-sandbox path for one invocation's stdin bytes.
+
+    Unique per invocation so concurrent lines on the same runtime
+    never overwrite each other's payload.
+    """
+    return f"{STDIN_PREFIX}_{uuid.uuid4().hex}"
+
+
+def stdin_redirect(line: str, path: str) -> str:
+    """The line rewritten to read its stdin from an uploaded file.
+
+    Runs the line in a subshell with stdin redirected from ``path``,
+    removes the file afterward, and preserves the line's exit code.
+
+    Args:
+        line (str): the raw shell line.
+        path (str): the uploaded stdin file (from stdin_path()).
+    """
+    quoted = shlex.quote(path)
+    return f"( {line} ) < {quoted}; _s=$?; rm -f {quoted}; exit $_s"
 
 
 def sdk_install_hint(name: str) -> str:

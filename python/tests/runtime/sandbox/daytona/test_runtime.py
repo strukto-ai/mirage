@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.runtime.sandbox.constants import stdin_redirect
 from mirage.runtime.sandbox.daytona import DaytonaRuntime, sdk
 
 
@@ -118,9 +119,13 @@ async def test_exec_line_redirects_stdin_through_a_file():
     assert result.exit_code == 0
     assert result.stderr is None
     sandbox = FakeClient.last
-    assert sandbox.fs.files["/tmp/.mirage_stdin"] == b"a\nb\n"
+    [path] = sandbox.fs.files
+    # Unique per invocation, so concurrent stdin lines never collide.
+    assert path.startswith("/tmp/.mirage_stdin_")
+    assert sandbox.fs.files[path] == b"a\nb\n"
     command, cwd, env = sandbox.process.calls[0]
-    assert command == "( wc -l ) < /tmp/.mirage_stdin"
+    assert command == stdin_redirect("wc -l", path)
+    assert f"rm -f {path}" in command
     assert cwd == "/workspace"
     assert env == {"E": "1"}
 

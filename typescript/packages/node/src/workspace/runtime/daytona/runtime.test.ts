@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { buildRuntime } from '@struktoai/mirage-core'
+import { buildRuntime, stdinRedirect } from '@struktoai/mirage-core'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
 import type { DaytonaConfig } from './config.ts'
@@ -121,11 +121,14 @@ describe('DaytonaRuntime', () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBeNull()
-    expect(DEC.decode(result.stdout)).toBe('out:( wc -l ) < /tmp/.mirage_stdin')
     const sandbox = FakeClient.last ?? new FakeSandbox()
-    expect(DEC.decode(sandbox.fs.files.get('/tmp/.mirage_stdin'))).toBe('a\nb\n')
+    const [path] = [...sandbox.fs.files.keys()]
+    // Unique per invocation, so concurrent stdin lines never collide.
+    expect(path).toMatch(/^\/tmp\/\.mirage_stdin_/)
+    expect(DEC.decode(sandbox.fs.files.get(path ?? ''))).toBe('a\nb\n')
     const [command, cwd, env] = sandbox.process.calls[0] ?? ['', undefined, undefined]
-    expect(command).toBe('( wc -l ) < /tmp/.mirage_stdin')
+    expect(command).toBe(stdinRedirect('wc -l', path ?? ''))
+    expect(command).toContain(`rm -f ${path ?? ''}`)
     expect(cwd).toBe('/workspace')
     expect(env).toEqual({ E: '1' })
   })

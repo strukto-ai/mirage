@@ -29,8 +29,12 @@ import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
-import { CommandTimeoutError, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../commands/safeguard.ts'
+import {
+  applySafeguard,
+  CommandTimeoutError,
+  runWithTimeout,
+} from '../commands/builtin/utils/safeguard.ts'
+import { resolveAcrossMounts, resolveSafeguard } from '../commands/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
 import { UsageError } from '../commands/errors.ts'
@@ -1239,23 +1243,55 @@ export class Workspace {
     const lineRuntime = this.wholeLineRuntimeFor(rootNode, deps.routingDecision ?? null)
     if (lineRuntime?.runLine !== undefined) {
       const data = stdin !== null ? await materialize(stdin) : null
+      // A whole line is a command like any other: resolve the same
+      // safeguard the tree would (per command name, aggregated across
+      // the mounts the line can span) and apply it around the runtime,
+      // so timeoutSeconds answers 124 and maxBytes/maxLines cap the
+      // output.
+      const name = command.trim().split(/\s+/)[0] ?? ''
+      const allMounts = this.registry.allMounts()
+      const guard =
+        allMounts.length > 0 ? resolveAcrossMounts(name, allMounts) : resolveSafeguard(name)
       let result: RunResult
       try {
-        result = await lineRuntime.runLine(
-          command,
-          data,
-          { ...effectiveSession.env },
-          effectiveSession.cwd,
+        result = await runWithTimeout(
+          lineRuntime.runLine(command, data, { ...effectiveSession.env }, effectiveSession.cwd),
+          guard?.timeoutSeconds ?? null,
+          name,
         )
+      } catch (err) {
+        if (err instanceof CommandTimeoutError) {
+          result = {
+            stdout: new Uint8Array(),
+            stderr: new TextEncoder().encode(`${err.message}\n`),
+            exitCode: 124,
+          }
+        } else {
+          result = {
+            stdout: new Uint8Array(),
+            stderr: new TextEncoder().encode(err instanceof Error ? err.message : String(err)),
+            exitCode: 1,
+          }
+        }
+      } finally {
         // The line may have written anywhere in the runtime's view of
         // the workspace; local read caches are stale.
         await this.invalidateAllAfterRemote()
-      } catch (err) {
-        result = {
-          stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(err instanceof Error ? err.message : String(err)),
-          exitCode: 1,
-        }
+      }
+      const [capped, sgIo] = await applySafeguard(result.stdout, guard)
+      let stderr = result.stderr
+      if (sgIo.stderr !== null) {
+        const existing = stderr !== null ? await materialize(stderr) : new Uint8Array()
+        const added = await materialize(sgIo.stderr)
+        const merged = new Uint8Array(existing.byteLength + added.byteLength)
+        merged.set(existing, 0)
+        merged.set(added, existing.byteLength)
+        stderr = merged
+      }
+      result = {
+        stdout: capped !== null ? await materialize(capped) : new Uint8Array(),
+        stderr,
+        exitCode: sgIo.exitCode !== 0 ? sgIo.exitCode : result.exitCode,
       }
       targetSession.lastExitCode = result.exitCode
       if (isLine) {

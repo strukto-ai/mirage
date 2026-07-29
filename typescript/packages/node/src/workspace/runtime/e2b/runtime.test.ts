@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { buildRuntime } from '@struktoai/mirage-core'
+import { stdinRedirect, buildRuntime } from '@struktoai/mirage-core'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
 import type { E2BConfig } from './config.ts'
@@ -135,10 +135,14 @@ describe('E2BRuntime', () => {
     )
     expect(result.exitCode).toBe(0)
     const sandbox = FakeSandbox.last ?? new FakeSandbox()
-    expect(DEC.decode(sandbox.files.files.get('/tmp/.mirage_stdin'))).toBe('a\nb\n')
+    const [path] = [...sandbox.files.files.keys()]
+    // Unique per invocation, so concurrent stdin lines never collide.
+    expect(path).toMatch(/^\/tmp\/\.mirage_stdin_/)
+    expect(DEC.decode(sandbox.files.files.get(path ?? ''))).toBe('a\nb\n')
     expect(sandbox.files.dirs).toEqual(['/tmp'])
     const [command, , cwd] = sandbox.commands.calls[0] ?? ['', undefined, undefined]
-    expect(command).toBe('( wc -l ) < /tmp/.mirage_stdin')
+    expect(command).toBe(stdinRedirect('wc -l', path ?? ''))
+    expect(command).toContain(`rm -f ${path ?? ''}`)
     expect(cwd).toBe('/workspace')
   })
 

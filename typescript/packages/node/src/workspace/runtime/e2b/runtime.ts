@@ -18,7 +18,8 @@ import {
   RemoteSandbox,
   type RemoteSandboxOptions,
   type RunResult,
-  STDIN_PATH,
+  stdinPath,
+  stdinRedirect,
 } from '@struktoai/mirage-core'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
@@ -83,8 +84,9 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     const sdk = await this.ensureSdk()
     let command = line
     if (stdin !== null) {
-      await this.upload(STDIN_PATH, stdin)
-      command = `( ${line} ) < ${STDIN_PATH}`
+      const path = stdinPath()
+      await this.upload(path, stdin)
+      command = stdinRedirect(line, path)
     }
     let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
     try {

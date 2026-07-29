@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
-import { MountMode } from '../../../types.ts'
+import { CommandSafeguard, MountMode } from '../../../types.ts'
 import { Workspace } from '../../workspace.ts'
 import { RemoteSandbox, type RemoteSandboxOptions } from './base.ts'
 import type { RunResult } from '../runtime.ts'
@@ -132,6 +132,59 @@ describe('RemoteSandbox', () => {
     await expect(box.run({ code: 'x', args: [], env: {}, stdin: null })).rejects.toThrow(
       'whole lines',
     )
+  })
+
+  it('a line timeout answers 124', async () => {
+    class SlowBox extends RecordingSandbox {
+      override async execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        return super.execLine(line, stdin, env, cwd)
+      }
+    }
+    const box = new SlowBox({ captures: ['python3'] })
+    const parser = await getTestParser()
+    const guards = { python3: new CommandSafeguard({ timeoutSeconds: 0.05 }) }
+    const ws = new Workspace(
+      { '/data': [new RAMResource(), MountMode.EXEC, guards] },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+    )
+    try {
+      // A captured line obeys the same command safeguards as any
+      // command: the mount's python3 timeout answers exit 124.
+      const io = await ws.execute('python3 train.py')
+      expect(io.exitCode).toBe(124)
+      expect(DEC.decode(io.stderr)).toContain('timed out')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('line output caps truncate with a notice', async () => {
+    class ChattyBox extends RecordingSandbox {
+      override execLine(): Promise<RunResult> {
+        return Promise.resolve({ stdout: ENC.encode('a\nb\nc\n'), stderr: null, exitCode: 0 })
+      }
+    }
+    const box = new ChattyBox({ captures: ['python3'] })
+    const parser = await getTestParser()
+    const guards = { python3: new CommandSafeguard({ maxLines: 2 }) }
+    const ws = new Workspace(
+      { '/data': [new RAMResource(), MountMode.EXEC, guards] },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+    )
+    try {
+      const io = await ws.execute('python3 train.py')
+      expect(io.exitCode).toBe(0)
+      expect(DEC.decode(io.stdout)).toBe('a\nb\n')
+      expect(DEC.decode(io.stderr)).toContain('truncated at safeguard limit')
+    } finally {
+      await ws.close()
+    }
   })
 
   it('rejects unknown config keys', () => {

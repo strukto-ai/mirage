@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
@@ -19,6 +21,7 @@ from mirage.cache.index.config import IndexEntry
 from mirage.io.types import materialize
 from mirage.runtime.base import RunArgs, RunResult
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
+from mirage.types import CommandSafeguard
 
 
 class RecordingSandbox(RemoteSandbox):
@@ -120,6 +123,54 @@ async def test_run_raises_sandboxes_take_lines():
 def test_config_dict_form_coerces():
     box = RecordingSandbox(config={"env": {"A": "1"}})
     assert box.config == SandboxConfig(env={"A": "1"})
+
+
+@pytest.mark.asyncio
+async def test_line_timeout_answers_124():
+
+    class SlowBox(RecordingSandbox):
+
+        async def exec_line(self, line: str, stdin: bytes | None,
+                            env: dict[str, str], cwd: str) -> RunResult:
+            await asyncio.sleep(0.5)
+            return await super().exec_line(line, stdin, env, cwd)
+
+    guards = {"python3": CommandSafeguard(timeout_seconds=0.05)}
+    box = SlowBox(captures=("python3", ))
+    ws = Workspace({"/data": (RAMResource(), MountMode.EXEC, guards)},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    try:
+        # A captured line obeys the same command_safeguards as any
+        # command: the mount's python3 timeout answers exit 124.
+        io = await ws.execute("python3 train.py")
+        assert io.exit_code == 124
+        assert b"timed out" in await materialize(io.stderr)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_line_output_caps_truncate_with_notice():
+
+    class ChattyBox(RecordingSandbox):
+
+        async def exec_line(self, line: str, stdin: bytes | None,
+                            env: dict[str, str], cwd: str) -> RunResult:
+            return RunResult(stdout=b"a\nb\nc\n", stderr=None, exit_code=0)
+
+    guards = {"python3": CommandSafeguard(max_lines=2)}
+    box = ChattyBox(captures=("python3", ))
+    ws = Workspace({"/data": (RAMResource(), MountMode.EXEC, guards)},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    try:
+        io = await ws.execute("python3 train.py")
+        assert io.exit_code == 0
+        assert await materialize(io.stdout) == b"a\nb\n"
+        assert b"truncated at safeguard limit" in await materialize(io.stderr)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

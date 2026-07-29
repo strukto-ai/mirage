@@ -15,6 +15,7 @@
 import pytest
 from e2b import CommandExitException
 
+from mirage.runtime.sandbox.constants import stdin_redirect
 from mirage.runtime.sandbox.e2b import E2BRuntime, sdk
 
 
@@ -122,10 +123,14 @@ async def test_stdin_redirects_through_an_uploaded_file():
     result = await runtime.exec_line("wc -l", b"a\nb\n", {}, "/workspace")
     assert result.exit_code == 0
     sandbox = FakeSandbox.last
-    assert sandbox.files.files["/tmp/.mirage_stdin"] == b"a\nb\n"
+    [path] = sandbox.files.files
+    # Unique per invocation, so concurrent stdin lines never collide.
+    assert path.startswith("/tmp/.mirage_stdin_")
+    assert sandbox.files.files[path] == b"a\nb\n"
     assert sandbox.files.dirs == ["/tmp"]
     command, _, cwd = sandbox.commands.calls[0]
-    assert command == "( wc -l ) < /tmp/.mirage_stdin"
+    assert command == stdin_redirect("wc -l", path)
+    assert f"rm -f {path}" in command
     assert cwd == "/workspace"
 
 

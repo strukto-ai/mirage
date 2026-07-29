@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import shlex
 from typing import Any
 
 from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import STDIN_PATH, sdk_install_hint
+from mirage.runtime.sandbox.constants import (sdk_install_hint, stdin_path,
+                                              stdin_redirect)
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
 
@@ -54,8 +54,9 @@ class E2BRuntime(RemoteSandbox):
                         env: dict[str, str], cwd: str) -> RunResult:
         command = line
         if stdin is not None:
-            await self._upload(STDIN_PATH, stdin)
-            command = f"( {line} ) < {shlex.quote(STDIN_PATH)}"
+            path = stdin_path()
+            await self._upload(path, stdin)
+            command = stdin_redirect(line, path)
         try:
             result = await self._sandbox.commands.run(command,
                                                       envs=env,

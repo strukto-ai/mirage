@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import shlex
 from typing import Any
 
 from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import STDIN_PATH, sdk_install_hint
+from mirage.runtime.sandbox.constants import (sdk_install_hint, stdin_path,
+                                              stdin_redirect)
 from mirage.runtime.sandbox.daytona import sdk
 from mirage.runtime.sandbox.daytona.config import DaytonaConfig
 
@@ -56,8 +56,9 @@ class DaytonaRuntime(RemoteSandbox):
                         env: dict[str, str], cwd: str) -> RunResult:
         command = line
         if stdin is not None:
-            await self._upload(STDIN_PATH, stdin)
-            command = f"( {line} ) < {shlex.quote(STDIN_PATH)}"
+            path = stdin_path()
+            await self._upload(path, stdin)
+            command = stdin_redirect(line, path)
         response = await self._sandbox.process.exec(command, cwd=cwd, env=env)
         return RunResult(stdout=str(response.result).encode(),
                          stderr=None,
@@ -72,6 +73,6 @@ class DaytonaRuntime(RemoteSandbox):
     async def close(self) -> None:
         """Release the SDK client; the sandbox itself is the user's."""
         self._sandbox = None
-        if getattr(self, "_client", None) is not None:
+        if self._client is not None:
             await self._client.close()
             self._client = None

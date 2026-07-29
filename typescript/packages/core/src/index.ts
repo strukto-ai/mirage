@@ -506,7 +506,7 @@ export {
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './workspace/executor/sandbox/config.ts'
-export { STDIN_PATH } from './workspace/executor/sandbox/constants.ts'
+export { stdinPath, stdinRedirect } from './workspace/executor/sandbox/constants.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'

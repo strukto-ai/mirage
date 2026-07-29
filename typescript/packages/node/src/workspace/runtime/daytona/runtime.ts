@@ -18,7 +18,8 @@ import {
   RemoteSandbox,
   type RemoteSandboxOptions,
   type RunResult,
-  STDIN_PATH,
+  stdinPath,
+  stdinRedirect,
 } from '@struktoai/mirage-core'
 import { DAYTONA_CONFIG_KEYS, type DaytonaConfig } from './config.ts'
 import type { Daytona, Sandbox } from '@daytonaio/sdk'
@@ -79,8 +80,9 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     if (this.sandbox === null) throw new Error('daytona sandbox not connected')
     let command = line
     if (stdin !== null) {
-      await this.upload(STDIN_PATH, stdin)
-      command = `( ${line} ) < ${STDIN_PATH}`
+      const path = stdinPath()
+      await this.upload(path, stdin)
+      command = stdinRedirect(line, path)
     }
     const response = await this.sandbox.process.executeCommand(command, cwd, env)
     return {
