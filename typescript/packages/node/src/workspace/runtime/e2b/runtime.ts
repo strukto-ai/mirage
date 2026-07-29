@@ -14,11 +14,9 @@
 
 import {
   loadOptionalPeer,
-  normalizeFields,
   registerRuntime,
   RemoteSandbox,
   type RemoteSandboxOptions,
-  rstripSlash,
   type RunResult,
   STDIN_PATH,
 } from '@struktoai/mirage-core'
@@ -32,35 +30,31 @@ const ENC = new TextEncoder()
 
 export const E2B_OPTION_KEYS: readonly string[] = [
   'captures',
-  'apiKey',
   'config',
-  'sandboxId',
   'workspaceRoot',
   'script',
   'mount',
 ]
 
 /**
- * An E2B sandbox as a whole-line runtime.
+ * An E2B sandbox the user runs as a whole-line runtime.
  *
- * E2BConfig has no image and no sizing fields: E2B bakes both into a
- * named template (`e2b template build`), so `template` selects the
- * prebuilt environment (E2B's default template when omitted) and
- * `params` passes any other Sandbox.create option verbatim, merged
- * last. `apiKey` falls back to E2B_API_KEY. E2B's exec reports stdout
- * and stderr separately, so both stream back real.
+ * You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
+ * mirage only connects by `sandboxId` and execs lines. `apiKey` falls
+ * back to E2B_API_KEY. E2B's exec reports stdout and stderr
+ * separately, so both stream back real; it takes no stdin, so piped
+ * bytes are uploaded and redirected in.
  */
 export class E2BRuntime extends RemoteSandbox<E2BConfig> {
   readonly name = 'e2b'
-  // Config-borne dicts keep yaml snake_case inner keys; the SDK
-  // wants camelCase. Camelizing here makes both spellings work.
-  private readonly params: Record<string, unknown>
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
   constructor(options: RemoteSandboxOptions<E2BConfig> | Record<string, unknown> = {}) {
     super(options, E2B_CONFIG_KEYS)
-    this.params = normalizeFields(this.config.params ?? {})
+    if (!this.config.sandboxId) {
+      throw new Error('e2b config needs sandboxId: the id of a live sandbox you created')
+    }
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -77,33 +71,12 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
   }
 
   private apiParams(): Record<string, unknown> {
-    return this.apiKey !== undefined ? { apiKey: this.apiKey } : {}
+    return this.config.apiKey !== undefined ? { apiKey: this.config.apiKey } : {}
   }
 
-  async createSandbox(): Promise<string> {
+  async connect(): Promise<void> {
     const sdk = await this.ensureSdk()
-    const params: Record<string, unknown> = this.apiParams()
-    if (this.config.template !== undefined) params.template = this.config.template
-    if (Object.keys(this.config.env).length > 0) params.envs = { ...this.config.env }
-    Object.assign(params, this.params)
-    this.sandbox = await sdk.Sandbox.create(params)
-    return this.sandbox.sandboxId
-  }
-
-  async connectSandbox(sandboxId: string): Promise<void> {
-    const sdk = await this.ensureSdk()
-    this.sandbox = await sdk.Sandbox.connect(sandboxId, this.apiParams())
-  }
-
-  /**
-   * $HOME/workspace: the default template user is `user` (uid 1000),
-   * so a root-level /workspace is not writable; home is.
-   */
-  override async defaultWorkspaceRoot(): Promise<string> {
-    if (this.sandbox === null) throw new Error('e2b sandbox not started')
-    const result = await this.sandbox.commands.run('printf "%s" "$HOME"')
-    const home = rstripSlash(result.stdout.trim())
-    return `${home}/workspace`
+    this.sandbox = await sdk.Sandbox.connect(this.config.sandboxId, this.apiParams())
   }
 
   async execLine(
@@ -112,7 +85,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     env: Record<string, string>,
     cwd: string,
   ): Promise<RunResult> {
-    if (this.sandbox === null) throw new Error('e2b sandbox not started')
+    if (this.sandbox === null) throw new Error('e2b sandbox not connected')
     const sdk = await this.ensureSdk()
     let command = line
     if (stdin !== null) {
@@ -133,24 +106,12 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     }
   }
 
-  async upload(path: string, data: Uint8Array): Promise<void> {
-    if (this.sandbox === null) throw new Error('e2b sandbox not started')
+  private async upload(path: string, data: Uint8Array): Promise<void> {
+    if (this.sandbox === null) throw new Error('e2b sandbox not connected')
     const slash = path.lastIndexOf('/')
     const parent = slash > 0 ? path.slice(0, slash) : ''
     if (parent !== '') await this.sandbox.files.makeDir(parent)
     await this.sandbox.files.write(path, new Blob([data]))
-  }
-
-  async download(path: string): Promise<Uint8Array> {
-    if (this.sandbox === null) throw new Error('e2b sandbox not started')
-    return await this.sandbox.files.read(path, { format: 'bytes' })
-  }
-
-  async close(): Promise<void> {
-    if (this.sandbox !== null) {
-      if (this.ownedSandbox) await this.sandbox.kill()
-      this.sandbox = null
-    }
   }
 }
 

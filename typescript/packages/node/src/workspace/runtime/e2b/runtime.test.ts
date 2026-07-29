@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { buildRuntime } from '@struktoai/mirage-core'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
 import type { E2BConfig } from './config.ts'
 import { E2BRuntime, type E2bSdk } from './runtime.ts'
@@ -35,9 +35,6 @@ class FakeCommands {
 
   run(command: string, opts?: { envs?: Record<string, string>; cwd?: string }) {
     this.calls.push([command, opts?.envs, opts?.cwd])
-    if (command.includes('$HOME')) {
-      return Promise.resolve({ stdout: '/home/user', stderr: '', exitCode: 0 })
-    }
     if (command.includes('exit 3')) {
       return Promise.reject(new FakeExitError(3, 'partial', 'boom-err'))
     }
@@ -57,38 +54,20 @@ class FakeFiles {
   async write(path: string, data: Blob): Promise<void> {
     this.files.set(path, new Uint8Array(await data.arrayBuffer()))
   }
-
-  read(path: string, opts: { format: string }): Promise<Uint8Array> {
-    expect(opts.format).toBe('bytes')
-    return Promise.resolve(this.files.get(path) ?? new Uint8Array())
-  }
 }
 
 class FakeSandbox {
-  static created: Record<string, unknown>[] = []
   static connected: [string, Record<string, unknown>][] = []
-  static killed = 0
   static last: FakeSandbox | null = null
 
   readonly sandboxId = 'sb-e2b'
   readonly commands = new FakeCommands()
   readonly files = new FakeFiles()
 
-  static create(params: Record<string, unknown>): Promise<FakeSandbox> {
-    FakeSandbox.created.push(params)
-    FakeSandbox.last = new FakeSandbox()
-    return Promise.resolve(FakeSandbox.last)
-  }
-
   static connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeSandbox> {
     FakeSandbox.connected.push([sandboxId, params])
     FakeSandbox.last = new FakeSandbox()
     return Promise.resolve(FakeSandbox.last)
-  }
-
-  kill(): Promise<boolean> {
-    FakeSandbox.killed += 1
-    return Promise.resolve(true)
   }
 }
 
@@ -102,55 +81,32 @@ class FakedE2BRuntime extends E2BRuntime {
 }
 
 function makeRuntime(
-  options: RemoteSandboxOptions<E2BConfig> | Record<string, unknown> = {},
+  options: RemoteSandboxOptions<E2BConfig> | Record<string, unknown> = {
+    config: { sandboxId: 'sb-live' },
+  },
 ): FakedE2BRuntime {
-  FakeSandbox.created = []
-  FakeSandbox.connected = []
-  FakeSandbox.killed = 0
-  FakeSandbox.last = null
   return new FakedE2BRuntime(options)
 }
 
+beforeEach(() => {
+  FakeSandbox.connected = []
+  FakeSandbox.last = null
+})
+
 describe('E2BRuntime', () => {
-  it('maps template, env, and apiKey onto create params', async () => {
-    const runtime = makeRuntime({
-      config: { template: 'mirage-base', env: { A: '1' } },
-      apiKey: 'k-123',
-    })
-    const sandboxId = await runtime.createSandbox()
-    expect(sandboxId).toBe('sb-e2b')
-    expect(FakeSandbox.created[0]).toEqual({
-      apiKey: 'k-123',
-      template: 'mirage-base',
-      envs: { A: '1' },
-    })
+  it('connect attaches by id with the apiKey', async () => {
+    const runtime = makeRuntime({ config: { sandboxId: 'sb-live', apiKey: 'k-123' } })
+    await runtime.connect()
+    expect(FakeSandbox.connected).toEqual([['sb-live', { apiKey: 'k-123' }]])
   })
 
-  it('params merge last with snake_case keys camelized', async () => {
-    const runtime = makeRuntime({
-      config: { template: 'mirage-base', params: { template: 'override', timeout_ms: 600 } },
-    })
-    await runtime.createSandbox()
-    const params = FakeSandbox.created[0] ?? {}
-    expect(params.template).toBe('override')
-    expect(params.timeoutMs).toBe(600)
-  })
-
-  it('image fails loud', () => {
-    expect(() => makeRuntime({ config: { image: 'python:3.12' } })).toThrow('template')
-  })
-
-  it('sizing fails loud', () => {
-    expect(() => makeRuntime({ config: { cpu: 2 } })).toThrow('template')
-  })
-
-  it('cli args fail loud', () => {
-    expect(() => makeRuntime({ config: { args: ['--network', 'host'] } })).toThrow('params')
+  it('sandboxId is required', () => {
+    expect(() => makeRuntime({ config: {} })).toThrow('sandboxId')
   })
 
   it('threads env and cwd and reports real stderr', async () => {
     const runtime = makeRuntime()
-    await runtime.createSandbox()
+    await runtime.connect()
     const result = await runtime.execLine('wc -l', null, { E: '1' }, '/workspace')
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('out:wc -l')
@@ -159,9 +115,9 @@ describe('E2BRuntime', () => {
     expect(sandbox.commands.calls[0]).toEqual(['wc -l', { E: '1' }, '/workspace'])
   })
 
-  it('a nonzero exit comes back as a result, not a throw', async () => {
+  it('a nonzero exit comes back as a result', async () => {
     const runtime = makeRuntime()
-    await runtime.createSandbox()
+    await runtime.connect()
     const result = await runtime.execLine('exit 3', null, {}, '/workspace')
     expect(result.exitCode).toBe(3)
     expect(DEC.decode(result.stdout)).toBe('partial')
@@ -170,7 +126,7 @@ describe('E2BRuntime', () => {
 
   it('redirects stdin through an uploaded file', async () => {
     const runtime = makeRuntime()
-    await runtime.createSandbox()
+    await runtime.connect()
     const result = await runtime.execLine(
       'wc -l',
       new TextEncoder().encode('a\nb\n'),
@@ -186,30 +142,8 @@ describe('E2BRuntime', () => {
     expect(cwd).toBe('/workspace')
   })
 
-  it('derives the default workspace root from the sandbox $HOME', async () => {
-    const runtime = makeRuntime()
-    await runtime.createSandbox()
-    expect(await runtime.defaultWorkspaceRoot()).toBe('/home/user/workspace')
-  })
-
-  it('a reattached sandbox survives close', async () => {
-    const runtime = makeRuntime({ sandboxId: 'sb-live', apiKey: 'k-123' })
-    await runtime.connectSandbox('sb-live')
-    expect(FakeSandbox.connected).toEqual([['sb-live', { apiKey: 'k-123' }]])
-    await runtime.close()
-    expect(FakeSandbox.killed).toBe(0)
-  })
-
-  it('close kills only an owned sandbox', async () => {
-    const runtime = makeRuntime()
-    await runtime.createSandbox()
-    runtime.ownedSandbox = true
-    await runtime.close()
-    expect(FakeSandbox.killed).toBe(1)
-  })
-
   it("registers under the config name 'e2b'", () => {
-    const runtime = buildRuntime('e2b', { config: { template: 'mirage-base' } })
+    const runtime = buildRuntime('e2b', { config: { sandboxId: 'sb-live' } })
     expect(runtime).toBeInstanceOf(E2BRuntime)
     expect(runtime.captures).toEqual(['*'])
   })

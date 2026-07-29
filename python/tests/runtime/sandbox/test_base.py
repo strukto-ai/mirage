@@ -24,25 +24,22 @@ from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 
 FAKE_SPEC = {"resource": "s3", "config": {"bucket": "b"}}
 
+CREATE_LINE = ("mirage workspace delete sandbox >/dev/null 2>&1; "
+               "mirage workspace create --id sandbox --from-env")
+
 
 class RecordingSandbox(RemoteSandbox):
     name = "recbox"
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.files: dict[str, bytes] = {}
         self.execs: list[tuple[str, bytes | None, str]] = []
         self.exec_envs: list[dict[str, str]] = []
-        self.created = 0
-        self.connected: list[str] = []
+        self.connected = 0
         self.synced = 0
 
-    async def create_sandbox(self) -> str:
-        self.created += 1
-        return "sb-rec"
-
-    async def connect_sandbox(self, sandbox_id: str) -> None:
-        self.connected.append(sandbox_id)
+    async def connect(self) -> None:
+        self.connected += 1
 
     async def exec_line(self, line: str, stdin: bytes | None,
                         env: dict[str, str], cwd: str) -> RunResult:
@@ -52,10 +49,7 @@ class RecordingSandbox(RemoteSandbox):
                          stderr=None,
                          exit_code=0)
 
-    async def upload(self, path: str, data: bytes) -> None:
-        self.files[path] = data
-
-    # Base-machinery tests exercise provisioning, not the mount setup,
+    # Base-machinery tests exercise connection, not the mount setup,
     # so record the call and skip the real one; FuseSandbox restores it.
     async def mount_workspace(self) -> None:
         self.synced += 1
@@ -71,14 +65,16 @@ def _attach_specs(box: RecordingSandbox, specs: dict) -> None:
     box.attach(box._dispatch, lambda: list(specs), lambda: dict(specs))
 
 
-def _mount_cmds(box: RecordingSandbox) -> list[str]:
+def _create_calls(box: RecordingSandbox) -> list[dict]:
     return [
-        line for line, _, _ in box.execs if line.startswith("mirage mount")
+        json.loads(env["MIRAGE_WORKSPACE_CONFIG"])
+        for (line, _, _), env in zip(box.execs, box.exec_envs)
+        if line == CREATE_LINE
     ]
 
 
 @pytest.mark.asyncio
-async def test_first_line_provisions_and_mounts_once():
+async def test_first_line_connects_and_mounts_once():
     box = RecordingSandbox(captures=("python3", ))
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
@@ -86,20 +82,18 @@ async def test_first_line_provisions_and_mounts_once():
     try:
         io = await ws.execute("python3 x")
         assert await materialize(io.stdout) == b"ran:python3 x"
-        assert box.created == 1
-        assert box.owned_sandbox is True
-        assert box.sandbox_id == "sb-rec"
+        assert box.connected == 1
         assert box.synced == 1
         await ws.execute("python3 x")
-        assert box.created == 1
-        # The workspace mounts once at provision, not per line.
+        # The workspace mounts once on the first line, not per line.
+        assert box.connected == 1
         assert box.synced == 1
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_mount_issues_mount_add_with_spec_in_env():
+async def test_mount_creates_one_workspace_with_config_in_env():
     box = FuseSandbox(captures=("python3", ))
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
@@ -107,15 +101,17 @@ async def test_mount_issues_mount_add_with_spec_in_env():
     _attach_specs(box, {"/data": FAKE_SPEC})
     try:
         await ws.execute("python3 /data/train.py")
-        adds = [(line, env)
-                for (line, _, _), env in zip(box.execs, box.exec_envs)
-                if line.startswith("mirage mount add")]
-        assert len(adds) == 1
-        line, env = adds[0]
-        assert line == "mirage mount add /data --fuse /workspace/data"
-        assert json.loads(env["MIRAGE_MOUNT_SPEC"]) == FAKE_SPEC
-        # The spec travels in the environment, never as a file.
-        assert box.files == {}
+        configs = _create_calls(box)
+        assert len(configs) == 1
+        assert configs[0] == {
+            "mode": "EXEC",
+            "mounts": {
+                "/data": {
+                    **FAKE_SPEC,
+                    "fuse": "/workspace/data",
+                },
+            },
+        }
     finally:
         await ws.close()
 
@@ -126,20 +122,21 @@ async def test_mount_excludes_system_mounts_and_runs_once():
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[box, "vfs"])
-    _attach_specs(box, {"/data": FAKE_SPEC})
+    _attach_specs(box, {"/data": FAKE_SPEC, "/dev": None})
     try:
         await ws.execute("python3 x")
         await ws.execute("python3 x")
-        cmds = _mount_cmds(box)
-        # One add for /data at provision, nothing for /dev or the
-        # history view, and no mount work on later lines.
-        assert cmds == ["mirage mount add /data --fuse /workspace/data"]
+        configs = _create_calls(box)
+        # One workspace create at first line, /dev never reproduced,
+        # and no mount work on later lines.
+        assert len(configs) == 1
+        assert list(configs[0]["mounts"]) == ["/data"]
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_root_only_workspace_mounts_from_root():
+async def test_root_only_workspace_mounts_at_the_root():
     box = FuseSandbox(captures=("python3", ))
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
@@ -147,7 +144,8 @@ async def test_root_only_workspace_mounts_from_root():
     _attach_specs(box, {"/": FAKE_SPEC})
     try:
         await ws.execute("python3 x")
-        assert _mount_cmds(box) == ["mirage mount add / --fuse /workspace"]
+        configs = _create_calls(box)
+        assert configs[0]["mounts"]["/"]["fuse"] == "/workspace"
     finally:
         await ws.close()
 
@@ -170,19 +168,12 @@ async def test_cwd_resolves_under_workspace_root_and_env_merges():
 
 
 @pytest.mark.asyncio
-async def test_sandbox_id_reattaches_instead_of_creating():
-    box = RecordingSandbox(captures=("python3", ), sandbox_id="sb-live")
-    ws = Workspace({"/data": RAMResource()},
-                   mode=MountMode.EXEC,
-                   runtimes=[box, "vfs"])
-    try:
-        await ws.execute("python3 x")
-        assert box.created == 0
-        assert box.connected == ["sb-live"]
-        assert box.owned_sandbox is False
-        assert box.sandbox_id == "sb-live"
-    finally:
-        await ws.close()
+async def test_custom_workspace_root_rebases_cwd():
+    box = RecordingSandbox(captures=("*", ),
+                           workspace_root="/home/daytona/workspace")
+    result = await box.run_line("ls", None, {}, "/data")
+    assert result.exit_code == 0
+    assert box.execs[-1][2] == "/home/daytona/workspace/data"
 
 
 @pytest.mark.asyncio
@@ -214,7 +205,7 @@ class FailingMountSandbox(FuseSandbox):
 
     async def exec_line(self, line: str, stdin: bytes | None,
                         env: dict[str, str], cwd: str) -> RunResult:
-        if line.startswith("mirage mount"):
+        if line.startswith("mirage workspace"):
             self.execs.append((line, stdin, cwd))
             self.exec_envs.append(dict(env))
             return RunResult(stdout=b"",

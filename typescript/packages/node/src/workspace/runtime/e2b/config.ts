@@ -14,21 +14,15 @@
 
 import type { SandboxConfig } from '@struktoai/mirage-core'
 
-/**
- * The E2B machine config, mapped onto Sandbox.create.
- *
- * Images and sizing are deliberately not fields: E2B bakes both into
- * a named template (`e2b template build`).
- */
+/** How to reach the user's live E2B sandbox. */
 export interface E2BConfig extends SandboxConfig {
-  /** Name or id of the template to boot (E2B's default when omitted). */
-  template?: string
   /**
-   * Any other Sandbox.create option passed verbatim (timeoutMs,
-   * metadata, allowInternetAccess, ...), merged last so it can
-   * override anything computed from the fields above.
+   * Id of a sandbox you created (`e2b sandbox spawn` or the SDK),
+   * booted from a template with fuse3 and mirage installed.
    */
-  params?: Record<string, unknown>
+  sandboxId: string
+  /** E2B credential; absent reads E2B_API_KEY. */
+  apiKey?: string
 }
 
-export const E2B_CONFIG_KEYS: readonly string[] = ['env', 'template', 'params']
+export const E2B_CONFIG_KEYS: readonly string[] = ['env', 'sandboxId', 'apiKey']

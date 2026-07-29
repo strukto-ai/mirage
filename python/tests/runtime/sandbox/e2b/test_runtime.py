@@ -34,8 +34,6 @@ class FakeCommands:
 
     async def run(self, command, envs=None, cwd=None):
         self.calls.append((command, envs, cwd))
-        if "$HOME" in command:
-            return FakeResult("/home/user")
         if "exit 3" in command:
             raise CommandExitException(stderr="boom-err",
                                        stdout="partial",
@@ -57,15 +55,9 @@ class FakeFiles:
     async def write(self, path, data):
         self.files[path] = data
 
-    async def read(self, path, format="text"):
-        assert format == "bytes"
-        return self.files.get(path, b"")
-
 
 class FakeSandbox:
-    created: list[dict] = []
     connected: list[tuple[str, dict]] = []
-    killed = 0
     last: "FakeSandbox | None" = None
 
     def __init__(self) -> None:
@@ -74,89 +66,38 @@ class FakeSandbox:
         self.files = FakeFiles()
 
     @classmethod
-    async def create(cls, **params):
-        cls.created.append(params)
-        cls.last = cls()
-        return cls.last
-
-    @classmethod
     async def connect(cls, sandbox_id, **params):
         cls.connected.append((sandbox_id, params))
         cls.last = cls()
         return cls.last
 
-    async def kill(self):
-        FakeSandbox.killed += 1
-        return True
-
 
 @pytest.fixture(autouse=True)
 def fake_sdk(monkeypatch):
-    FakeSandbox.created = []
     FakeSandbox.connected = []
-    FakeSandbox.killed = 0
     FakeSandbox.last = None
     monkeypatch.setattr(sdk, "AsyncSandbox", FakeSandbox)
 
 
 @pytest.mark.asyncio
-async def test_create_maps_template_env_and_api_key():
+async def test_connect_attaches_by_id_with_api_key():
     runtime = E2BRuntime(config={
-        "template": "mirage-base",
-        "env": {
-            "A": "1"
-        },
-    },
-                         api_key="k-123")
-    sandbox_id = await runtime.create_sandbox()
-    assert sandbox_id == "sb-e2b"
-    params = FakeSandbox.created[0]
-    assert params == {
+        "sandbox_id": "sb-live",
         "api_key": "k-123",
-        "template": "mirage-base",
-        "envs": {
-            "A": "1"
-        },
-    }
+    })
+    await runtime.connect()
+    assert FakeSandbox.connected == [("sb-live", {"api_key": "k-123"})]
 
 
-@pytest.mark.asyncio
-async def test_params_merge_last_over_config_fields():
-    runtime = E2BRuntime(
-        config={
-            "template": "mirage-base",
-            "params": {
-                "template": "override",
-                "timeout": 600
-            },
-        })
-    await runtime.create_sandbox()
-    params = FakeSandbox.created[0]
-    assert params["template"] == "override"
-    assert params["timeout"] == 600
-
-
-def test_image_fails_loud():
-    # Not an E2BConfig field: e2b boots templates, never inline images.
-    with pytest.raises(TypeError, match="image"):
-        E2BRuntime(config={"image": "python:3.12"})
-
-
-def test_sizing_fails_loud():
-    # Not an E2BConfig field: sizing is baked into the template.
-    with pytest.raises(TypeError, match="cpu"):
-        E2BRuntime(config={"cpu": 2})
-
-
-def test_cli_args_fail_loud():
-    with pytest.raises(TypeError, match="args"):
-        E2BRuntime(config={"args": ["--network", "host"]})
+def test_sandbox_id_is_required():
+    with pytest.raises(TypeError, match="sandbox_id"):
+        E2BRuntime(config={})
 
 
 @pytest.mark.asyncio
 async def test_exec_line_threads_env_cwd_and_real_stderr():
-    runtime = E2BRuntime()
-    await runtime.create_sandbox()
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
     result = await runtime.exec_line("wc -l", None, {"E": "1"}, "/workspace")
     assert result.exit_code == 0
     assert result.stdout == b"out:wc -l"
@@ -167,8 +108,8 @@ async def test_exec_line_threads_env_cwd_and_real_stderr():
 
 @pytest.mark.asyncio
 async def test_exec_line_nonzero_exit_comes_back_as_result():
-    runtime = E2BRuntime()
-    await runtime.create_sandbox()
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
     result = await runtime.exec_line("exit 3", None, {}, "/workspace")
     assert result.exit_code == 3
     assert result.stdout == b"partial"
@@ -177,8 +118,8 @@ async def test_exec_line_nonzero_exit_comes_back_as_result():
 
 @pytest.mark.asyncio
 async def test_stdin_redirects_through_an_uploaded_file():
-    runtime = E2BRuntime()
-    await runtime.create_sandbox()
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
     result = await runtime.exec_line("wc -l", b"a\nb\n", {}, "/workspace")
     assert result.exit_code == 0
     sandbox = FakeSandbox.last
@@ -190,33 +131,8 @@ async def test_stdin_redirects_through_an_uploaded_file():
 
 
 @pytest.mark.asyncio
-async def test_default_workspace_root_derives_from_home():
-    runtime = E2BRuntime()
-    await runtime.create_sandbox()
-    assert await runtime.default_workspace_root() == "/home/user/workspace"
-
-
-@pytest.mark.asyncio
-async def test_reattached_sandbox_survives_close():
-    runtime = E2BRuntime(sandbox_id="sb-live", api_key="k-123")
-    await runtime.connect_sandbox("sb-live")
-    assert FakeSandbox.connected == [("sb-live", {"api_key": "k-123"})]
-    await runtime.close()
-    assert FakeSandbox.killed == 0
-
-
-@pytest.mark.asyncio
-async def test_close_kills_only_an_owned_sandbox():
-    runtime = E2BRuntime()
-    await runtime.create_sandbox()
-    runtime.owned_sandbox = True
-    await runtime.close()
-    assert FakeSandbox.killed == 1
-
-
-@pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
     monkeypatch.setattr(sdk, "AsyncSandbox", None)
-    runtime = E2BRuntime()
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     with pytest.raises(ImportError, match="mirage-ai\\[e2b\\]"):
-        await runtime.create_sandbox()
+        await runtime.connect()

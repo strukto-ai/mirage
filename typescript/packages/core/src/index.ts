@@ -512,9 +512,10 @@ export {
   type SandboxConfig,
 } from './workspace/executor/sandbox/config.ts'
 export {
-  MOUNT_SPEC_ENV,
+  SANDBOX_WORKSPACE_ID,
   STDIN_PATH,
   SYSTEM_MOUNTS,
+  WORKSPACE_CONFIG_ENV,
 } from './workspace/executor/sandbox/constants.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'

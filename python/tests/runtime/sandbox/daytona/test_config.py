@@ -12,26 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.runtime.sandbox.daytona import DaytonaConfig
-
-
-def test_sized_reflects_any_sizing_field():
-    assert DaytonaConfig().sized() is False
-    assert DaytonaConfig(image="cuda:12").sized() is False
-    assert DaytonaConfig(cpu=1).sized() is True
-    assert DaytonaConfig(gpu="H100").sized() is True
 
 
 def test_coerce_dict_covers_all_fields():
     config = DaytonaConfig.coerce({
-        "template": "mirage-fuse",
+        "sandbox_id": "sb-live",
+        "api_key": "k-123",
         "env": {
             "A": "1"
         },
-        "params": {
-            "auto_stop_interval": 10
-        },
     })
-    assert config.template == "mirage-fuse"
+    assert config.sandbox_id == "sb-live"
+    assert config.api_key == "k-123"
     assert config.env == {"A": "1"}
-    assert config.params == {"auto_stop_interval": 10}
+
+
+def test_sandbox_id_is_required():
+    with pytest.raises(TypeError, match="sandbox_id"):
+        DaytonaConfig.coerce({"api_key": "k-123"})

@@ -15,27 +15,13 @@
 from typing import Any
 
 AsyncDaytona: Any
-CreateSandboxFromImageParams: Any
-CreateSandboxFromSnapshotParams: Any
 DaytonaConfig: Any
-Resources: Any
 try:
     from daytona import AsyncDaytona as _AsyncDaytona
-    from daytona import \
-        CreateSandboxFromImageParams as _CreateSandboxFromImageParams
-    from daytona import \
-        CreateSandboxFromSnapshotParams as _CreateSandboxFromSnapshotParams
     from daytona import DaytonaConfig as _DaytonaConfig
-    from daytona import Resources as _Resources
 except ImportError:
     AsyncDaytona = None
-    CreateSandboxFromImageParams = None
-    CreateSandboxFromSnapshotParams = None
     DaytonaConfig = None
-    Resources = None
 else:
     AsyncDaytona = _AsyncDaytona
-    CreateSandboxFromImageParams = _CreateSandboxFromImageParams
-    CreateSandboxFromSnapshotParams = _CreateSandboxFromSnapshotParams
     DaytonaConfig = _DaytonaConfig
-    Resources = _Resources

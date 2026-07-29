@@ -14,49 +14,16 @@
 
 import type { SandboxConfig } from '@struktoai/mirage-core'
 
-/** The Daytona machine config, mapped onto the create params. */
+/** How to reach the user's live Daytona sandbox. */
 export interface DaytonaConfig extends SandboxConfig {
-  /** Image built inline at create time. Mutually exclusive with template. */
-  image?: string
   /**
-   * Name of a prebaked Daytona snapshot. Prefer it for anything
-   * heavy: an inline image build sits in the create path, a snapshot
-   * boots in seconds.
+   * Id of a sandbox you created (dashboard, `daytona sandbox create`,
+   * or the SDK). Boot it from an image or snapshot with fuse3 and
+   * mirage installed.
    */
-  template?: string
-  /** CPU cores; sizing requires an image. */
-  cpu?: number
-  /** Memory in GiB. */
-  memory?: number
-  /** Disk in GiB. */
-  disk?: number
-  /** GPU count or type spec; truthy forces the sandbox ephemeral. */
-  gpu?: number | string
-  /**
-   * Any other Daytona create option passed verbatim
-   * (autoStopInterval, labels, volumes, ...), merged last so it can
-   * override anything computed from the fields above.
-   */
-  params?: Record<string, unknown>
+  sandboxId: string
+  /** Daytona credential; absent reads DAYTONA_API_KEY. */
+  apiKey?: string
 }
 
-export const DAYTONA_CONFIG_KEYS: readonly string[] = [
-  'env',
-  'image',
-  'template',
-  'cpu',
-  'memory',
-  'disk',
-  'gpu',
-  'params',
-]
-
-/** Whether any per-sandbox sizing field is set. */
-export function sizedConfig(config: DaytonaConfig): boolean {
-  return (
-    config.cpu !== undefined ||
-    config.memory !== undefined ||
-    config.disk !== undefined ||
-    config.gpu !== undefined
-  )
-}
+export const DAYTONA_CONFIG_KEYS: readonly string[] = ['env', 'sandboxId', 'apiKey']

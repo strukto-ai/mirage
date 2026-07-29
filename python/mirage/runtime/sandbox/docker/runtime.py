@@ -13,27 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import posixpath
-import shlex
 
 from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import (DOCKER_CLI_HINT,
-                                              DOCKER_DEFAULT_IMAGE)
 from mirage.runtime.sandbox.docker.config import DockerConfig
+from mirage.runtime.sandbox.docker.constants import DOCKER_CLI_HINT
 
 
 class DockerRuntime(RemoteSandbox):
-    """A local Docker container as a whole-line runtime.
+    """A container the user runs as a whole-line runtime.
 
-    Drives the docker CLI directly (Docker Desktop, colima, or a
-    podman alias all work), so there is no SDK dependency and no
-    daemon socket wiring. DockerConfig maps onto the CLI: ``image``
-    is pulled on first use (python:3.12-slim when omitted), sizing
-    becomes --cpus/--memory/--gpus, and ``args`` passes any extra
-    `docker run` flag verbatim before the image (binds, --cap-add,
-    --network, --user, ...). Containers get real stdin and separated
-    stderr.
+    You start the container yourself; mirage only connects to it and
+    execs lines. The docker CLI is the transport (Docker Desktop,
+    colima, or a podman alias all work), so there is no SDK dependency
+    and no daemon socket wiring; each line is one `docker exec -i`
+    with the merged environment, the rebased cwd, real stdin, and
+    separated stderr.
 
     Args:
         options (Any): the RemoteSandbox constructor fields.
@@ -61,76 +56,22 @@ class DockerRuntime(RemoteSandbox):
         stdout, stderr = await process.communicate(stdin)
         return stdout, stderr, process.returncode or 0
 
-    def _resource_args(self) -> list[str]:
-        args: list[str] = []
-        if self.config.cpu is not None:
-            args += ["--cpus", str(self.config.cpu)]
-        if self.config.memory is not None:
-            args += ["--memory", f"{self.config.memory}g"]
-        if self.config.gpu is not None:
-            args += ["--gpus", str(self.config.gpu)]
-        return args
-
-    async def create_sandbox(self) -> str:
-        image = (self.config.image
-                 if self.config.image is not None else DOCKER_DEFAULT_IMAGE)
-        args = [
-            "run", "-d", *self._resource_args(), *self.config.args, image,
-            "sleep", "infinity"
-        ]
-        stdout, stderr, code = await self._docker(args)
-        if code != 0:
-            raise RuntimeError(f"docker run failed: {stderr.decode().strip()}")
-        return stdout.decode().strip()
-
-    async def connect_sandbox(self, sandbox_id: str) -> None:
-        stdout, stderr, code = await self._docker(
-            ["inspect", "--format", "{{.State.Running}}", sandbox_id])
+    async def connect(self) -> None:
+        stdout, stderr, code = await self._docker([
+            "inspect", "--format", "{{.State.Running}}", self.config.container
+        ])
         if code != 0:
             raise RuntimeError(
                 f"docker inspect failed: {stderr.decode().strip()}")
         if stdout.decode().strip() != "true":
-            raise RuntimeError(f"container {sandbox_id} is not running")
-
-    async def default_workspace_root(self) -> str:
-        """$HOME/workspace: containers usually run as root, so this is
-        /root/workspace on stock images; custom-user images get their
-        own home the same way."""
-        stdout, _, _ = await self._docker(
-            ["exec",
-             str(self.sandbox_id), "sh", "-c", 'printf "%s" "$HOME"'])
-        home = stdout.decode().strip()
-        return posixpath.join(home or "/", "workspace")
+            raise RuntimeError(
+                f"container {self.config.container} is not running")
 
     async def exec_line(self, line: str, stdin: bytes | None,
                         env: dict[str, str], cwd: str) -> RunResult:
         args = ["exec", "-i", "-w", cwd]
         for key, value in env.items():
             args += ["-e", f"{key}={value}"]
-        args += [str(self.sandbox_id), "sh", "-c", line]
+        args += [self.config.container, "sh", "-c", line]
         stdout, stderr, code = await self._docker(args, stdin=stdin)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
-
-    async def upload(self, path: str, data: bytes) -> None:
-        parent = path.rsplit("/", 1)[0] or "/"
-        script = (f"mkdir -p {shlex.quote(parent)} && "
-                  f"cat > {shlex.quote(path)}")
-        _, stderr, code = await self._docker(
-            ["exec", "-i",
-             str(self.sandbox_id), "sh", "-c", script],
-            stdin=data)
-        if code != 0:
-            raise RuntimeError(
-                f"docker upload failed: {stderr.decode().strip()}")
-
-    async def download(self, path: str) -> bytes:
-        stdout, stderr, code = await self._docker(
-            ["exec", str(self.sandbox_id), "cat", path])
-        if code != 0:
-            raise RuntimeError(
-                f"docker download failed: {stderr.decode().strip()}")
-        return stdout
-
-    async def close(self) -> None:
-        if self.sandbox_id is not None and self.owned_sandbox:
-            await self._docker(["rm", "-f", str(self.sandbox_id)])

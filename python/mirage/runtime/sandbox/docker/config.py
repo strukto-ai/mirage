@@ -12,31 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from mirage.runtime.sandbox.config import SandboxConfig
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DockerConfig(SandboxConfig):
-    """The docker machine config, mapped onto the docker CLI.
-
-    ``disk`` is deliberately not a field: the default storage driver
-    has no per-container limit. Templates and SDK params are not
-    fields either; docker boots images and is driven by CLI flags.
+    """How to reach the user's running container.
 
     Args:
-        image (str | None): image to boot, pulled on first use
-            (python:3.12-slim when omitted).
-        cpu (int | None): CPU cores, mapped onto --cpus.
-        memory (int | None): memory in GiB, mapped onto --memory.
-        gpu (int | str | None): GPU count or spec, mapped onto --gpus.
-        args (list[str]): extra `docker run` flags passed verbatim
-            before the image (binds, --cap-add, --network, --user).
+        container (str): id or name of a running container. You start
+            it yourself (`docker run -d ... sleep infinity`); live
+            FUSE mounts need `--cap-add SYS_ADMIN --device /dev/fuse`
+            and an image with mirage installed.
     """
 
-    image: str | None = None
-    cpu: int | None = None
-    memory: int | None = None
-    gpu: int | str | None = None
-    args: list[str] = field(default_factory=list)
+    container: str

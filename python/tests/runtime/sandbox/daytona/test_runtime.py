@@ -28,8 +28,7 @@ class FakeProcess:
 
         class Response:
             exit_code = 0
-            result = ("/home/daytona"
-                      if "$HOME" in command else f"out:{command}")
+            result = f"out:{command}"
 
         return Response()
 
@@ -46,9 +45,6 @@ class FakeFs:
     async def upload_file(self, data, path):
         self.files[path] = data
 
-    async def download_file(self, path):
-        return self.files.get(path)
-
 
 class FakeSandbox:
     id = "sb-77"
@@ -59,27 +55,18 @@ class FakeSandbox:
 
 
 class FakeClient:
-    created: list[object] = []
+    configs: list[object] = []
     fetched: list[str] = []
-    deleted: list[object] = []
     closed = 0
     last: "FakeSandbox | None" = None
 
     def __init__(self, config=None) -> None:
-        self.config = config
-
-    async def create(self, params):
-        FakeClient.created.append(params)
-        FakeClient.last = FakeSandbox()
-        return FakeClient.last
+        FakeClient.configs.append(config)
 
     async def get(self, sandbox_id):
         FakeClient.fetched.append(sandbox_id)
         FakeClient.last = FakeSandbox()
         return FakeClient.last
-
-    async def delete(self, sandbox, timeout=60):
-        FakeClient.deleted.append(sandbox)
 
     async def close(self):
         FakeClient.closed += 1
@@ -87,105 +74,46 @@ class FakeClient:
 
 @pytest.fixture(autouse=True)
 def fake_client(monkeypatch):
-    FakeClient.created = []
+    FakeClient.configs = []
     FakeClient.fetched = []
-    FakeClient.deleted = []
     FakeClient.closed = 0
     FakeClient.last = None
     monkeypatch.setattr(sdk, "AsyncDaytona", FakeClient)
 
 
 @pytest.mark.asyncio
-async def test_create_maps_image_env_and_gpu_forces_ephemeral():
+async def test_connect_gets_the_users_sandbox_by_id():
+    runtime = DaytonaRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    assert FakeClient.fetched == ["sb-live"]
+
+
+def test_sandbox_id_is_required():
+    with pytest.raises(TypeError, match="sandbox_id"):
+        DaytonaRuntime(config={})
+
+
+@pytest.mark.asyncio
+async def test_api_key_reaches_the_client(monkeypatch):
+
+    class FakeSdkConfig:
+
+        def __init__(self, api_key=None) -> None:
+            self.api_key = api_key
+
+    monkeypatch.setattr(sdk, "DaytonaConfig", FakeSdkConfig)
     runtime = DaytonaRuntime(config={
-        "image": "cuda:12",
-        "env": {
-            "A": "1"
-        },
-        "cpu": 4,
-        "gpu": "H100",
+        "sandbox_id": "sb-live",
+        "api_key": "k-123",
     })
-    sandbox_id = await runtime.create_sandbox()
-    assert sandbox_id == "sb-77"
-    params = FakeClient.created[0]
-    assert params.image == "cuda:12"
-    assert params.env_vars == {"A": "1"}
-    assert params.ephemeral is True
-    assert params.resources.cpu == 4
-    assert params.resources.gpu == 1
-
-
-@pytest.mark.asyncio
-async def test_create_without_image_uses_default_snapshot():
-    runtime = DaytonaRuntime()
-    await runtime.create_sandbox()
-    params = FakeClient.created[0]
-    assert not hasattr(params, "image")
-
-
-@pytest.mark.asyncio
-async def test_template_boots_a_snapshot_by_name():
-    runtime = DaytonaRuntime(config={"template": "mirage-fuse"})
-    await runtime.create_sandbox()
-    params = FakeClient.created[0]
-    assert params.snapshot == "mirage-fuse"
-    assert not hasattr(params, "image")
-
-
-def test_template_and_image_conflict():
-    with pytest.raises(ValueError, match="not both"):
-        DaytonaRuntime(config={"template": "mirage-fuse", "image": "cuda:12"})
-
-
-def test_cli_args_fail_loud():
-    # Not a DaytonaConfig field: daytona is SDK-driven.
-    with pytest.raises(TypeError, match="args"):
-        DaytonaRuntime(config={"args": ["--cap-add", "SYS_ADMIN"]})
-
-
-@pytest.mark.asyncio
-async def test_params_pass_through_verbatim():
-    runtime = DaytonaRuntime(
-        config={
-            "params": {
-                "auto_stop_interval": 10,
-                "auto_delete_interval": 30,
-                "labels": {
-                    "team": "ml"
-                },
-            }
-        })
-    await runtime.create_sandbox()
-    params = FakeClient.created[0]
-    assert params.auto_stop_interval == 10
-    assert params.auto_delete_interval == 30
-    assert params.labels == {"team": "ml"}
-
-
-@pytest.mark.asyncio
-async def test_params_merge_last_over_config_fields():
-    runtime = DaytonaRuntime(config={
-        "image": "cuda:12",
-        "params": {
-            "image": "cuda:13"
-        },
-    })
-    await runtime.create_sandbox()
-    params = FakeClient.created[0]
-    assert params.image == "cuda:13"
-
-
-@pytest.mark.asyncio
-async def test_sizing_without_image_fails_loud():
-    runtime = DaytonaRuntime(config={"gpu": 1})
-    with pytest.raises(ValueError, match="requires an image"):
-        await runtime.create_sandbox()
+    await runtime.connect()
+    assert FakeClient.configs[0].api_key == "k-123"
 
 
 @pytest.mark.asyncio
 async def test_exec_line_redirects_stdin_through_a_file():
-    runtime = DaytonaRuntime()
-    await runtime.create_sandbox()
+    runtime = DaytonaRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
     result = await runtime.exec_line("wc -l", b"a\nb\n", {"E": "1"},
                                      "/workspace")
     assert result.exit_code == 0
@@ -199,35 +127,17 @@ async def test_exec_line_redirects_stdin_through_a_file():
 
 
 @pytest.mark.asyncio
-async def test_reattached_sandbox_survives_close():
-    runtime = DaytonaRuntime(sandbox_id="sb-live")
-    await runtime.connect_sandbox("sb-live")
-    assert FakeClient.fetched == ["sb-live"]
+async def test_close_releases_the_client_never_the_sandbox():
+    runtime = DaytonaRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
     await runtime.close()
-    assert FakeClient.deleted == []
+    # The fake exposes no delete at all: close only drops the client.
     assert FakeClient.closed == 1
-
-
-@pytest.mark.asyncio
-async def test_close_deletes_only_an_owned_sandbox():
-    runtime = DaytonaRuntime()
-    await runtime.create_sandbox()
-    runtime.owned_sandbox = True
-    await runtime.close()
-    assert len(FakeClient.deleted) == 1
-    assert FakeClient.closed == 1
-
-
-@pytest.mark.asyncio
-async def test_default_workspace_root_derives_from_home():
-    runtime = DaytonaRuntime()
-    await runtime.create_sandbox()
-    assert await runtime.default_workspace_root() == "/home/daytona/workspace"
 
 
 @pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
     monkeypatch.setattr(sdk, "AsyncDaytona", None)
-    runtime = DaytonaRuntime()
+    runtime = DaytonaRuntime(config={"sandbox_id": "sb-live"})
     with pytest.raises(ImportError, match="mirage-ai\\[daytona\\]"):
-        await runtime.create_sandbox()
+        await runtime.connect()

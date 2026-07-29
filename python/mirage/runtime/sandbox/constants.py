@@ -17,23 +17,22 @@ from mirage.resource.history import HISTORY_PREFIX
 # Virtual mounts the workspace synthesizes; the sandbox has its own.
 SYSTEM_MOUNTS: frozenset[str] = frozenset({"/dev", HISTORY_PREFIX})
 
-# The in-sandbox `mirage mount add` reads its spec from this variable;
-# the spec travels in the exec environment, never on disk or argv.
-MOUNT_SPEC_ENV = "MIRAGE_MOUNT_SPEC"
+# The in-sandbox `mirage workspace create` reads its config from this
+# variable; the config travels in the exec environment, never on disk
+# or argv.
+WORKSPACE_CONFIG_ENV = "MIRAGE_WORKSPACE_CONFIG"
 
-# Where the workspace lands when neither the caller nor the provider
-# resolves a root.
+# The one in-sandbox workspace mirroring the host workspace's mounts
+# (one workspace serves one host workspace; a host workspace may fan
+# out to many sandboxes).
+SANDBOX_WORKSPACE_ID = "sandbox"
+
+# Where the workspace lands when no workspace_root is configured.
 DEFAULT_WORKSPACE_ROOT = "/workspace"
 
 # Providers whose exec API has no stdin stream (Daytona, e2b) upload
 # piped bytes here and redirect them into the line.
 STDIN_PATH = "/tmp/.mirage_stdin"
-
-# Docker boots this when no image is configured.
-DOCKER_DEFAULT_IMAGE = "python:3.12-slim"
-
-DOCKER_CLI_HINT = ("the docker runtime needs the docker CLI on PATH "
-                   "(Docker Desktop, colima, or a podman alias)")
 
 
 def sdk_install_hint(name: str) -> str:

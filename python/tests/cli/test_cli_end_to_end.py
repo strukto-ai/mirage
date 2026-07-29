@@ -79,6 +79,38 @@ def test_workspace_create_with_explicit_id(daemon, tmp_path):
     _run_cli(daemon["env"], "workspace", "delete", "custom-ws")
 
 
+def test_workspace_create_from_env(daemon):
+    # The sandbox-runtime path: config as JSON in the environment,
+    # never on disk or argv.
+    env = dict(daemon["env"])
+    env["MIRAGE_WORKSPACE_CONFIG"] = json.dumps(
+        {"mounts": {
+            "/": {
+                "resource": "ram",
+                "mode": "WRITE"
+            }
+        }})
+    created = _run_cli(env, "workspace", "create", "--id", "sandbox",
+                       "--from-env")
+    assert created["id"] == "sandbox"
+    _run_cli(env, "workspace", "delete", "sandbox")
+
+
+def test_workspace_create_from_env_missing_var_fails(daemon):
+    _run_cli(daemon["env"], "workspace", "create", "--from-env", expect_exit=2)
+
+
+def test_workspace_create_needs_file_or_env(daemon, tmp_path):
+    cfg = _write_config(tmp_path)
+    _run_cli(daemon["env"], "workspace", "create", expect_exit=2)
+    _run_cli(daemon["env"],
+             "workspace",
+             "create",
+             str(cfg),
+             "--from-env",
+             expect_exit=2)
+
+
 def test_session_lifecycle(daemon, tmp_path):
     cfg = _write_config(tmp_path)
     created = _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id",

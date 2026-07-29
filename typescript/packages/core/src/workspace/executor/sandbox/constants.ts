@@ -17,12 +17,17 @@ import { HISTORY_PREFIX } from '../../../resource/history/history.ts'
 // Virtual mounts the workspace synthesizes; the sandbox has its own.
 export const SYSTEM_MOUNTS: ReadonlySet<string> = new Set(['/dev', HISTORY_PREFIX])
 
-// The in-sandbox `mirage mount add` reads its spec from this variable;
-// the spec travels in the exec environment, never on disk or argv.
-export const MOUNT_SPEC_ENV = 'MIRAGE_MOUNT_SPEC'
+// The in-sandbox `mirage workspace create` reads its config from this
+// variable; the config travels in the exec environment, never on disk
+// or argv.
+export const WORKSPACE_CONFIG_ENV = 'MIRAGE_WORKSPACE_CONFIG'
 
-// Where the workspace lands when neither the caller nor the provider
-// resolves a root.
+// The one in-sandbox workspace mirroring the host workspace's mounts
+// (one workspace serves one host workspace; a host workspace may fan
+// out to many sandboxes).
+export const SANDBOX_WORKSPACE_ID = 'sandbox'
+
+// Where the workspace lands when no workspaceRoot is configured.
 export const DEFAULT_WORKSPACE_ROOT = '/workspace'
 
 // Providers whose exec API has no stdin stream (Daytona, e2b) upload

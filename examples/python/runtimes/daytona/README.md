@@ -12,8 +12,8 @@ a guest), here the guest has its own `/dev/fuse` and runs Mirage itself.
 ## How it works
 
 ```
-your machine (control plane)                 Daytona sandbox
-  Workspace: /data -> S3Resource               mirage mount add /data --fuse ...
+your machine (control plane)                 Daytona sandbox (yours)
+  Workspace: /data -> S3Resource               mirage workspace create (from env)
   captures ["python3"] -> DaytonaRuntime  -->    -> in-sandbox daemon
   vfs runs every other line locally             -> FUSE-mounts S3 at
                                                     /home/daytona/workspace/data
@@ -22,13 +22,14 @@ your machine (control plane)                 Daytona sandbox
 
 1. The workspace declares `/data` as an `S3Resource`. A `DaytonaRuntime` captures
    `python3` lines; everything else stays on the local vfs.
-1. When the sandbox boots, each mount becomes one `mirage mount add <prefix> --fuse <path>` command inside the sandbox (the spec travels in the exec
-   environment, never as a file), and the mount is served live from then on.
+1. Mirage never creates or deletes sandboxes: you create one (below) and hand
+   the runtime its `sandbox_id`. On the first captured line mirage connects and
+   creates **one in-sandbox workspace** mirroring the host mounts (the config
+   travels in the exec environment, never as a file); the mounts are served live
+   from then on.
 1. Mounts appear at `<workspace_root>/<prefix>` and the session cwd is rebased
    under the workspace root, so paths relative to the cwd just work. Mirage does
    not rewrite paths inside your command: keep them relative to the cwd.
-1. The sandbox is created lazily on the first captured line and deleted when the
-   workspace closes (or reused across runs when you pass a `sandbox_id`).
 
 ## Prerequisites
 
@@ -55,11 +56,13 @@ seconds. Re-run after a Mirage release to refresh the baked package.
 
 ## Run: the workspace runtime (CLI)
 
-`daytona_workspace.yaml` wires the S3 mount to a Daytona runtime that boots from
-the `mirage-fuse` snapshot. From the repo root:
+Create a sandbox from the snapshot (prints its id), then wire the workspace to
+it. From the repo root:
 
 ```bash
 set -a; source .env.development; set +a
+export DAYTONA_SANDBOX_ID=$(./python/.venv/bin/python \
+  examples/python/runtimes/daytona/create_sandbox.py)
 mirage workspace create examples/python/runtimes/daytona/daytona_workspace.yaml --id daytona-demo
 
 printf 'print("hello from the sandbox")\n' \
@@ -68,8 +71,12 @@ printf 'print("hello from the sandbox")\n' \
 # Relative path from the rebased cwd; mirage does not rewrite absolute paths.
 mirage execute -w daytona-demo -c 'cd /data && python3 hello.py'
 
-mirage workspace delete daytona-demo   # deletes the sandbox it created
+mirage workspace delete daytona-demo   # the sandbox stays yours
 ```
+
+The sandbox is yours to keep or delete (`daytona sandbox delete`, the
+dashboard, or just let the idle-stop/auto-delete timers set by
+`create_sandbox.py` clean it up).
 
 The `cat > /data/hello.py` write runs on the local vfs and lands in S3; the
 `python3` line then reads the same file inside the sandbox through the live
@@ -104,14 +111,14 @@ FUSE mountpoint: /home/daytona/.../s3
 
 ## GPU sandboxes
 
-Snapshot sandboxes fix their sizing at bake time. For a GPU sandbox, size it with
-an **image** instead (Daytona requires an image for per-sandbox resources) and
-bake `fuse3` + `mirage-ai[s3,fuse]` into that image. See the commented GPU entry
-at the top of `daytona_workspace.yaml`.
+Sizing, GPUs, and lifecycle are Daytona settings you pick when you create the
+sandbox, not mirage options. For a GPU box, create it from an image sized with
+`Resources(gpu=...)` (Daytona requires an image for per-sandbox resources) with
+`fuse3` + `mirage-ai[s3,fuse]` baked in, then hand mirage its id as usual.
 
 ## Notes
 
 - Not run in CI. It needs a Daytona account, a baked snapshot, and live AWS
   credentials.
-- Lifecycle safety net: the workspace yaml stops an idle sandbox after 10 minutes
-  and deletes it 30 minutes later, so a forgotten demo cleans itself up.
+- Lifecycle safety net: `create_sandbox.py` sets idle-stop after 10 minutes and
+  auto-delete 30 minutes later, so a forgotten demo box cleans itself up.

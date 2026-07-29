@@ -12,42 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from mirage.runtime.sandbox.config import SandboxConfig
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DaytonaConfig(SandboxConfig):
-    """The Daytona machine config, mapped onto the create params.
+    """How to reach the user's live Daytona sandbox.
 
     Args:
-        image (str | None): image built inline at create time.
-            Mutually exclusive with template.
-        template (str | None): name of a prebaked Daytona snapshot.
-            Prefer it for anything heavy: an inline image build sits
-            in the create path, a snapshot boots in seconds.
-        cpu (int | None): CPU cores; sizing requires an image.
-        memory (int | None): memory in GiB.
-        disk (int | None): disk in GiB.
-        gpu (int | str | None): GPU count or type spec; truthy forces
-            the sandbox ephemeral, as Daytona requires.
-        params (dict[str, Any]): any other Daytona create option
-            passed verbatim (auto_stop_interval, labels, volumes,
-            ...), merged last so it can override anything computed
-            from the fields above.
+        sandbox_id (str): id of a sandbox you created (dashboard,
+            `daytona sandbox create`, or the SDK). Boot it from an
+            image or snapshot with fuse3 and mirage installed.
+        api_key (str | None): Daytona credential; None reads
+            DAYTONA_API_KEY.
     """
 
-    image: str | None = None
-    template: str | None = None
-    cpu: int | None = None
-    memory: int | None = None
-    disk: int | None = None
-    gpu: int | str | None = None
-    params: dict[str, Any] = field(default_factory=dict)
-
-    def sized(self) -> bool:
-        """Whether any per-sandbox sizing field is set."""
-        sizing = (self.cpu, self.memory, self.disk, self.gpu)
-        return any(value is not None for value in sizing)
+    sandbox_id: str
+    api_key: str | None = None

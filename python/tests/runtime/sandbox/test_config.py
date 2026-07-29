@@ -26,8 +26,8 @@ def test_coerce_none_gives_defaults():
 
 
 def test_coerce_passes_an_instance_through():
-    config = SandboxConfig(env={"A": "1"})
-    assert SandboxConfig.coerce(config) is config
+    config = SandboxConfig.coerce(SandboxConfig(env={"A": "1"}))
+    assert config.env == {"A": "1"}
 
 
 def test_coerce_dict_form_is_a_yaml_config_block():
@@ -37,17 +37,10 @@ def test_coerce_dict_form_is_a_yaml_config_block():
 
 def test_coerce_unknown_key_fails_loud():
     # A provider-only field is unknown on the base config.
-    with pytest.raises(TypeError, match="image"):
-        SandboxConfig.coerce({"image": "python:3.13"})
-
-
-def test_coerce_lifts_a_base_config_into_a_provider_config():
-    lifted = DockerConfig.coerce(SandboxConfig(env={"A": "1"}))
-    assert lifted == DockerConfig(env={"A": "1"})
+    with pytest.raises(TypeError, match="container"):
+        SandboxConfig.coerce({"container": "cid-42"})
 
 
 def test_coerce_rejects_a_sibling_provider_config():
-    # A DockerConfig is a SandboxConfig, so the base passes it
-    # through; a sibling provider rejects its foreign fields.
-    with pytest.raises(TypeError, match="image"):
-        E2BConfig.coerce(DockerConfig(args=["-v", "/host:/mnt"]))
+    with pytest.raises(TypeError, match="container"):
+        E2BConfig.coerce(DockerConfig(container="cid-42"))

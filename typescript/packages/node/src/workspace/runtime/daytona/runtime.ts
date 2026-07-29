@@ -14,23 +14,14 @@
 
 import {
   loadOptionalPeer,
-  normalizeFields,
   registerRuntime,
   RemoteSandbox,
   type RemoteSandboxOptions,
-  rstripSlash,
   type RunResult,
   STDIN_PATH,
 } from '@struktoai/mirage-core'
-import { DAYTONA_CONFIG_KEYS, sizedConfig, type DaytonaConfig } from './config.ts'
-import type {
-  CreateSandboxFromImageParams,
-  CreateSandboxFromSnapshotParams,
-  Daytona,
-  GpuType,
-  Resources,
-  Sandbox,
-} from '@daytonaio/sdk'
+import { DAYTONA_CONFIG_KEYS, type DaytonaConfig } from './config.ts'
+import type { Daytona, Sandbox } from '@daytonaio/sdk'
 import type * as daytonaSdk from '@daytonaio/sdk'
 
 export type DaytonaSdk = typeof daytonaSdk
@@ -39,44 +30,32 @@ const ENC = new TextEncoder()
 
 export const DAYTONA_OPTION_KEYS: readonly string[] = [
   'captures',
-  'apiKey',
   'config',
-  'sandboxId',
   'workspaceRoot',
   'script',
   'mount',
 ]
 
 /**
- * A Daytona sandbox as a whole-line runtime.
+ * A Daytona sandbox the user runs as a whole-line runtime.
  *
- * DaytonaConfig maps directly onto the create params: `image` becomes
- * an image sandbox built at create time, `template` names a prebaked
- * snapshot, sizing maps onto Daytona's per-sandbox resources (`gpu`
- * as a number is a count, as a string a GPU type like "H100"; either
- * requests a GPU and forces the sandbox ephemeral, as Daytona
- * requires), and `params` passes any other create option verbatim,
- * merged last. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec
- * has no stdin and reports combined output, so piped bytes are
- * uploaded and redirected in, and stderr comes back null.
+ * You create the sandbox yourself (dashboard, `daytona sandbox
+ * create`, or the SDK); mirage only connects by `sandboxId` and execs
+ * lines. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec has
+ * no stdin and reports combined output, so piped bytes are uploaded
+ * and redirected in, and stderr comes back null. close() releases the
+ * SDK client and never touches the sandbox.
  */
 export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   readonly name = 'daytona'
-  // Config-borne dicts keep yaml snake_case inner keys; the SDK
-  // wants camelCase. Camelizing here makes both spellings work.
-  private readonly params: Record<string, unknown>
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
   constructor(options: RemoteSandboxOptions<DaytonaConfig> | Record<string, unknown> = {}) {
     super(options, DAYTONA_CONFIG_KEYS)
-    if (this.config.image !== undefined && this.config.template !== undefined) {
-      throw new Error(
-        'daytona takes image or template, not both: an image builds at ' +
-          'create time, a template names a snapshot that is already built',
-      )
+    if (!this.config.sandboxId) {
+      throw new Error('daytona config needs sandboxId: the id of a live sandbox you created')
     }
-    this.params = normalizeFields(this.config.params ?? {})
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -87,80 +66,14 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     })
   }
 
-  private async ensureClient(): Promise<Daytona> {
+  async connect(): Promise<void> {
     if (this.client === null) {
       const sdk = await this.loadSdk()
-      this.client = new sdk.Daytona(this.apiKey !== undefined ? { apiKey: this.apiKey } : undefined)
+      this.client = new sdk.Daytona(
+        this.config.apiKey !== undefined ? { apiKey: this.config.apiKey } : undefined,
+      )
     }
-    return this.client
-  }
-
-  async createSandbox(): Promise<string> {
-    const client = await this.ensureClient()
-    const params = this.createParams()
-    // The SDK's create() overloads take image and snapshot params
-    // separately; the `in` check narrows the union to one of them.
-    this.sandbox = 'image' in params ? await client.create(params) : await client.create(params)
-    return this.sandbox.id
-  }
-
-  async connectSandbox(sandboxId: string): Promise<void> {
-    const client = await this.ensureClient()
-    this.sandbox = await client.get(sandboxId)
-  }
-
-  /**
-   * $HOME/workspace: the sandbox user is not root (uid 1001 `daytona`
-   * in the default snapshot), so a root-level /workspace cannot even
-   * be created; home always can.
-   */
-  override async defaultWorkspaceRoot(): Promise<string> {
-    if (this.sandbox === null) throw new Error('daytona sandbox not started')
-    const response = await this.sandbox.process.executeCommand('printf "%s" "$HOME"')
-    const home = rstripSlash(response.result.trim())
-    return `${home}/workspace`
-  }
-
-  /** Map the general config onto Daytona create params. */
-  private createParams(): CreateSandboxFromImageParams | CreateSandboxFromSnapshotParams {
-    const shared: CreateSandboxFromSnapshotParams = {}
-    if (Object.keys(this.config.env).length > 0) shared.envVars = { ...this.config.env }
-    const resources = this.createResources()
-    if (this.config.image === undefined) {
-      // Snapshot sandboxes fix sizing when the snapshot is created;
-      // dropping sizing silently would hide that no GPU was ever
-      // requested.
-      if (resources !== null) {
-        throw new Error(
-          'daytona sizing (cpu/memory/disk/gpu) requires an image; a ' +
-            'snapshot sandbox fixes its sizing when the snapshot is created',
-        )
-      }
-      if (this.config.template !== undefined) shared.snapshot = this.config.template
-      return { ...shared, ...this.params } as CreateSandboxFromSnapshotParams
-    }
-    if (this.config.gpu !== undefined && this.config.gpu !== 0) {
-      shared.ephemeral = true
-    }
-    const params: CreateSandboxFromImageParams = { ...shared, image: this.config.image }
-    if (resources !== null) params.resources = resources
-    return { ...params, ...this.params } as CreateSandboxFromImageParams
-  }
-
-  private createResources(): Resources | null {
-    if (!sizedConfig(this.config)) return null
-    const { cpu, memory, disk, gpu } = this.config
-    const mapped: Resources = {}
-    if (cpu !== undefined) mapped.cpu = cpu
-    if (memory !== undefined) mapped.memory = memory
-    if (disk !== undefined) mapped.disk = disk
-    if (typeof gpu === 'number') {
-      mapped.gpu = gpu
-    } else if (gpu !== undefined) {
-      mapped.gpu = 1
-      mapped.gpuType = gpu as GpuType
-    }
-    return mapped
+    this.sandbox = await this.client.get(this.config.sandboxId)
   }
 
   async execLine(
@@ -169,7 +82,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     env: Record<string, string>,
     cwd: string,
   ): Promise<RunResult> {
-    if (this.sandbox === null) throw new Error('daytona sandbox not started')
+    if (this.sandbox === null) throw new Error('daytona sandbox not connected')
     let command = line
     if (stdin !== null) {
       await this.upload(STDIN_PATH, stdin)
@@ -183,25 +96,17 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     }
   }
 
-  async upload(path: string, data: Uint8Array): Promise<void> {
-    if (this.sandbox === null) throw new Error('daytona sandbox not started')
+  private async upload(path: string, data: Uint8Array): Promise<void> {
+    if (this.sandbox === null) throw new Error('daytona sandbox not connected')
     const slash = path.lastIndexOf('/')
     const parent = slash > 0 ? path.slice(0, slash) : ''
     if (parent !== '') await this.sandbox.fs.createFolder(parent, '755')
     await this.sandbox.fs.uploadFile(Buffer.from(data), path)
   }
 
-  async download(path: string): Promise<Uint8Array> {
-    if (this.sandbox === null) throw new Error('daytona sandbox not started')
-    const data = await this.sandbox.fs.downloadFile(path)
-    return new Uint8Array(data)
-  }
-
-  async close(): Promise<void> {
-    if (this.sandbox !== null && this.client !== null) {
-      if (this.ownedSandbox) await this.client.delete(this.sandbox)
-      this.sandbox = null
-    }
+  /** Release the SDK client; the sandbox itself is the user's. */
+  override async close(): Promise<void> {
+    this.sandbox = null
     if (this.client !== null) {
       await this.client[Symbol.asyncDispose]()
       this.client = null

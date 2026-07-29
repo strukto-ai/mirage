@@ -25,12 +25,14 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const FAKE_SPEC = { resource: 's3', config: { bucket: 'b' } }
 
+const CREATE_LINE =
+  'mirage workspace delete sandbox >/dev/null 2>&1; ' +
+  'mirage workspace create --id sandbox --from-env'
+
 class RecordingSandbox extends RemoteSandbox {
   readonly name = 'recbox'
-  readonly files: Record<string, Uint8Array> = {}
   readonly execs: [string, Uint8Array | null, Record<string, string>, string][] = []
-  created = 0
-  connected: string[] = []
+  connectedCount = 0
   synced = 0
   attached: [BridgeDispatchFn, () => string[], (() => MountSpecs) | undefined] | null = null
 
@@ -47,13 +49,8 @@ class RecordingSandbox extends RemoteSandbox {
     this.attached = [dispatch, listMounts, listMountSpecs]
   }
 
-  createSandbox(): Promise<string> {
-    this.created += 1
-    return Promise.resolve('sb-rec')
-  }
-
-  connectSandbox(sandboxId: string): Promise<void> {
-    this.connected.push(sandboxId)
+  connect(): Promise<void> {
+    this.connectedCount += 1
     return Promise.resolve()
   }
 
@@ -67,20 +64,7 @@ class RecordingSandbox extends RemoteSandbox {
     return Promise.resolve({ stdout: ENC.encode(`ran:${line}`), stderr: null, exitCode: 0 })
   }
 
-  upload(path: string, data: Uint8Array): Promise<void> {
-    this.files[path] = data
-    return Promise.resolve()
-  }
-
-  download(path: string): Promise<Uint8Array> {
-    return Promise.resolve(this.files[path] ?? new Uint8Array())
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  // Base-machinery tests exercise provisioning, not the mount setup, so
+  // Base-machinery tests exercise connection, not the mount setup, so
   // record the call and skip the real one; FuseSandbox restores it.
   override mountWorkspace(): Promise<void> {
     this.synced += 1
@@ -112,43 +96,42 @@ function attachSpecs(box: RecordingSandbox, specs: MountSpecs): void {
   box.attach(attached[0], attached[1], () => ({ ...specs }))
 }
 
-function mountCmds(box: RecordingSandbox): string[] {
-  return box.execs.map(([line]) => line).filter((line) => line.startsWith('mirage mount'))
+function createCalls(box: RecordingSandbox): Record<string, unknown>[] {
+  return box.execs
+    .filter(([line]) => line === CREATE_LINE)
+    .map(([, , env]) => JSON.parse(env.MIRAGE_WORKSPACE_CONFIG ?? '{}') as Record<string, unknown>)
 }
 
 describe('RemoteSandbox', () => {
-  it('provisions on the first line and mounts once', async () => {
+  it('connects on the first line and mounts once', async () => {
     const box = new RecordingSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
       const io = await ws.execute('python3 x')
       expect(DEC.decode(io.stdout)).toBe('ran:python3 x')
-      expect(box.created).toBe(1)
-      expect(box.ownedSandbox).toBe(true)
-      expect(box.sandboxId).toBe('sb-rec')
+      expect(box.connectedCount).toBe(1)
       expect(box.synced).toBe(1)
       await ws.execute('python3 x')
-      expect(box.created).toBe(1)
-      // The workspace mounts once at provision, not per line.
+      // The workspace mounts once on the first line, not per line.
+      expect(box.connectedCount).toBe(1)
       expect(box.synced).toBe(1)
     } finally {
       await ws.close()
     }
   })
 
-  it('mount issues mount add with the spec in the env', async () => {
+  it('mount creates one workspace with the config in the env', async () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
       attachSpecs(box, { '/data': FAKE_SPEC })
       await ws.execute('python3 /data/train.py')
-      const adds = box.execs.filter(([line]) => line.startsWith('mirage mount add'))
-      expect(adds).toHaveLength(1)
-      const [line, , env] = adds[0] ?? ['', null, {} as Record<string, string>, '']
-      expect(line).toBe('mirage mount add /data --fuse /workspace/data')
-      expect(JSON.parse(env.MIRAGE_MOUNT_SPEC ?? '')).toEqual(FAKE_SPEC)
-      // The spec travels in the environment, never as a file.
-      expect(Object.keys(box.files)).toEqual([])
+      const configs = createCalls(box)
+      expect(configs).toHaveLength(1)
+      expect(configs[0]).toEqual({
+        mode: 'EXEC',
+        mounts: { '/data': { ...FAKE_SPEC, fuse: '/workspace/data' } },
+      })
     } finally {
       await ws.close()
     }
@@ -158,24 +141,28 @@ describe('RemoteSandbox', () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
-      attachSpecs(box, { '/data': FAKE_SPEC })
+      attachSpecs(box, { '/data': FAKE_SPEC, '/dev': null })
       await ws.execute('python3 x')
       await ws.execute('python3 x')
-      // One add for /data at provision, nothing for /dev or the
-      // history view, and no mount work on later lines.
-      expect(mountCmds(box)).toEqual(['mirage mount add /data --fuse /workspace/data'])
+      const configs = createCalls(box)
+      // One workspace create at first line, /dev never reproduced,
+      // and no mount work on later lines.
+      expect(configs).toHaveLength(1)
+      expect(Object.keys((configs[0]?.mounts ?? {}) as Record<string, unknown>)).toEqual(['/data'])
     } finally {
       await ws.close()
     }
   })
 
-  it('mounts a root-only workspace from root', async () => {
+  it('mounts a root-only workspace at the root', async () => {
     const box = new FuseSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box, { '/': new RAMResource() })
     try {
       attachSpecs(box, { '/': FAKE_SPEC })
       await ws.execute('python3 x')
-      expect(mountCmds(box)).toEqual(['mirage mount add / --fuse /workspace'])
+      const configs = createCalls(box)
+      const mounts = (configs[0]?.mounts ?? {}) as Record<string, Record<string, unknown>>
+      expect(mounts['/']?.fuse).toBe('/workspace')
     } finally {
       await ws.close()
     }
@@ -201,18 +188,12 @@ describe('RemoteSandbox', () => {
     }
   })
 
-  it('reattaches by sandboxId instead of creating', async () => {
-    const box = new RecordingSandbox({ captures: ['python3'], sandboxId: 'sb-live' })
-    const ws = await sandboxWorkspace(box)
-    try {
-      await ws.execute('python3 x')
-      expect(box.created).toBe(0)
-      expect(box.connected).toEqual(['sb-live'])
-      expect(box.ownedSandbox).toBe(false)
-      expect(box.sandboxId).toBe('sb-live')
-    } finally {
-      await ws.close()
-    }
+  it('a custom workspaceRoot rebases the cwd', async () => {
+    const box = new RecordingSandbox({ captures: ['*'], workspaceRoot: '/home/daytona/workspace' })
+    const result = await box.runLine('ls', null, {}, '/data')
+    expect(result.exitCode).toBe(0)
+    const [, , , cwd] = box.execs[box.execs.length - 1] ?? ['', null, {}, '']
+    expect(cwd).toBe('/home/daytona/workspace/data')
   })
 
   it('passes stdin bytes through to execLine', async () => {
@@ -247,7 +228,7 @@ describe('RemoteSandbox', () => {
         env: Record<string, string>,
         cwd: string,
       ): Promise<RunResult> {
-        if (line.startsWith('mirage mount')) {
+        if (line.startsWith('mirage workspace')) {
           this.execs.push([line, stdin, env, cwd])
           return Promise.resolve({
             stdout: new Uint8Array(),

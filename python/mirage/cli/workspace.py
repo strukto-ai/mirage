@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -23,12 +24,26 @@ from mirage.cli.client import make_client
 from mirage.cli.output import (emit, fail, format_age, format_table,
                                handle_response)
 from mirage.config import _interpolate_env, load_config
+from mirage.runtime.sandbox.constants import WORKSPACE_CONFIG_ENV
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _env_config() -> dict[str, Any]:
+    raw = os.environ.get(WORKSPACE_CONFIG_ENV)
+    if not raw:
+        fail(f"missing {WORKSPACE_CONFIG_ENV} in the environment", exit_code=2)
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as e:
+        fail(f"{WORKSPACE_CONFIG_ENV} is not valid JSON: {e}", exit_code=2)
+    if not isinstance(config, dict):
+        fail(f"{WORKSPACE_CONFIG_ENV} must be a JSON object", exit_code=2)
+    return config
 
 
 def _resolve_config(path: Path) -> dict[str, Any]:
@@ -120,15 +135,29 @@ def _format_diff(changes: dict[str, list[str]]) -> str:
 
 @app.command("create")
 def create_cmd(
-    config_path: Path = typer.Argument(...,
-                                       exists=True,
-                                       readable=True,
-                                       help="YAML/JSON workspace config."),
+    config_path: Path
+    | None = typer.Argument(None,
+                            exists=True,
+                            readable=True,
+                            help="YAML/JSON workspace config."),
     workspace_id: str
     | None = typer.Option(None, "--id", help="Explicit workspace id."),
+    from_env: bool = typer.Option(
+        False,
+        "--from-env",
+        help=f"Read the config as JSON from {WORKSPACE_CONFIG_ENV} "
+        "(how a sandbox runtime mounts the workspace: the config "
+        "travels in the exec environment, never on disk or argv)."),
 ) -> None:
     """Create a workspace; daemon auto-spawns if not running."""
-    body: dict[str, Any] = {"config": _resolve_config(config_path)}
+    if from_env == (config_path is not None):
+        fail("pass a config file or --from-env, exactly one", exit_code=2)
+    if from_env:
+        config = _env_config()
+    else:
+        assert config_path is not None
+        config = _resolve_config(config_path)
+    body: dict[str, Any] = {"config": config}
     if workspace_id:
         body["id"] = workspace_id
     with make_client() as client:

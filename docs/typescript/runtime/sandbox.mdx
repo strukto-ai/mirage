@@ -14,11 +14,11 @@ that the in-process interpreters cannot give it.
 Three sandbox runtimes ship from `@struktoai/mirage-node`, all with the same
 surface:
 
-| Runtime | Where it runs | Credentials | GPU |
-| --- | --- | --- | --- |
-| `docker` | A local Docker container (Docker Desktop, colima, or a podman alias) | None | `--gpus` if the host has them |
-| `daytona` | A [Daytona](https://www.daytona.io) cloud sandbox | `DAYTONA_API_KEY` | Yes, with GPU quota |
-| `e2b` | An [e2b](https://e2b.dev) cloud sandbox | `E2B_API_KEY` | Provider-dependent |
+| Runtime | Connects to | Config |
+| --- | --- | --- |
+| `docker` | A container you started (`docker run`) | `container` |
+| `daytona` | A [Daytona](https://www.daytona.io) sandbox you created | `sandboxId`, `apiKey` |
+| `e2b` | An [e2b](https://e2b.dev) sandbox you created | `sandboxId`, `apiKey` |
 
 ## Routing: what goes to the sandbox
 
@@ -34,8 +34,9 @@ runtimes:
 ```
 
 So `grep`, `cat`, and `ls` run locally as always, while `python3 train.py`
-runs on the cloud box. The sandbox is created **lazily** on the first
-captured line and deleted when the workspace closes.
+runs on the cloud box. Mirage never creates or deletes sandboxes: **you
+bring your own** (a running container, a live Daytona or E2B sandbox), and
+the first captured line connects to it and mounts the workspace.
 
 ## The workspace inside the sandbox
 
@@ -45,9 +46,10 @@ store live** under a workspace root, so a read pulls from the backend and a
 write streams straight back to it, with no upload or sync step. Inside the
 sandbox, `/data` backed by S3 is a real directory.
 
-Mounting happens once, when the sandbox boots: each mount becomes one
-`mirage mount add <prefix> --fuse <path>` command inside the sandbox, with
-the spec in the exec environment, never as a file.
+Mirage is workspace based, so the sandbox gets exactly one workspace
+mirroring the host mounts: on the first captured line, one in-sandbox
+`mirage workspace create` runs through the provider's exec API, with the
+config as JSON in the exec environment, never as a file.
 
 This needs an image or snapshot with `fuse3` and Mirage installed (see
 [The sandbox image](#the-sandbox-image)), and a backend that is remotely
@@ -95,8 +97,14 @@ template base.
 
 ## Docker
 
-`DockerRuntime` drives the `docker` CLI directly, so there is no SDK and no
-account. Point it at the fuse image and grant the container FUSE access:
+Start the container yourself, then point `DockerRuntime` at it. Live FUSE
+mounts need `--cap-add SYS_ADMIN --device /dev/fuse` (Linux hosts) and the
+fuse image:
+
+```bash
+docker run -d --cap-add SYS_ADMIN --device /dev/fuse \
+  --name my-sandbox mirage-python-fuse sleep infinity
+```
 
 ```ts
 import { MountMode, S3Resource, Workspace } from '@struktoai/mirage-node'
@@ -104,10 +112,7 @@ import { DockerRuntime } from '@struktoai/mirage-node'
 
 const runtime = new DockerRuntime({
   captures: ['python3'],
-  config: {
-    image: 'mirage-python-fuse',
-    args: ['--cap-add', 'SYS_ADMIN', '--device', '/dev/fuse'],
-  },
+  config: { container: 'my-sandbox' },
 })
 const ws = new Workspace(
   { '/data': new S3Resource({ bucket: 'my-bucket' }) },
@@ -116,31 +121,27 @@ const ws = new Workspace(
 await ws.execute('python3 job.py', { cwd: '/data' })
 ```
 
-Every sandbox runtime takes a `config`: how the machine is built. Each
-provider's config carries exactly the fields that provider supports, and an
-unknown field fails loud. For docker, `cpu` / `memory` / `gpu` map onto
-`--cpus` / `--memory` / `--gpus` (there is no `disk`: the default storage
-driver has no per-container limit), and `args` passes any extra
-`docker run` flag verbatim (binds, `--network`, `--user`). The container
-gets real stdin and separated stderr. Live FUSE mounts need
-`--cap-add SYS_ADMIN --device /dev/fuse` and run on Linux hosts.
+Every sandbox runtime takes a `config`: how to reach the sandbox. Each
+provider's config carries exactly the fields that provider needs, and an
+unknown field fails loud. The docker CLI is the transport (Docker Desktop,
+colima, or a podman alias), so there is no SDK and no daemon socket
+wiring; the container gets real stdin and separated stderr. Sizing, GPUs,
+networks, and binds are all yours: pass them to your own `docker run`.
 
 ## Daytona and e2b
 
-The cloud providers boot from a prebaked snapshot or template that carries
-the fuse image, so a sandbox starts in seconds. They take the same uniform
-options plus a provider credential:
+Create the sandbox with the provider's own tooling (dashboard, CLI, or
+SDK), boot it from an image or snapshot carrying the fuse image, and hand
+mirage the id:
 
 ```yaml
 runtimes:
   - name: daytona
     captures: ["python3", "pip"]
-    apiKey: ${DAYTONA_API_KEY}
     config:
-      template: mirage-fuse # prebaked snapshot with fuse3 + mirage
-      params:
-        autoStopInterval: 10 # idle minutes before stop
-        autoDeleteInterval: 30 # minutes stopped before delete
+      sandboxId: ${DAYTONA_SANDBOX_ID}
+      apiKey: ${DAYTONA_API_KEY}
+    workspaceRoot: /home/daytona/workspace # a dir the sandbox user can write
   - vfs
 ```
 
@@ -150,18 +151,10 @@ They need the matching provider SDK:
 pnpm add @daytonaio/sdk   # or: pnpm add e2b
 ```
 
-The config's `template` names the prebaked source (a Daytona snapshot or an
-e2b template), its sizing (`cpu` / `memory` / `disk` / `gpu`) sizes an image
-sandbox (a template fixes sizing when it is built), and `params` passes any
-other provider create option verbatim to the SDK.
-
-## Reusing and reattaching
-
-By default a sandbox is created on the first line and deleted on close. Pass
-a `sandboxId` to reattach to a live sandbox instead; closing the workspace
-then leaves it alone, since it deletes only sandboxes it created itself. The
-cloud providers add idle-stop and auto-delete timers as a safety net so a
-forgotten sandbox cleans itself up.
+Sizing, GPUs, snapshots, and lifecycle (idle-stop, auto-delete) are all
+provider concerns you set when you create the sandbox; mirage never
+touches them. Closing the workspace releases the SDK client and leaves the
+sandbox running.
 
 ## Selecting in YAML
 
@@ -175,8 +168,7 @@ runtimes:
   - name: docker
     captures: ["python3"]
     config:
-      image: mirage-python-fuse
-      args: ["--cap-add", "SYS_ADMIN", "--device", "/dev/fuse"]
+      container: my-sandbox # started with your own `docker run`
   - vfs
 
 mounts:

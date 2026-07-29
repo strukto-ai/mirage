@@ -19,87 +19,42 @@ from mirage.runtime.sandbox import DockerRuntime
 
 class FakeDockerRuntime(DockerRuntime):
 
-    def __init__(self, **options):
+    def __init__(self, running: bool = True, **options):
         super().__init__(**options)
+        self.running = running
         self.calls: list[tuple[list[str], bytes | None]] = []
-        self.files: dict[str, bytes] = {}
 
     async def _docker(self, args, stdin=None):
         self.calls.append((list(args), stdin))
-        if args[0] == "run":
-            return b"cid-42\n", b"", 0
         if args[0] == "inspect":
-            return b"true\n", b"", 0
-        if args[0] == "rm":
-            return b"cid-42\n", b"", 0
+            return (b"true\n" if self.running else b"false\n"), b"", 0
         script = args[-1]
-        if '"$HOME"' in script:
-            return b"/root", b"", 0
-        if script.startswith("mkdir -p"):
-            self.files[script.rsplit("> ", 1)[1].strip("'")] = stdin or b""
-            return b"", b"", 0
-        if args[-2] == "cat":
-            data = self.files.get(args[-1])
-            if data is None:
-                return b"", b"cat: no such file", 1
-            return data, b"", 0
         return f"out:{script}".encode(), b"warn", 0
 
 
 @pytest.mark.asyncio
-async def test_create_maps_image_sizing_and_args():
-    runtime = FakeDockerRuntime(
-        config={
-            "image": "python:3.13",
-            "cpu": 2,
-            "memory": 4,
-            "gpu": 1,
-            "args": ["-v", "/host:/mnt/data"],
-        })
-    sandbox_id = await runtime.create_sandbox()
-    assert sandbox_id == "cid-42"
+async def test_connect_checks_the_users_container_is_running():
+    runtime = FakeDockerRuntime(config={"container": "cid-42"})
+    await runtime.connect()
     args, _ = runtime.calls[0]
-    assert args == [
-        "run", "-d", "--cpus", "2", "--memory", "4g", "--gpus", "1", "-v",
-        "/host:/mnt/data", "python:3.13", "sleep", "infinity"
-    ]
+    assert args == ["inspect", "--format", "{{.State.Running}}", "cid-42"]
 
 
 @pytest.mark.asyncio
-async def test_create_defaults_the_image():
-    runtime = FakeDockerRuntime()
-    await runtime.create_sandbox()
-    args, _ = runtime.calls[0]
-    assert "python:3.12-slim" in args
+async def test_connect_fails_loud_on_a_stopped_container():
+    runtime = FakeDockerRuntime(running=False, config={"container": "cid-42"})
+    with pytest.raises(RuntimeError, match="not running"):
+        await runtime.connect()
 
 
-def test_disk_sizing_fails_loud():
-    # Not a DockerConfig field: docker has no per-container disk limit.
-    with pytest.raises(TypeError, match="disk"):
-        DockerRuntime(config={"disk": 10})
-
-
-def test_template_fails_loud():
-    with pytest.raises(TypeError, match="template"):
-        DockerRuntime(config={"template": "mirage-fuse"})
-
-
-def test_sdk_params_fail_loud():
-    with pytest.raises(TypeError, match="params"):
-        DockerRuntime(config={"params": {"labels": {"team": "ml"}}})
-
-
-@pytest.mark.asyncio
-async def test_default_workspace_root_derives_from_home():
-    runtime = FakeDockerRuntime()
-    runtime._sandbox_id = await runtime.create_sandbox()
-    assert await runtime.default_workspace_root() == "/root/workspace"
+def test_container_is_required():
+    with pytest.raises(TypeError, match="container"):
+        DockerRuntime(config={})
 
 
 @pytest.mark.asyncio
 async def test_exec_line_threads_cwd_env_stdin_and_real_stderr():
-    runtime = FakeDockerRuntime()
-    runtime._sandbox_id = await runtime.create_sandbox()
+    runtime = FakeDockerRuntime(config={"container": "cid-42"})
     result = await runtime.exec_line("wc -l", b"a\nb\n", {"E": "1"},
                                      "/root/workspace")
     assert result.exit_code == 0
@@ -111,41 +66,3 @@ async def test_exec_line_threads_cwd_env_stdin_and_real_stderr():
         "-c", "wc -l"
     ]
     assert stdin == b"a\nb\n"
-
-
-@pytest.mark.asyncio
-async def test_upload_download_round_trip():
-    runtime = FakeDockerRuntime()
-    runtime._sandbox_id = await runtime.create_sandbox()
-    await runtime.upload("/root/workspace/data/train.py", b"code")
-    args, stdin = runtime.calls[-1]
-    assert args[-1] == ("mkdir -p /root/workspace/data && "
-                        "cat > /root/workspace/data/train.py")
-    assert stdin == b"code"
-    assert await runtime.download("/root/workspace/data/train.py") == b"code"
-
-
-@pytest.mark.asyncio
-async def test_download_missing_file_fails_loud():
-    runtime = FakeDockerRuntime()
-    runtime._sandbox_id = await runtime.create_sandbox()
-    with pytest.raises(RuntimeError, match="download failed"):
-        await runtime.download("/root/workspace/missing")
-
-
-@pytest.mark.asyncio
-async def test_reattached_container_survives_close():
-    runtime = FakeDockerRuntime(sandbox_id="cid-live")
-    await runtime.connect_sandbox("cid-live")
-    await runtime.close()
-    assert all(args[0] != "rm" for args, _ in runtime.calls)
-
-
-@pytest.mark.asyncio
-async def test_close_removes_only_an_owned_container():
-    runtime = FakeDockerRuntime()
-    runtime._sandbox_id = await runtime.create_sandbox()
-    runtime.owned_sandbox = True
-    await runtime.close()
-    args, _ = runtime.calls[-1]
-    assert args == ["rm", "-f", "cid-42"]

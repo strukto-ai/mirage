@@ -12,17 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SandboxConfig } from '@struktoai/mirage-core'
-
-/** How to reach the user's running container. */
-export interface DockerConfig extends SandboxConfig {
-  /**
-   * Id or name of a running container. You start it yourself
-   * (`docker run -d ... sleep infinity`); live FUSE mounts need
-   * `--cap-add SYS_ADMIN --device /dev/fuse` and an image with mirage
-   * installed.
-   */
-  container: string
-}
-
-export const DOCKER_CONFIG_KEYS: readonly string[] = ['env', 'container']
+export const DOCKER_CLI_HINT =
+  'the docker runtime needs the docker CLI on PATH (Docker Desktop, colima, or a podman alias)'
