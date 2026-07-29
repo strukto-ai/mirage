@@ -784,16 +784,16 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
     runs-on: macos-15
-    # Advisory only, like integ-fuse-windows: not in the gate, never blocks
-    # a merge. This is the only place the fskit backend runs for real, so
-    # until now the feature shipped on unit tests plus one user report.
-    # macFUSE installs its FSKit module without kext approval (that is the
-    # whole point of the backend), but whether a hosted runner enables the
-    # module without a GUI toggle is exactly what this job measures.
-    # Python only for now: TypeScript reaches fskit too (fuse.node links the
-    # installed libfuse), but the mount never comes up on a hosted runner
-    # either way, so one leg is enough to measure the environment.
-    continue-on-error: true
+    # Not in the gate. Everything installs and enables headlessly, but the
+    # mount request never reaches macFUSE's FSKit module on a hosted runner
+    # (engaging the module appears to need the GUI approval in System
+    # Settings), so the known mount timeout is reported as a skip below.
+    # Green = environment-limited or verified; red = something new broke
+    # (a guard regression, a crash, or the runner starts mounting and the
+    # results diverge from integ/truth_fskit.json). Real verification runs
+    # on a Mac with macFUSE 5.x: integ/fskit.py | integ/check_json.py.
+    # Python only for now: TypeScript reaches fskit too (fuse.node links
+    # the installed libfuse), but one leg is enough to probe the runner.
     steps:
       - uses: actions/checkout@v7
 
@@ -843,11 +843,17 @@ jobs:
         run: uv sync --extra fuse
 
       - name: Run the fskit mount and check
-        # Dump the raw output before checking: on failure the traceback is
-        # the whole point of this advisory job.
+        # The known hosted-runner limit surfaces as exactly one signature:
+        # the readiness TimeoutError (the module never engages, libfuse
+        # emits nothing). That case is a skip; any other failure is real.
         run: |
           ./python/.venv/bin/python integ/fskit.py > /tmp/fskit.out 2>&1 || true
           cat /tmp/fskit.out
+          if grep -q "did not become ready" /tmp/fskit.out; then
+            echo "SKIP: this runner cannot engage the macFUSE FSKit module" \
+                 "(known hosted-runner limit; verified locally instead)"
+            exit 0
+          fi
           ./python/.venv/bin/python integ/check_json.py \
             integ/truth_fskit.json < /tmp/fskit.out
 
