@@ -25,6 +25,7 @@ describe('finishStatement', () => {
     const session = new Session({ sessionId: 't' })
     session.lastExitCode = 7
     async function* gen(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
       yield new TextEncoder().encode('ab')
       yield new TextEncoder().encode('c')
     }
@@ -47,6 +48,7 @@ describe('finishStatement', () => {
     const source = new IOResult({ exitCode: 0 })
     const merged = await new IOResult().merge(source)
     async function* gen(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
       yield new TextEncoder().encode('out')
       source.exitCode = 4
     }
