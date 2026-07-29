@@ -48,20 +48,20 @@ describe('resolveSafeguard', () => {
   it('prefers mount override over command default', () => {
     const override = new CommandSafeguard({ maxLines: 5 })
     const cmd = new CommandSafeguard({ maxLines: 50 })
-    expect(resolveSafeguard('cat', cmd, override)).toBe(override)
+    expect(resolveSafeguard('cat', [], cmd, override)).toBe(override)
   })
 
   it('falls back to command default when no override', () => {
     const cmd = new CommandSafeguard({ maxLines: 50 })
-    expect(resolveSafeguard('cat', cmd, null)).toBe(cmd)
+    expect(resolveSafeguard('cat', [], cmd, null)).toBe(cmd)
   })
 
   it('falls back to central default for known names', () => {
-    expect(resolveSafeguard('cat', null, null)).toBe(DEFAULT_COMMAND_SAFEGUARDS.cat)
+    expect(resolveSafeguard('cat')).toBe(DEFAULT_COMMAND_SAFEGUARDS.cat)
   })
 
   it('returns FALLBACK_SAFEGUARD for unknown command', () => {
-    expect(resolveSafeguard('nl', null, null)).toBe(FALLBACK_SAFEGUARD)
+    expect(resolveSafeguard('nl')).toBe(FALLBACK_SAFEGUARD)
     expect(FALLBACK_SAFEGUARD.timeoutSeconds).not.toBeNull()
   })
 

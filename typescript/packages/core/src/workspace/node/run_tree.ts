@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { applySafeguard } from '../../commands/builtin/utils/safeguard.ts'
+import { guardOutput } from '../../commands/builtin/utils/safeguard.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -49,20 +49,14 @@ export async function runCommandTree(
     return [materialized, io, execNode]
   }
   io.syncExitCode()
-  if (io.safeguard !== null && materialized !== null) {
-    const [trimmed, sgIo] = await applySafeguard(materialized, io.safeguard)
-    materialized = trimmed
-    if (sgIo.stderr !== null) {
-      const existing = await materialize(io.stderr)
-      const added = await materialize(sgIo.stderr)
-      const merged = new Uint8Array(existing.byteLength + added.byteLength)
-      merged.set(existing, 0)
-      merged.set(added, existing.byteLength)
-      io.stderr = merged
-    }
-    if (sgIo.exitCode !== 0) {
-      io.exitCode = sgIo.exitCode
-    }
-  }
+  const [guarded, guardedErr, guardedCode] = await guardOutput(
+    materialized,
+    io.stderr,
+    io.exitCode,
+    io.safeguard,
+  )
+  materialized = guarded !== null ? await materialize(guarded) : null
+  io.stderr = guardedErr
+  io.exitCode = guardedCode
   return [materialized, io, execNode]
 }

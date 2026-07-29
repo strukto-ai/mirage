@@ -13,11 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
-import { read as s3Read } from '../../../core/s3/read.ts'
-import { stat as s3Stat } from '../../../core/s3/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { S3_MKDIR } from './mkdir.ts'
 import { S3_RM } from './rm.ts'
@@ -29,11 +26,6 @@ import { S3_IO } from './io.ts'
 const S3_OVERRIDES = new Set(['stat', 'rm', 'mkdir', 'tee', 'touch'])
 
 export const S3_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<S3Accessor>({
-    resource: ResourceName.S3,
-    readBytes: s3Read,
-    statEntry: s3Stat,
-  }),
   ...makeGenericCommands<S3Accessor>(ResourceName.S3, S3_IO, {
     overrides: S3_OVERRIDES,
   }),

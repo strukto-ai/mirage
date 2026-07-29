@@ -203,6 +203,22 @@ describe('workspace: subshell', () => {
     expect(ws.getSession(ws.defaultSessionId).env.X).toBe('outer')
     await ws.close()
   })
+
+  it('$? updates between commands inside a subshell', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('(false; echo subshell=$?)')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('subshell=1\n')
+    await ws.close()
+  })
+
+  it('$? sees lazily finalized exit codes inside a subshell', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('(grep missing /ram/notes.txt; echo s=$?)')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('s=1\n')
+    await ws.close()
+  })
 })
 
 describe('workspace: function', () => {
@@ -248,6 +264,45 @@ describe('workspace: brace group', () => {
     expect(s.env.B).toBe('2')
     await ws.close()
   })
+
+  it('$? updates between commands inside a brace group', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('{ false; echo group=$?; }')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('group=1\n')
+    await ws.close()
+  })
+
+  it('$? sees lazily finalized exit codes inside a brace group', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('{ grep missing /ram/notes.txt; echo s=$?; }')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('s=1\n')
+    await ws.close()
+  })
+})
+
+describe('workspace: $? in construct bodies', () => {
+  const cases = [
+    'if true; then false; echo s=$?; fi',
+    'for i in 1; do false; echo s=$?; done',
+    'while true; do false; echo s=$?; break; done',
+    'case x in x) false; echo s=$?;; esac',
+    'f() { false; echo s=$?; }; f',
+    'if true; then grep missing /ram/notes.txt; echo s=$?; fi',
+    'for i in 1; do grep missing /ram/notes.txt; echo s=$?; done',
+    'case x in x) grep missing /ram/notes.txt; echo s=$?;; esac',
+    'g() { grep missing /ram/notes.txt; echo s=$?; }; g',
+  ]
+  for (const cmd of cases) {
+    it(`tracks the previous statement: ${cmd}`, async () => {
+      const { ws } = await makeWorkspace()
+      const io = await ws.execute(cmd)
+      expect(io.exitCode).toBe(0)
+      expect(stdoutStr(io)).toBe('s=1\n')
+      await ws.close()
+    })
+  }
 })
 
 describe('workspace: variable expansion', () => {

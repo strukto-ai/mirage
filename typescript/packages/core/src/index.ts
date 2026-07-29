@@ -194,20 +194,14 @@ export {
   record,
   recordStream,
   revisionFor,
+  runWithMountPrefix,
   runWithRecording,
   runWithRevisions,
-  setVirtualPrefix,
+  withMountPrefix,
 } from './observe/context.ts'
 export { guessType } from './utils/filetype.ts'
 export { newSessionId, newWorkspaceId, uuid7 } from './utils/ids.ts'
 export { Accessor, NOOPAccessor, RAMAccessor } from './accessor/index.ts'
-export { cat as featherCat, describe as featherDescribe } from './core/filetype/feather.ts'
-export { cat as hdf5Cat, describe as hdf5Describe } from './core/filetype/hdf5.ts'
-export { cat as parquetCat, describe as parquetDescribe } from './core/filetype/parquet.ts'
-export {
-  makeFiletypeCommands,
-  type FiletypeCommandsOptions,
-} from './commands/builtin/filetype_factory/factory.ts'
 export {
   type Builder,
   type BuilderFn,
@@ -230,13 +224,6 @@ export {
   withDefaultProvisions,
   writeMetadataProvision,
 } from './commands/builtin/generic_bind/index.ts'
-export {
-  FILETYPE_ENTRIES,
-  type FiletypeEntry,
-  type FiletypeModule,
-  type FiletypeReadBytesFn,
-  type StatEntryFn,
-} from './commands/builtin/filetype_factory/extensions.ts'
 export { numberLines } from './commands/builtin/generic/cat.ts'
 export { CUT_OPEN_END, cutBytes, cutStream, parseCutRanges } from './commands/builtin/cut_helper.ts'
 export { cutGeneric } from './commands/builtin/generic/cut.ts'
@@ -430,30 +417,6 @@ export {
   type SedCommand,
 } from './commands/builtin/sed_helper.ts'
 export { readTar, type TarEntry, writeTar } from './commands/builtin/tar_helper.ts'
-export {
-  cut as featherCut,
-  grep as featherGrep,
-  head as featherHead,
-  stat as featherStat,
-  tail as featherTail,
-  wc as featherWc,
-} from './core/filetype/feather.ts'
-export {
-  cut as hdf5Cut,
-  grep as hdf5Grep,
-  head as hdf5Head,
-  stat as hdf5Stat,
-  tail as hdf5Tail,
-  wc as hdf5Wc,
-} from './core/filetype/hdf5.ts'
-export {
-  cut as parquetCut,
-  grep as parquetGrep,
-  head as parquetHead,
-  stat as parquetStat,
-  tail as parquetTail,
-  wc as parquetWc,
-} from './core/filetype/parquet.ts'
 export { Precision, ProvisionResult, type ProvisionResultInit } from './provision/types.ts'
 export { IndexEntry, type IndexEntryInit, ResourceType } from './cache/index/config.ts'
 export { drainBudget, type FileCache, validateMaxDrainBytes } from './cache/file/mixin.ts'
@@ -540,7 +503,19 @@ export {
   type RouteFn,
   type RouteScript,
 } from './workspace/executor/route/index.ts'
-export { buildRuntime, candidates, RUNTIMES } from './workspace/executor/runtime_table.ts'
+export {
+  buildRuntime,
+  candidates,
+  registerRuntime,
+  RUNTIMES,
+} from './workspace/executor/runtime_table.ts'
+export { RemoteSandbox, type RemoteSandboxOptions } from './workspace/executor/sandbox/base.ts'
+export {
+  coerceConfig,
+  type NormalizedSandboxConfig,
+  type SandboxConfig,
+} from './workspace/executor/sandbox/config.ts'
+export { stdinPath, stdinRedirect } from './workspace/executor/sandbox/constants.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'
@@ -1277,7 +1252,7 @@ export {
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './utils/slash.ts'
-export { mountKey, mountPrefixOf, rekey, stripMount } from './utils/key_prefix.ts'
+export { mountKey, mountPrefixOf, mountedPath, rekey, stripMount } from './utils/key_prefix.ts'
 export * as keyPrefix from './utils/key_prefix.ts'
 export { fnmatch } from './utils/fnmatch.ts'
 export {
@@ -1294,6 +1269,7 @@ export {
   treeHasEmpty,
 } from './commands/builtin/findEval.ts'
 export {
+  eexist,
   eisdir,
   enoent,
   enoentWithMessage,
@@ -1307,6 +1283,7 @@ export {
   isFsError,
   isMissingOp,
   isMissingPath,
+  operandSpelling,
   type MissingOpError,
   noMount,
   type NoMountError,

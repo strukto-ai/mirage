@@ -23,6 +23,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
 import type { ShellArray } from '../../shell/array.ts'
+import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
@@ -53,7 +54,7 @@ import {
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
 import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
+import { resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { UsageError } from '../../commands/errors.ts'
@@ -520,8 +521,7 @@ export async function handleCommand(
       const m = registry.mountFor(s.virtual)
       if (m !== null) mounts.push(m)
     }
-    csIo.safeguard =
-      mounts.length > 0 ? resolveAcrossMounts(cmdName, mounts) : resolveSafeguard(cmdName)
+    csIo.safeguard = resolveSafeguard(cmdName, mounts)
     csExec.paths = pathScopes
     return [maybeWithTimeout(csStdout, csIo.safeguard, cmdName), csIo, csExec]
   }
@@ -951,7 +951,10 @@ async function executeShellFunction(
     for (const cmd of body) {
       try {
         const cmdNode = cmd as Parameters<ExecuteNodeFn>[0]
-        const [stdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
+        const [rawStdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
+        // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
+        // grep) finalize only once stdout is consumed.
+        const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
         if (stdout !== null) allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
         lastExec = execNode

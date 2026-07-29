@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf, rekey } from '../../../utils/key_prefix.ts'
+import { mountedPath, rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
@@ -39,7 +39,7 @@ import {
   type BackendKeyFn,
 } from '../utils/copy.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../../utils/errors.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { norm, parent } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
@@ -489,12 +489,6 @@ function transferLine(src: PathSpec, target: PathSpec, backup: PathSpec | null):
 
 function descendantPath(root: PathSpec, virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual, rekey(root.virtual, root.resourcePath, virtual))
-}
-
-function mountedPath(root: PathSpec, mountPath: string): PathSpec {
-  const prefix = mountPrefixOf(root.virtual, root.resourcePath)
-  const virtual = prefix !== '' ? prefix + mountPath : mountPath
-  return PathSpec.fromStrPath(virtual, stripSlash(mountPath))
 }
 
 // Recreate a source tree's directories under the destination root. Only

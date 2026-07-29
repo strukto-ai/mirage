@@ -140,10 +140,13 @@ async def _populate_file_async(state: _MountState, name: str,
         full.write_bytes(content)
     elif state.ptype == "redis":
         parts = ("/" + name).strip("/").split("/")
-        for i in range(1, len(parts)):
-            d = "/" + "/".join(parts[:i])
+        if len(parts) > 1:
+            # mkdir -p the parent chain, like the disk branch above: plain
+            # mkdir refuses a directory that is already there (GNU).
             await redis_mkdir(state.resource.accessor,
-                              PathSpec.from_str_path(d))
+                              PathSpec.from_str_path("/" +
+                                                     "/".join(parts[:-1])),
+                              parents=True)
         await redis_write(state.resource.accessor,
                           PathSpec.from_str_path("/" + name), content)
 

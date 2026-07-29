@@ -13,16 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
-import { read as gdriveRead } from '../../../core/gdrive/read.ts'
-import { stat as gdriveStat } from '../../../core/gdrive/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { GDOCS_COMMANDS } from '../gdocs/index.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GSHEETS_COMMANDS } from '../gsheets/index.ts'
 import { GSLIDES_COMMANDS } from '../gslides/index.ts'
-import { GWS_DRIVE_API_COMMANDS } from '../gws/index.ts'
+import { GWS_DRIVE_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 import { GDRIVE_IO } from './io.ts'
 
 const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
@@ -30,14 +27,10 @@ const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
   ...GSHEETS_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
   ...GSLIDES_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
   ...GWS_DRIVE_API_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
+  ...gwsHelpCommands(ResourceName.GDRIVE),
 ]
 
 export const GDRIVE_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<GDriveAccessor>({
-    resource: ResourceName.GDRIVE,
-    readBytes: gdriveRead,
-    statEntry: gdriveStat,
-  }),
   ...makeGenericCommands<GDriveAccessor>(ResourceName.GDRIVE, GDRIVE_IO, {}),
   ...GWS_FOR_GDRIVE,
 ]

@@ -339,9 +339,10 @@ export class MountCore {
 
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
     const ctx = this.handles.get(fd)
-    // Filetype-aware read: no `raw: true`, so parquet/feather/hdf5/etc. get
-    // routed through their read ops and surface as rendered text — matches
-    // Python's `ops.read(path)`, which also goes through filetype dispatch.
+    // Filetype-aware read: no `raw: true`, so an extension with a
+    // registered renderer surfaces as rendered text. Mirage registers
+    // none by default, so this reads raw bytes until a mount adds one.
+    // Matches Python's `self._ops.read(path)`, which also dispatches.
     if (ctx !== undefined && ctx.data === undefined) {
       const cached = this.cachedData(path)
       ctx.data = cached ?? (await this.ws.fs.readFile(this.resolve(path)))

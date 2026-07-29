@@ -85,13 +85,9 @@ def test_overrides_skip_names():
     assert {o.name for o in ops} == {"read", "stat"}
 
 
-def test_filetype_read_emits_cat_ops():
-    ops = make_generic_ops("x", make_table(), filetype_read=True)
-    filetypes = {o.filetype for o in ops if o.filetype}
-    # pyarrow/h5py are installed in the dev env; formats whose dep is
-    # missing are skipped, so assert subset rather than equality.
-    assert filetypes <= {".parquet", ".feather", ".orc", ".hdf5"}
-    assert all(o.name == "read" for o in ops if o.filetype)
+def test_emits_no_filetype_scoped_ops():
+    ops = make_generic_ops("x", make_table())
+    assert all(o.filetype is None for o in ops)
 
 
 @pytest.mark.asyncio

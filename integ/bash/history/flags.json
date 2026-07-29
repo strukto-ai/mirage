@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "id": "history_s_appends",
+      "seq": 310018,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "history -s synthetic entry one",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_after_s",
+      "seq": 310019,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "history 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "2  history\n3  synthetic entry one\n4  history -s synthetic entry one\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_d_first",
+      "seq": 310020,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "history -d 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_after_d",
+      "seq": 310021,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "history 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "3  history -s synthetic entry one\n4  history 3\n5  history -d 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_p_prints",
+      "seq": 310022,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history -p alpha beta",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\nbeta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_noop_w",
+      "seq": 310023,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history -w",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

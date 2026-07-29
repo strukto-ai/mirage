@@ -51,6 +51,21 @@ const OPTION_KEYS: Record<string, readonly string[]> = {
 }
 
 /**
+ * Register a runtime class under a config name, with its allowed
+ * constructor option keys. Runtime packages extend the table with
+ * their own runtimes (e.g. `daytona` from `@struktoai/mirage-node`),
+ * mirroring Python's NAMED dict; existing entries are overwritten.
+ */
+export function registerRuntime(
+  name: string,
+  cls: new (options?: Record<string, unknown>) => Runtime,
+  optionKeys: readonly string[],
+): void {
+  NAMED[name] = cls
+  OPTION_KEYS[name] = optionKeys
+}
+
+/**
  * Construct a runtime by name, failing loud on unknown names (with a
  * cross-language hint for Python-only names) and on unknown options.
  */

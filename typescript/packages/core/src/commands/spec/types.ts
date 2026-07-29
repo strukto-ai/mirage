@@ -133,6 +133,7 @@ export interface CommandSpecInit {
   rest?: Operand | null
   ignoreTokens?: readonly string[]
   description?: string
+  epilog?: string
 }
 
 export class CommandSpec {
@@ -141,6 +142,7 @@ export class CommandSpec {
   readonly rest: Operand | null
   readonly ignoreTokens: ReadonlySet<string>
   readonly description: string | null
+  readonly epilog: string | null
 
   constructor(init: CommandSpecInit = {}) {
     this.options = init.options ?? []
@@ -148,6 +150,7 @@ export class CommandSpec {
     this.rest = init.rest ?? null
     this.ignoreTokens = new Set(init.ignoreTokens ?? [])
     this.description = init.description ?? null
+    this.epilog = init.epilog ?? null
     Object.freeze(this)
   }
 }

@@ -75,6 +75,19 @@ export function rebaseRaw(paths: string[], virtual: string, raw: string): string
   return paths.map((p) => rebaseOne(p, virtual, raw))
 }
 
+// The prefix of `path` with `count` trailing segments removed. The ancestor
+// counterpart of rebaseOne: it names a path above another one while keeping the
+// original spelling, so a relative argument stays relative. `count` is clamped
+// so the result never loses every segment, which would leave an empty string
+// where a path belongs. Mirrors Python's drop_trailing_segments.
+export function dropTrailingSegments(path: string, count: number): string {
+  if (count <= 0) return path
+  const parts = rstripSlash(path).split('/')
+  if (count >= parts.filter((part) => part !== '').length) return path
+  const joined = parts.slice(0, parts.length - count).join('/')
+  return joined === '' ? '/' : joined
+}
+
 export function rebaseOne(path: string, virtual: string, raw: string): string {
   if (raw === virtual) return path
   const base = rstripSlash(virtual)

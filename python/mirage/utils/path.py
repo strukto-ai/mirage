@@ -256,6 +256,34 @@ def rebase_one(path: str, original: str, raw: str) -> str:
     return path
 
 
+def drop_trailing_segments(path: str, count: int) -> str:
+    """The prefix of ``path`` with ``count`` trailing segments removed.
+
+    The ancestor counterpart of :func:`rebase_one`: it names a path above
+    another one while keeping the original spelling, so a relative
+    argument stays relative. ``count`` is clamped so the result never
+    loses every segment, which would leave an empty string where a path
+    belongs.
+
+    Example::
+
+        drop_trailing_segments("a/b/c", 1)   -> "a/b"
+        drop_trailing_segments("/x/y/z", 2)  -> "/x"
+        drop_trailing_segments("a/b", 5)     -> "a/b"   # clamped
+
+    Args:
+        path (str): The path as typed.
+        count (int): How many trailing segments to drop.
+    """
+    if count <= 0:
+        return path
+    parts = path.rstrip("/").split("/")
+    if count >= len([part for part in parts if part]):
+        return path
+    joined = "/".join(parts[:-count])
+    return joined if joined else "/"
+
+
 def gnu_basename(path: str, suffix: str | None = None) -> str:
     i = len(path)
     while i > 0 and path[i - 1] == "/":

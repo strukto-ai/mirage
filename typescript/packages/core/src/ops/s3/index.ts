@@ -17,6 +17,4 @@ import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const S3_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.S3, S3_IO, {
-  filetypeRead: ['.feather', '.hdf5', '.parquet'],
-})
+export const S3_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.S3, S3_IO, {})

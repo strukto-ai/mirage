@@ -27,7 +27,7 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      maybe_with_timeout)
 from mirage.commands.config import version_request
 from mirage.commands.errors import UsageError
-from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
+from mirage.commands.safeguard import resolve_safeguard
 from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
                                   flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
@@ -40,6 +40,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.route import RoutingDecision
 from mirage.runtime.table import VfsRuntime
 from mirage.shell.array import ShellArray
+from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -607,6 +608,10 @@ async def handle_command(
                             IOResult(stderr=sig.stderr))
                     merged_io.exit_code = sig.exit_code
                     break
+                # Barrier before seeding $?: lazy exit codes
+                # (exit_on_empty in grep) finalize only once stdout is
+                # consumed.
+                stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
                 if stdout is not None:
                     all_stdout.append(stdout)
                 merged_io = await merged_io.merge(io)
@@ -750,8 +755,7 @@ async def handle_command(
             except ValueError:
                 # a scope outside any mount contributes nothing here
                 pass
-        io.safeguard = (resolve_across_mounts(cmd_name, mounts)
-                        if mounts else resolve_safeguard(cmd_name))
+        io.safeguard = resolve_safeguard(cmd_name, mounts)
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
         return stdout, io, await _exec_node(cmd_str, io, path_scopes)
 

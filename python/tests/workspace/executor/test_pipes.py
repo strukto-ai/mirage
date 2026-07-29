@@ -16,7 +16,7 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.workspace.executor.pipes import handle_pipe
+from mirage.workspace.executor.pipes import handle_pipe, handle_subshell
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -25,6 +25,8 @@ class FakeNode:
 
     def __init__(self, text: str):
         self.text = text
+        self.is_named = True
+        self.type = "command"
 
 
 @pytest.mark.asyncio
@@ -75,3 +77,25 @@ async def test_handle_pipe_threads_stdout_to_next_stdin():
     )
     assert seen[0] == b""
     assert seen[1] == b"a-out"
+
+
+@pytest.mark.asyncio
+async def test_handle_subshell_seeds_last_exit_code_between_children():
+    session = Session(session_id="t")
+    session.last_exit_code = 0
+    seen: list[int] = []
+
+    async def execute_node(nd, sess, _stdin, _call_stack=None):
+        seen.append(sess.last_exit_code)
+        code = 7 if nd.text == "a" else 0
+        return (b"", IOResult(exit_code=code),
+                ExecutionNode(command=nd.text, exit_code=code))
+
+    await handle_subshell(
+        execute_node,
+        [FakeNode("a"), FakeNode("b")],
+        session,
+        None,
+    )
+    assert seen == [0, 7]
+    assert session.last_exit_code == 0

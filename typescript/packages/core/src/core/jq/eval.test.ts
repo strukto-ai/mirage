@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { jqEval } from './eval.ts'
+import { hasTopLevelSpread, jqEval } from './eval.ts'
 import { JQ_EMPTY } from './format.ts'
 
 describe('jq eval (libjq adapter)', () => {
@@ -322,5 +322,31 @@ describe('jq eval — user expressions that broke the homegrown parser', () => {
         },
       ],
     })
+  })
+})
+
+describe('hasTopLevelSpread', () => {
+  it('detects a top-level spread', () => {
+    expect(hasTopLevelSpread('.a[]')).toBe(true)
+    expect(hasTopLevelSpread('.[] | .name')).toBe(true)
+  })
+
+  it('does not treat a spread inside a collector as top level', () => {
+    // `[.a[] | .t]` emits ONE array, so the caller must print one line.
+    expect(hasTopLevelSpread('[.a[] | .t]')).toBe(false)
+    expect(hasTopLevelSpread('[["H"]] + [.[] | [.]]')).toBe(false)
+  })
+
+  it('does not treat a spread inside parens as top level', () => {
+    expect(hasTopLevelSpread('([.a[]] | length)')).toBe(false)
+  })
+
+  it('ignores a bracket pair inside a string literal', () => {
+    expect(hasTopLevelSpread('.a | test("[]")')).toBe(false)
+  })
+
+  it('does not treat an index or slice as a spread', () => {
+    expect(hasTopLevelSpread('.values[1:]')).toBe(false)
+    expect(hasTopLevelSpread('.a[0]')).toBe(false)
   })
 })

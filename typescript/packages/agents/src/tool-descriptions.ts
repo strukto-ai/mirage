@@ -16,7 +16,7 @@ export const EXECUTE_DESCRIPTION =
   'Run a shell-style command on the Mirage virtual filesystem. ' +
   'Supports cat, grep, find, head, tail, ls, wc, sort, uniq, tee, pipe, ' +
   'and any other Unix command on mounted resources (S3, disk, RAM, etc.). ' +
-  'Also supports reading structured files: cat on .parquet/.orc/.csv returns a table.'
+  'Files with no registered renderer, such as .parquet or .orc, read back as raw bytes.'
 
 export const READ_DESCRIPTION =
   'Read the contents of a file on the Mirage virtual filesystem. ' +

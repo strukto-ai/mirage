@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "find_arg_mindepth",
+      "seq": 320001,
+      "targets": [
+        "argerr-databricks",
+        "argerr-discord",
+        "argerr-email",
+        "argerr-gdocs",
+        "argerr-gdrive",
+        "argerr-github_ci",
+        "argerr-gmail",
+        "argerr-gsheets",
+        "argerr-gslides",
+        "argerr-langfuse",
+        "argerr-linear",
+        "argerr-mem0",
+        "argerr-onedrive",
+        "argerr-sharepoint",
+        "argerr-slack",
+        "argerr-trello"
+      ],
+      "command": "find {mount} -mindepth xx",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument 'xx' to '-mindepth'\n"
+      }
+    }
+  ]
+}

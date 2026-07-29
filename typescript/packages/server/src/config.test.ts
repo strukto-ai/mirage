@@ -105,7 +105,7 @@ describe('configToWorkspaceArgs', () => {
   it('rejects an unknown runtime entry name', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtimes: ['docker'],
+      runtimes: ['nosuchruntime'],
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime/)
   })

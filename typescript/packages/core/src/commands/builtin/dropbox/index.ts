@@ -13,11 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
-import { read as dropboxRead } from '../../../core/dropbox/read.ts'
-import { stat as dropboxStat } from '../../../core/dropbox/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DROPBOX_GREP } from './grep.ts'
 import { DROPBOX_IO } from './io.ts'
@@ -26,11 +23,6 @@ import { DROPBOX_RG } from './rg.ts'
 const DROPBOX_OVERRIDES = new Set(['grep', 'rg'])
 
 export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<DropboxAccessor>({
-    resource: ResourceName.DROPBOX,
-    readBytes: dropboxRead,
-    statEntry: dropboxStat,
-  }),
   ...makeGenericCommands<DropboxAccessor>(ResourceName.DROPBOX, DROPBOX_IO, {
     overrides: DROPBOX_OVERRIDES,
   }),

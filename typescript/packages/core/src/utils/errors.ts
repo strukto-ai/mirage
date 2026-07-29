@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { dropTrailingSegments, rebaseOne } from './path.ts'
+import { rstripSlash } from './slash.ts'
+
 export interface FsError extends Error {
   code: string
   // The virtual path the user typed (PathSpec.virtual) — the ONLY path that
@@ -218,6 +221,31 @@ export function errorVirtualPath(err: unknown): string {
 export function isFsError(err: unknown): boolean {
   const code = (err as { code?: unknown }).code
   return typeof code === 'string' && gnuStrerror(code) !== null
+}
+
+// Re-spell a reported path the way its operand was typed. Backends name paths
+// in virtual space, but GNU quotes the operand as the user wrote it:
+// `cd /data && mkdir -p f.txt/sub` reports 'f.txt', not '/data/f.txt'. The path
+// an error names is the operand itself, an ancestor of it (mkdir -p blames the
+// component of the chain it tripped on), or something under it, so all three
+// are rebased onto rawPath. An absolute operand rebases to itself, which is why
+// this is a no-op for most invocations. Mirrors Python's operand_spelling.
+export function operandSpelling(
+  path: string,
+  operand: { virtual: string; rawPath?: string },
+): string {
+  const virtual = operand.virtual
+  const raw = operand.rawPath ?? virtual
+  if (raw === virtual) return path
+  if (path === virtual) return raw
+  const base = rstripSlash(virtual)
+  if (path.startsWith(base + '/')) return rebaseOne(path, virtual, raw)
+  const trimmed = rstripSlash(path)
+  if (base.startsWith(trimmed + '/')) {
+    const segments = (p: string): number => p.split('/').filter((s) => s !== '').length
+    return dropTrailingSegments(raw, segments(base) - segments(trimmed))
+  }
+  return path
 }
 
 // GNU coreutils stderr line for one failed path operand, spelled as typed

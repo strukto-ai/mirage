@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
+import {
+  errorVirtualPath,
+  fsStrerror,
+  isFsError,
+  operandSpelling,
+} from '../../../../utils/errors.ts'
 import { DEFAULT_DIR_MODE, parseMode } from '../../../../utils/mode.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
@@ -57,9 +62,12 @@ export const MKDIR_BUILDER: Builder = {
         await mkdir(accessor, p, parents)
       } catch (err) {
         // One unusable operand is not an aborted command: GNU reports it
-        // and still makes the remaining directories.
+        // and still makes the remaining directories. The error names the path
+        // to quote: usually the operand, but `mkdir -p` blames the component
+        // of the chain it tripped on.
         if (!isFsError(err)) throw err
-        errors.push(`mkdir: cannot create directory '${p.virtual}': ${String(fsStrerror(err))}`)
+        const named = operandSpelling(errorVirtualPath(err), p)
+        errors.push(`mkdir: cannot create directory '${named}': ${String(fsStrerror(err))}`)
         continue
       }
       // -m applies to the named directory only; any parents made by -p keep

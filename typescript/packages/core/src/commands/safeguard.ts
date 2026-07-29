@@ -29,18 +29,27 @@ export const DEFAULT_COMMAND_SAFEGUARDS: Record<string, CommandSafeguard> = Obje
 
 export const FALLBACK_SAFEGUARD = new CommandSafeguard({ timeoutSeconds: DEFAULT_TIMEOUT_SECONDS })
 
+interface SafeguardMount {
+  commandSafeguards: Map<string, CommandSafeguard>
+}
+
+/**
+ * Resolve one command's safeguard, the one entry point.
+ *
+ * Precedence: an explicit mountOverride, then the command's own
+ * default, then aggregation across the mounts the command spans
+ * (tightest per field), then the global table.
+ */
 export function resolveSafeguard(
   name: string,
+  mounts: readonly SafeguardMount[] = [],
   commandDefault: CommandSafeguard | null = null,
   mountOverride: CommandSafeguard | null = null,
 ): CommandSafeguard | null {
   if (mountOverride !== null) return mountOverride
   if (commandDefault !== null) return commandDefault
+  if (mounts.length > 0) return resolveAcrossMounts(name, mounts)
   return DEFAULT_COMMAND_SAFEGUARDS[name] ?? FALLBACK_SAFEGUARD
-}
-
-interface SafeguardMount {
-  commandSafeguards: Map<string, CommandSafeguard>
 }
 
 export function resolveAcrossMounts(
@@ -48,7 +57,7 @@ export function resolveAcrossMounts(
   mounts: Iterable<SafeguardMount>,
 ): CommandSafeguard | null {
   const resolved = [...mounts].map((m) =>
-    resolveSafeguard(name, null, m.commandSafeguards.get(name) ?? null),
+    resolveSafeguard(name, [], null, m.commandSafeguards.get(name) ?? null),
   )
   return CommandSafeguard.aggr(resolved)
 }

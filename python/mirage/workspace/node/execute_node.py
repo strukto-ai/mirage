@@ -22,6 +22,7 @@ from mirage.runtime.route import RoutingDecision
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (array_append, array_extent, array_get,
                                 array_set, make_array)
+from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.job_table import JobTable
@@ -363,9 +364,14 @@ async def execute_node(
             if child.type == NT.COMMENT:
                 continue
             stdout, io, last_exec = await recurse(child, session, stdin, cs)
+            # Barrier before seeding $?: lazy exit codes (exit_on_empty
+            # in grep) finalize only once stdout is consumed (same as
+            # program / subshell).
+            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            session.last_exit_code = io.exit_code
             if (io.exit_code != 0 and session.shell_options.get("errexit")
                     and child.type not in ERREXIT_EXEMPT_TYPES
                     and not session.errexit_immune):

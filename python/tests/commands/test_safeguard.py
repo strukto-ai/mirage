@@ -47,20 +47,21 @@ def test_rejects_negative_limits():
 def test_resolve_prefers_mount_override():
     override = CommandSafeguard(max_lines=5)
     default = CommandSafeguard(max_lines=50)
-    assert resolve_safeguard("cat", default, override) is override
+    assert resolve_safeguard("cat",
+                             command_default=default,
+                             mount_override=override) is override
 
 
 def test_resolve_falls_back_to_command_default():
     default = CommandSafeguard(max_lines=50)
-    assert resolve_safeguard("cat", default, None) is default
+    assert resolve_safeguard("cat", command_default=default) is default
 
 
 def test_resolve_falls_back_to_central_default():
-    assert resolve_safeguard("cat", None,
-                             None) is DEFAULT_COMMAND_SAFEGUARDS["cat"]
+    assert resolve_safeguard("cat") is DEFAULT_COMMAND_SAFEGUARDS["cat"]
 
 
 def test_resolve_unknown_command_returns_fallback_safeguard():
     from mirage.commands.safeguard import FALLBACK_SAFEGUARD
-    assert resolve_safeguard("nl", None, None) is FALLBACK_SAFEGUARD
+    assert resolve_safeguard("nl") is FALLBACK_SAFEGUARD
     assert FALLBACK_SAFEGUARD.timeout_seconds is not None

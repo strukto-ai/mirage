@@ -46,7 +46,8 @@ await ws.execute('cp /s3/report.csv /data/local.csv')
 await ws.execute('wc -l $(find /s3/data -name "*.jsonl")')
 
 // Commands are extensible: register new commands, or override one per
-// resource + filetype, e.g. `cat` on S3 Parquet renders rows as JSON.
+// resource + filetype. Mirage ships no filetype renderers, so a format
+// like Parquet renders however you register it.
 ws.command('summarize', ...)
 ws.command('cat', { resource: 's3', filetype: 'parquet' }, ...)
 

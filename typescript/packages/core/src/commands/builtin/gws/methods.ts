@@ -222,12 +222,45 @@ export const GWS_METHODS: readonly GwsMethod[] = [
   },
 ] as const
 
-export const GWS_API_SPEC = new CommandSpec({
-  options: [
-    new Option({ long: '--params', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--json', valueKind: OperandKind.TEXT }),
-  ],
-})
+const PARAMS_HELP = 'JSON object of path and query parameters, e.g. \'{"fileId":"abc"}\''
+const JSON_HELP = 'JSON request body, the API resource for this method'
+const PAGE_ALL_HELP =
+  'Follow nextPageToken to the end (the default); pages print as one JSON response per line'
+const PAGE_LIMIT_HELP = 'Stop after this many pages instead of reading them all'
+
+export const BESPOKE_COMMANDS: readonly (readonly [string, string])[] = [
+  ['gws sheets +read', 'Read a cell range: --spreadsheet <id> --range <A1>'],
+  ['gws sheets +write', 'Overwrite a range: --spreadsheet <id> --range <A1> --json-values <2D>'],
+  ['gws sheets +append', 'Append rows: --spreadsheet <id> --range <A1> --json-values <2D>'],
+  ['gws docs +write', "Replace a document's text: --document <id>"],
+  ['gws gmail +read', 'Read a message by id'],
+  ['gws gmail +send', 'Send a message'],
+  ['gws gmail +reply', 'Reply to a message'],
+  ['gws gmail +forward', 'Forward a message'],
+  ['gws gmail +triage', 'Label / archive a message'],
+] as const
+
+export function gwsMethodDescription(m: GwsMethod): string {
+  return `${m.http} ${m.path} (Google ${m.service} API passthrough)`
+}
+
+// The options are identical across methods; only the description differs,
+// so `--help` names the HTTP call the command stands for.
+export function gwsMethodSpec(m: GwsMethod): CommandSpec {
+  return new CommandSpec({
+    options: [
+      new Option({ long: '--params', valueKind: OperandKind.TEXT, description: PARAMS_HELP }),
+      new Option({ long: '--json', valueKind: OperandKind.TEXT, description: JSON_HELP }),
+      new Option({ long: '--page-all', description: PAGE_ALL_HELP }),
+      new Option({
+        long: '--page-limit',
+        valueKind: OperandKind.TEXT,
+        description: PAGE_LIMIT_HELP,
+      }),
+    ],
+    description: gwsMethodDescription(m),
+  })
+}
 
 export const SERVICE_BASES: Record<GwsService, (tm: TokenManager) => string> = {
   drive: driveBase,

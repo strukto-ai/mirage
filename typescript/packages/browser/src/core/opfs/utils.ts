@@ -102,6 +102,40 @@ export function destError(err: unknown, spec: PathSpec): unknown {
   return err
 }
 
+// What lives at a mount-local key: 'file', 'dir', or null when nothing does.
+// OPFS raises the same TypeMismatchError whichever kind is in the way, so a
+// chain walk that has to tell GNU's two errnos apart can only get the split by
+// trying both handle kinds.
+export async function kindAt(
+  root: FileSystemDirectoryHandle,
+  key: string,
+): Promise<'file' | 'dir' | null> {
+  let dir: FileSystemDirectoryHandle
+  let name: string
+  try {
+    ;[dir, name] = await resolveParentDirHandle(root, key, { create: false })
+  } catch (err) {
+    // A chain that stops short is "nothing here"; anything else (a
+    // SecurityError, an invalid state) is a real backend failure and must
+    // not read as an absent component.
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
+    return null
+  }
+  try {
+    await dir.getDirectoryHandle(name, { create: false })
+    return 'dir'
+  } catch (err) {
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
+  }
+  try {
+    await dir.getFileHandle(name, { create: false })
+    return 'file'
+  } catch (err) {
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
+  }
+  return null
+}
+
 export function isNotFound(err: unknown): boolean {
   if (err instanceof DOMException) {
     return err.name === 'NotFoundError'

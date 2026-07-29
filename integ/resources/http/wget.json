@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "id": "wget_o_writes_vfs",
+      "seq": 330023,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -q -O /data/wgot.txt {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wget_o_content_landed",
+      "seq": 330024,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "cat /data/wgot.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wget_report_on_stderr",
+      "seq": 330025,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -O /data/wgot2.txt {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "'/data/wgot2.txt' saved [16/16]\n"
+      }
+    },
+    {
+      "id": "wget_spider_reports_exists",
+      "seq": 330026,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget --spider {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Remote file exists.\n"
+      }
+    },
+    {
+      "id": "wget_spider_quiet",
+      "seq": 330027,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -q --spider {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -14,7 +14,8 @@
 
 from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir
+from mirage.utils.errors import eexist, enoent, enotdir
+from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
 
 
@@ -47,3 +48,54 @@ def check_dest_parents(store: RAMStore, dst_spec: PathSpec, d: str) -> None:
         if ancestor in store.files:
             raise enotdir(dst_spec)
         raise enoent(dst_spec)
+
+
+def check_mkdir_target(store: RAMStore, spec: PathSpec, key: str,
+                       parents: bool) -> None:
+    """Reject a ``mkdir`` the store cannot satisfy.
+
+    The companion of :func:`check_dest_parents` for the one op that may
+    create its own parents, and the two flag modes fail differently
+    because GNU implements them differently:
+
+    * Plain ``mkdir`` issues one ``mkdir(2)`` on the whole path, so an
+      existing target is EEXIST whichever kind it is. Its parent chain
+      stays :func:`check_dest_parents`' job, which reports the operand
+      because that is what the kernel resolves.
+    * ``mkdir -p`` walks the chain itself, creating as it goes, so it
+      reports the *component* it tripped on rather than the operand:
+      ``mkdir -p a.txt/sub`` is "cannot create directory 'a.txt': Not a
+      directory". Reaching the target itself as a plain file is EEXIST,
+      not ENOTDIR. An existing directory anywhere in the chain is
+      success, which is what makes ``-p`` idempotent.
+
+    Without this a store has no kernel to refuse a directory key that
+    collides with a file key: ``-p`` added it anyway, the directory
+    shadowed the file, and reading it started reporting EISDIR while the
+    bytes stayed orphaned in the store. Pinned against GNU coreutils in
+    docker.
+
+    Args:
+        store (RAMStore): The backing store.
+        spec (PathSpec): The operand, reported when the target is to
+            blame.
+        key (str): Normalized target key.
+        parents (bool): Whether ``-p`` was given.
+
+    Raises:
+        FileExistsError: The target already exists (plain ``mkdir``), or
+            ``-p`` reached it as a plain file.
+        NotADirectoryError: ``-p`` crossed a component that is a plain
+            file.
+    """
+    if not parents:
+        if key in store.dirs or key in store.files:
+            raise eexist(spec)
+        return
+    for component in (*ancestors(key), key):
+        if component not in store.files:
+            continue
+        named = mounted_path(spec, component)
+        if component == key:
+            raise eexist(named)
+        raise enotdir(named)

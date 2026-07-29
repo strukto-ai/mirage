@@ -12,23 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// The per-command metadata cases this file used to run now live in
+// integ/unix/meta and integ/unix/meta_overlay, where the JSON battery runs
+// them on 22 backends instead of the four here. What is left are the three
+// scenarios the declarative harness cannot express: it can run commands and
+// stat paths, but it cannot snapshot a workspace, reload it onto a fresh
+// resource, or mutate a backend out of band. Retiring these needs snapshot
+// and namespace support in the harness, not another case file.
+
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FileStat } from '@struktoai/mirage-node'
 import {
-  DiskResource,
   ConsistencyPolicy,
   MountMode,
   RAMResource,
-  RedisResource,
   S3Resource,
   Workspace,
 } from '@struktoai/mirage-node'
-import { metaStatLine, runMetaCases, runMetaOverlayCases } from './cases.ts'
-
-const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
 
 function s3ResourceFromEnv(keyPrefix: string): S3Resource {
   const bucket = process.env.S3_BUCKET
@@ -47,6 +50,19 @@ function s3ResourceFromEnv(keyPrefix: string): S3Resource {
     ...(accessKeyId !== undefined && accessKeyId !== '' ? { accessKeyId } : {}),
     ...(secretAccessKey !== undefined && secretAccessKey !== '' ? { secretAccessKey } : {}),
   })
+}
+
+// Kept local now that cases.ts is gone: four fields, and the mtime slice keeps
+// the Z vs +00:00 suffix out of the byte-diffed truth file.
+function metaStatLine(st: FileStat, fields: ReadonlyArray<string>): string {
+  return fields
+    .map((field) => {
+      if (field === 'mode') return `mode=${st.mode !== undefined ? st.mode.toString(8) : '-'}`
+      if (field === 'uid') return `uid=${st.uid !== undefined ? String(st.uid) : '-'}`
+      if (field === 'gid') return `gid=${st.gid !== undefined ? String(st.gid) : '-'}`
+      return `mtime=${st.modified !== undefined ? st.modified.slice(0, 19) : '-'}`
+    })
+    .join(' ')
 }
 
 async function runOverlaySnapshotRoundtrip(ws: Workspace, fresh: S3Resource): Promise<void> {
@@ -112,52 +128,18 @@ async function runSnapshotRoundtrip(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log('##### ram #####')
-  const ramWs = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
-  await runMetaCases(ramWs)
-  await ramWs.close()
-
-  console.log('##### disk #####')
-  const root = mkdtempSync(join(tmpdir(), 'mirage-integ-meta-disk-'))
-  const diskWs = new Workspace({ '/data': new DiskResource({ root }) }, { mode: MountMode.WRITE })
-  try {
-    await runMetaCases(diskWs)
-  } finally {
-    await diskWs.close()
-    rmSync(root, { recursive: true, force: true })
-  }
-
-  console.log('##### redis #####')
   const prefix = `mirage-integ-meta-${randomUUID().slice(0, 8)}/`
-  const redisWs = new Workspace(
-    { '/data': new RedisResource({ url: REDIS_URL, keyPrefix: prefix }) },
-    { mode: MountMode.WRITE },
-  )
-  try {
-    await runMetaCases(redisWs)
-  } finally {
-    await redisWs.execute('rm -rf /data/metad')
-    await redisWs.close()
-  }
-
-  console.log('##### s3 (overlay) #####')
-  const keyPrefix = `mirage-integ-meta-${String(process.pid)}-${String(Date.now())}/`
   const s3Ws = new Workspace(
-    { '/data': s3ResourceFromEnv(keyPrefix) },
+    { '/data': s3ResourceFromEnv(prefix) },
     { mode: MountMode.WRITE },
   )
   try {
-    await runMetaOverlayCases(s3Ws)
-    await runOverlaySnapshotRoundtrip(s3Ws, s3ResourceFromEnv(keyPrefix))
-    await runOverlayOrphanGc(keyPrefix)
+    await runOverlaySnapshotRoundtrip(s3Ws, s3ResourceFromEnv(prefix))
   } finally {
     await s3Ws.close()
   }
-
+  await runOverlayOrphanGc(`${prefix}gc/`)
   await runSnapshotRoundtrip()
 }
 
-main().catch((err: unknown) => {
-  process.stderr.write(String(err) + '\n')
-  process.exit(1)
-})
+void main()

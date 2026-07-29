@@ -21,6 +21,7 @@ import {
   posixNormpath,
   resolvePath,
   resolveSymlinks,
+  dropTrailingSegments,
 } from './path.ts'
 
 describe('resolveSymlinks', () => {
@@ -148,5 +149,22 @@ describe('ancestors', () => {
 
   it('tolerates a trailing slash', () => {
     expect(ancestors('/a/b/')).toEqual(['/a'])
+  })
+})
+
+describe('dropTrailingSegments', () => {
+  it.each([
+    ['a/b/c', 1, 'a/b'],
+    ['/x/y/z', 2, '/x'],
+    ['f.txt/sub', 1, 'f.txt'],
+    ['/data/mkc/f.txt/sub', 1, '/data/mkc/f.txt'],
+    ['a.txt', 0, 'a.txt'],
+  ])('drops %i trailing segments of %s', (path, count, want) => {
+    expect(dropTrailingSegments(path, count)).toBe(want)
+  })
+
+  it('is clamped so a path never becomes empty', () => {
+    expect(dropTrailingSegments('/a', 1)).toBe('/a')
+    expect(dropTrailingSegments('a/b', 5)).toBe('a/b')
   })
 })

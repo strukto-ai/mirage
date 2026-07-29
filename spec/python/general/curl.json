@@ -7,6 +7,7 @@
     "resources": []
   },
   "description": "Transfer data from or to a server.",
+  "epilog": null,
   "ignore_tokens": [],
   "options": [
     {
@@ -75,6 +76,16 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-L",
+      "short_value": true,
+      "value_kind": "none",
+      "value_optional": false
+    },
+    {
+      "description": "Fail with exit 22 on an HTTP error status.",
+      "long": "--fail",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-f",
       "short_value": true,
       "value_kind": "none",
       "value_optional": false

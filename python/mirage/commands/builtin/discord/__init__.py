@@ -24,13 +24,9 @@ from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
 from mirage.commands.builtin.discord.io import IO as _IO
 from mirage.commands.builtin.discord.rg import rg
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.core.discord.read import read as _read
 
 COMMANDS = [
-    *make_filetype_commands(
-        "discord", _IO.resolve_glob, _read, read_takes_index=True),
     *make_generic_commands(
         "discord",
         _IO,

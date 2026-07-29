@@ -14,7 +14,7 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
-from mirage.core.redis.dest import check_dest_parents
+from mirage.core.redis.dest import check_dest_parents, check_mkdir_target
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -28,6 +28,7 @@ async def mkdir(
     path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
+    await check_mkdir_target(store, path_spec, p, parents)
     if parents:
         parts = p.strip("/").split("/")
         current = ""

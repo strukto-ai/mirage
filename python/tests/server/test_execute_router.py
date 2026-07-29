@@ -60,6 +60,31 @@ async def test_execute_sync_returns_io_result():
 
 
 @pytest.mark.asyncio
+async def test_execute_honors_cwd():
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        wid = await _create_workspace(client)
+        r = await client.post(
+            f"/v1/workspaces/{wid}/execute",
+            json={"command": "mkdir -p /sub && echo -n nested > /sub/f.txt"},
+        )
+        assert r.status_code == 200, r.text
+        r = await client.post(
+            f"/v1/workspaces/{wid}/execute",
+            json={
+                "command": "cat f.txt",
+                "cwd": "/sub"
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["exit_code"] == 0
+        assert body["stdout"] == "nested"
+
+
+@pytest.mark.asyncio
 async def test_execute_sync_records_a_job_in_done_state():
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)

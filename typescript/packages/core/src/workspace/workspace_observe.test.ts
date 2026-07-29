@@ -116,4 +116,90 @@ describe('Workspace observer wiring', () => {
     expect(prefixes).toEqual(new Set(['/', '/data/', '/dev/', '/.bash_history/']))
     await ws.close()
   })
+
+  // The three below assert the recorded event shape on the real execute path.
+  // observer.test.ts builds entries by hand, so a regression in the wiring from
+  // a command to its event would not be caught there, and the /.bash_history
+  // and `history` views render fine without these fields.
+  it('records exitCode and cwd on every command event', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hello > /data/test.txt')
+    await ws.execute('cat /data/missing.txt')
+    const commands = await ws.history()
+    expect(commands).toHaveLength(2)
+    expect(commands.every((e) => 'exit_code' in e)).toBe(true)
+    expect(commands.every((e) => 'cwd' in e)).toBe(true)
+    expect(commands.map((e) => e.exit_code)).toEqual([0, 1])
+    await ws.close()
+  })
+
+  // Op events name the virtual path, mount prefix included, so two mounts
+  // holding the same filename stay distinguishable in the recording. The
+  // write arrives through executeOp and the read through a lazy stream, so
+  // this covers both routes the mount prefix has to survive. Mirrors
+  // python's test_execute_records_op_source.
+  it('records a source and a read op on every op event', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hello > /data/test.txt')
+    await ws.execute('cat /data/test.txt')
+    const events = await ws.observer.events()
+    const ops = events.filter((e) => e.type === 'op')
+    expect(ops.length).toBeGreaterThan(0)
+    expect(ops.every((e) => 'source' in e)).toBe(true)
+    expect(ops.filter((e) => e.op === 'read').length).toBeGreaterThan(0)
+    expect(new Set(ops.map((e) => e.path))).toEqual(new Set(['/data/test.txt']))
+    await ws.close()
+  })
+
+  // Two mounts holding the same filename have to stay distinguishable, so
+  // every record carries its mount prefix whichever route it arrives by:
+  // an eager write (dispatch), a lazy read (stream), and a cp whose read
+  // and write land on different mounts. Mirrors python's
+  // test_execute_records_op_path_per_mount.
+  it('records the op path per mount, not mount-relative', async () => {
+    const s3 = new RAMResource()
+    const db = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(s3)
+    registry.registerResource(db)
+    const ws = new Workspace(
+      { '/s3': s3, '/db': db },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    for (const line of [
+      'echo one > /s3/report.json',
+      'echo two > /db/report.json',
+      'cat /s3/report.json',
+      'cat /db/report.json',
+      'cp /s3/report.json /db/copy.json',
+    ]) {
+      await ws.execute(line)
+    }
+    const ops = (await ws.observer.events())
+      .filter((e) => e.type === 'op')
+      .map((e) => [e.op, e.path])
+    expect(ops).toEqual([
+      ['write', '/s3/report.json'],
+      ['write', '/db/report.json'],
+      ['read', '/s3/report.json'],
+      ['read', '/db/report.json'],
+      ['read', '/s3/report.json'],
+      ['write', '/db/copy.json'],
+    ])
+    await ws.close()
+  })
+
+  it('records clear, command, delete and op event types', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hello > /data/test.txt')
+    await ws.execute('history -s synthetic')
+    await ws.execute('history -d 1')
+    await ws.execute('history -c')
+    const events = await ws.observer.events()
+    const types = new Set(events.map((e) => e.type))
+    for (const kind of ['clear', 'command', 'delete', 'op']) {
+      expect(types.has(kind)).toBe(true)
+    }
+    await ws.close()
+  })
 })

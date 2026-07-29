@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { httpFormRequest, httpRequest, setHttpProxyBase } from './http.ts'
+import {
+  HttpConnectError,
+  httpFormRequest,
+  httpRequest,
+  isHttpError,
+  setHttpProxyBase,
+} from './http.ts'
 
 const ENC = new TextEncoder()
 
@@ -129,10 +135,29 @@ describe('http proxy routing', () => {
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json')
   })
 
-  it('surfaces non-2xx responses as thrown errors', async () => {
+  // A non-2xx is data, not an error: curl exits 0 and prints the body for a
+  // 404 while wget exits 8, so only the caller can decide. Throwing here is
+  // what used to force both tools to fail on any 4xx.
+  it('reports a non-2xx response as a status rather than throwing', async () => {
     const fetchMock = makeFetchMock('nope', 502)
     vi.stubGlobal('fetch', fetchMock)
     setHttpProxyBase('/__proxy')
-    await expect(httpRequest('https://example.com/x')).rejects.toThrow(/HTTP 502/)
+    const resp = await httpRequest('https://example.com/x')
+    expect(resp.status).toBe(502)
+    expect(isHttpError(resp)).toBe(true)
+    expect(new TextDecoder().decode(resp.body)).toBe('nope')
+  })
+
+  it('wraps a transport failure as HttpConnectError with host and port', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('fetch failed'))),
+    )
+    setHttpProxyBase(null)
+    await expect(httpRequest('http://127.0.0.1:1/x')).rejects.toThrow(HttpConnectError)
+    await expect(httpRequest('http://127.0.0.1:1/x')).rejects.toMatchObject({
+      host: '127.0.0.1',
+      port: 1,
+    })
   })
 })

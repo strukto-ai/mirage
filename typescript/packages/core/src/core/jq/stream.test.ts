@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseJsonAuto } from './stream.ts'
+import { parseJsonAuto, parseJsonDocs } from './stream.ts'
 
 const ENC = new TextEncoder()
 
@@ -37,5 +37,31 @@ describe('parseJsonAuto', () => {
 
   it('propagates original parse error on single-line garbage (no silent NDJSON downgrade)', () => {
     expect(() => parseJsonAuto(ENC.encode('this is not json'))).toThrow(/JSON|json/)
+  })
+})
+
+describe('parseJsonDocs', () => {
+  it('returns a single value as one document', () => {
+    expect(parseJsonDocs(ENC.encode('{"a":1}'))).toEqual([{ a: 1 }])
+  })
+
+  it('splits an NDJSON stream', () => {
+    expect(parseJsonDocs(ENC.encode('{"a":1}\n{"a":2}\n'))).toEqual([{ a: 1 }, { a: 2 }])
+  })
+
+  it('splits a pretty-printed stream, since documents need not be one per line', () => {
+    const raw = ENC.encode('{\n  "a": 1\n}\n{\n  "a": 2\n}\n')
+    expect(parseJsonDocs(raw)).toEqual([{ a: 1 }, { a: 2 }])
+  })
+
+  it('splits a stream of arrays', () => {
+    expect(parseJsonDocs(ENC.encode('[1,2]\n[3,4]\n'))).toEqual([
+      [1, 2],
+      [3, 4],
+    ])
+  })
+
+  it('reports the whole-document error on garbage', () => {
+    expect(() => parseJsonDocs(ENC.encode('this is not json'))).toThrow(/JSON|json/)
   })
 })

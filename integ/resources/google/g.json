@@ -290,7 +290,7 @@
       "command": "gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes'\\\"}\" | jq -c '[.files[] | {name, mimeType}]'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n",
+        "stdout": "[{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}]\n",
         "stderr": ""
       }
     },
@@ -361,7 +361,63 @@
       "expect": {
         "exit": 0,
         "stderr": "",
-        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n\"Notes copy\"\n"
+        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n[\"Notes copy\"]\n"
+      }
+    },
+    {
+      "id": "g_files_list_paginates_by_default",
+      "seq": 500027,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files list --params \"{\\\"q\\\": \\\"name contains 'Notes'\\\", \\\"pageSize\\\": 1}\" | jq -r '.files[].name' | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "Notes\nNotes copy\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_files_list_page_limit_truncates",
+      "seq": 500028,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files list --page-limit 1 --params \"{\\\"q\\\": \\\"name contains 'Notes'\\\", \\\"pageSize\\\": 1}\" | jq -r '.files[].name' | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_help_lists_services",
+      "seq": 500029,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws --help | grep -c 'API methods'",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_help_lists_service_methods",
+      "seq": 500030,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive --help | grep -c '^  gws drive '",
+      "expect": {
+        "exit": 0,
+        "stdout": "10\n",
+        "stderr": ""
       }
     },
     {

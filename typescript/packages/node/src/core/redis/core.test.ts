@@ -112,6 +112,28 @@ describe.skipIf(skip)('core/redis ops', () => {
     expect(await exists(acc, spec('/foo/bar'))).toBe(true)
   })
 
+  it('mkdir refuses an existing target, and -p is the idempotent form (GNU)', async () => {
+    await mkdir(acc, spec('/d'))
+    await expect(mkdir(acc, spec('/d'))).rejects.toMatchObject({ code: 'EEXIST' })
+    await mkdir(acc, spec('/d'), true)
+    expect(await exists(acc, spec('/d'))).toBe(true)
+  })
+
+  it('mkdir -p across a plain file names the component and keeps the file', async () => {
+    await writeBytes(acc, spec('/f.txt'), ENC.encode('hi'))
+    await expect(mkdir(acc, spec('/f.txt/sub'), true)).rejects.toMatchObject({
+      code: 'ENOTDIR',
+      virtualPath: '/f.txt',
+    })
+    expect(await store.hasDir('/f.txt')).toBe(false)
+    expect(DEC.decode(await read(acc, spec('/f.txt')))).toBe('hi')
+  })
+
+  it('mkdir -p onto a plain file target is EEXIST', async () => {
+    await writeBytes(acc, spec('/f.txt'), ENC.encode('hi'))
+    await expect(mkdir(acc, spec('/f.txt'), true)).rejects.toMatchObject({ code: 'EEXIST' })
+  })
+
   it('mkdir with parents=true creates chain', async () => {
     await mkdir(acc, spec('/a/b/c'), true)
     expect(await exists(acc, spec('/a/b/c'))).toBe(true)

@@ -261,35 +261,6 @@ async def main():
     print(f"  Files matching 'queue': {files}")
     print(f"  Stats: {ops_summary()}")
 
-    # ── filetype: parquet, orc, feather, hdf5 ──
-    print("\n=== FILETYPE: parquet, orc, feather, hdf5 ===\n")
-
-    for label, path in [
-        ("parquet", "/gdrive/mirage/example.parquet"),
-        ("orc", "/gdrive/mirage/example.orc"),
-        ("feather", "/gdrive/mirage/example.feather"),
-        ("hdf5", "/gdrive/mirage/example.h5"),
-    ]:
-        print(f"--- grep item_5 {label} ---")
-        r = await ws.execute(f"grep item_5 {path}")
-        print(f"  exit={r.exit_code}  {(await r.stdout_str()).strip()[:100]}")
-
-    print("\n--- cat parquet | head -n 3 ---")
-    r = await ws.execute("cat /gdrive/mirage/example.parquet | head -n 3")
-    print(f"  {(await r.stdout_str()).strip()}")
-
-    print("\n--- wc -l across formats ---")
-    for label, path in [
-        ("parquet", "/gdrive/mirage/example.parquet"),
-        ("orc", "/gdrive/mirage/example.orc"),
-        ("feather", "/gdrive/mirage/example.feather"),
-        ("hdf5", "/gdrive/mirage/example.h5"),
-    ]:
-        r = await ws.execute(f"wc -l {path}")
-        print(f"  {label}: {(await r.stdout_str()).strip()}")
-
-    print(f"  Stats: {ops_summary()}")
-
     # ── jq: structured JSON queries ──
     print("\n=== JQ QUERIES ===\n")
 

@@ -73,6 +73,27 @@ describe('command()', () => {
     const out = command({ name: 'echo', resource: null, spec: STUB_SPEC, fn: STUB_FN })
     expect(out[0]?.resource).toBeNull()
   })
+
+  it('keeps the spec epilog when injecting --help / --version', async () => {
+    const out = command({
+      name: 'gws',
+      resource: 'gdrive',
+      spec: new CommandSpec({ epilog: 'Services:\n  drive' }),
+      fn: STUB_FN,
+    })
+    const rc = out[0]
+    if (rc === undefined) throw new Error('expected a registered command')
+    expect(rc.spec.epilog).toBe('Services:\n  drive')
+    const result = await rc.fn({} as never, [], [], {
+      stdin: null,
+      flags: { help: true },
+      filetypeFns: null,
+      cwd: '/',
+      resource: {} as never,
+    })
+    if (result === null) throw new Error('expected result')
+    expect(new TextDecoder().decode(result[0] as Uint8Array)).toContain('Services:\n  drive\n')
+  })
 })
 
 describe('crossCommand()', () => {

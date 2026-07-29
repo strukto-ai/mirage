@@ -319,6 +319,19 @@ def test_subshell_isolates_env():
     assert session.env["X"] == "before"
 
 
+def test_subshell_updates_status_between_commands():
+    """$? inside ( ... ) must reflect the previous command in the body."""
+    stdout, io, _, _, _, _ = _exec("(false; echo subshell=$?)")
+    assert io.exit_code == 0
+    assert stdout == b"subshell=1\n"
+
+
+def test_subshell_status_after_true_then_false():
+    stdout, io, _, _, _, _ = _exec("(true; false; echo s=$?)")
+    assert io.exit_code == 0
+    assert stdout == b"s=1\n"
+
+
 def test_subshell_isolates_cwd():
     dispatch = _mock_dispatch()
     stat = MagicMock()
@@ -1282,6 +1295,19 @@ def test_brace_group():
     _, _, _, session, _, _ = _exec("{ export A=1; export B=2; }")
     assert session.env["A"] == "1"
     assert session.env["B"] == "2"
+
+
+def test_brace_group_updates_status_between_commands():
+    """$? inside { ... } must reflect the previous command in the group."""
+    stdout, io, _, _, _, _ = _exec("{ false; echo group=$?; }")
+    assert io.exit_code == 0
+    assert stdout == b"group=1\n"
+
+
+def test_brace_group_status_after_true_then_false():
+    stdout, io, _, _, _, _ = _exec("{ true; false; echo mid=$?; }")
+    assert io.exit_code == 0
+    assert stdout == b"mid=1\n"
 
 
 def test_brace_group_with_if():

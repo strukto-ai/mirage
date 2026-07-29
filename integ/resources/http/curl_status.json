@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "curl_404_prints_body_exit_0",
+      "seq": 330007,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s {http}/missing",
+      "expect": {
+        "exit": 0,
+        "stdout": "not found\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_500_prints_body_exit_0",
+      "seq": 330008,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s {http}/boom",
+      "expect": {
+        "exit": 0,
+        "stdout": "server error\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_fail_404_exit_22",
+      "seq": 330009,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sS -f {http}/missing",
+      "expect": {
+        "exit": 22,
+        "stdout": "",
+        "stderr": "curl: (22) The requested URL returned error: 404\n"
+      }
+    },
+    {
+      "id": "curl_fail_500_exit_22",
+      "seq": 330010,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sS -f {http}/boom",
+      "expect": {
+        "exit": 22,
+        "stdout": "",
+        "stderr": "curl: (22) The requested URL returned error: 500\n"
+      }
+    },
+    {
+      "id": "curl_fail_silent_no_message",
+      "seq": 330011,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -f {http}/missing",
+      "expect": {
+        "exit": 22,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_fail_ok_status_exit_0",
+      "seq": 330012,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -f {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_unreachable_exit_7",
+      "seq": 330013,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sS http://127.0.0.1:1/hello",
+      "expect": {
+        "exit": 7,
+        "stdout": "",
+        "stderr": "curl: (7) Failed to connect to 127.0.0.1 port 1: Could not connect to server\n"
+      }
+    },
+    {
+      "id": "curl_unreachable_silent",
+      "seq": 330014,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s http://127.0.0.1:1/hello",
+      "expect": {
+        "exit": 7,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

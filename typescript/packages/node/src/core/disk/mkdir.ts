@@ -14,7 +14,13 @@
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { mkdir as fsMkdir } from 'node:fs/promises'
-import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
+import {
+  type PathSpec,
+  invalidateAfterWrite,
+  invalidateAncestors,
+  norm,
+} from '@struktoai/mirage-core'
+import { mkdirComponentError } from './dest.ts'
 import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
 
@@ -23,22 +29,32 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
-  const full = resolveSafe(accessor.root, path.mountPath)
+  const root = accessor.root
+  const full = resolveSafe(root, path.mountPath)
   if (parents) {
-    await fsMkdir(full, { recursive: true })
+    try {
+      await fsMkdir(full, { recursive: true })
+    } catch (err) {
+      // The kernel names the whole path; GNU names the component it tripped
+      // on, so the chain is walked only now that it is known to be broken.
+      const named =
+        (err as NodeJS.ErrnoException).code === 'ENOTDIR'
+          ? await mkdirComponentError(root, path, norm(path.mountPath))
+          : null
+      throw named ?? diskError(err, path)
+    }
     await invalidateAfterWrite(path)
     await invalidateAncestors(path)
     return
   }
+  // An existing target is EEXIST, not success: only -p is idempotent (GNU).
+  // Every internal caller that mirrors a tree through this op (cp -r) probes
+  // with isDirectory first, so it never reaches this path for a directory it
+  // meant to reuse.
   try {
     await fsMkdir(full)
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    // An existing directory stays a no-op here: cp -r mirrors a tree
-    // through this op and must reuse the directories already there. The
-    // rest keep the kernel's errno, restamped against the mount so only
-    // the virtual path reaches a stderr line.
-    if (code !== 'EEXIST') throw diskError(err, path)
+    throw diskError(err, path)
   }
   await invalidateAfterWrite(path)
 }

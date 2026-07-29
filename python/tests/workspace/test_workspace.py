@@ -364,6 +364,47 @@ def test_brace_group():
     assert s.env["B"] == "2"
 
 
+def test_status_inside_subshell_and_brace_group():
+    """$? inside ( ) and { } must track prior commands (issue #476)."""
+    ws = _ws()
+    io = _exec(ws, "(false; echo subshell=$?)")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"subshell=1\n"
+    io = _exec(ws, "{ false; echo group=$?; }")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"group=1\n"
+
+
+def test_status_lazy_exit_code_inside_subshell_and_brace_group():
+    """grep's exit code is finalized lazily; $? must still see it."""
+    ws = _ws()
+    io = _exec(ws, "(grep missing /ram/notes.txt; echo s=$?)")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"s=1\n"
+    io = _exec(ws, "{ grep missing /ram/notes.txt; echo s=$?; }")
+    assert io.exit_code == 0
+    assert _stdout(io) == b"s=1\n"
+
+
+def test_status_updates_in_all_construct_bodies():
+    """$? tracks the previous statement inside every construct body."""
+    ws = _ws()
+    for cmd in [
+            "if true; then false; echo s=$?; fi",
+            "for i in 1; do false; echo s=$?; done",
+            "while true; do false; echo s=$?; break; done",
+            "case x in x) false; echo s=$?;; esac",
+            "f() { false; echo s=$?; }; f",
+            "if true; then grep missing /ram/notes.txt; echo s=$?; fi",
+            "for i in 1; do grep missing /ram/notes.txt; echo s=$?; done",
+            "case x in x) grep missing /ram/notes.txt; echo s=$?;; esac",
+            "g() { grep missing /ram/notes.txt; echo s=$?; }; g",
+    ]:
+        io = _exec(ws, cmd)
+        assert io.exit_code == 0, cmd
+        assert _stdout(io) == b"s=1\n", cmd
+
+
 # ── variable expansion ─────────────────────────
 
 

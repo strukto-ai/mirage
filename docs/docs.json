@@ -393,7 +393,8 @@
             "group": "Runtimes",
             "pages": [
               "python/runtime/python",
-              "python/runtime/javascript"
+              "python/runtime/javascript",
+              "python/runtime/sandbox"
             ]
           }
         ]
@@ -569,7 +570,8 @@
             "group": "Runtimes",
             "pages": [
               "typescript/runtime/python",
-              "typescript/runtime/javascript"
+              "typescript/runtime/javascript",
+              "typescript/runtime/sandbox"
             ]
           }
         ]

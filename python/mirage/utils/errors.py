@@ -16,6 +16,7 @@ import errno
 from collections.abc import Awaitable, Callable
 
 from mirage.types import PathSpec
+from mirage.utils.path import drop_trailing_segments, rebase_one
 
 
 class OperationNotSupportedError(OSError):
@@ -62,6 +63,10 @@ def enoent(path: object) -> FileNotFoundError:
 
 def enotdir(path: object) -> NotADirectoryError:
     return NotADirectoryError(_virtual_of(path))
+
+
+def eexist(path: object) -> FileExistsError:
+    return FileExistsError(_virtual_of(path))
 
 
 def eisdir(path: object) -> IsADirectoryError:
@@ -130,6 +135,60 @@ def fs_strerror(exc: BaseException) -> str | None:
     return None
 
 
+def error_path(exc: BaseException) -> str:
+    """The path an fs error is about.
+
+    Two conventions meet here and both mean the same thing. The store
+    backends raise with the bare operand as the message
+    (``enoent(spec)``), while the real-filesystem backends stamp
+    ``filename`` (``disk_errors``, and the kernel before it). An error may
+    also name something other than the operand it was raised for:
+    ``mkdir -p`` reports the component of the chain it tripped on, so the
+    stamped path wins over what the caller was holding.
+
+    Args:
+        exc (BaseException): The filesystem error.
+    """
+    stamped = getattr(exc, "filename", None)
+    if isinstance(stamped, str) and stamped:
+        return stamped
+    return str(exc)
+
+
+def operand_spelling(path: str, operand: PathSpec) -> str:
+    """Re-spell a reported path the way its operand was typed.
+
+    Backends name paths in virtual space, but GNU quotes the operand as
+    the user wrote it: ``cd /data && mkdir -p f.txt/sub`` reports
+    ``'f.txt'``, not ``'/data/f.txt'``. The path an error names is the
+    operand itself, an ancestor of it (``mkdir -p`` blames the component
+    of the chain it tripped on), or something under it, so all three are
+    rebased onto ``raw_path``. An absolute operand rebases to itself,
+    which is why this is a no-op for most invocations.
+
+    Args:
+        path (str): The virtual path the error named.
+        operand (PathSpec): The operand the command was given.
+    """
+    raw, virtual = operand.raw_path, operand.virtual
+    if raw == virtual:
+        return path
+    if path == virtual:
+        return raw
+    base = virtual.rstrip("/")
+    if path.startswith(base + "/"):
+        return rebase_one(path, virtual, raw)
+    trimmed = path.rstrip("/")
+    if base.startswith(trimmed + "/"):
+        depth = len(_segments(base)) - len(_segments(trimmed))
+        return drop_trailing_segments(raw, depth)
+    return path
+
+
+def _segments(path: str) -> list[str]:
+    return [part for part in path.split("/") if part]
+
+
 def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
     """GNU coreutils stderr line for one failed path operand.
 
@@ -181,7 +240,7 @@ def format_fs_error(cmd_name: str,
         if message.startswith(f"{cmd_name}: "):
             return f"{message}\n".encode()
         return f"{cmd_name}: {message}\n".encode()
-    path = getattr(exc, "filename", None) or str(exc)
+    path = error_path(exc)
     if paths:
         for p in paths:
             if p.virtual == path:

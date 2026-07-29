@@ -7,6 +7,7 @@
     "resources": []
   },
   "description": "Run JavaScript on a sandboxed quickjs engine.",
+  "epilog": null,
   "ignore_tokens": [],
   "options": [
     {

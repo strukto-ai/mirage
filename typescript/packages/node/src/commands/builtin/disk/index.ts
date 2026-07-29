@@ -12,22 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type RegisteredCommand,
-  ResourceName,
-  makeFiletypeCommands,
-  makeGenericCommands,
-} from '@struktoai/mirage-core'
+import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
-import { read as diskRead } from '../../../core/disk/read.ts'
-import { stat as diskStat } from '../../../core/disk/stat.ts'
 import { DISK_IO } from './io.ts'
 
 export const DISK_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<DiskAccessor>({
-    resource: ResourceName.DISK,
-    readBytes: diskRead,
-    statEntry: diskStat,
-  }),
   ...makeGenericCommands<DiskAccessor>(ResourceName.DISK, DISK_IO),
 ]

@@ -15,7 +15,15 @@
 import * as jqWasm from 'jq-wasm'
 import { JQ_EMPTY } from './format.ts'
 
-function hasTopLevelSpread(expr: string): boolean {
+/**
+ * Report whether a jq program spreads its input at the top level.
+ *
+ * A top-level `[]` means the program emits one output per element, so the
+ * caller must print each on its own line. A `[]` nested inside a collector
+ * (`[.a[] | .b]`) does not: that program emits a single array. Strings are
+ * skipped so a literal "[]" never counts.
+ */
+export function hasTopLevelSpread(expr: string): boolean {
   let depth = 0
   let inStr = false
   for (let i = 0; i < expr.length; i++) {

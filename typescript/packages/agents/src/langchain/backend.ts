@@ -94,8 +94,6 @@ function extOf(path: string): string {
   return path.slice(dot + 1).toLowerCase()
 }
 
-const MIRAGE_RENDERED_AS_TEXT = new Set(['parquet', 'h5', 'hdf5', 'feather'])
-
 function mimeFor(path: string): string {
   const ext = extOf(path)
   if (ext === 'json' || ext === 'jsonl') return 'application/json'
@@ -103,7 +101,6 @@ function mimeFor(path: string): string {
   if (ext === 'html' || ext === 'htm') return 'text/html'
   if (ext === 'md') return 'text/markdown'
   if (TEXT_EXTENSIONS.has(ext)) return 'text/plain'
-  if (MIRAGE_RENDERED_AS_TEXT.has(ext)) return 'text/plain'
   if (ext === 'png') return 'image/png'
   if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
   if (ext === 'pdf') return 'application/pdf'

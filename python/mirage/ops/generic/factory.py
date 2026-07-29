@@ -14,19 +14,9 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.optional import try_load_command
 from mirage.ops.generic.table import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
-
-FILETYPE_CATS: dict[str, OpFn | None] = {
-    ".parquet": try_load_command("mirage.core.filetype.parquet", "cat",
-                                 "parquet"),
-    ".feather": try_load_command("mirage.core.filetype.feather", "cat",
-                                 "parquet"),
-    ".orc": try_load_command("mirage.core.filetype.orc", "cat", "parquet"),
-    ".hdf5": try_load_command("mirage.core.filetype.hdf5", "cat", "hdf5"),
-}
 
 
 def _make_read(fn: OpFn) -> OpFn:
@@ -37,19 +27,6 @@ def _make_read(fn: OpFn) -> OpFn:
                    index: IndexCacheStore | None = None,
                    **kwargs) -> bytes:
         return await fn(accessor, path, index)
-
-    return read
-
-
-def _make_filetype_read(fn: OpFn, cat: OpFn) -> OpFn:
-
-    async def read(accessor: Accessor,
-                   path: PathSpec,
-                   *,
-                   index: IndexCacheStore | None = None,
-                   **kwargs) -> bytes:
-        raw = await fn(accessor, path, index)
-        return cat(raw)
 
     return read
 
@@ -152,7 +129,6 @@ def make_generic_ops(
     resource: str | list[str],
     table: OpsTable,
     *,
-    filetype_read: bool = False,
     emulate_truncate: bool = False,
     mkdir_parents: bool = False,
     overrides: set[str] | None = None,
@@ -171,21 +147,17 @@ def make_generic_ops(
     store through the cache context on mutation, so forwarding
     ``index`` into read/readdir/stat is always safe, whereas the TS
     ram/disk/redis/ssh cores cache listings that mutations never
-    invalidate and need ``forwardIndex: false``. Likewise
-    ``filetype_read`` is a bool (every backend that opts in gets the
-    full cat set, with missing optional deps skipped at import) while
-    TS takes an explicit ``filetypeRead`` extension list (TS has no ORC
-    support and its backends opt in per extension).
+    invalidate and need ``forwardIndex: false``.
+
+    Every op emitted here is filetype-agnostic. To serve one extension
+    differently, register a filetype-scoped op on the mount; the mount
+    resolves ``(name, filetype)`` before ``(name, resource)``.
 
     Args:
         resource (str | list[str]): resource name(s) the ops register
             under; a list fans out one ``RegisteredOp`` per name (the
             HF family registers one surface for four resources).
         table (OpsTable): the backend's IO table (its ``CommandIO``).
-        filetype_read (bool): emit ``read`` ops for ``.parquet`` /
-            ``.feather`` / ``.orc`` / ``.hdf5`` rendered through the
-            shared filetype cats; formats whose optional dependency is
-            missing are skipped like ``try_load_command`` does.
         emulate_truncate (bool): synthesize ``truncate`` from
             ``read_bytes`` + ``write`` for backends with no native
             partial write (s3/ssh/ram/redis today).
@@ -203,13 +175,6 @@ def make_generic_ops(
     _emit(ops, resources, "readdir", _make_read(table.readdir), False, None,
           skip)
     _emit(ops, resources, "stat", _make_read(table.stat), False, None, skip)
-
-    if filetype_read:
-        for ext, cat in FILETYPE_CATS.items():
-            if cat is None:
-                continue
-            _emit(ops, resources, "read",
-                  _make_filetype_read(table.read_bytes, cat), False, ext, skip)
 
     if table.write is not None:
         _emit(ops, resources, "write", _make_data_write(table.write), True,

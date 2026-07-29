@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import importlib
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 
@@ -90,6 +91,16 @@ class VfsRuntime(Runtime):
 NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}
 NAMED[VfsRuntime.name] = VfsRuntime
 
+# Sandbox runtimes resolve on first use. Their provider SDKs are heavy
+# (the daytona client alone pulls in opentelemetry), and importing them
+# eagerly would put that cost on every `import mirage`, so the table
+# holds module paths and imports the class only when the name is built.
+SANDBOX_MODULES: dict[str, str] = {
+    "daytona": "mirage.runtime.sandbox.daytona:DaytonaRuntime",
+    "docker": "mirage.runtime.sandbox.docker:DockerRuntime",
+    "e2b": "mirage.runtime.sandbox.e2b:E2BRuntime",
+}
+
 # The default world when no runtimes list is given: today's behavior
 # exactly. Defaults build gracefully (a missing extra leaves the
 # command reporting its install hint per invocation); an explicitly
@@ -120,10 +131,13 @@ def build_runtime(name: str, **options: Any) -> Runtime:
             TypeScript-only names.
     """
     cls = NAMED.get(name)
+    if cls is None and name in SANDBOX_MODULES:
+        module_path, attr = SANDBOX_MODULES[name].split(":")
+        cls = getattr(importlib.import_module(module_path), attr)
     if cls is None:
         if name in TS_ONLY_HINTS:
             raise ValueError(TS_ONLY_HINTS[name])
-        known = ", ".join(repr(n) for n in NAMED)
+        known = ", ".join(repr(n) for n in (*NAMED, *SANDBOX_MODULES))
         raise ValueError(f"unknown runtime: {name!r} "
                          f"(expected one of {known})")
     return cls(**options)

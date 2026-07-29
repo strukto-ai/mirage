@@ -579,6 +579,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
         description: 'Write response body to the given file.',
       }),
       new Option({ short: '-L', description: 'Follow HTTP redirects.' }),
+      new Option({
+        short: '-f',
+        long: '--fail',
+        description: 'Fail with exit 22 on an HTTP error status.',
+      }),
       new Option({ short: '-s', description: 'Run silently with no progress or messages.' }),
       new Option({ short: '-S', description: 'Show errors even when silent.' }),
     ],

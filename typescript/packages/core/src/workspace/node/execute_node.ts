@@ -19,6 +19,7 @@ import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { makeAbortError } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {
   getCaseItems,
   getCaseWord,
@@ -415,10 +416,15 @@ export async function executeNode(
     let lastExec = new ExecutionNode({ command: '{}', exitCode: 0 })
     for (const child of node.namedChildren) {
       if (child.type === NT.COMMENT) continue
-      const [stdout, io, execNode] = await recurse(child, session, stdin, callStack)
+      const [rawStdout, io, execNode] = await recurse(child, session, stdin, callStack)
       lastExec = execNode
+      // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
+      // grep) finalize only once stdout is consumed (same as
+      // program / subshell).
+      const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      session.lastExitCode = io.exitCode
       if (
         io.exitCode !== 0 &&
         session.shellOptions.errexit === true &&

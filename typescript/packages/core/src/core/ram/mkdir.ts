@@ -17,10 +17,11 @@ import type { PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
-import { checkDestParents } from './dest.ts'
+import { checkDestParents, checkMkdirTarget } from './dest.ts'
 
 export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): Promise<void> {
   const p = norm(path.mountPath)
+  checkMkdirTarget(accessor, path, p, parents)
   if (parents) {
     const parts = stripSlash(p).split('/').filter(Boolean)
     let current = ''

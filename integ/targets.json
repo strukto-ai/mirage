@@ -75,6 +75,45 @@
       }
     },
     {
+      "id": "ram-history",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ],
+      "sessions": {
+        "s2": null
+      }
+    },
+    {
+      "id": "http-ram",
+      "facet": "http",
+      "service": "http",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "http_fixture",
+          "backend": "memory"
+        },
+        {
+          "path": "/ro",
+          "resource": "http_fixture",
+          "backend": "memory",
+          "mode": "read"
+        }
+      ]
+    },
+    {
       "id": "disk",
       "hosts": [
         "python",
@@ -1216,6 +1255,262 @@
           "resource": "ram",
           "backend": "memory",
           "fixture": "statvfs/v1"
+        }
+      ]
+    },
+    {
+      "id": "argerr-databricks",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/databricks",
+          "resource": "arg_error",
+          "backend": "databricks",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-discord",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/discord",
+          "resource": "arg_error",
+          "backend": "discord",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-email",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/email",
+          "resource": "arg_error",
+          "backend": "email",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gdocs",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gdocs",
+          "resource": "arg_error",
+          "backend": "gdocs",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gdrive",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gdrive",
+          "resource": "arg_error",
+          "backend": "gdrive",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-github_ci",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/github_ci",
+          "resource": "arg_error",
+          "backend": "github_ci",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gmail",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gmail",
+          "resource": "arg_error",
+          "backend": "gmail",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gsheets",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gsheets",
+          "resource": "arg_error",
+          "backend": "gsheets",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gslides",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gslides",
+          "resource": "arg_error",
+          "backend": "gslides",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-langfuse",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/langfuse",
+          "resource": "arg_error",
+          "backend": "langfuse",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-linear",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/linear",
+          "resource": "arg_error",
+          "backend": "linear",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-mem0",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/mem0",
+          "resource": "arg_error",
+          "backend": "mem0",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-onedrive",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/onedrive",
+          "resource": "arg_error",
+          "backend": "onedrive",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-sharepoint",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/sharepoint",
+          "resource": "arg_error",
+          "backend": "sharepoint",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-slack",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/slack",
+          "resource": "arg_error",
+          "backend": "slack",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-trello",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/trello",
+          "resource": "arg_error",
+          "backend": "trello",
+          "mode": "read"
         }
       ]
     }
