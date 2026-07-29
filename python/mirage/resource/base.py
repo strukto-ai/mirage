@@ -15,7 +15,7 @@
 from functools import partial
 from typing import Any, Callable
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import (IndexCacheStore, IndexConfig,
@@ -35,13 +35,6 @@ class BaseResource:
 
     name: str = "base"
     caches_reads: bool = False
-    # Whether the backing store lives remotely, reachable from its
-    # config alone. True unlocks reconstructing the resource elsewhere
-    # (e.g. FUSE-mounting it inside a sandbox), which serializes the
-    # config, credentials included, out to that remote. Opt-in per
-    # backend: leave False for anything local (RAM, disk) or that must
-    # not ship its secrets.
-    remote: bool = False
     accessor: Accessor = Accessor()
     _ops: dict[str, Callable[..., Any]] = {}
     PROMPT: str = ""
@@ -89,28 +82,6 @@ class BaseResource:
     @property
     def index(self) -> IndexCacheStore:
         return self._index
-
-    def remote_mount_spec(self) -> dict[str, Any] | None:
-        """How a remote host can mount this resource's backing store.
-
-        A serializable ``{"resource": <registry name>, "config":
-        {...}}`` including credentials, enough for another mirage
-        process (e.g. inside a sandbox) to construct the same resource
-        and mount it. Generic for any backend that opts in with
-        ``remote`` and holds a pydantic ``config``; None (the default)
-        means the backing store is not remotely reachable, e.g. RAM or
-        a local disk.
-        """
-        config = getattr(self, "config", None)
-        if not self.remote or not isinstance(config, BaseModel):
-            return None
-        dumped = config.model_dump(exclude_none=True)
-        spec_config = {
-            key: (value.get_secret_value()
-                  if isinstance(value, SecretStr) else value)
-            for key, value in dumped.items()
-        }
-        return {"resource": self.name, "config": spec_config}
 
     async def resolve_glob(self,
                            paths: list[str | PathSpec],

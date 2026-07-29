@@ -32,7 +32,6 @@ class GSlidesResource(BaseResource):
 
     accessor: GSlidesAccessor
     name: str = ResourceName.GSLIDES
-    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT

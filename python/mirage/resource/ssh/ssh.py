@@ -71,7 +71,6 @@ class SSHResource(BaseResource):
 
     accessor: SSHAccessor
     name: str = ResourceName.SSH
-    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _SSH_OPS
     PROMPT: str = PROMPT

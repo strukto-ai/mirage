@@ -60,7 +60,6 @@ class HfBucketsResource(BaseResource):
 
     accessor: HfBucketsAccessor
     name: str = ResourceName.HF_BUCKETS
-    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _OPS
     PROMPT: str = PROMPT

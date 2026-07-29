@@ -28,13 +28,7 @@ export type E2bSdk = typeof e2bSdk
 
 const ENC = new TextEncoder()
 
-export const E2B_OPTION_KEYS: readonly string[] = [
-  'captures',
-  'config',
-  'workspaceRoot',
-  'script',
-  'mount',
-]
+export const E2B_OPTION_KEYS: readonly string[] = ['captures', 'config', 'script']
 
 /**
  * An E2B sandbox the user runs as a whole-line runtime.

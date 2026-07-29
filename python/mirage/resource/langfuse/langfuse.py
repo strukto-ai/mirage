@@ -29,7 +29,6 @@ class LangfuseResource(BaseResource):
 
     accessor: LangfuseAccessor
     name: str = ResourceName.LANGFUSE
-    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
 

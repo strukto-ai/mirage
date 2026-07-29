@@ -91,7 +91,6 @@ export type {
   WorkspaceStateDict,
 } from './workspace/snapshot/types.ts'
 export { BaseResource, type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
-export { remoteSpec } from './resource/spec.ts'
 export {
   hasRedactedSecret,
   REDACTED_SECRET,
@@ -501,22 +500,13 @@ export {
   registerRuntime,
   RUNTIMES,
 } from './workspace/executor/runtime_table.ts'
-export {
-  RemoteSandbox,
-  type MountSpecs,
-  type RemoteSandboxOptions,
-} from './workspace/executor/sandbox/base.ts'
+export { RemoteSandbox, type RemoteSandboxOptions } from './workspace/executor/sandbox/base.ts'
 export {
   coerceConfig,
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './workspace/executor/sandbox/config.ts'
-export {
-  SANDBOX_WORKSPACE_ID,
-  STDIN_PATH,
-  SYSTEM_MOUNTS,
-  WORKSPACE_CONFIG_ENV,
-} from './workspace/executor/sandbox/constants.ts'
+export { STDIN_PATH } from './workspace/executor/sandbox/constants.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'

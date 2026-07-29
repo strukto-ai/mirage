@@ -29,7 +29,6 @@ class MongoDBResource(BaseResource):
 
     accessor: MongoDBAccessor
     name: str = ResourceName.MONGODB
-    remote: bool = True
     caches_reads: bool = False
     PROMPT: str = PROMPT
 

@@ -55,7 +55,6 @@ class SharePointResource(BaseResource):
 
     accessor: SharePointAccessor
     name: str = ResourceName.SHAREPOINT
-    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _SHAREPOINT_OPS
     PROMPT: str = PROMPT

@@ -13,23 +13,22 @@ a guest), here the guest has its own `/dev/fuse` and runs Mirage itself.
 
 ```
 your machine (control plane)                 Daytona sandbox (yours)
-  Workspace: /data -> S3Resource               mirage workspace create (from env)
-  captures ["python3"] -> DaytonaRuntime  -->    -> in-sandbox daemon
-  vfs runs every other line locally             -> FUSE-mounts S3 at
-                                                    /home/daytona/workspace/data
-  cd /data; python3 train.py  ------------>      cwd rebased; train.py reads the mount
+  Workspace: /data -> S3Resource               provisioned by you:
+  captures ["python3"] -> DaytonaRuntime  -->    mirage workspace create sandbox.yaml
+  vfs runs every other line locally              -> FUSE-mounts S3 at /data
+  cd /data; python3 train.py  ------------>    cwd passes through; train.py reads /data
 ```
 
 1. The workspace declares `/data` as an `S3Resource`. A `DaytonaRuntime` captures
    `python3` lines; everything else stays on the local vfs.
-1. Mirage never creates or deletes sandboxes: you create one (below) and hand
-   the runtime its `sandbox_id`. On the first captured line mirage connects and
-   creates **one in-sandbox workspace** mirroring the host mounts (the config
-   travels in the exec environment, never as a file); the mounts are served live
-   from then on.
-1. Mounts appear at `<workspace_root>/<prefix>` and the session cwd is rebased
-   under the workspace root, so paths relative to the cwd just work. Mirage does
-   not rewrite paths inside your command: keep them relative to the cwd.
+1. Mirage never creates, provisions, or deletes sandboxes: you create one
+   (below), provision the workspace inside it (`create_sandbox.py` does both:
+   it uploads a sandbox-side config with the same mount at the same prefix and
+   runs `mirage workspace create` in the sandbox), and hand the runtime its
+   `sandbox_id`. Mirage only connects and execs lines.
+1. The sandbox serves the same prefixes as the host, so the line, its cwd, and
+   every path pass through verbatim: `/data` means the same thing on both
+   sides, relative or absolute.
 
 ## Prerequisites
 
@@ -56,8 +55,8 @@ seconds. Re-run after a Mirage release to refresh the baked package.
 
 ## Run: the workspace runtime (CLI)
 
-Create a sandbox from the snapshot (prints its id), then wire the workspace to
-it. From the repo root:
+Create and provision a sandbox from the snapshot (prints its id; provisioning
+status goes to stderr), then wire the workspace to it. From the repo root:
 
 ```bash
 set -a; source .env.development; set +a
@@ -68,7 +67,7 @@ mirage workspace create examples/python/runtimes/daytona/daytona_workspace.yaml 
 printf 'print("hello from the sandbox")\n' \
   | mirage execute -w daytona-demo -c 'cat > /data/hello.py'
 
-# Relative path from the rebased cwd; mirage does not rewrite absolute paths.
+# Same prefix on both sides, so the path passes through verbatim.
 mirage execute -w daytona-demo -c 'cd /data && python3 hello.py'
 
 mirage workspace delete daytona-demo   # the sandbox stays yours

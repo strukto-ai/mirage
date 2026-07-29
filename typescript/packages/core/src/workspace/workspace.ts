@@ -99,7 +99,7 @@ import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
-import { rstripSlash, stripSlash } from '../utils/slash.ts'
+import { stripSlash } from '../utils/slash.ts'
 import type { WatchRuntime } from '../watch/base.ts'
 import { Watcher } from '../watch/watcher.ts'
 
@@ -358,11 +358,7 @@ export class Workspace {
     for (const entry of this.runtimeEntries) {
       if (typeof entry.script === 'string')
         throw scriptStringError(`runtime '${entry.name}' script`)
-      entry.attach(
-        this.buildWorkspaceBridge(),
-        () => this.sandboxVisibleMounts(),
-        () => this.sandboxMountSpecs(),
-      )
+      entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
       this.closers.push(() => entry.close())
     }
     this.runtimeBindings = bindCommands(this.runtimeEntries)
@@ -452,22 +448,6 @@ export class Workspace {
   }
 
   /**
-   * Per-prefix remote mount specs for sandbox runtimes: each mount
-   * prefix (trailing slash stripped) to its resource's
-   * remoteMountSpec(), null where the backing store is not remotely
-   * reachable. Read per run, like the prefixes.
-   */
-  private sandboxMountSpecs(): Record<string, Record<string, unknown> | null> {
-    const specs: Record<string, Record<string, unknown> | null> = {}
-    for (const m of this.registry.allMounts()) {
-      const stripped = rstripSlash(m.prefix)
-      const prefix = stripped === '' ? '/' : stripped
-      specs[prefix] = m.resource.remoteMountSpec?.() ?? null
-    }
-    return specs
-  }
-
-  /**
    * Append a runtime entry to the workspace's ordered world.
    *
    * The entry lands last, so it never steals a command an earlier
@@ -480,11 +460,7 @@ export class Workspace {
     if (typeof entry.script === 'string') throw scriptStringError(`runtime '${entry.name}' script`)
     const candidate = [...this.runtimeEntries, entry]
     const bindings = bindCommands(candidate)
-    entry.attach(
-      this.buildWorkspaceBridge(),
-      () => this.sandboxVisibleMounts(),
-      () => this.sandboxMountSpecs(),
-    )
+    entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
     this.closers.push(() => entry.close())
     this.runtimeEntries.push(entry)
     this.runtimeBindings = bindings

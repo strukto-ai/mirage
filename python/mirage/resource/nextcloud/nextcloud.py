@@ -35,7 +35,6 @@ class NextcloudResource(BaseResource):
 
     accessor: NextcloudAccessor
     name: str = ResourceName.NEXTCLOUD
-    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _NEXTCLOUD_OPS
     PROMPT: str = PROMPT

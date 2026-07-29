@@ -50,7 +50,6 @@ class DropboxResource(BaseResource):
 
     accessor: DropboxAccessor
     name: str = ResourceName.DROPBOX
-    remote: bool = True
     caches_reads: bool = True
     index_ttl: float = 86_400
     _ops: dict[str, Any] = _DROPBOX_OPS

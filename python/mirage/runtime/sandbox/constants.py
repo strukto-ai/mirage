@@ -12,24 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.history import HISTORY_PREFIX
-
-# Virtual mounts the workspace synthesizes; the sandbox has its own.
-SYSTEM_MOUNTS: frozenset[str] = frozenset({"/dev", HISTORY_PREFIX})
-
-# The in-sandbox `mirage workspace create` reads its config from this
-# variable; the config travels in the exec environment, never on disk
-# or argv.
-WORKSPACE_CONFIG_ENV = "MIRAGE_WORKSPACE_CONFIG"
-
-# The one in-sandbox workspace mirroring the host workspace's mounts
-# (one workspace serves one host workspace; a host workspace may fan
-# out to many sandboxes).
-SANDBOX_WORKSPACE_ID = "sandbox"
-
-# Where the workspace lands when no workspace_root is configured.
-DEFAULT_WORKSPACE_ROOT = "/workspace"
-
 # Providers whose exec API has no stdin stream (Daytona, e2b) upload
 # piped bytes here and redirect them into the line.
 STDIN_PATH = "/tmp/.mirage_stdin"

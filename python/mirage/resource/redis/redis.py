@@ -79,7 +79,6 @@ class RedisResource(BaseResource):
 
     accessor: RedisAccessor
     name: str = ResourceName.REDIS
-    remote: bool = True
     index_ttl: float = 0
     _ops: dict[str, Any] = _REDIS_OPS
     PROMPT: str = PROMPT

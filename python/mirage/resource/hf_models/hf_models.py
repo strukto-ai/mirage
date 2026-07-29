@@ -60,7 +60,6 @@ class HfModelsResource(BaseResource):
 
     accessor: HfModelsAccessor
     name: str = ResourceName.HF_MODELS
-    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _OPS
     PROMPT: str = PROMPT

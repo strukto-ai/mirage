@@ -31,7 +31,6 @@ class JaegerResource(BaseResource):
 
     accessor: JaegerAccessor
     name: str = ResourceName.JAEGER
-    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
 

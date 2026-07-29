@@ -35,7 +35,6 @@ class GitHubResource(BaseResource):
 
     accessor: GitHubAccessor
     name: str = ResourceName.GITHUB
-    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
 

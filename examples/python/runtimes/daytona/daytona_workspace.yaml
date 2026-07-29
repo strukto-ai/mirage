@@ -1,8 +1,9 @@
 # S3-centered workspace with a Daytona whole-line runtime.
 #
-# Mirage never creates or deletes sandboxes: create one yourself from
-# the mirage-fuse snapshot (prebake_snapshot.py builds it once), then
-# point the runtime at its id.
+# Mirage never creates, provisions, or deletes sandboxes: create one
+# yourself from the mirage-fuse snapshot (prebake_snapshot.py builds
+# it once; create_sandbox.py creates the sandbox AND provisions the
+# in-sandbox workspace), then point the runtime at its id.
 #
 #   set -a; source .env.development; set +a
 #   export DAYTONA_SANDBOX_ID=$(./python/.venv/bin/python \
@@ -14,13 +15,10 @@
 #   mirage workspace delete daytona-demo   # the sandbox stays yours
 #
 # Captured lines (python3, pip) run whole inside the Daytona sandbox;
-# every other command stays on the local vfs. On the first captured
-# line mirage connects to the sandbox and creates one in-sandbox
-# workspace mirroring these mounts, FUSE-mounted live under
-# workspace_root, so a remote write shows up in /data immediately with
-# no sync step. The session cwd is rebased under workspace_root, so
-# paths relative to the cwd just work; mirage does not rewrite
-# absolute paths in the command.
+# every other command stays on the local vfs. The sandbox serves the
+# same mount at the same prefix (create_sandbox.py FUSE-mounts S3 at
+# /data inside it), so the line, its cwd, and every path pass through
+# verbatim: /data means the same thing on both sides.
 #
 # Sizing, GPUs, and lifecycle (idle-stop, auto-delete) are Daytona
 # settings you pick when you create the sandbox; mirage never touches
@@ -42,7 +40,6 @@ runtimes:
   - name: daytona
     captures: ["python3", "pip"]
     config:
-      sandbox_id: ${DAYTONA_SANDBOX_ID} # a sandbox you created
+      sandbox_id: ${DAYTONA_SANDBOX_ID} # a sandbox you created and provisioned
       api_key: ${DAYTONA_API_KEY}
-    workspace_root: /home/daytona/workspace # writable by the sandbox user
   - vfs

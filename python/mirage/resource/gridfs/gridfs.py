@@ -70,7 +70,6 @@ class GridFSResource(BaseResource):
 
     accessor: GridFSAccessor
     name: str = ResourceName.GRIDFS
-    remote: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _GRIDFS_OPS
     PROMPT: str = PROMPT

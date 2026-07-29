@@ -22,13 +22,7 @@ import {
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 import { DOCKER_CLI_HINT } from './constants.ts'
 
-export const DOCKER_OPTION_KEYS: readonly string[] = [
-  'captures',
-  'config',
-  'workspaceRoot',
-  'script',
-  'mount',
-]
+export const DOCKER_OPTION_KEYS: readonly string[] = ['captures', 'config', 'script']
 
 interface DockerResult {
   stdout: Uint8Array

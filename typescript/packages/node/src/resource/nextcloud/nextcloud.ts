@@ -39,7 +39,6 @@ import {
   type NextcloudConfigRedacted,
 } from './config.ts'
 import { NEXTCLOUD_PROMPT } from './prompt.ts'
-import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveGlobCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
 
@@ -189,10 +188,6 @@ export class NextcloudResource extends BaseResource implements Resource {
 
   deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
-  }
-
-  remoteMountSpec(): Record<string, unknown> {
-    return remoteSpec('nextcloud', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<NextcloudResourceState> {

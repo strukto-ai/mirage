@@ -33,7 +33,6 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactJaegerConfig, type JaegerConfig, type JaegerConfigRedacted } from './config.ts'
-import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveJaegerGlob = makeResolveGlob(jaegerReaddir)
 
@@ -117,10 +116,6 @@ export class JaegerResource extends BaseResource implements Resource {
           )
         : paths
     return resolveJaegerGlob(this.accessor, effective, this.index)
-  }
-
-  remoteMountSpec(): Record<string, unknown> {
-    return remoteSpec('jaeger', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<JaegerResourceState> {

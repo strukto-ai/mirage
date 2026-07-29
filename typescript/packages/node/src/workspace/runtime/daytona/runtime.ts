@@ -28,13 +28,7 @@ export type DaytonaSdk = typeof daytonaSdk
 
 const ENC = new TextEncoder()
 
-export const DAYTONA_OPTION_KEYS: readonly string[] = [
-  'captures',
-  'config',
-  'workspaceRoot',
-  'script',
-  'mount',
-]
+export const DAYTONA_OPTION_KEYS: readonly string[] = ['captures', 'config', 'script']
 
 /**
  * A Daytona sandbox the user runs as a whole-line runtime.

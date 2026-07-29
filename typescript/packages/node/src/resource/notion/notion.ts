@@ -34,7 +34,6 @@ import {
   type Resource,
 } from '@struktoai/mirage-core'
 import { redactNotionConfig, type NotionConfig, type NotionConfigRedacted } from './config.ts'
-import { remoteSpec } from '@struktoai/mirage-core'
 
 const resolveNotionGlob = makeResolveGlob<NotionAccessor>(notionReaddir)
 
@@ -104,10 +103,6 @@ export class NotionResource extends BaseResource implements Resource {
           )
         : paths
     return resolveNotionGlob(this.accessor, effective, this.index)
-  }
-
-  remoteMountSpec(): Record<string, unknown> {
-    return remoteSpec('notion', this.config as unknown as Record<string, unknown>)
   }
 
   getState(): Promise<NotionResourceState> {

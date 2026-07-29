@@ -25,7 +25,6 @@ import { ResourceName, type FileStat, type PathSpec } from '../../types.ts'
 import { BaseResource, type Resource } from '../base.ts'
 import { resolveChromaConfig, type ChromaConfig, type ChromaConfigResolved } from './config.ts'
 import { CHROMA_PROMPT } from './prompt.ts'
-import { remoteSpec } from '../spec.ts'
 
 const resolveGlob = makeResolveGlob(chromaReaddir)
 
@@ -78,9 +77,5 @@ export class ChromaResource extends BaseResource implements Resource {
 
   stat(p: PathSpec): Promise<FileStat> {
     return chromaStat(this.accessor, p, this.index)
-  }
-
-  remoteMountSpec(): Record<string, unknown> {
-    return remoteSpec('chroma', this.config as unknown as Record<string, unknown>)
   }
 }

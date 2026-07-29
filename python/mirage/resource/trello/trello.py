@@ -29,7 +29,6 @@ class TrelloResource(BaseResource):
 
     accessor: TrelloAccessor
     name: str = ResourceName.TRELLO
-    remote: bool = True
     caches_reads: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT

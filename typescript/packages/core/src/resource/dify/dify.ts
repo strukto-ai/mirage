@@ -25,7 +25,6 @@ import { ResourceName, type FileStat, type PathSpec } from '../../types.ts'
 import { BaseResource, type Resource } from '../base.ts'
 import { resolveDifyConfig, type DifyConfig, type DifyConfigResolved } from './config.ts'
 import { DIFY_PROMPT } from './prompt.ts'
-import { remoteSpec } from '../spec.ts'
 
 const resolveGlob = makeResolveGlob(difyReaddir)
 
@@ -78,9 +77,5 @@ export class DifyResource extends BaseResource implements Resource {
 
   stat(p: PathSpec): Promise<FileStat> {
     return difyStat(this.accessor, p, this.index)
-  }
-
-  remoteMountSpec(): Record<string, unknown> {
-    return remoteSpec('dify', this.config as unknown as Record<string, unknown>)
   }
 }

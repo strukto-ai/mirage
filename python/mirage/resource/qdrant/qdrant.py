@@ -29,7 +29,7 @@ class QdrantResource(BaseResource):
 
     accessor: QdrantAccessor
     name: str = ResourceName.QDRANT
-    remote: bool = True
+    is_remote: bool = True
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = False
 

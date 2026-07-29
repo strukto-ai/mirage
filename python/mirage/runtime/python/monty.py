@@ -253,13 +253,8 @@ class MontyRuntime(Runtime):
                 "pip install mirage-ai[monty], or select the 'local' runtime")
         self._workspace_dispatch = dispatch
 
-    def attach(
-        self,
-        dispatch: Callable[..., Any],
-        mount_prefixes: Callable[[], list[str]],
-        mount_specs: Callable[[], dict[str, dict[str, Any] | None]]
-        | None = None,
-    ) -> None:
+    def attach(self, dispatch: Callable[..., Any],
+               mount_prefixes: Callable[[], list[str]]) -> None:
         if self._workspace_dispatch is None:
             self._workspace_dispatch = dispatch
 

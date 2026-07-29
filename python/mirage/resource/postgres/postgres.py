@@ -29,7 +29,6 @@ class PostgresResource(BaseResource):
 
     accessor: PostgresAccessor
     name: str = ResourceName.POSTGRES
-    remote: bool = True
     caches_reads: bool = False
     PROMPT: str = PROMPT
 

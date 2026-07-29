@@ -64,16 +64,9 @@ export interface Runtime {
   /**
    * Late-wire workspace I/O into a user-constructed instance. The
    * workspace attaches its dispatch bridge at construction; runtimes
-   * that never touch workspace files keep this a no-op. The optional
-   * third callable gives per-prefix remote mount specs (each
-   * resource's remoteMountSpec()), for runtimes that reproduce the
-   * mounts elsewhere; most runtimes ignore it.
+   * that never touch workspace files keep this a no-op.
    */
-  attach(
-    dispatch: BridgeDispatchFn,
-    listMounts: () => string[],
-    listMountSpecs?: () => Record<string, Record<string, unknown> | null>,
-  ): void
+  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void
   run(args: RunArgs): Promise<RunResult>
   /**
    * Execute one raw command line wholesale. Only runtimes with
