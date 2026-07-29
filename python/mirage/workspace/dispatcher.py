@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import time
 from typing import Any
 
 from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
 from mirage.io import IOResult
 from mirage.observe.record import OpRecord
-from mirage.ops.config import NO_FOLLOW_OPS
+from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountEntry
@@ -92,7 +93,8 @@ class Dispatcher:
             result = merge_overlay_stat(self._namespace.meta_for(path.virtual),
                                         result)
         if op in _DISPATCH_WRITE_OPS:
-            await self.invalidate_after_write(mount, path)
+            observed = time.time() if op in STAMP_WRITE_OPS else None
+            await self.invalidate_after_write(mount, path, observed=observed)
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
                 await self.invalidate_after_write(mount, kwargs["dst"])
         return result, IOResult()
@@ -128,7 +130,10 @@ class Dispatcher:
             return False
         return mount.resource.caches_reads
 
-    async def invalidate_after_write_by_path(self, path: str) -> None:
+    async def invalidate_after_write_by_path(self,
+                                             path: str,
+                                             observed: float | None = None
+                                             ) -> None:
         """Drop file-cache + stale parent index after a write to `path`.
 
         Single source of truth for post-write invalidation. Called from
@@ -147,11 +152,13 @@ class Dispatcher:
             return
         spec = PathSpec.from_str_path(
             path, mount_key(path, mount.prefix.rstrip("/")))
-        await self.invalidate_after_write(mount, spec)
+        await self.invalidate_after_write(mount, spec, observed=observed)
 
-    async def invalidate_after_write(self, mount: MountEntry,
-                                     path: PathSpec) -> None:
-        await self._namespace.clear_times(path.virtual)
+    async def invalidate_after_write(self,
+                                     mount: MountEntry,
+                                     path: PathSpec,
+                                     observed: float | None = None) -> None:
+        await self._namespace.clear_times(path.virtual, observed=observed)
         manager = mount.cache_manager
         if manager is None:
             manager = CacheManager(self._cache, mount.resource.index,

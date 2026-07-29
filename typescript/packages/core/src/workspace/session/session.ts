@@ -98,6 +98,14 @@ export class Session {
   // value stale, restarting the scan, matching bash's char pointer.
   getoptsPos = 0
   getoptsOptind: number | null = null
+  // Command-substitution tracking for assignment statements: how many
+  // substitutions have run in this session, and the status of the
+  // most recent one. An assignment statement snapshots the count
+  // before expanding its value and, when it grew, reports the last
+  // substitution's status as its own (bash: `x=$(false)` exits 1,
+  // `x=abc` exits 0).
+  cmdsubSeq = 0
+  cmdsubStatus = 0
   mountModes: ReadonlyMap<string, MountMode> | null
   generation: number
   pipelineTimeoutSeconds: number | null
@@ -150,6 +158,8 @@ export class Session {
     })
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
+    forked.cmdsubSeq = this.cmdsubSeq
+    forked.cmdsubStatus = this.cmdsubStatus
     return forked
   }
 

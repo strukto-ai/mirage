@@ -20,7 +20,6 @@ from mirage.commands.builtin.utils.safeguard import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, close_quietly, merge_stdout_stderr
 from mirage.io.types import ByteSource, materialize
-from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
@@ -28,6 +27,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.executor.jobs import handle_background
+from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -151,9 +151,7 @@ async def handle_connection(
     children = [left_exec]
 
     if op == NT.AND:
-        left_bytes = await apply_barrier(left_stdout, left_io,
-                                         BarrierPolicy.VALUE)
-        session.last_exit_code = left_io.exit_code
+        left_bytes = await finish_statement(left_stdout, left_io, session)
         if left_io.exit_code != 0:
             # The failing command is left of the final `&&`, which bash
             # exempts from `set -e`.
@@ -174,9 +172,7 @@ async def handle_connection(
                                                children=children)
 
     if op == NT.OR:
-        left_bytes = await apply_barrier(left_stdout, left_io,
-                                         BarrierPolicy.VALUE)
-        session.last_exit_code = left_io.exit_code
+        left_bytes = await finish_statement(left_stdout, left_io, session)
         if left_io.exit_code == 0:
             return left_bytes, left_io, ExecutionNode(
                 op="||", exit_code=left_io.exit_code, children=children)
@@ -194,8 +190,7 @@ async def handle_connection(
                                                children=children)
 
     # semicolon or other
-    left_bytes = await apply_barrier(left_stdout, left_io, BarrierPolicy.VALUE)
-    session.last_exit_code = left_io.exit_code
+    left_bytes = await finish_statement(left_stdout, left_io, session)
     try:
         right_stdout, right_io, right_exec = await execute_node(
             right, session, stdin, call_stack)
@@ -287,14 +282,10 @@ async def handle_subshell(
                                           exit_code=sig.contained_code,
                                           stderr=sig.stderr)
                 break
-            # Barrier before seeding $?: lazy exit codes (exit_on_empty
-            # in grep) finalize only once stdout is consumed, and
-            # handle_connection does the same for top-level lists.
-            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+            stdout = await finish_statement(stdout, io, session)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
-            session.last_exit_code = io.exit_code
             if (io.exit_code != 0 and session.shell_options.get("errexit")
                     and child.type not in ERREXIT_EXEMPT_TYPES
                     and not session.errexit_immune):

@@ -45,4 +45,21 @@ describe('mergeOverlayStat', () => {
     const merged = mergeOverlayStat({ target: '/other', mtime: 1767312000 }, base)
     expect(merged.modified).toBe('2026-01-01T00:00:00Z')
   })
+
+  it('observed mtime defers to a backend-reported mtime', () => {
+    const merged = mergeOverlayStat({ observedMtime: 1767312000 }, base)
+    expect(merged.modified).toBe('2026-01-01T00:00:00Z')
+  })
+
+  it('observed mtime fills a missing backend mtime', () => {
+    const bare = new FileStat({ name: 'f.txt', size: 3 })
+    const merged = mergeOverlayStat({ observedMtime: 1767312000 }, bare)
+    expect(merged.modified).toBe('2026-01-02T00:00:00Z')
+  })
+
+  it('explicit mtime beats observed', () => {
+    const bare = new FileStat({ name: 'f.txt', size: 3 })
+    const merged = mergeOverlayStat({ mtime: 1767312000, observedMtime: 1767398400 }, bare)
+    expect(merged.modified).toBe('2026-01-02T00:00:00Z')
+  })
 })

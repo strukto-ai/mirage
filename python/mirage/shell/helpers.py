@@ -130,6 +130,40 @@ def get_for_parts(
     return variable, values, body
 
 
+def get_cfor_parts(
+    node: tree_sitter.Node,
+) -> tuple[list[tree_sitter.Node | None], list[tree_sitter.Node]]:
+    """Get ([init, cond, update], body_commands) from a C-style for.
+
+    The expression slots are positional between the (( )) delimiters,
+    separated by `;` tokens, and any of them may be empty (None):
+    `for ((;;))`.
+
+    Args:
+        node (tree_sitter.Node): the c_style_for_statement node.
+    """
+    exprs: list[tree_sitter.Node | None] = [None, None, None]
+    slot = 0
+    inside = False
+    body: list[tree_sitter.Node] = []
+    for child in node.children:
+        if child.type == NT.ARITH_OPEN:
+            inside = True
+            continue
+        if child.type == NT.ARITH_CLOSE:
+            inside = False
+            continue
+        if inside:
+            if child.type == NT.SEMI:
+                slot += 1
+            elif child.is_named and slot < 3:
+                exprs[slot] = child
+            continue
+        if child.type == NT.DO_GROUP:
+            body = list(child.named_children)
+    return exprs, body
+
+
 def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     """Get body commands from subshell."""
     return list(node.named_children)

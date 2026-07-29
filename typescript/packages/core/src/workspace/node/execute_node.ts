@@ -20,10 +20,12 @@ import type { Resource } from '../../resource/base.ts'
 import { makeAbortError } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { assignmentStatus, finishStatement } from '../executor/statement.ts'
 import {
   getCaseItems,
   getCaseWord,
   getDeclarationKeyword,
+  getCforParts,
   getForParts,
   getFunctionBody,
   getFunctionName,
@@ -55,7 +57,9 @@ import { expandAndClassify } from '../expand/parts.ts'
 import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
 import { wordText } from '../../types.ts'
 import {
+  type CforEval,
   handleCase,
+  handleCfor,
   handleFor,
   handleIf,
   handleSelect,
@@ -94,6 +98,34 @@ type Recurse = (
 // Array-literal elements behave like any other shell word list: command
 // substitutions word-split and globs resolve to matches
 // (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
+/**
+ * Evaluate one C-style for expression slot: the slot's integer value,
+ * or the default for an empty slot (1 for the condition so `for
+ * ((;;))` loops, 0 for init/update). Re-raises ArithError with the
+ * expression text prepended so the loop can print bash's
+ * `((: expr: reason` diagnostic.
+ */
+async function evalCforExpr(
+  expr: TSNodeLike | null,
+  dflt: number,
+  session: Session,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
+): Promise<number> {
+  if (expr === null) return dflt
+  const text = await expandArith(expr, session, executeFn, callStack)
+  let value: bigint
+  let updates: Record<string, string>
+  try {
+    ;({ value, updates } = evaluateArith(text, session.env))
+  } catch (err) {
+    if (!(err instanceof ArithError)) throw err
+    throw new ArithError(`${text}: ${err.message}`)
+  }
+  Object.assign(session.env, updates)
+  return Number(value)
+}
+
 async function expandArrayItems(
   arrayNode: TSNodeLike,
   session: Session,
@@ -418,13 +450,9 @@ export async function executeNode(
       if (child.type === NT.COMMENT) continue
       const [rawStdout, io, execNode] = await recurse(child, session, stdin, callStack)
       lastExec = execNode
-      // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
-      // grep) finalize only once stdout is consumed (same as
-      // program / subshell).
-      const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
+      const stdout = await finishStatement(rawStdout, io, session)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
-      session.lastExitCode = io.exitCode
       if (
         io.exitCode !== 0 &&
         session.shellOptions.errexit === true &&
@@ -446,6 +474,12 @@ export async function executeNode(
   if (kind === NodeKind.IF) {
     const [branches, elseBody] = getIfBranches(node)
     return handleIf(recurse, branches, elseBody, session, stdin, callStack)
+  }
+
+  if (kind === NodeKind.CFOR) {
+    const [exprs, body] = getCforParts(node)
+    const evalExpr: CforEval = (e, d) => evalCforExpr(e, d, session, executeFn, callStack)
+    return handleCfor(recurse, exprs, body, evalExpr, session, stdin, callStack)
   }
 
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
@@ -610,7 +644,10 @@ export async function executeNode(
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
-    const [stdout, io, execNode] = await recurse(inner, session, stdin, callStack)
+    const [rawStdout, io, execNode] = await recurse(inner, session, stdin, callStack)
+    // Lazy exit codes (exitOnEmpty in grep) must be final before
+    // inverting, or `! grep miss f` negates the provisional 0.
+    const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
     const flipped = new IOResult({
       exitCode: io.exitCode !== 0 ? 0 : 1,
       stderr: io.stderr,
@@ -628,6 +665,7 @@ export async function executeNode(
     if (!text.includes('=')) {
       return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
     }
+    const subSeq = session.cmdsubSeq
     const subscriptNode = node.namedChildren.find((c) => c.type === 'subscript') ?? null
     const nameSource = subscriptNode ?? node
     const nameNode = nameSource.namedChildren.find((c) => c.type === NT.VARIABLE_NAME)
@@ -665,7 +703,12 @@ export async function executeNode(
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete session.env[key]
       }
-      return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
+      const arrCode = assignmentStatus(session, subSeq)
+      return [
+        null,
+        new IOResult({ exitCode: arrCode }),
+        new ExecutionNode({ command: text, exitCode: arrCode }),
+      ]
     }
     let val = text.slice(eq + 1)
     if (firstVal !== undefined) {
@@ -701,7 +744,12 @@ export async function executeNode(
       }
       arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
       session.arrays[key] = arr
-      return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
+      const subCode = assignmentStatus(session, subSeq)
+      return [
+        null,
+        new IOResult({ exitCode: subCode }),
+        new ExecutionNode({ command: text, exitCode: subCode }),
+      ]
     }
     if (append) {
       const arr = session.arrays[key]
@@ -718,11 +766,28 @@ export async function executeNode(
     // Reassigning OPTIND (even to its current value) restarts the getopts
     // scan, matching bash's internal char pointer.
     if (key === 'OPTIND') session.getoptsOptind = null
-    const assignIo = new IOResult()
+    const code = assignmentStatus(session, subSeq)
+    const assignIo = new IOResult({ exitCode: code })
     if (session.shellOptions.xtrace === true) {
       assignIo.stderr = traceAssignment(key, val, append)
     }
-    return [null, assignIo, new ExecutionNode({ command: text, exitCode: 0 })]
+    return [null, assignIo, new ExecutionNode({ command: text, exitCode: code })]
+  }
+
+  // Assignment-only statement (a=1 b=2).
+  if (kind === NodeKind.VAR_ASSIGNS) {
+    const subSeq = session.cmdsubSeq
+    let mergedIo = new IOResult()
+    for (const child of node.namedChildren) {
+      if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
+      const [, io] = await recurse(child, session, stdin, callStack)
+      mergedIo = await mergedIo.merge(io)
+    }
+    // The statement's status follows the last command substitution
+    // performed across ALL its assignments, not the last child's.
+    const code = assignmentStatus(session, subSeq)
+    mergedIo.exitCode = code
+    return [null, mergedIo, new ExecutionNode({ command: getText(node), exitCode: code })]
   }
 
   // Constructs the parser accepts but the executor cannot honor (e.g.

@@ -642,6 +642,7 @@ class NodeMetaKey(StrEnum):
     UID = "uid"
     GID = "gid"
     ATIME = "atime"
+    OBSERVED_MTIME = "observed_mtime"
 
 
 class SessionKey(StrEnum):

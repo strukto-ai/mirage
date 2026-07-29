@@ -35,6 +35,12 @@ export interface NodeMeta {
   uid?: number | string
   gid?: number | string
   atime?: string
+  // Time of the last content write observed through mirage. Unlike
+  // `mtime` (an explicit touch, which wins over the backend), this is
+  // a fallback that only surfaces when the backend reports no modified
+  // time at all, so `find -mtime` works on mtime-less backends for
+  // files written through mirage.
+  observedMtime?: number
 }
 
 export interface SetAttrsFields {
@@ -53,6 +59,7 @@ function metaToFields(meta: NodeMeta): NodeFields {
   if (meta.uid !== undefined) out.uid = meta.uid
   if (meta.gid !== undefined) out.gid = meta.gid
   if (meta.atime !== undefined) out.atime = meta.atime
+  if (meta.observedMtime !== undefined) out.observed_mtime = meta.observedMtime
   return out
 }
 
@@ -64,6 +71,7 @@ function metaFromFields(fields: NodeFields): NodeMeta {
   if (typeof fields.uid === 'number' || typeof fields.uid === 'string') meta.uid = fields.uid
   if (typeof fields.gid === 'number' || typeof fields.gid === 'string') meta.gid = fields.gid
   if (typeof fields.atime === 'string') meta.atime = fields.atime
+  if (typeof fields.observed_mtime === 'number') meta.observedMtime = fields.observed_mtime
   return meta
 }
 
@@ -251,11 +259,19 @@ export class Namespace {
     return true
   }
 
-  async clearTimes(path: string): Promise<void> {
-    const meta = this.nodeTable.get(path)
+  async clearTimes(path: string, observed: number | null = null): Promise<void> {
+    let meta = this.nodeTable.get(path)
+    if (meta === undefined && observed !== null) {
+      meta = {}
+      this.nodeTable.set(path, meta)
+    }
     if (meta === undefined || meta.target !== undefined) return
     delete meta.mtime
     delete meta.atime
+    // null (a removal) also drops any prior observed time, so a
+    // deleted path's meta does not linger.
+    if (observed === null) delete meta.observedMtime
+    else meta.observedMtime = observed
     if (Object.keys(meta).length === 0) {
       this.nodeTable.delete(path)
       await this.store.delete([path])

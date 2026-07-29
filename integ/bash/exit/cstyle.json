@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "exit_cstyle_for_graceful",
+      "id": "exit_cstyle_for_runs",
       "seq": 500114,
       "targets": [
         "ram",
@@ -25,9 +25,9 @@
       ],
       "command": "for ((i=0;i<3;i++)); do echo $i; done",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "mirage: unsupported shell construct: c_style_for_statement\n"
+        "exit": 0,
+        "stdout": "0\n1\n2\n",
+        "stderr": ""
       }
     }
   ]

@@ -38,6 +38,7 @@ class NodeKind(StrEnum):
     COMPOUND = "compound"
     IF = "if"
     FOR = "for"
+    CFOR = "cfor"
     SELECT = "select"
     WHILE = "while"
     UNTIL = "until"
@@ -48,6 +49,7 @@ class NodeKind(StrEnum):
     TEST = "test"
     NEGATED = "negated"
     VAR_ASSIGN = "var_assign"
+    VAR_ASSIGNS = "var_assigns"
     UNSUPPORTED = "unsupported"
 
 
@@ -68,6 +70,8 @@ _SIMPLE_KINDS = {
     NT.TEST_COMMAND: NodeKind.TEST,
     NT.NEGATED_COMMAND: NodeKind.NEGATED,
     NT.VARIABLE_ASSIGNMENT: NodeKind.VAR_ASSIGN,
+    NT.VARIABLE_ASSIGNMENTS: NodeKind.VAR_ASSIGNS,
+    NT.C_STYLE_FOR_STATEMENT: NodeKind.CFOR,
 }
 
 
@@ -79,7 +83,8 @@ def node_kind(node: Any) -> NodeKind:
 
     Returns:
         NodeKind: statement kind, or UNSUPPORTED for node types
-        neither walker implements (c-style for, arithmetic, ...).
+        neither walker implements (tree-sitter ERROR nodes, future
+        grammar additions).
     """
     ntype = node.type
     simple = _SIMPLE_KINDS.get(ntype)

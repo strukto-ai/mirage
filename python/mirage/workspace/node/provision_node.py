@@ -40,10 +40,11 @@ from mirage.workspace.provision.rollup import rollup_list, rollup_pipe
 from mirage.workspace.session import Session
 
 from mirage.shell.helpers import (  # isort: skip
-    get_case_items, get_command_name, get_for_parts, get_function_body,
-    get_function_name, get_if_branches, get_list_parts, get_negated_command,
-    get_parts, get_pipeline_commands, get_redirects, get_subshell_body,
-    get_text, get_while_parts, has_command_substitution, split_env_prefix)
+    get_case_items, get_cfor_parts, get_command_name, get_for_parts,
+    get_function_body, get_function_name, get_if_branches, get_list_parts,
+    get_negated_command, get_parts, get_pipeline_commands, get_redirects,
+    get_subshell_body, get_text, get_while_parts, has_command_substitution,
+    split_env_prefix)
 
 # eval / source execute their payload, so they are NOT free builtins:
 # leaving them out lets them fall through to command resolution, which
@@ -289,6 +290,12 @@ async def provision_node(
         _, body = get_while_parts(node)
         return await handle_while_provision(recurse, body, session)
 
+    if kind == NodeKind.CFOR:
+        # The iteration count comes from arithmetic: unbounded like
+        # while.
+        _, body = get_cfor_parts(node)
+        return await handle_while_provision(recurse, body, session)
+
     if kind == NodeKind.CASE:
         items = get_case_items(node)
         children = []
@@ -310,7 +317,7 @@ async def provision_node(
         return await handle_builtin_provision()
 
     if kind in (NodeKind.DECLARATION, NodeKind.UNSET, NodeKind.TEST,
-                NodeKind.VAR_ASSIGN):
+                NodeKind.VAR_ASSIGN, NodeKind.VAR_ASSIGNS):
         return await handle_builtin_provision()
 
     if kind == NodeKind.NEGATED:

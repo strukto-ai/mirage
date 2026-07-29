@@ -23,7 +23,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
 import type { ShellArray } from '../../shell/array.ts'
-import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { finishStatement } from './statement.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
@@ -250,9 +250,14 @@ async function runOnMount(
   // ls/stat render stat rows from the backend's own stat, which never sees
   // namespace attr overlays (chmod/chown/touch on overlay backends) or the
   // default owner; inject the merge so ls -l and stat -c agree.
-  // cp/mv -u freshness checks compare the same merged mtimes.
+  // cp/mv -u freshness checks compare the same merged mtimes, and
+  // find -mtime filters on them (touch results, observed writes).
   const statOverlay =
-    (cmdName === 'ls' || cmdName === 'stat' || cmdName === 'cp' || cmdName === 'mv') &&
+    (cmdName === 'ls' ||
+      cmdName === 'stat' ||
+      cmdName === 'cp' ||
+      cmdName === 'mv' ||
+      cmdName === 'find') &&
     namespace !== undefined
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
       : null
@@ -953,15 +958,12 @@ async function executeShellFunction(
       try {
         const cmdNode = cmd as Parameters<ExecuteNodeFn>[0]
         const [rawStdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
-        // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
-        // grep) finalize only once stdout is consumed.
-        const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
+        // $? tracks each statement inside the body, so a bare `return`
+        // (and mid-function $?) sees the last command.
+        const stdout = await finishStatement(rawStdout, io, session)
         if (stdout !== null) allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
         lastExec = execNode
-        // $? tracks each statement inside the body, so a bare `return`
-        // (and mid-function $?) sees the last command.
-        session.lastExitCode = io.exitCode
         if (
           io.exitCode !== 0 &&
           session.shellOptions.errexit === true &&

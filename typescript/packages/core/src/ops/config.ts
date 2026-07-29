@@ -19,6 +19,17 @@ import type { FileStat } from '../types.ts'
 // operand through the symlink table.
 export const NO_FOLLOW_OPS: ReadonlySet<string> = new Set(['unlink', 'rename', 'rmdir'])
 
+// Content-writing ops whose completion stamps an observed mtime on the
+// namespace node (removals invalidate but must not stamp).
+export const STAMP_WRITE_OPS: ReadonlySet<string> = new Set([
+  'write',
+  'write_bytes',
+  'append',
+  'create',
+  'truncate',
+  'mkdir',
+])
+
 // The symlink surface a namespace offers to lower layers. The workspace
 // Namespace satisfies this structurally; the fs facade and FUSE consume
 // it through this seam so the dependency points downward (workspace

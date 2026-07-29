@@ -72,6 +72,8 @@ async def handle_background(
     task = asyncio.create_task(_run_bg())
     cmd_str = get_text(left) if hasattr(left, 'text') else str(left)
 
+    # Non-interactive bash announces nothing on launch ("[1] <pid>" is
+    # interactive-only); the job stays discoverable via $! and `jobs`.
     if job_table is not None:
         job = job_table.submit(command=cmd_str,
                                task=task,
@@ -79,20 +81,15 @@ async def handle_background(
                                agent=agent_id or "",
                                session_id=session.session_id)
         session.last_bg_job_id = job.id
-        job_line = f"[{job.id}]\n".encode()
-    else:
-        job_line = b"[bg]\n"
 
     if right is None:
-        return None, IOResult(stderr=job_line), ExecutionNode(
+        return None, IOResult(), ExecutionNode(
             op="&",
             exit_code=0,
             children=[ExecutionNode(command=cmd_str, exit_code=0)])
 
     right_stdout, right_io, right_exec = await execute_node(
         right, session, stdin, call_stack)
-    left_stderr = await materialize(right_io.stderr)
-    right_io.stderr = (job_line + left_stderr if left_stderr else job_line)
     children = [
         ExecutionNode(command=cmd_str, exit_code=0),
         right_exec,

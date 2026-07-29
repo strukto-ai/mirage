@@ -14,7 +14,7 @@
 
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
 
 export const FIND_BUILDER: Builder = {
   name: 'find',
@@ -23,7 +23,20 @@ export const FIND_BUILDER: Builder = {
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     const { find, isDirName } = ops
     if (find !== undefined) {
-      return findGeneric(resolved, texts, opts, (root, options) => find(accessor, root, options))
+      // -mtime must see namespace times (touch results, observed
+      // writes), so local backends post-filter through the overlay-
+      // aware stat instead of pushing the window into the core.
+      const stat =
+        ops.local === true
+          ? overlaidStat((spec) => ops.stat(accessor, spec, idx), opts.statOverlay)
+          : undefined
+      return findGeneric(
+        resolved,
+        texts,
+        opts,
+        (root, options) => find(accessor, root, options),
+        stat,
+      )
     }
     // No backend find op: walk readdir/stat, classifying directories by the
     // isDirName hint when the backend provides one.
@@ -32,7 +45,12 @@ export const FIND_BUILDER: Builder = {
         root,
         {
           readdir: (spec, i) => ops.readdir(accessor, spec, i),
-          stat: (spec, i) => ops.stat(accessor, spec, i),
+          // -mtime must see namespace times (touch results, observed
+          // writes on mtime-less backends), same as ls.
+          stat: async (spec, i) => {
+            const st = await ops.stat(accessor, spec, i)
+            return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
+          },
           isDirName: isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
         },
         options,

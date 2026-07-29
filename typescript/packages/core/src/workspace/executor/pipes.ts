@@ -16,7 +16,7 @@ import { runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { asyncChain, closeQuietly, mergeStdoutStderr } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { finishStatement } from './statement.ts'
 import type { ShellArray } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
@@ -162,8 +162,7 @@ export async function handleConnection(
   const children = [leftExec]
 
   if (op === NT.AND) {
-    const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
-    session.lastExitCode = leftIo.exitCode
+    const leftBytes = await finishStatement(leftStdout, leftIo, session)
     if (leftIo.exitCode !== 0) {
       // The failing command is left of the final `&&`, which bash
       // exempts from `set -e`.
@@ -191,8 +190,7 @@ export async function handleConnection(
   }
 
   if (op === NT.OR) {
-    const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
-    session.lastExitCode = leftIo.exitCode
+    const leftBytes = await finishStatement(leftStdout, leftIo, session)
     if (leftIo.exitCode === 0) {
       return [
         leftBytes,
@@ -217,8 +215,7 @@ export async function handleConnection(
   }
 
   // ; (semicolon) or other: run both regardless
-  const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
-  session.lastExitCode = leftIo.exitCode
+  const leftBytes = await finishStatement(leftStdout, leftIo, session)
   let rightStdout: ByteSource | null
   let rightIo: IOResult
   let rightExec: ExecutionNode
@@ -322,14 +319,10 @@ export async function handleSubshell(
         })
         break
       }
-      // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
-      // grep) finalize only once stdout is consumed, and
-      // handleConnection does the same for top-level lists.
-      stdout = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
+      stdout = await finishStatement(stdout, io, session)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       lastExec = childExec
-      session.lastExitCode = io.exitCode
       if (
         io.exitCode !== 0 &&
         session.shellOptions.errexit === true &&

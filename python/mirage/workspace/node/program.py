@@ -61,6 +61,9 @@ async def execute_program(
             stdout, io, last_exec = await handle_background(
                 recurse, child, None, session, job_table, agent_id, stdin,
                 call_stack)
+            # Launching a job is itself a statement: bash sets $? to 0
+            # (the launch status), so `false; cmd & echo $?` prints 0.
+            session.last_exit_code = io.exit_code
             i += 2
         else:
             try:

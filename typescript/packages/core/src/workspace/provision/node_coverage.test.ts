@@ -15,10 +15,17 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
+import { IOResult } from '../../io/types.ts'
+import { Precision } from '../../provision/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { NodeKind } from '../../shell/node_kind.ts'
 import { createShellParser } from '../../shell/parse.ts'
 import { MountMode } from '../../types.ts'
+import { type TSNodeLike } from '../expand/variable.ts'
+import { MountRegistry } from '../mount/registry.ts'
+import { provisionNode } from '../node/provision_node.ts'
+import { Session } from '../session/session.ts'
+import type { ExecuteResult } from '../workspace.ts'
 import { Workspace } from '../workspace.ts'
 
 const ENC = new TextEncoder()
@@ -55,7 +62,13 @@ const PLANS: Record<NodeKind, [string, string, string, string]> = {
   [NodeKind.TEST]: ['[[ -n x ]]', '0', '0', 'exact'],
   [NodeKind.NEGATED]: ['! grep zzz /data/a.txt', '24', '0', 'exact'],
   [NodeKind.VAR_ASSIGN]: ['FOO=1', '0', '0', 'exact'],
-  [NodeKind.UNSUPPORTED]: ['for ((i=0;i<2;i++)); do true; done', '0', '0', 'unknown'],
+  [NodeKind.VAR_ASSIGNS]: ['FOO=1 BAR=2', '0', '0', 'exact'],
+  [NodeKind.CFOR]: ['for ((i=0;i<2;i++)); do cat /data/a.txt; done', '24', '0', 'unknown'],
+  // No valid syntax reaches the planner's UNSUPPORTED fallthrough:
+  // the workspace syntax gate rejects ERROR trees first, so this
+  // entry pins the gate, and the stub-node test below pins the
+  // fallthrough plan itself.
+  [NodeKind.UNSUPPORTED]: ['case x', '0', '0', 'unknown'],
 }
 
 function buildWorkspace(): Workspace {
@@ -80,6 +93,14 @@ describe('planner covers every statement kind', () => {
       try {
         await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
         const result = await ws.execute(snippet, { provision: true })
+        if (kind === NodeKind.UNSUPPORTED) {
+          const gated = result as unknown as ExecuteResult
+          expect(gated.exitCode).toBe(2)
+          expect(new TextDecoder().decode(gated.stderr)).toBe(
+            "mirage: syntax error near 'case x'\n",
+          )
+          return
+        }
         expect(result.networkRead, kind).toBe(net)
         expect(result.networkWrite, kind).toBe(write)
         expect(result.precision, kind).toBe(precision)
@@ -88,6 +109,21 @@ describe('planner covers every statement kind', () => {
       }
     })
   }
+
+  it('plans an unsupported node as an unknown fallthrough', async () => {
+    const fake = { type: 'some_unknown_type_xyz', text: 'some_unknown_type_xyz' }
+    const result = await provisionNode(
+      {
+        registry: new MountRegistry({}, MountMode.WRITE),
+        executeFn: () => Promise.resolve(new IOResult()),
+      },
+      fake as unknown as TSNodeLike,
+      new Session({ sessionId: 't' }),
+    )
+    expect(result.precision).toBe(Precision.UNKNOWN)
+    expect(result.networkRead).toBe('0')
+    expect(result.networkWrite).toBe('0')
+  })
 
   it('plans function calls, env prefixes, eval, and redirect reads', async () => {
     const ws = buildWorkspace()
