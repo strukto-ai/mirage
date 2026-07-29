@@ -542,8 +542,9 @@ class MountEntry:
                 # body: eager commands do their work inside cmd.fn,
                 # where the stream-consumption guard never runs.
                 resolved_safeguard = resolve_safeguard(
-                    cmd_name, cmd.safeguard,
-                    self.command_safeguards.get(cmd_name))
+                    cmd_name,
+                    command_default=cmd.safeguard,
+                    mount_override=self.command_safeguards.get(cmd_name))
                 cmd_timeout = (resolved_safeguard.timeout_seconds
                                if resolved_safeguard is not None else None)
                 result = await run_with_timeout(

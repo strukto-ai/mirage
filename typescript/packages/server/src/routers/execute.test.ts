@@ -41,6 +41,26 @@ describe('execute router', () => {
     await app.close()
   })
 
+  it('honors a cwd for the line', async () => {
+    const app = buildApp()
+    await createWs(app, 'ecwd')
+    await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ecwd/execute',
+      payload: { command: 'mkdir -p /sub && echo -n nested > /sub/f.txt' },
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ecwd/execute',
+      payload: { command: 'cat f.txt', cwd: '/sub' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<{ stdout: string; exitCode: number }>()
+    expect(body.exitCode).toBe(0)
+    expect(body.stdout).toBe('nested')
+    await app.close()
+  })
+
   it('passes base64 stdin to command execution', async () => {
     const app = buildApp()
     await createWs(app, 'estdin')

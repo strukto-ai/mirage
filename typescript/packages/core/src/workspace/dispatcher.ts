@@ -167,6 +167,11 @@ export class Dispatcher {
     return [result, new IOResult()]
   }
 
+  /** Drop the whole file cache (post-remote-line invalidation). */
+  async clearFileCache(): Promise<void> {
+    await this.cache.clear()
+  }
+
   async invalidateAfterWriteByPath(rawPath: string, observed: number | null = null): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not

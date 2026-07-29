@@ -1,0 +1,45 @@
+# S3-centered workspace with a Daytona whole-line runtime.
+#
+# Mirage never creates, provisions, or deletes sandboxes: create one
+# yourself from the mirage-fuse snapshot (prebake_snapshot.py builds
+# it once; create_sandbox.py creates the sandbox AND provisions the
+# in-sandbox workspace), then point the runtime at its id.
+#
+#   set -a; source .env.development; set +a
+#   export DAYTONA_SANDBOX_ID=$(./python/.venv/bin/python \
+#     examples/python/runtimes/daytona/create_sandbox.py)
+#   mirage workspace create daytona_workspace.yaml --id daytona-demo
+#   printf 'print("hello from the sandbox")\n' \
+#     | mirage execute -w daytona-demo -c 'cat > /data/hello.py'
+#   mirage execute -w daytona-demo -c 'cd /data && python3 hello.py'
+#   mirage workspace delete daytona-demo   # the sandbox stays yours
+#
+# Captured lines (python3, pip) run whole inside the Daytona sandbox;
+# every other command stays on the local vfs. The sandbox serves the
+# same mount at the same prefix (create_sandbox.py FUSE-mounts S3 at
+# /data inside it), so the line, its cwd, and every path pass through
+# verbatim: /data means the same thing on both sides.
+#
+# Sizing, GPUs, and lifecycle (idle-stop, auto-delete) are Daytona
+# settings you pick when you create the sandbox; mirage never touches
+# them.
+
+mode: EXEC
+
+mounts:
+  /data:
+    resource: s3
+    config:
+      bucket: ${AWS_S3_BUCKET}
+      region: ${AWS_DEFAULT_REGION}
+      aws_access_key_id: ${AWS_ACCESS_KEY_ID}
+      aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+      key_prefix: mirage-daytona-cli-demo
+
+runtimes:
+  - name: daytona
+    captures: ["python3", "pip"]
+    config:
+      sandbox_id: ${DAYTONA_SANDBOX_ID} # a sandbox you created and provisioned
+      api_key: ${DAYTONA_API_KEY}
+  - vfs

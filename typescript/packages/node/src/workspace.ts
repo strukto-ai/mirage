@@ -28,6 +28,7 @@ import {
 import { FuseManager } from './workspace/fuse.ts'
 import { Mount } from './workspace/mount_spec.ts'
 import './compression_codecs.ts'
+import './workspace/runtime/daytona/runtime.ts'
 
 const requireCjs = createRequire(import.meta.url)
 

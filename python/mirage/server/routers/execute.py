@@ -31,6 +31,7 @@ class ExecuteRequest(BaseModel):
     session_id: str | None = None
     provision: bool = False
     agent_id: str | None = None
+    cwd: str | None = None
 
 
 class BackgroundResponse(BaseModel):
@@ -56,6 +57,8 @@ def _build_execute_kwargs(req: ExecuteRequest,
         kwargs["session_id"] = req.session_id
     if req.agent_id is not None:
         kwargs["agent_id"] = req.agent_id
+    if req.cwd is not None:
+        kwargs["cwd"] = req.cwd
     if stdin is not None:
         kwargs["stdin"] = stdin
     return kwargs

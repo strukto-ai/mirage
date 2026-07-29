@@ -495,7 +495,19 @@ export {
   type RouteFn,
   type RouteScript,
 } from './workspace/executor/route/index.ts'
-export { buildRuntime, candidates, RUNTIMES } from './workspace/executor/runtime_table.ts'
+export {
+  buildRuntime,
+  candidates,
+  registerRuntime,
+  RUNTIMES,
+} from './workspace/executor/runtime_table.ts'
+export { RemoteSandbox, type RemoteSandboxOptions } from './workspace/executor/sandbox/base.ts'
+export {
+  coerceConfig,
+  type NormalizedSandboxConfig,
+  type SandboxConfig,
+} from './workspace/executor/sandbox/config.ts'
+export { stdinPath, stdinRedirect } from './workspace/executor/sandbox/constants.ts'
 export type { JsRuntime } from './workspace/executor/js/interface.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'

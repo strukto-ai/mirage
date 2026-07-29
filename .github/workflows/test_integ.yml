@@ -732,8 +732,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Retry choco (its community feed 503s), then fall back to the
+      # official GitHub release MSI, and verify the driver landed either
+      # way so a bad install fails here, not as "Unable to find libfuse".
       - name: Install WinFsp
-        run: choco install winfsp -y
+        shell: pwsh
+        run: |
+          $ok = $false
+          foreach ($i in 1..3) {
+            choco install winfsp -y
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Host "choco attempt $i failed; retrying"
+            Start-Sleep -Seconds 10
+          }
+          if (-not $ok) {
+            Write-Host "choco unavailable; installing from the GitHub release MSI"
+            Invoke-WebRequest -Uri "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" -OutFile winfsp.msi
+            Start-Process msiexec.exe -ArgumentList '/i','winfsp.msi','/qn' -Wait
+          }
+          if (-not (Test-Path "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll")) {
+            throw "WinFsp install failed: winfsp-x64.dll not found"
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v7

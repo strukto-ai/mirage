@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { yieldBytes } from '../../../io/stream.ts'
-import { type ByteSource, IOResult } from '../../../io/types.ts'
+import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type CommandSafeguard, OnExceed } from '../../../types.ts'
 
 const NEWLINE = 0x0a
@@ -181,6 +181,32 @@ export async function applySafeguard(
     return [null, new IOResult({ exitCode: 1, stderr: notice })]
   }
   return [data, new IOResult({ stderr: notice })]
+}
+
+/**
+ * Apply output caps at a boundary and merge the outcome.
+ *
+ * The one boundary rule, shared by the command tree and the
+ * whole-line runtimes: cap stdout, append the truncation notice to
+ * stderr, and let an ERROR-mode guard override the exit code.
+ */
+export async function guardOutput(
+  stdout: ByteSource | null,
+  stderr: ByteSource | null,
+  exitCode: number,
+  safeguard: CommandSafeguard | null,
+): Promise<[ByteSource | null, ByteSource | null, number]> {
+  if (stdout === null) return [stdout, stderr, exitCode]
+  const [data, sgIo] = await applySafeguard(stdout, safeguard)
+  if (sgIo.stderr !== null) {
+    const existing = stderr !== null ? await materialize(stderr) : new Uint8Array()
+    const added = await materialize(sgIo.stderr)
+    const merged = new Uint8Array(existing.byteLength + added.byteLength)
+    merged.set(existing, 0)
+    merged.set(added, existing.byteLength)
+    stderr = merged
+  }
+  return [data, stderr, sgIo.exitCode !== 0 ? sgIo.exitCode : exitCode]
 }
 
 export async function applyOpSafeguard(

@@ -469,6 +469,7 @@ export class MountEntry {
               // where the stream-consumption guard never runs.
               const resolvedSafeguard = resolveSafeguard(
                 cmdName,
+                [],
                 cmd.safeguard,
                 opts.safeguardOverride !== undefined
                   ? opts.safeguardOverride

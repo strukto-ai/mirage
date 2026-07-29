@@ -162,7 +162,9 @@ camel       = [
 ]
 
 # --- sandboxes ---
-daytona     = ["daytona>=0.176.0"]
+daytona     = [
+    "daytona>=0.176.0",
+]
 
 # --- meta: install everything ---
 all = [
@@ -192,12 +194,35 @@ all = [
     "mirage-ai[agno]",
     "mirage-ai[claude-agent-sdk]",
     "mirage-ai[daytona]",
+    "mirage-ai[e2b]",
+]
+sandbox = [
+    "mirage-ai[s3]",
+    "mirage-ai[r2]",
+    "mirage-ai[gcs]",
+    "mirage-ai[oci]",
+    "mirage-ai[databricks]",
+    "mirage-ai[ssh]",
+    "mirage-ai[nextcloud]",
+    "mirage-ai[hf]",
+    "mirage-ai[fuse]",
+    "mirage-ai[mongodb]",
+    "mirage-ai[gridfs]",
+    "mirage-ai[postgres]",
+    "mirage-ai[redis]",
+    "mirage-ai[email]",
+    "mirage-ai[langfuse]",
+    "mirage-ai[chroma]",
+    "mirage-ai[qdrant]",
 ]
 lancedb = [
     "lancedb>=0.33.0",
 ]
 mem0 = [
     "mem0ai>=2.0.6",
+]
+e2b = [
+    "e2b>=2.0.0",
 ]
 
 [tool.uv]

@@ -32,13 +32,31 @@ FALLBACK_SAFEGUARD = CommandSafeguard(timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
 
 def resolve_safeguard(
     name: str,
+    mounts: Iterable[Any] = (),
     command_default: CommandSafeguard | None = None,
     mount_override: CommandSafeguard | None = None,
 ) -> CommandSafeguard | None:
+    """Resolve one command's safeguard, the one entry point.
+
+    Precedence: an explicit mount_override, then the command's own
+    default, then aggregation across the mounts the command spans
+    (tightest per field), then the global table.
+
+    Args:
+        name (str): command name being resolved.
+        mounts (Iterable): the mounts the command spans (may be empty).
+        command_default (CommandSafeguard | None): the registered
+            command's own default, passed by mount dispatch.
+        mount_override (CommandSafeguard | None): one mount's
+            per-command override, passed by mount dispatch.
+    """
     if mount_override is not None:
         return mount_override
     if command_default is not None:
         return command_default
+    spanned = list(mounts)
+    if spanned:
+        return resolve_across_mounts(name, spanned)
     return DEFAULT_COMMAND_SAFEGUARDS.get(name, FALLBACK_SAFEGUARD)
 
 
@@ -58,7 +76,7 @@ def resolve_across_mounts(
         mounts (Iterable): the mounts the command spans.
     """
     resolved = [
-        resolve_safeguard(name, None, m.command_safeguards.get(name))
+        resolve_safeguard(name, mount_override=m.command_safeguards.get(name))
         for m in mounts
     ]
     return CommandSafeguard.aggr(resolved)

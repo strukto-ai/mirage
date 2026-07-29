@@ -29,7 +29,11 @@ import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
-import { CommandTimeoutError, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
+import {
+  guardOutput,
+  CommandTimeoutError,
+  runWithTimeout,
+} from '../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from '../commands/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
@@ -1069,6 +1073,20 @@ export class Workspace {
    * for any mount that maintains an index. No-op for paths that resolve
    * to no known mount.
    */
+  /**
+   * Drop the file cache and every mount index wholesale. A whole-line
+   * runtime may have written anywhere in its view of the workspace,
+   * so per-path invalidation cannot apply: clear the read caches so
+   * the next local command refetches from the backends instead of
+   * serving pre-line state.
+   */
+  private async invalidateAllAfterRemote(): Promise<void> {
+    await this.dispatcher.clearFileCache()
+    for (const m of this.registry.allMounts()) {
+      await m.resource.index?.clear()
+    }
+  }
+
   async invalidateAfterWriteByPath(path: string): Promise<void> {
     await this.dispatcher.invalidateAfterWriteByPath(path)
   }
@@ -1228,12 +1246,48 @@ export class Workspace {
     const lineRuntime = this.wholeLineRuntimeFor(rootNode, deps.routingDecision ?? null)
     if (lineRuntime?.runLine !== undefined) {
       const data = stdin !== null ? await materialize(stdin) : null
-      const result = await lineRuntime.runLine(
-        command,
-        data,
-        { ...effectiveSession.env },
-        effectiveSession.cwd,
+      // A whole line is a command like any other: the same resolution
+      // and boundary rule as the tree, so timeoutSeconds answers 124
+      // and maxBytes/maxLines cap the output.
+      const name = command.trim().split(/\s+/)[0] ?? ''
+      const guard = resolveSafeguard(name, this.registry.allMounts())
+      let result: RunResult
+      try {
+        result = await runWithTimeout(
+          lineRuntime.runLine(command, data, { ...effectiveSession.env }, effectiveSession.cwd),
+          guard?.timeoutSeconds ?? null,
+          name,
+        )
+      } catch (err) {
+        if (err instanceof CommandTimeoutError) {
+          result = {
+            stdout: new Uint8Array(),
+            stderr: new TextEncoder().encode(`${err.message}\n`),
+            exitCode: 124,
+          }
+        } else {
+          result = {
+            stdout: new Uint8Array(),
+            stderr: new TextEncoder().encode(err instanceof Error ? err.message : String(err)),
+            exitCode: 1,
+          }
+        }
+      } finally {
+        // The line may have written anywhere in the runtime's view of
+        // the workspace; local read caches are stale.
+        await this.invalidateAllAfterRemote()
+      }
+      const [capped, cappedErr, cappedCode] = await guardOutput(
+        result.stdout,
+        result.stderr,
+        result.exitCode,
+        guard,
       )
+      result = {
+        stdout: capped !== null ? await materialize(capped) : new Uint8Array(),
+        stderr: cappedErr !== null ? await materialize(cappedErr) : null,
+        exitCode: cappedCode,
+      }
       targetSession.lastExitCode = result.exitCode
       if (isLine) {
         const lineIo = new IOResult({
