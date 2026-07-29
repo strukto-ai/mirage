@@ -18,7 +18,7 @@ import time
 from collections.abc import AsyncIterator
 
 from mirage.commands.safeguard import CommandSafeguard
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import OnExceed
 from mirage.utils.stream import ensure_stream
 
@@ -156,6 +156,36 @@ async def apply_safeguard(
     if safeguard.on_exceed is OnExceed.ERROR:
         return None, IOResult(exit_code=1, stderr=notice)
     return data, IOResult(stderr=notice)
+
+
+async def guard_output(
+    stdout: ByteSource | None,
+    stderr: ByteSource | None,
+    exit_code: int,
+    safeguard: CommandSafeguard | None,
+) -> tuple[ByteSource | None, ByteSource | None, int]:
+    """Apply output caps at a boundary and merge the outcome.
+
+    The one boundary rule, shared by the command tree and the
+    whole-line runtimes: cap stdout, append the truncation notice to
+    stderr, and let an ERROR-mode guard override the exit code.
+
+    Args:
+        stdout (ByteSource | None): the output to cap.
+        stderr (ByteSource | None): the error stream to carry the
+            notice.
+        exit_code (int): the run's exit code.
+        safeguard (CommandSafeguard | None): resolved safeguard.
+    """
+    if stdout is None:
+        return stdout, stderr, exit_code
+    data, sg_io = await apply_safeguard(stdout, safeguard)
+    if sg_io.stderr is not None:
+        existing = (await materialize(stderr) if stderr is not None else b"")
+        stderr = existing + await materialize(sg_io.stderr)
+    if sg_io.exit_code != 0:
+        exit_code = sg_io.exit_code
+    return data, stderr, exit_code
 
 
 async def apply_op_safeguard(result, safeguard: CommandSafeguard | None):

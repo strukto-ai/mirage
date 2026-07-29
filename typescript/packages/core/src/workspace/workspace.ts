@@ -30,11 +30,11 @@ import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
 import {
-  applySafeguard,
+  guardOutput,
   CommandTimeoutError,
   runWithTimeout,
 } from '../commands/builtin/utils/safeguard.ts'
-import { resolveAcrossMounts, resolveSafeguard } from '../commands/safeguard.ts'
+import { resolveSafeguard } from '../commands/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
 import { UsageError } from '../commands/errors.ts'
@@ -1243,15 +1243,11 @@ export class Workspace {
     const lineRuntime = this.wholeLineRuntimeFor(rootNode, deps.routingDecision ?? null)
     if (lineRuntime?.runLine !== undefined) {
       const data = stdin !== null ? await materialize(stdin) : null
-      // A whole line is a command like any other: resolve the same
-      // safeguard the tree would (per command name, aggregated across
-      // the mounts the line can span) and apply it around the runtime,
-      // so timeoutSeconds answers 124 and maxBytes/maxLines cap the
-      // output.
+      // A whole line is a command like any other: the same resolution
+      // and boundary rule as the tree, so timeoutSeconds answers 124
+      // and maxBytes/maxLines cap the output.
       const name = command.trim().split(/\s+/)[0] ?? ''
-      const allMounts = this.registry.allMounts()
-      const guard =
-        allMounts.length > 0 ? resolveAcrossMounts(name, allMounts) : resolveSafeguard(name)
+      const guard = resolveSafeguard(name, this.registry.allMounts())
       let result: RunResult
       try {
         result = await runWithTimeout(
@@ -1278,20 +1274,16 @@ export class Workspace {
         // the workspace; local read caches are stale.
         await this.invalidateAllAfterRemote()
       }
-      const [capped, sgIo] = await applySafeguard(result.stdout, guard)
-      let stderr = result.stderr
-      if (sgIo.stderr !== null) {
-        const existing = stderr !== null ? await materialize(stderr) : new Uint8Array()
-        const added = await materialize(sgIo.stderr)
-        const merged = new Uint8Array(existing.byteLength + added.byteLength)
-        merged.set(existing, 0)
-        merged.set(added, existing.byteLength)
-        stderr = merged
-      }
+      const [capped, cappedErr, cappedCode] = await guardOutput(
+        result.stdout,
+        result.stderr,
+        result.exitCode,
+        guard,
+      )
       result = {
         stdout: capped !== null ? await materialize(capped) : new Uint8Array(),
-        stderr,
-        exitCode: sgIo.exitCode !== 0 ? sgIo.exitCode : result.exitCode,
+        stderr: cappedErr !== null ? await materialize(cappedErr) : null,
+        exitCode: cappedCode,
       }
       targetSession.lastExitCode = result.exitCode
       if (isLine) {

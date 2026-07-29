@@ -53,7 +53,7 @@ import {
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
 import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
+import { resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { UsageError } from '../../commands/errors.ts'
@@ -520,8 +520,7 @@ export async function handleCommand(
       const m = registry.mountFor(s.virtual)
       if (m !== null) mounts.push(m)
     }
-    csIo.safeguard =
-      mounts.length > 0 ? resolveAcrossMounts(cmdName, mounts) : resolveSafeguard(cmdName)
+    csIo.safeguard = resolveSafeguard(cmdName, mounts)
     csExec.paths = pathScopes
     return [maybeWithTimeout(csStdout, csIo.safeguard, cmdName), csIo, csExec]
   }

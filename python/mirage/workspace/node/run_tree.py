@@ -15,9 +15,8 @@
 import asyncio
 from typing import Any, Callable
 
-from mirage.commands.builtin.utils.safeguard import apply_safeguard
+from mirage.commands.builtin.utils.safeguard import guard_output
 from mirage.io import IOResult
-from mirage.io.types import materialize
 from mirage.runtime.route import RoutingDecision
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
@@ -86,12 +85,7 @@ async def run_command_tree(
         routing_decision=routing_decision,
     )
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-    if io.safeguard is not None and stdout is not None:
-        stdout, sg_io = await apply_safeguard(stdout, io.safeguard)
-        if sg_io.stderr is not None:
-            existing = await materialize(io.stderr)
-            io.stderr = existing + await materialize(sg_io.stderr)
-        if sg_io.exit_code != 0:
-            io.exit_code = sg_io.exit_code
+    stdout, io.stderr, io.exit_code = await guard_output(
+        stdout, io.stderr, io.exit_code, io.safeguard)
     io.stdout = stdout
     return io, exec_node

@@ -28,7 +28,22 @@ export function stdinPath(): string {
 /**
  * The line rewritten to read its stdin from an uploaded file: runs
  * the line in a subshell with stdin redirected from the path, removes
- * the file afterward, and preserves the line's exit code.
+ * the file afterward, and preserves the line's exit code. This is the
+ * only byte-exact stdin with a real EOF that Daytona and e2b allow:
+ * their exec APIs take no stdin stream, e2b's sendStdin cannot signal
+ * EOF, and a PTY merges streams and mangles bytes.
+ *
+ * Known limitations, all inherent to the file transport:
+ * - stdin is fully buffered and uploaded before the line starts;
+ *   nothing is streamed, so no interactive stdin.
+ * - the bytes briefly touch the sandbox's /tmp, readable by other
+ *   processes in the sandbox and left behind if the exec dies before
+ *   the `rm` runs (a later line's unique path is never affected).
+ * - each stdin line costs two extra provider API calls (mkdir +
+ *   upload).
+ * - the sandbox must have a POSIX sh (subshell, `$?`, `rm`).
+ * If a provider ever adds real exec stdin, drop this for that
+ * provider (docker already streams via `docker exec -i`).
  */
 export function stdinRedirect(line: string, path: string): string {
   return `( ${line} ) < ${path}; _s=$?; rm -f ${path}; exit $_s`

@@ -27,11 +27,10 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
-                                                     apply_safeguard,
+                                                     guard_output,
                                                      run_with_timeout)
 from mirage.commands.errors import FindParseError, UsageError
-from mirage.commands.safeguard import (CommandSafeguard, resolve_across_mounts,
-                                       resolve_safeguard)
+from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import RecordingScope
@@ -1323,15 +1322,12 @@ class Workspace:
             if line_runtime is not None:
                 data = (await materialize(stdin)
                         if stdin is not None else None)
-                # A whole line is a command like any other: resolve the
-                # same safeguard the tree would (per command name,
-                # aggregated across the mounts the line can span) and
-                # apply it around the runtime, so timeout_seconds
-                # answers 124 and max_bytes/max_lines cap the output.
+                # A whole line is a command like any other: the same
+                # resolution and boundary rule as the tree, so
+                # timeout_seconds answers 124 and max_bytes/max_lines
+                # cap the output.
                 name = command.strip().split()[0] if command.strip() else ""
-                mounts = self._registry.mounts()
-                guard = (resolve_across_mounts(name, mounts)
-                         if mounts else resolve_safeguard(name))
+                guard = resolve_safeguard(name, self._registry.mounts())
                 timeout = (guard.timeout_seconds
                            if guard is not None else None)
                 try:
@@ -1345,15 +1341,10 @@ class Workspace:
                     # runtime's view of the workspace; local read
                     # caches are stale.
                     await self._dispatcher.invalidate_all_after_remote()
-                stdout, sg_io = await apply_safeguard(result.stdout or b"",
-                                                      guard)
-                stderr = result.stderr
-                if sg_io.stderr is not None:
-                    existing = (await materialize(stderr)
-                                if stderr is not None else b"")
-                    stderr = existing + await materialize(sg_io.stderr)
-                io = IOResult(exit_code=(sg_io.exit_code if sg_io.exit_code
-                                         != 0 else result.exit_code),
+                stdout, stderr, exit_code = await guard_output(
+                    result.stdout or b"", result.stderr, result.exit_code,
+                    guard)
+                io = IOResult(exit_code=exit_code,
                               stdout=stdout,
                               stderr=stderr)
                 session.last_exit_code = io.exit_code

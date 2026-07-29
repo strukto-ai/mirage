@@ -106,8 +106,8 @@ async def test_mount_override_beats_command_default():
     ws = _ws(safeguards=overrides)
     mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
     from mirage.commands.safeguard import resolve_safeguard
-    resolved = resolve_safeguard("cat", None,
-                                 mount.command_safeguards.get("cat"))
+    resolved = resolve_safeguard(
+        "cat", mount_override=mount.command_safeguards.get("cat"))
     assert resolved.timeout_seconds == 999.0
 
 
