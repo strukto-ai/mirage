@@ -4,16 +4,18 @@ description: Script which runtime serves each command line; route scripts run on
 icon: route
 ---
 
-A workspace can hold several runtimes for the same command: `python3` might
-run on sandboxed `monty` normally, but on a `docker` sandbox when the line
-touches heavy data. Which entry serves a line is a **routing decision**, and
-you script it from the config file:
+A workspace can hold several runtimes for the same command, with different
+trade-offs. `monty` runs `python3` in-process, sandboxed, stdlib-only:
+perfect for quick one-liners and pipe transforms, useless for a script that
+imports `pandas`. A `docker` entry is the opposite: your container, your
+installed packages, but every line pays the exec round-trip. The **route**
+decides per line which one serves it:
 
 ```yaml
 runtimes:
-  - monty # captures python3 by default: the everyday interpreter
+  - monty # captures python3 by default: sandboxed, stdlib-only
   - name: docker
-    captures: ["python3"] # captures python3 too, for the heavy lines
+    captures: ["python3"] # your container, has pandas installed
     config:
       container: my-box
   - vfs
@@ -21,19 +23,60 @@ route: ./route.py
 ```
 
 ```python route.py
-# The last expression is the verdict: a runtime name, or None to pass.
-"docker" if "train.py" in ctx["line"] else None
+# Jobs under /jobs need the container's packages; anything else
+# stays on the fast in-process sandbox. The LAST EXPRESSION is
+# the verdict.
+stage = ctx["commands"][0]
+in_jobs = any(p.startswith("/jobs/") for p in stage["paths"])
+"docker" if in_jobs else "monty"
 ```
 
-Both entries capture `python3`. Without a verdict (`None`), the first
-capturer in the list serves it, so `monty` is the default; a verdict names
-the runtime that takes the line instead.
+So `python3 /jobs/train.py --epochs 3` runs in the container, while
+`cat data.csv | python3 -c "import sys; print(len(sys.stdin.read()))"`
+stays on monty.
 
-The script sees the line's context as the `ctx` global: `line`, `command`,
-`builtin`, `commands` (per-stage words and paths), `cwd`, `env`, `mounts`,
-`session_id`, `agent_id`. Besides the global `route`, each runtime entry can
-carry its own `script:`, answering true or false: am I willing to serve this
-line? The first willing capturer wins.
+## Input: the line's context
+
+The script sees one global, `ctx`, the parsed line before any routing.
+For `python3 /jobs/train.py --epochs 3` it is:
+
+```json
+{
+  "line": "python3 /jobs/train.py --epochs 3",
+  "command": "python3",
+  "builtin": true,
+  "commands": [
+    {
+      "command": "python3",
+      "words": ["python3", "/jobs/train.py", "--epochs", "3"],
+      "builtin": true,
+      "paths": ["/jobs/train.py"]
+    }
+  ],
+  "cwd": "/",
+  "env": {},
+  "mounts": ["/jobs", "/data"],
+  "session_id": "s-1",
+  "agent_id": null
+}
+```
+
+`commands` has one entry per pipeline stage (`cat x | python3 -` has two),
+each with its words and its absolute-path operands; `command` and `builtin`
+mirror the first stage. The same schema is what a Python callable receives,
+and it round-trips through JSON, so you can store a payload and replay it.
+
+## Output: the verdict
+
+- **A runtime name** (`"docker"`): that entry serves every command it
+  captures on this line.
+- **`None`**: no opinion; the first capturer in the `runtimes` list order
+  serves each command (here, `monty`).
+- Anything else is a routing error; the line fails rather than guessing.
+
+Besides the global `route`, each runtime entry can carry its own `script:`
+with the same `ctx` input but a boolean verdict: am I willing to serve this
+line? Unwilling entries step aside and the first willing capturer wins.
 
 ## What runs the scripts
 
