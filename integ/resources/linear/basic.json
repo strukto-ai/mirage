@@ -519,6 +519,110 @@
         "stdout": "PLAT-1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ln_size_stat_team_json",
+      "seq": 560040,
+      "targets": [
+        "linear"
+      ],
+      "command": "stat -c %s /issues/teams/PLAT__Platform__team_plat/team.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "545\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_size_read_team_json",
+      "seq": 560041,
+      "targets": [
+        "linear"
+      ],
+      "command": "cat /issues/teams/PLAT__Platform__team_plat/team.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "545\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_size_stat_issue_json",
+      "seq": 560042,
+      "targets": [
+        "linear"
+      ],
+      "command": "stat -c %s /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "832\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_size_read_issue_json",
+      "seq": 560043,
+      "targets": [
+        "linear"
+      ],
+      "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "832\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_size_stat_comments_jsonl",
+      "seq": 560044,
+      "targets": [
+        "linear"
+      ],
+      "command": "stat -c %s /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/comments.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "645\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_size_read_comments_jsonl",
+      "seq": 560045,
+      "targets": [
+        "linear"
+      ],
+      "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/comments.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "645\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_size_stat_project_json",
+      "seq": 560046,
+      "targets": [
+        "linear"
+      ],
+      "command": "stat -c %s /issues/teams/PLAT__Platform__team_plat/projects/Search__prj_search.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "588\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_size_read_project_json",
+      "seq": 560047,
+      "targets": [
+        "linear"
+      ],
+      "command": "cat /issues/teams/PLAT__Platform__team_plat/projects/Search__prj_search.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "588\n",
+        "stderr": ""
+      }
     }
   ]
 }

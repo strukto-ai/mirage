@@ -38,6 +38,10 @@ class LinearResource(BaseResource):
     accessor: LinearAccessor
     name: str = ResourceName.LINEAR
     caches_reads: bool = True
+    # Every file is sized at its parent's readdir from the listing payload
+    # (comments.jsonl via one bounded comments call), so stat always reports
+    # the rendered byte length and fskit mounts serve exact reads.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _LINEAR_OPS
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
