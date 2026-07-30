@@ -110,7 +110,7 @@ jobs:
               - 'integ/fskit.py'
               - 'integ/cli_fskit.sh'
               - 'integ/check_json.py'
-              - 'integ/truth_fuse.txt'
+              - 'integ/truth_fuse.json'
               - 'integ/truth_fskit.json'
               - 'integ/check_lines.sh'
               - 'integ/package.json'
@@ -691,7 +691,7 @@ jobs:
       - name: Run Python FUSE mount and check (real libfuse)
         run: |
           ./python/.venv/bin/python integ/fuse.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_fuse.txt
+            | ./python/.venv/bin/python integ/check_json.py integ/truth_fuse.json
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -719,7 +719,7 @@ jobs:
         working-directory: integ
         run: |
           pnpm exec tsx fuse.ts 2>&1 \
-            | bash check_lines.sh truth_fuse.txt
+            | ../python/.venv/bin/python check_json.py truth_fuse.json
 
   integ-fuse-windows:
     needs: changes
@@ -779,7 +779,7 @@ jobs:
         run: |
           ./python/.venv/Scripts/python integ/fuse.py > /tmp/fuse-win.out 2>&1 || true
           cat /tmp/fuse-win.out
-          bash integ/check_lines.sh integ/truth_fuse.txt < /tmp/fuse-win.out
+          ./python/.venv/Scripts/python integ/check_json.py integ/truth_fuse.json < /tmp/fuse-win.out
 
   integ-fskit-macos:
     needs: changes
