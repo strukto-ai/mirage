@@ -94,7 +94,9 @@ async def stat(
             # threaded index, so the readdir above populates a NULL store
             # that can't be read back. Resolve the id directly instead.
             item = await resolve_item(accessor, path_parts(path))
-            if item is None:
+            if item is None or resource_type_for(item) == "box/weblink":
+                # Weblinks are hidden from listings; a direct lookup must
+                # not resurface a sizeless, unreadable entry.
                 raise enoent(virtual)
             return _stat_from_item(item)
     if result.entry.resource_type == "box/folder":

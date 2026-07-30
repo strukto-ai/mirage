@@ -83,7 +83,9 @@ export async function stat(
     // The write-family builders and provision estimation call stat without a
     // threaded index; resolve the id directly rather than ENOENT.
     const item = await resolveItem(accessor, pathParts(path))
-    if (item === null) throw enoent(path.virtual)
+    // Weblinks are hidden from listings; a direct lookup must not
+    // resurface a sizeless, unreadable entry.
+    if (item === null || item.type === 'web_link') throw enoent(path.virtual)
     return statFromItem(item)
   }
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
@@ -109,7 +111,7 @@ export async function stat(
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {
       const item = await resolveItem(accessor, pathParts(path))
-      if (item === null) throw enoent(path.virtual)
+      if (item === null || item.type === 'web_link') throw enoent(path.virtual)
       return statFromItem(item)
     }
   }

@@ -198,3 +198,30 @@ async def test_stat_size_matches_read_for_every_file(accessor, index):
                 assert info.size == len(body), trimmed
                 files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]
+
+
+@pytest.mark.asyncio
+async def test_stat_direct_resolve_hides_weblinks(accessor, index):
+    # Weblinks are filtered from listings; the resolve_item fallback must
+    # not resurface one as a sizeless, unreadable entry.
+    weblink = {
+        "id": "300",
+        "name": "homepage",
+        "type": "web_link",
+        "modified_at": "2026-04-01T00:00:00+00:00",
+    }
+    with patch(
+            "mirage.core.box.readdir.list_folder_items",
+            new_callable=AsyncMock,
+            return_value=[weblink],
+    ), patch(
+            "mirage.core.box.resolve.list_folder_items",
+            new_callable=AsyncMock,
+            return_value=[weblink],
+    ):
+        with pytest.raises(FileNotFoundError):
+            await stat(
+                accessor,
+                PathSpec(resource_path="homepage",
+                         virtual="/homepage",
+                         directory="/"), index)
