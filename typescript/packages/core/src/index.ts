@@ -484,22 +484,22 @@ export {
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
 export {
   bindCommands,
-  runtimeBindingsFor,
-  isEvaluator,
   DEFAULT_ENTRIES,
-  VfsRuntime,
   Runtime,
-  EvalError,
-  type Evaluator,
+  runtimeBindingsFor,
+  VfsRuntime,
+  type RuntimeEntry,
+} from './workspace/executor/runtime.ts'
+export { EvalError } from './workspace/executor/runtime_errors.ts'
+export { isEvaluator, type Evaluator } from './workspace/executor/runtime_mixin.ts'
+export {
   type EvalResult,
   type EvalStatus,
   type EvalValue,
   type RunArgs,
   type RunResult,
-  type RuntimeEntry,
   type RuntimeOptions,
-} from './workspace/executor/runtime.ts'
-export { pythonEvalHarness, splitEnvelope } from './workspace/executor/envelope.ts'
+} from './workspace/executor/runtime_types.ts'
 export {
   commandFacts,
   decideLine,

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PYTHON_ONLY_HINTS, VfsRuntime, type Runtime, type RuntimeOptions } from './runtime.ts'
+import { PYTHON_ONLY_HINTS, VfsRuntime, type Runtime } from './runtime.ts'
+import type { RuntimeOptions } from './runtime_types.ts'
 import { MontyRuntime } from './python/runtimes/monty.ts'
 import { PyodideRuntime } from './python/runtimes/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'

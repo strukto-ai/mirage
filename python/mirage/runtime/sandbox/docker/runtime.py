@@ -14,10 +14,10 @@
 
 import asyncio
 
-from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.docker.config import DockerConfig
 from mirage.runtime.sandbox.docker.constants import DOCKER_CLI_HINT
+from mirage.runtime.types import RunResult
 
 
 class DockerRuntime(RemoteSandbox):

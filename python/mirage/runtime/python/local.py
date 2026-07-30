@@ -19,8 +19,9 @@ import sys
 from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime, ScriptSource
+from mirage.runtime.base import Runtime
 from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 

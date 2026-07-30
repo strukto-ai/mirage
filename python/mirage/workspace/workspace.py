@@ -44,13 +44,14 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import RunResult, Runtime
+from mirage.runtime.base import Runtime
 from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   bind_commands, build_runtime, catch_all,
                                   runtime_bindings_for, whole_line_runtime)
+from mirage.runtime.types import RunResult
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, DriftPolicy,

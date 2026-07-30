@@ -16,12 +16,13 @@ import importlib
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 
-from mirage.runtime.base import Runtime, ScriptSource
+from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
+from mirage.runtime.types import ScriptSource
 
 # One source of truth, preference order (sandboxed first, host last).
 # The command -> runtime mapping is derived from each class's captures,

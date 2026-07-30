@@ -23,7 +23,7 @@ from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
                            load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
-from mirage.runtime.base import ScriptSource
+from mirage.runtime.types import ScriptSource
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore

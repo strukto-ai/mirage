@@ -14,12 +14,13 @@
 
 import pytest
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.route import (RouteContext, ScriptSource, command_facts,
                                   decide_line, evaluate_route, evaluate_script,
                                   evaluator_of)
 from mirage.runtime.table import VfsRuntime
+from mirage.runtime.types import RunArgs, RunResult
 from mirage.workspace.workspace import parse
 
 

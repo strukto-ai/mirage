@@ -15,13 +15,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   bindCommands,
-  runtimeBindingsFor,
   DEFAULT_ENTRIES,
   Runtime,
+  runtimeBindingsFor,
   VfsRuntime,
-  type RunArgs,
-  type RunResult,
 } from './runtime.ts'
+import type { RunArgs, RunResult } from './runtime_types.ts'
 import { buildRuntime, candidates } from './runtime_table.ts'
 import { MontyRuntime } from './python/runtimes/monty.ts'
 import { PyodideRuntime } from './python/runtimes/pyodide.ts'

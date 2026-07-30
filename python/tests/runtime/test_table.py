@@ -16,11 +16,12 @@ import asyncio
 
 import pytest
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VfsRuntime,
                                   bind_commands, build_runtime,
                                   runtime_bindings_for, whole_line_runtime)
+from mirage.runtime.types import RunArgs, RunResult
 
 
 class FakeRuntime(Runtime):

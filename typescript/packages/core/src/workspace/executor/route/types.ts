@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EvalValue, Runtime } from '../runtime.ts'
+import type { Runtime } from '../runtime.ts'
+import type { EvalValue } from '../runtime_types.ts'
 
 /** Parse facts for one command of the line being routed. */
 export interface CommandFacts {

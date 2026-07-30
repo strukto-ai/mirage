@@ -18,8 +18,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime, ScriptSource
+from mirage.runtime.base import Runtime
 from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 wasmtime: Any

@@ -17,8 +17,10 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import EvalError, EvaluatorMixin, RunArgs
+from mirage.runtime.errors import EvalError
+from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python import MontyRuntime
+from mirage.runtime.types import RunArgs
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 

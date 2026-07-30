@@ -18,7 +18,8 @@ from typing import Any, Callable
 from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, CommandOutput, IOResult
-from mirage.runtime.base import RunArgs, Runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.types import RunArgs
 from mirage.types import PathSpec
 
 

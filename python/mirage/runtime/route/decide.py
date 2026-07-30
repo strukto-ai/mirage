@@ -15,10 +15,13 @@
 import inspect
 from typing import Any
 
-from mirage.runtime.base import EvalError, EvaluatorMixin, EvalValue, Runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.errors import EvalError
+from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.route.types import (RouteContext, RouteFn, RouteScript,
                                         RoutingDecision, ScriptSource)
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
+from mirage.runtime.types import EvalValue
 
 
 def evaluator_of(entries: list[Runtime]) -> EvaluatorMixin | None:

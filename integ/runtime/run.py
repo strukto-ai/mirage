@@ -27,9 +27,10 @@ import uuid  # noqa: E402
 from typing import Any  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
-from mirage.runtime.base import RunArgs, RunResult, Runtime  # noqa: E402
+from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.route import ScriptSource  # noqa: E402
 from mirage.runtime.table import build_runtime  # noqa: E402
+from mirage.runtime.types import RunArgs, RunResult  # noqa: E402
 from mirage.types import CommandSafeguard, PathSpec  # noqa: E402
 
 HOST = "python"

@@ -20,9 +20,9 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import RunArgs
 from mirage.runtime.python import WasiRuntime
 from mirage.runtime.python.wasi import WASI_HOME_ENV
+from mirage.runtime.types import RunArgs
 
 
 def _build_dir() -> str | None:

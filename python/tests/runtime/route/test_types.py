@@ -14,8 +14,9 @@
 
 import json
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
 from mirage.runtime.route.types import CommandFacts, RouteContext
+from mirage.runtime.types import RunArgs, RunResult
 
 
 class StubRuntime(Runtime):

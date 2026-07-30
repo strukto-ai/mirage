@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Runtime, VfsRuntime, type RunArgs, type RunResult } from './executor/runtime.ts'
+import { Runtime, VfsRuntime } from './executor/runtime.ts'
+import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
 import { ScriptSource } from './executor/route/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'

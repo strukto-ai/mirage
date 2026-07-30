@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Runtime, type RunArgs, type RunResult, type RuntimeOptions } from '../runtime.ts'
+import { Runtime } from '../runtime.ts'
+import type { RunArgs, RunResult, RuntimeOptions } from '../runtime_types.ts'
 import {
   createMirageBridge,
   type BridgeDispatchFn,

@@ -16,14 +16,13 @@ import asyncio
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
-from mirage.runtime.base import (EvalError, EvalResult, EvaluatorMixin,
-                                 EvalValue, RunArgs, RunResult, Runtime)
-from mirage.runtime.envelope import python_eval_harness, split_envelope
+from mirage.runtime.base import Runtime
 from mirage.runtime.route.types import RouteScript
 from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.types import RunArgs, RunResult
 
 
-class RemoteSandbox(Runtime, EvaluatorMixin):
+class RemoteSandbox(Runtime):
     """A runtime that runs whole lines inside a sandbox the user runs.
 
     Mirage never creates, provisions, or deletes sandboxes: you bring
@@ -82,42 +81,6 @@ class RemoteSandbox(Runtime, EvaluatorMixin):
                 self._connected = True
         merged = {**self.config.env, **env}
         return await self.exec_line(line, stdin, merged, cwd)
-
-    async def eval(self,
-                   code: str,
-                   *,
-                   inputs: dict[str, EvalValue] | None = None,
-                   session: str | None = None) -> EvalResult:
-        """Evaluate python code in the sandbox via the result envelope.
-
-        The code is wrapped in the envelope harness and piped to the
-        sandbox's stock ``python3 -``: inputs travel in as embedded
-        JSON, the trailing expression's value comes home as JSON
-        behind the envelope sentinel, and the program's own prints
-        stay ordinary stdout. Requires python3 in the sandbox image.
-
-        Args:
-            code (str): the python source; its trailing expression is
-                the value.
-            inputs (dict[str, EvalValue] | None): named globals for
-                the program.
-            session (str | None): unsupported; a sandbox exec is one
-                process per run, so no state persists between calls.
-
-        Raises:
-            EvalError: session requested, python3 absent, the program
-                failed, or the value could not be carried back.
-        """
-        if session is not None:
-            raise EvalError(f"runtime {self.name!r} evaluates one-shot; "
-                            f"eval sessions are not supported in a sandbox")
-        harness = python_eval_harness(code, inputs)
-        result = await self.run_line("python3 -", harness.encode(), {}, "/")
-        if result.exit_code != 0:
-            detail = (result.stderr or b"").decode(errors="replace").strip()
-            raise EvalError(detail or f"evaluation exited {result.exit_code}")
-        stdout, value = split_envelope(result.stdout)
-        return EvalResult(value=value, stdout=stdout, stderr=result.stderr)
 
     async def connect(self) -> None:
         """Attach to the user's live sandbox, failing loud if absent."""

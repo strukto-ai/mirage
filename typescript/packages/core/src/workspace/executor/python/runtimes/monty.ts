@@ -12,16 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  EvalError,
-  Runtime,
-  type EvalResult,
-  type Evaluator,
-  type EvalValue,
-  type RunArgs,
-  type RunResult,
-  type RuntimeOptions,
-} from '../../runtime.ts'
+import { Runtime } from '../../runtime.ts'
+import { EvalError } from '../../runtime_errors.ts'
+import type { Evaluator } from '../../runtime_mixin.ts'
+import type {
+  EvalResult,
+  EvalValue,
+  RunArgs,
+  RunResult,
+  RuntimeOptions,
+} from '../../runtime_types.ts'
 import type { BridgeDispatchFn } from '../mirage_bridge.ts'
 import { MONTY_RUNTIME } from './interface.ts'
 

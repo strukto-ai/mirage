@@ -12,16 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  bindCommands,
-  catchAll,
-  isEvaluator,
-  runtimeBindingsFor,
-  EvalError,
-  type Evaluator,
-  type EvalValue,
-  type Runtime,
-} from '../runtime.ts'
+import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../runtime.ts'
+import { EvalError } from '../runtime_errors.ts'
+import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
+import type { EvalValue } from '../runtime_types.ts'
 import { RoutingDecisionError } from './errors.ts'
 import {
   ScriptSource,

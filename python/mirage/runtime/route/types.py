@@ -16,7 +16,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from mirage.runtime.base import Runtime, ScriptSource
+from mirage.runtime.base import Runtime
+from mirage.runtime.types import ScriptSource
 
 
 @dataclass(frozen=True, slots=True)

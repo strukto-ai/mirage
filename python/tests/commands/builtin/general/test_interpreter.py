@@ -17,7 +17,8 @@ import pytest
 from mirage.commands.builtin.general.interpreter import (Source,
                                                          resolve_source,
                                                          run_code)
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
 
 

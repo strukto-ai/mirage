@@ -12,25 +12,80 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-# A docker container as an evaluator: inputs in, the last expression's
-# value out, over the result envelope (JSON behind a sentinel on
-# stdout). Any runtime with the evaluator capability can also serve as
-# the workspace's routing policy engine. Start the container first:
+# How to give YOUR OWN runtime the evaluator capability: inherit
+# EvaluatorMixin and implement eval (inputs in, the last expression's
+# value out). The transport is yours to choose; mirage only defines
+# the contract. Here a docker container evaluates python by piping a
+# harness to its stock `python3 -`: the value comes back as JSON
+# behind a NUL sentinel on stdout (NUL cannot appear in JSON text, so
+# user prints cannot forge it). An evaluator runtime can also serve
+# as the workspace's routing policy engine. Start the container first:
 #
 #     docker run -d --name mirage-eval-demo python:3.12-slim sleep infinity
 #
 # and remove it when done: docker rm -f mirage-eval-demo
 
 import asyncio
+import json
 
-from mirage.runtime.base import EvalError
+from mirage.runtime.errors import EvalError
+from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.sandbox.docker import DockerRuntime
+from mirage.runtime.types import EvalResult, EvalValue
 
 CONTAINER = "mirage-eval-demo"
 
+SENTINEL = "\x00MIRAGE_EVAL\x00"
+
+# Runs inside the container: bind inputs as globals, execute the user
+# code, evaluate its trailing expression, emit the value as JSON
+# behind the sentinel. User prints stream to stdout ahead of it; a
+# raised exception exits nonzero with its own traceback instead.
+HARNESS = """\
+import ast as _ast
+import json as _json
+import sys as _sys
+_code = _json.loads({code_json})
+_tree = _ast.parse(_code)
+_last = None
+if _tree.body and isinstance(_tree.body[-1], _ast.Expr):
+    _last = _ast.Expression(_tree.body[-1].value)
+    _tree.body = _tree.body[:-1]
+_globals = _json.loads({inputs_json})
+exec(compile(_tree, "<eval>", "exec"), _globals)
+_value = None
+if _last is not None:
+    _value = eval(compile(_last, "<eval>", "eval"), _globals)
+_sys.stdout.write({sentinel_json} + _json.dumps(_value))
+"""
+
+
+class EvalDockerRuntime(DockerRuntime, EvaluatorMixin):
+    """A docker container that is also an evaluator."""
+
+    async def eval(self,
+                   code: str,
+                   *,
+                   inputs: dict[str, EvalValue] | None = None,
+                   session: str | None = None) -> EvalResult:
+        if session is not None:
+            raise EvalError("one exec per run; sessions are not supported")
+        harness = HARNESS.format(code_json=json.dumps(json.dumps(code)),
+                                 inputs_json=json.dumps(
+                                     json.dumps(inputs or {})),
+                                 sentinel_json=json.dumps(SENTINEL))
+        result = await self.run_line("python3 -", harness.encode(), {}, "/")
+        if result.exit_code != 0:
+            detail = (result.stderr or b"").decode(errors="replace").strip()
+            raise EvalError(detail or f"evaluation exited {result.exit_code}")
+        stdout, sep, tail = result.stdout.rpartition(SENTINEL.encode())
+        if not sep:
+            raise EvalError("the program exited before its final expression")
+        return EvalResult(value=json.loads(tail.decode()), stdout=stdout)
+
 
 async def main() -> None:
-    runtime = DockerRuntime(config={"container": CONTAINER})
+    runtime = EvalDockerRuntime(config={"container": CONTAINER})
 
     result = await runtime.eval(
         "print('computing inside the container')\n"

@@ -18,7 +18,7 @@ import { RAMResource } from '../../../resource/ram/ram.ts'
 import { CommandSafeguard, MountMode } from '../../../types.ts'
 import { Workspace } from '../../workspace.ts'
 import { RemoteSandbox } from './base.ts'
-import type { RunResult, RuntimeOptions } from '../runtime.ts'
+import type { RunResult, RuntimeOptions } from '../runtime_types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

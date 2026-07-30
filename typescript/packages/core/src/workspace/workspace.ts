@@ -75,17 +75,16 @@ import {
 import {
   bindCommands,
   catchAll,
-  isEvaluator,
+  DEFAULT_ENTRIES,
   runtimeBindingsFor,
   scriptStringError,
-  wholeLineRuntime,
-  DEFAULT_ENTRIES,
   VfsRuntime,
-  type EvalResult,
+  wholeLineRuntime,
   type Runtime,
   type RuntimeEntry,
-  type RunResult,
 } from './executor/runtime.ts'
+import { isEvaluator } from './executor/runtime_mixin.ts'
+import type { EvalResult, RunResult } from './executor/runtime_types.ts'
 import { buildRuntime } from './executor/runtime_table.ts'
 import { PyodideUnavailableError } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
