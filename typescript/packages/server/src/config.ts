@@ -295,7 +295,7 @@ interface StoreBlock {
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
   runtimes?: (string | Record<string, unknown>)[] | null
-  route?: string | null
+  policy?: string | null
   mode?: string
   consistency?: string
   defaultSessionId?: string
@@ -337,14 +337,14 @@ export function loadWorkspaceConfig(
 /**
  * Resolve relative script paths against the config file's directory.
  *
- * A path-form `script`/`route` in a config file means "next to the
+ * A path-form `script`/`policy` in a config file means "next to the
  * file" (the docker build-context model), never "wherever the server
  * happens to run". In-memory object configs are untouched.
  */
 function absolutizeScripts(raw: WorkspaceConfigRaw, base: string): void {
-  const route = raw.route
-  if (typeof route === 'string' && isScriptPath(route) && !isAbsolute(route.trim())) {
-    raw.route = join(base, route.trim())
+  const policy = raw.policy
+  if (typeof policy === 'string' && isScriptPath(policy) && !isAbsolute(policy.trim())) {
+    raw.policy = join(base, policy.trim())
   }
   if (!Array.isArray(raw.runtimes)) return
   for (const entry of raw.runtimes) {
@@ -382,7 +382,7 @@ export interface WorkspaceArgs {
     workspaceId?: string
     store?: WorkspaceStateStore
     runtimes?: RuntimeEntry[]
-    route?: ScriptSource
+    policy?: ScriptSource
   }
   kernelMounts: Record<string, [MountBackend, string | undefined]>
 }
@@ -477,8 +477,8 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(cfg.runtimes !== undefined && cfg.runtimes !== null
         ? { runtimes: buildRuntimeEntries(cfg.runtimes) }
         : {}),
-      ...(cfg.route !== undefined && cfg.route !== null
-        ? { route: loadScriptSource(cfg.route) }
+      ...(cfg.policy !== undefined && cfg.policy !== null
+        ? { policy: loadScriptSource(cfg.policy) }
         : {}),
     },
     kernelMounts,

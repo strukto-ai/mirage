@@ -15,9 +15,9 @@
 import asyncio
 
 from mirage import MountMode, Workspace
-from mirage.commands import safeguard as sg
 from mirage.commands.builtin.utils.safeguard import SafeguardExceededError
 from mirage.resource.ram import RAMResource
+from mirage.runtime.policy import safeguard as sg
 from mirage.types import CommandSafeguard, OnExceed, PathSpec
 
 A_LINES = "1\n2\n3\n4\n5\n"
