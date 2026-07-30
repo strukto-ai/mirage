@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -204,11 +204,19 @@ class PolicyContext:
 #         script: guard.py
 PolicyScript = Callable[[PolicyContext], bool | Awaitable[bool]] | ScriptSource
 
+# What the global policy may answer: a runtime name, None to pass, or
+# a verdict dict, the extensible spelling. Today's dict keys (mutually
+# exclusive): {"runtime": name} places the line, {"deny": reason}
+# refuses it before anything runs (exit 126, reason on stderr). New
+# powers grow as new dict keys, never as new return types. Mirrors the
+# TS PolicyVerdict.
+PolicyVerdict = str | Mapping[str, Any] | None
+
 # The global policy, answering "who takes this line?". In code: a
-# callable (sync or async) on the PolicyContext returning a runtime
-# name, or None to pass down the ladder. From config: a .py file
-# reference, loaded as ScriptSource (its last expression is that name
-# or None). Mirrors the TS PolicyFn.
+# callable (sync or async) on the PolicyContext returning a
+# PolicyVerdict. From config: a .py file reference, loaded as
+# ScriptSource (its last expression is the verdict). Mirrors the TS
+# PolicyFn.
 #
 #     def policy(ctx: PolicyContext) -> str | None:
 #         return "wasi" if ctx.command == "python3" else None
@@ -218,7 +226,7 @@ PolicyScript = Callable[[PolicyContext], bool | Awaitable[bool]] | ScriptSource
 #     # workspace yaml: policy.py next to the config file
 #     policy: policy.py
 PolicyFn = Callable[[PolicyContext],
-                    str | None | Awaitable[str | None]] | ScriptSource
+                    PolicyVerdict | Awaitable[PolicyVerdict]] | ScriptSource
 
 
 @dataclass(frozen=True, slots=True)

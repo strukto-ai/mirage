@@ -185,6 +185,12 @@ describe('MontyRuntime', () => {
     expect(result.status).toBe('complete')
   }, 30_000)
 
+  it('eval folds dict values into plain objects, not Maps', async () => {
+    const rt = make()
+    const result = await rt.eval("{'deny': 'no', 'nested': [{'k': 1}]}")
+    expect(result.value).toEqual({ deny: 'no', nested: [{ k: 1 }] })
+  }, 30_000)
+
   it('a missing virtual file surfaces as an error without poisoning the runtime', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
     const rt = make(dispatch)

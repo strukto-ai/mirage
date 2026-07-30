@@ -160,11 +160,20 @@ export class ScriptSource {
 export type PolicyScript = ((ctx: PolicyContext) => boolean | Promise<boolean>) | ScriptSource
 
 /**
+ * What the global policy may answer: a runtime name, null to pass, or
+ * a verdict object, the extensible spelling. Today's keys (mutually
+ * exclusive): `{runtime: name}` places the line, `{deny: reason}`
+ * refuses it before anything runs (exit 126, reason on stderr). New
+ * powers grow as new keys, never as new return types. Mirrors the
+ * python PolicyVerdict.
+ */
+export type PolicyVerdict = string | null | { runtime?: string; deny?: string }
+
+/**
  * The global policy, answering "who takes this line?". In code: a
- * function (sync or async) on the PolicyContext returning a runtime
- * name, or null to pass down the ladder. From config: a `.py` file
- * reference, loaded as ScriptSource (its last expression is that name
- * or None).
+ * function (sync or async) on the PolicyContext returning a
+ * PolicyVerdict. From config: a `.py` file reference, loaded as
+ * ScriptSource (its last expression is the verdict).
  *
  * ```
  * policy: (ctx) => (ctx.command === 'python3' ? 'monty' : null)
@@ -174,7 +183,7 @@ export type PolicyScript = ((ctx: PolicyContext) => boolean | Promise<boolean>) 
  * ```
  */
 export type PolicyFn =
-  | ((ctx: PolicyContext) => string | null | Promise<string | null>)
+  | ((ctx: PolicyContext) => PolicyVerdict | Promise<PolicyVerdict>)
   | ScriptSource
 
 /**

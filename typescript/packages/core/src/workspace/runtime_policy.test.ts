@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
-import { ScriptSource } from './executor/policy/index.ts'
+import { parseVerdict, ScriptSource } from './executor/policy/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -193,6 +193,55 @@ describe('routing ladder', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  it('a deny verdict folds into the line result', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), 'vfs'],
+        policy: (ctx) => (ctx.command === 'python3' ? { deny: 'python3 is blocked' } : null),
+      },
+    )
+    try {
+      const denied = await ws.execute('python3 -c "x"')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('mirage: policy denied: python3 is blocked\n')
+      const ok = await ws.execute('echo ok')
+      expect(DEC.decode(ok.stdout)).toBe('ok\n')
+      expect(ok.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a runtime verdict object places the line', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'vfs'],
+        policy: () => ({ runtime: 'beta' }),
+      },
+    )
+    try {
+      const io = await ws.execute('python3 -c "x"')
+      expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('parseVerdict fails loud on bad verdict objects', () => {
+    expect(() => parseVerdict({ runtme: 'beta' })).toThrow('unknown policy verdict keys')
+    expect(() => parseVerdict({ runtime: 'beta', deny: 'no' })).toThrow('both place and deny')
+    expect(() => parseVerdict({})).toThrow("needs a 'runtime' name")
+    expect(() => parseVerdict(42)).toThrow('verdict dict, or null')
   })
 
   it('nested evals inherit the typed line decision', async () => {

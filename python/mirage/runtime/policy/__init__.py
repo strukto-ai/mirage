@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.policy.decide import (decide_line, evaluate_policy,
-                                          evaluate_script, evaluator_of)
-from mirage.runtime.policy.errors import PolicyError
+                                          evaluate_script, evaluator_of,
+                                          parse_verdict)
+from mirage.runtime.policy.errors import PolicyDeny, PolicyError
 from mirage.runtime.policy.facts import command_facts
 from mirage.runtime.policy.types import (CommandFacts, PolicyContext,
                                          PolicyDecision, PolicyFn,
-                                         PolicyScript, ScriptSource)
+                                         PolicyScript, PolicyVerdict,
+                                         ScriptSource)
 
 __all__ = [
     "CommandFacts",
@@ -28,6 +30,9 @@ __all__ = [
     "PolicyFn",
     "PolicyScript",
     "PolicyError",
+    "PolicyDeny",
+    "PolicyVerdict",
+    "parse_verdict",
     "command_facts",
     "decide_line",
     "evaluate_policy",

@@ -67,6 +67,7 @@ import { MontyUnavailableError } from './executor/python/runtimes/monty.ts'
 import {
   commandFacts,
   decideLine,
+  PolicyDeny,
   PolicyError,
   type PolicyDecision,
   type PolicyContext,
@@ -1148,7 +1149,22 @@ export class Workspace {
       return new ExecuteResult(new Uint8Array(), err, 2)
     }
     const rootNode = root as unknown as TSNodeLike
-    const routingDecision = await this.resolvePolicyDecision(rootNode, command, options)
+    let routingDecision: PolicyDecision | null
+    try {
+      routingDecision = await this.resolvePolicyDecision(rootNode, command, options)
+    } catch (caught) {
+      if (caught instanceof PolicyDeny) {
+        // A deny is a policy outcome, not a mistake: it folds into the
+        // line's result the way a timeout does, never a throw.
+        const msg = new TextEncoder().encode(`mirage: policy denied: ${caught.reason}\n`)
+        const deniedSession = this.sessionManager.get(
+          options.sessionId ?? this.sessionManager.defaultId,
+        )
+        deniedSession.lastExitCode = 126
+        return new ExecuteResult(new Uint8Array(), msg, 126)
+      }
+      throw caught
+    }
 
     const dispatch: DispatchFn = this.dispatcher.dispatch
 

@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import inspect
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
+from mirage.runtime.policy.errors import PolicyDeny
 from mirage.runtime.policy.types import (PolicyContext, PolicyDecision,
                                          PolicyFn, PolicyScript, ScriptSource)
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
@@ -101,20 +103,54 @@ async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
     return bool(verdict)
 
 
+def parse_verdict(verdict: Any) -> str | None:
+    """Normalize a policy verdict to a runtime name or None to pass.
+
+    The dict form is the extensible spelling: {"runtime": name} places
+    the line, {"deny": reason} refuses it, and the keys are mutually
+    exclusive. Unknown keys fail loud so a typo never silently passes.
+
+    Args:
+        verdict: whatever the policy returned.
+
+    Raises:
+        PolicyDeny: the verdict is {"deny": reason}.
+        ValueError: the verdict is not a name, None, or a verdict dict.
+    """
+    if verdict is None or isinstance(verdict, str):
+        return verdict
+    if isinstance(verdict, Mapping):
+        unknown = sorted(set(verdict) - {"runtime", "deny"})
+        if unknown:
+            raise ValueError(f"unknown policy verdict keys: {unknown}")
+        if "deny" in verdict and "runtime" in verdict:
+            raise ValueError("policy verdict cannot both place and deny")
+        if "deny" in verdict:
+            raise PolicyDeny(str(verdict["deny"]))
+        name = verdict.get("runtime")
+        if isinstance(name, str):
+            return name
+        raise ValueError("policy verdict dict needs a 'runtime' name "
+                         "or a 'deny' reason")
+    raise ValueError(f"policy must return a runtime name, a verdict "
+                     f"dict, or None, got {verdict!r}")
+
+
 async def evaluate_policy(policy: PolicyFn, ctx: PolicyContext,
                           evaluator: EvaluatorMixin | None) -> str | None:
     """Run the global policy, returning a runtime name or None to pass.
 
     Args:
         policy (PolicyFn): a callable taking the PolicyContext, or a
-            config-borne ScriptSource (last expression = the name).
+            config-borne ScriptSource (last expression = the verdict).
         ctx (PolicyContext): facts about the line.
         evaluator (EvaluatorMixin | None): the world's policy engine,
             consulted only for ScriptSource policies.
 
     Raises:
-        ValueError: the policy returned something other than a runtime
-            name or None.
+        PolicyDeny: the policy refused the line.
+        ValueError: the policy returned something other than a
+            PolicyVerdict.
     """
     verdict: Any
     if isinstance(policy, ScriptSource):
@@ -123,10 +159,7 @@ async def evaluate_policy(policy: PolicyFn, ctx: PolicyContext,
         verdict = policy(ctx)
         if inspect.isawaitable(verdict):
             verdict = await verdict
-    if verdict is None or isinstance(verdict, str):
-        return verdict
-    raise ValueError(f"policy must return a runtime name or None, "
-                     f"got {verdict!r}")
+    return parse_verdict(verdict)
 
 
 async def decide_line(entries: list[Runtime], policy: PolicyFn | None,

@@ -15,9 +15,10 @@
 import pytest
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import (PolicyContext, ScriptSource, command_facts,
-                                   decide_line, evaluate_policy,
-                                   evaluate_script, evaluator_of)
+from mirage.runtime.policy import (PolicyContext, PolicyDeny, ScriptSource,
+                                   command_facts, decide_line, evaluate_policy,
+                                   evaluate_script, evaluator_of,
+                                   parse_verdict)
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult
@@ -101,12 +102,36 @@ def test_evaluator_of_picks_first_evaluator_entry():
 
 
 @pytest.mark.asyncio
-async def test_route_returns_name_or_none_only():
+async def test_policy_returns_name_none_or_verdict_dict():
     assert await evaluate_policy(lambda c: None, ctx_for("x"), None) is None
     assert await evaluate_policy(ScriptSource("'beta'"), ctx_for("x"),
                                  MontyRuntime()) == "beta"
-    with pytest.raises(ValueError, match="runtime name or None"):
+    assert await evaluate_policy(lambda c: {"runtime": "beta"}, ctx_for("x"),
+                                 None) == "beta"
+    with pytest.raises(ValueError, match="verdict dict, or None"):
         await evaluate_policy(lambda c: 42, ctx_for("x"), None)
+
+
+@pytest.mark.asyncio
+async def test_policy_deny_verdict_raises_with_reason():
+    with pytest.raises(PolicyDeny) as caught:
+        await evaluate_policy(lambda c: {"deny": "blocked here"}, ctx_for("x"),
+                              None)
+    assert caught.value.reason == "blocked here"
+    with pytest.raises(PolicyDeny, match="no python3"):
+        await evaluate_policy(
+            ScriptSource("{'deny': 'no python3'} "
+                         "if ctx['command'] == 'python3' else None"),
+            ctx_for("python3 x"), MontyRuntime())
+
+
+def test_parse_verdict_fails_loud_on_bad_dicts():
+    with pytest.raises(ValueError, match="unknown policy verdict keys"):
+        parse_verdict({"runtme": "beta"})
+    with pytest.raises(ValueError, match="both place and deny"):
+        parse_verdict({"runtime": "beta", "deny": "no"})
+    with pytest.raises(ValueError, match="needs a 'runtime' name"):
+        parse_verdict({})
 
 
 @pytest.mark.asyncio

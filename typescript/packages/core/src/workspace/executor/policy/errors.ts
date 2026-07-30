@@ -24,3 +24,17 @@ export class PolicyError extends Error {
     this.name = 'PolicyError'
   }
 }
+
+/**
+ * The policy refused the line before anything ran.
+ *
+ * A legitimate policy outcome, not a mistake: execute() folds it into
+ * the line's result (exit 126, the reason on stderr) instead of
+ * propagating like PolicyError.
+ */
+export class PolicyDeny extends Error {
+  constructor(readonly reason: string) {
+    super(reason)
+    this.name = 'PolicyDeny'
+  }
+}

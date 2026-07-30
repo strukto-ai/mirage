@@ -45,8 +45,9 @@ from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyError,
-                                   PolicyFn, command_facts, decide_line)
+from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyDeny,
+                                   PolicyError, PolicyFn, command_facts,
+                                   decide_line)
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   bind_commands, build_runtime, catch_all,
                                   runtime_bindings_for, whole_line_runtime)
@@ -1384,6 +1385,13 @@ class Workspace:
             msg = (str(exc) + "\n").encode()
             io = IOResult(exit_code=124, stderr=msg)
             session.last_exit_code = 124
+            return io
+        except PolicyDeny as exc:
+            # A deny is a policy outcome, not a mistake: it folds into
+            # the line's result the way a timeout does, never a raise.
+            msg = f"mirage: policy denied: {exc.reason}\n".encode()
+            io = IOResult(exit_code=126, stderr=msg)
+            session.last_exit_code = 126
             return io
         except (MirageAbortError, ContentDriftError, PolicyError):
             raise

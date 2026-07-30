@@ -16,7 +16,7 @@ import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../run
 import { EvalError } from '../runtime_errors.ts'
 import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
 import type { EvalValue } from '../runtime_types.ts'
-import { PolicyError } from './errors.ts'
+import { PolicyDeny, PolicyError } from './errors.ts'
 import {
   ScriptSource,
   policyContextPayload,
@@ -101,6 +101,36 @@ async function evaluateScript(
   return await script(view)
 }
 
+/**
+ * Normalize a policy verdict to a runtime name or null to pass.
+ *
+ * The object form is the extensible spelling: `{runtime: name}` places
+ * the line, `{deny: reason}` refuses it, and the keys are mutually
+ * exclusive. Unknown keys fail loud so a typo never silently passes.
+ */
+export function parseVerdict(verdict: unknown): string | null {
+  if (verdict === null) return null
+  if (typeof verdict === 'string') return verdict
+  if (typeof verdict === 'object' && !Array.isArray(verdict) && !(verdict instanceof Uint8Array)) {
+    const obj = verdict as Record<string, unknown>
+    const unknown = Object.keys(obj)
+      .filter((key) => key !== 'runtime' && key !== 'deny')
+      .sort()
+    if (unknown.length > 0) {
+      throw new PolicyError(`unknown policy verdict keys: ${JSON.stringify(unknown)}`)
+    }
+    if ('deny' in obj && 'runtime' in obj) {
+      throw new PolicyError('policy verdict cannot both place and deny')
+    }
+    if ('deny' in obj) throw new PolicyDeny(String(obj.deny))
+    if (typeof obj.runtime === 'string') return obj.runtime
+    throw new PolicyError("policy verdict dict needs a 'runtime' name or a 'deny' reason")
+  }
+  throw new PolicyError(
+    `policy must return a runtime name, a verdict dict, or null, got ${JSON.stringify(verdict)}`,
+  )
+}
+
 /** Run the global policy, returning a runtime name or null to pass. */
 async function evaluatePolicy(
   policy: PolicyFn,
@@ -113,9 +143,7 @@ async function evaluatePolicy(
     policy instanceof ScriptSource
       ? await evalSource(policy.source, policyContextPayload(ctx), evaluator)
       : ((await policy(ctx)) ?? null)
-  if (verdict === null) return null
-  if (typeof verdict === 'string') return verdict
-  throw new PolicyError(`policy must return a runtime name or null, got ${JSON.stringify(verdict)}`)
+  return parseVerdict(verdict)
 }
 
 /**

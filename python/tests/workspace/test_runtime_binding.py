@@ -319,6 +319,24 @@ async def test_global_route_names_the_runtime():
 
 
 @pytest.mark.asyncio
+async def test_policy_deny_folds_into_the_line_result():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(), "vfs"],
+                   policy=lambda ctx: {"deny": "python3 is blocked"}
+                   if ctx.command == "python3" else None)
+    try:
+        io = await ws.execute("python3 -c 'x'")
+        assert io.exit_code == 126
+        assert io.stderr == b"mirage: policy denied: python3 is blocked\n"
+        io = await ws.execute("echo ok")
+        assert await materialize(io.stdout) == b"ok\n"
+        assert io.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_nested_eval_inherits_routing():
     alpha, beta = AlphaRuntime(), BetaRuntime()
     alpha.script = lambda ctx: "big" not in ctx.line

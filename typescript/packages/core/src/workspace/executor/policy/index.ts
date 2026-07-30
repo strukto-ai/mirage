@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { decideLine, evaluatorOf } from './decide.ts'
-export { PolicyError } from './errors.ts'
+export { decideLine, evaluatorOf, parseVerdict } from './decide.ts'
+export { PolicyDeny, PolicyError } from './errors.ts'
 export { commandFacts } from './facts.ts'
 export { ScriptSource, policyContextFromPayload, policyContextPayload } from './types.ts'
 export type {
@@ -22,4 +22,5 @@ export type {
   PolicyContext,
   PolicyFn,
   PolicyScript,
+  PolicyVerdict,
 } from './types.ts'

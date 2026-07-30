@@ -507,12 +507,15 @@ export {
   policyContextFromPayload,
   policyContextPayload,
   ScriptSource,
+  parseVerdict,
+  PolicyDeny,
   PolicyError,
   type CommandFacts,
   type PolicyDecision,
   type PolicyContext,
   type PolicyFn,
   type PolicyScript,
+  type PolicyVerdict,
 } from './workspace/executor/policy/index.ts'
 export {
   buildRuntime,
