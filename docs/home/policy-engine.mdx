@@ -88,19 +88,9 @@ plays both roles: it serves `python3` and evaluates the scripts. A world
 that uses route scripts without any evaluator entry fails loudly at the
 first decision.
 
-When every command should run in the sandbox and `monty` should serve
-nothing, keep it as the engine only by declaring empty captures:
-
-```yaml
-runtimes:
-  - name: monty
-    captures: [] # evaluates scripts, serves no commands
-  - name: docker
-    captures: ["python3"]
-    config:
-      container: my-box
-  - vfs
-```
+(An entry can even be engine-only: `captures: []` keeps `monty` in the
+world to evaluate scripts without serving any command, for worlds where
+everything must run in the sandbox.)
 
 In code you can skip all of this and pass real functions as `route=` or
 `script=`; functions run directly and need no evaluator.
