@@ -14,9 +14,7 @@ function accessorWith(fake: FakeNextcloudOperator): NextcloudAccessor {
 
 describe('nextcloud readdir', () => {
   it('indexes listing sizes, 0-byte files included', async () => {
-    const accessor = accessorWith(
-      new FakeNextcloudOperator({ 'a.txt': 'hello', 'empty.txt': '' }),
-    )
+    const accessor = accessorWith(new FakeNextcloudOperator({ 'a.txt': 'hello', 'empty.txt': '' }))
     const index = new RAMIndexCacheStore()
     const out = await readdir(accessor, PathSpec.fromStrPath('/'), index)
     expect(out).toEqual(['/a.txt', '/empty.txt'])
