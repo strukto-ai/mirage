@@ -12,6 +12,7 @@ installed packages, but every line pays the exec round-trip. The **route**
 decides per line which one serves it:
 
 ```yaml
+mode: exec
 runtimes:
   - monty # captures python3 by default: sandboxed, stdlib-only
   - name: docker
@@ -38,13 +39,12 @@ stays on monty.
 ## Input: the line's context
 
 The script sees one global, `ctx`, the parsed line before any routing.
-For `python3 /jobs/train.py --epochs 3` it is:
+This payload is captured from a live run of the config above, routing
+`python3 /jobs/train.py --epochs 3`:
 
 ```json
 {
   "line": "python3 /jobs/train.py --epochs 3",
-  "command": "python3",
-  "builtin": true,
   "commands": [
     {
       "command": "python3",
@@ -53,18 +53,29 @@ For `python3 /jobs/train.py --epochs 3` it is:
       "paths": ["/jobs/train.py"]
     }
   ],
+  "command": "python3",
+  "builtin": true,
   "cwd": "/",
   "env": {},
-  "mounts": ["/jobs", "/data"],
-  "session_id": "s-1",
-  "agent_id": null
+  "session_id": "019fb2fc-19a3-77cf-bbbe-c76069eed523",
+  "agent_id": "",
+  "mounts": ["/.bash_history/", "/data/", "/dev/", "/"]
 }
 ```
 
-`commands` has one entry per pipeline stage (`cat x | python3 -` has two),
-each with its words and its absolute-path operands; `command` and `builtin`
-mirror the first stage. The same schema is what a Python callable receives,
-and it round-trips through JSON, so you can store a payload and replay it.
+- `commands`: one entry per pipeline stage (`cat x | python3 -` has two),
+  each with its full words and its absolute-path operands.
+- `command`, `builtin`: mirror the first stage. `builtin` means mirage has
+  a builtin spec for the command (`python3` is a builtin that hands its
+  code to a runtime), as opposed to an unknown name.
+- `env`: the session environment (empty here, no `export` yet).
+- `session_id`: the executing session's id. `agent_id` is empty until an
+  agent identity is attached.
+- `mounts`: the workspace's mount prefixes, including built-ins like
+  `/dev/`.
+
+The payload round-trips through JSON (`RouteContext.from_dict`), so you
+can store one and replay a decision in tests.
 
 ## Output: the verdict
 
@@ -80,20 +91,36 @@ line? Unwilling entries step aside and the first willing capturer wins.
 
 ## What runs the scripts
 
-A config file can only carry source text, so something must evaluate it.
-That is the workspace's **policy engine**: its first runtime with the
-evaluator capability (`monty` in both languages, `pyodide` in TypeScript),
-asked to evaluate each script with `ctx` bound as a global. Above, `monty`
-plays both roles: it serves `python3` and evaluates the scripts. A world
-that uses route scripts without any evaluator entry fails loudly at the
-first decision.
+`route.py` is never imported or called as a module: the workspace hands
+its source text to the **policy engine**, the first runtime in the
+`runtimes` list with the evaluator capability (`monty` in both languages,
+`pyodide` in TypeScript). The engine evaluates it per line with `ctx`
+bound as a global, and the last expression comes back as the verdict. In
+the config above the engine is `monty`, the same entry that serves
+`python3`. If a config carries route scripts but no entry has the
+capability, the first decision fails with a `RoutingDecisionError` telling
+you to add one.
 
 (An entry can even be engine-only: `captures: []` keeps `monty` in the
 world to evaluate scripts without serving any command, for worlds where
 everything must run in the sandbox.)
 
-In code you can skip all of this and pass real functions as `route=` or
-`script=`; functions run directly and need no evaluator.
+When you build the workspace in code rather than from a config file,
+`route=` also accepts a plain function with the same decision contract,
+sync or async. It is called directly, so no evaluator is involved:
+
+```python
+from mirage.runtime.route import RouteContext
+
+def route(ctx: RouteContext) -> str | None:
+    stage = ctx.commands[0]
+    in_jobs = any(p.startswith("/jobs/") for p in stage.paths)
+    return "docker" if in_jobs else "monty"
+
+ws = Workspace(mounts, runtimes=runtimes, route=route)
+```
+
+A per-entry `script=` likewise accepts `(ctx) -> bool` in code.
 
 ## Bring your own
 
