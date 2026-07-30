@@ -31,6 +31,7 @@ import {
   handleEval,
   handleExport,
   handleLocal,
+  handleReadonly,
   handleMan,
   handlePrintenv,
   handlePrintf,
@@ -93,6 +94,60 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     handleExport(['X', 'Y'], s)
     expect(s.env.X).toBe('existing')
     expect(s.env.Y).toBe('')
+  })
+
+  it('export -p prints declare -x lines', () => {
+    const s = new Session({ sessionId: 'test', env: { ZZZ: '1', AAA: 'a"b' } })
+    const [out, io] = handleExport(['-p'], s)
+    expect(io.exitCode).toBe(0)
+    const text = decode(out as Uint8Array)
+    expect(text).toContain('declare -x AAA="a\\"b"\n')
+    expect(text).toContain('declare -x ZZZ="1"\n')
+    expect(text.indexOf('AAA')).toBeLessThan(text.indexOf('ZZZ'))
+  })
+
+  it('bare export prints like -p', () => {
+    const s = new Session({ sessionId: 'test', env: { FOO: 'bar' } })
+    const [out, io] = handleExport([], s)
+    expect(io.exitCode).toBe(0)
+    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\n')
+  })
+
+  it('export -z is invalid option exit 2', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleExport(['-z'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toContain('invalid option')
+    expect(decode(io.stderr as Uint8Array)).toContain('usage: export')
+  })
+
+  it('export -p with a name does not print', () => {
+    const s = new Session({ sessionId: 'test', env: { KEEP: '1' } })
+    const [out, io] = handleExport(['-p', 'FOO=bar'], s)
+    expect(io.exitCode).toBe(0)
+    expect(out).toBeNull()
+    expect(s.env.FOO).toBe('bar')
+  })
+
+  it('readonly -p prints scalars and arrays', () => {
+    const s = new Session({ sessionId: 'test', env: { VAL: 'x' } })
+    s.readonlyVars.add('VAL')
+    s.readonlyVars.add('ONLY')
+    s.arrays.AR = ['a', 'b c']
+    s.readonlyVars.add('AR')
+    const [out, io] = handleReadonly(['-p'], s)
+    expect(io.exitCode).toBe(0)
+    const text = decode(out as Uint8Array)
+    expect(text).toContain('declare -ar AR=([0]="a" [1]="b c")\n')
+    expect(text).toContain('declare -r ONLY\n')
+    expect(text).toContain('declare -r VAL="x"\n')
+  })
+
+  it('readonly -z is invalid option exit 2', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleReadonly(['-z'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toContain('invalid option')
   })
 
   it('unset removes keys', () => {

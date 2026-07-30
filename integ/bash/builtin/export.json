@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "export_p_prints_declare_x",
+      "seq": 609250,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "export ZEP1=v1; export -p | grep ZEP1",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -x ZEP1=\"v1\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "export_bare_prints_like_p",
+      "seq": 609251,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "export ZEP2=v2; export | grep ZEP2",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -x ZEP2=\"v2\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "export_p_quotes_special_chars",
+      "seq": 609252,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "export ZEP3='a\"b'; export ZEP4='x$y'; export -p | grep ZEP3; export -p | grep ZEP4",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -x ZEP3=\"a\\\"b\"\ndeclare -x ZEP4=\"x\\$y\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "export_invalid_option_exit_2",
+      "seq": 609253,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "export -z; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\n",
+        "stderr": "bash: export: -z: invalid option\nexport: usage: export [-fn] [name[=value] ...] or export -p\n"
+      }
+    },
+    {
+      "id": "readonly_p_prints_declare_r",
+      "seq": 609254,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readonly ZRP1=7; readonly -p | grep ZRP1",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -r ZRP1=\"7\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readonly_p_prints_array",
+      "seq": 609255,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readonly -a ZAR=(x 'y z'); readonly -p | grep ZAR",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -ar ZAR=([0]=\"x\" [1]=\"y z\")\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readonly_invalid_option_exit_2",
+      "seq": 609256,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readonly -z; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\n",
+        "stderr": "bash: readonly: -z: invalid option\nreadonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n"
+      }
+    }
+  ]
+}

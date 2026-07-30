@@ -497,14 +497,22 @@ async def execute_node(
                     session.arrays[bare] = [] if scalar is None else [scalar]
         if is_readonly:
             # An array assignment stores itself above, but the name still
-            # has to be marked readonly.
+            # has to be marked readonly. Only the `readonly` keyword owns
+            # -p / illegal-option handling; `declare -r` keeps names only.
+            if keyword == "readonly":
+                flag_words = ([f"-{''.join(flag_chars)}"]
+                              if flag_chars else [])
+                return await handle_readonly(
+                    flag_words + assignments + array_names, session)
             return await handle_readonly(assignments + array_names, session)
         # declare/typeset scope like `local` inside a function (bash
         # semantics) and assign globally at top level, which is exactly
         # handle_local's fallback when no function scope is active.
         if keyword in (NT.LOCAL, "declare", "typeset"):
             return await handle_local(assignments, session)
-        return await handle_export(assignments, session)
+        # Rebuild export flags so -p / bare print and illegal options work.
+        flag_words = [f"-{''.join(flag_chars)}"] if flag_chars else []
+        return await handle_export(flag_words + assignments, session)
 
     # ── unset ───────────────────────────────────
     if kind == NodeKind.UNSET:

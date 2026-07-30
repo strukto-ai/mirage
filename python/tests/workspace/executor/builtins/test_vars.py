@@ -8,8 +8,8 @@ from mirage.io.stream import materialize
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.workspace.executor.builtins.vars import (  # yapf: disable
-    handle_env, handle_exit, handle_getopts, handle_read, handle_return,
-    handle_shift, handle_unset, handle_whoami)
+    handle_env, handle_exit, handle_export, handle_getopts, handle_read,
+    handle_readonly, handle_return, handle_shift, handle_unset, handle_whoami)
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session.session import Session
@@ -659,3 +659,100 @@ async def test_getopts_subshell_does_not_corrupt_parent_cursor():
     io = await ws.execute('set -- -ab; OPTIND=1; getopts ab o; '
                           '(getopts ab o); getopts ab o; echo "$o"')
     assert (io.stdout or b"") == b"b\n"
+
+
+@pytest.mark.asyncio
+async def test_export_p_prints_declare_x():
+    session = make_session()
+    session.env["ZZZ"] = "1"
+    session.env["AAA"] = 'a"b'
+    session.env["NL"] = "a\nb"
+    session.env["DOL"] = "a$b"
+    out, io, _ = await handle_export(["-p"], session)
+    assert io.exit_code == 0
+    text = (await materialize(out)).decode()
+    assert 'declare -x AAA="a\\"b"\n' in text
+    assert 'declare -x DOL="a\\$b"\n' in text
+    assert "declare -x NL=$'a\\nb'\n" in text
+    assert 'declare -x ZZZ="1"\n' in text
+    # Sorted by name
+    assert text.index("AAA") < text.index("ZZZ")
+
+
+@pytest.mark.asyncio
+async def test_export_bare_prints_like_p():
+    session = make_session()
+    session.env["FOO"] = "bar"
+    out, io, _ = await handle_export([], session)
+    assert io.exit_code == 0
+    assert await materialize(out) == b'declare -x FOO="bar"\n'
+
+
+@pytest.mark.asyncio
+async def test_export_invalid_option_exit_2():
+    session = make_session()
+    _, io, _ = await handle_export(["-z"], session)
+    assert io.exit_code == 2
+    err = (io.stderr or b"").decode()
+    assert "invalid option" in err
+    assert "usage: export" in err
+
+
+@pytest.mark.asyncio
+async def test_export_p_with_name_does_not_print():
+    session = make_session()
+    session.env["KEEP"] = "1"
+    out, io, _ = await handle_export(["-p", "FOO=bar"], session)
+    assert io.exit_code == 0
+    assert out is None
+    assert session.env["FOO"] == "bar"
+
+
+@pytest.mark.asyncio
+async def test_readonly_p_prints_scalars_and_arrays():
+    session = make_session()
+    session.env["VAL"] = "x"
+    session.readonly_vars.add("VAL")
+    session.readonly_vars.add("ONLY")
+    session.arrays["AR"] = ["a", "b c"]
+    session.readonly_vars.add("AR")
+    out, io, _ = await handle_readonly(["-p"], session)
+    assert io.exit_code == 0
+    text = (await materialize(out)).decode()
+    assert 'declare -ar AR=([0]="a" [1]="b c")\n' in text
+    assert "declare -r ONLY\n" in text
+    assert 'declare -r VAL="x"\n' in text
+
+
+@pytest.mark.asyncio
+async def test_readonly_invalid_option_exit_2():
+    session = make_session()
+    _, io, _ = await handle_readonly(["-z"], session)
+    assert io.exit_code == 2
+    err = (io.stderr or b"").decode()
+    assert "invalid option" in err
+    assert "usage: readonly" in err
+
+
+@pytest.mark.asyncio
+async def test_export_p_via_workspace():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('export ZEP1=v1; export -p | grep ZEP1')
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b'declare -x ZEP1="v1"\n'
+
+
+@pytest.mark.asyncio
+async def test_readonly_p_via_workspace():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('readonly ZRP1=7; readonly -p | grep ZRP1')
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b'declare -r ZRP1="7"\n'
+
+
+@pytest.mark.asyncio
+async def test_export_invalid_option_via_workspace():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute("export -z")
+    assert io.exit_code == 2
+    assert b"invalid option" in (io.stderr or b"")

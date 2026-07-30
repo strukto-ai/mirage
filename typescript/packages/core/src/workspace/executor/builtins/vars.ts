@@ -31,8 +31,114 @@ import { ReturnSignal } from '../command.ts'
 import { PRINTF_TARGET_RE } from './text.ts'
 import type { ExecuteStringFn, Result } from './scope.ts'
 
+const EXPORT_USAGE = 'export: usage: export [-fn] [name[=value] ...] or export -p\n'
+const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n'
+const EXPORT_FLAGS = new Set('fnp')
+const READONLY_FLAGS = new Set('aAfp')
+
+/** Quote a value the way bash `declare -p` / `export -p` does. */
+function bashDeclareQuote(value: string): string {
+  if (value.includes('\n') || value.includes('\r')) {
+    let out = ''
+    for (const ch of value) {
+      if (ch === '\\') out += '\\\\'
+      else if (ch === "'") out += "\\'"
+      else if (ch === '\n') out += '\\n'
+      else if (ch === '\r') out += '\\r'
+      else if (ch === '\t') out += '\\t'
+      else out += ch
+    }
+    return `$'${out}'`
+  }
+  let out = ''
+  for (const ch of value) {
+    if (ch === '\\' || ch === '"' || ch === '$' || ch === '`') out += `\\${ch}`
+    else out += ch
+  }
+  return `"${out}"`
+}
+
+function splitDeclFlags(
+  args: string[],
+  allowed: Set<string>,
+): { flags: Set<string>; names: string[]; bad: string | null } {
+  const flags = new Set<string>()
+  let i = 0
+  while (i < args.length) {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (tok.startsWith('-') && tok.length > 1 && tok !== '-') {
+      const body = tok.slice(1)
+      for (const ch of body) {
+        if (!allowed.has(ch)) return { flags, names: args.slice(i), bad: ch }
+      }
+      for (const ch of body) flags.add(ch)
+      i += 1
+      continue
+    }
+    break
+  }
+  return { flags, names: args.slice(i), bad: null }
+}
+
+function exportLines(session: Session): string[] {
+  // Mirage keeps shell variables in session.env and treats that map as the
+  // exported environment (printenv / env already do), so export -p lists it.
+  return Object.keys(session.env)
+    .sort()
+    .map((name) => `declare -x ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
+}
+
+function readonlyLines(session: Session): string[] {
+  const lines: string[] = []
+  for (const name of [...session.readonlyVars].sort()) {
+    const arr = session.arrays[name]
+    if (arr !== undefined) {
+      const parts: string[] = []
+      for (let i = 0; i < arr.length; i++) {
+        const v = arr[i]
+        if (v !== null && v !== undefined) {
+          parts.push(`[${String(i)}]=${bashDeclareQuote(v)}`)
+        }
+      }
+      lines.push(`declare -ar ${name}=(${parts.join(' ')})`)
+      continue
+    }
+    if (name in session.env) {
+      lines.push(`declare -r ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
+    } else {
+      lines.push(`declare -r ${name}`)
+    }
+  }
+  return lines
+}
+
+/**
+ * Mark names for export, or print them (`export -p` / bare `export`).
+ *
+ * With no name operands, prints every entry in `session.env` as
+ * `declare -x NAME="value"`. Invalid option characters fail with status 2.
+ */
 export function handleExport(assignments: string[], session: Session): Result {
-  for (const assign of assignments) {
+  const { flags, names, bad } = splitDeclFlags(assignments, EXPORT_FLAGS)
+  if (bad !== null) {
+    const err = new TextEncoder().encode(`bash: export: -${bad}: invalid option\n${EXPORT_USAGE}`)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'export', exitCode: 2, stderr: err }),
+    ]
+  }
+  if (names.length === 0) {
+    const lines = exportLines(session)
+    const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
+  }
+  void flags
+  for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
@@ -52,8 +158,31 @@ export function handleExport(assignments: string[], session: Session): Result {
   return [null, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
 }
 
+/**
+ * Mark names readonly, or print them (`readonly -p` / bare `readonly`).
+ *
+ * With no name operands, prints every readonly name as `declare -r` (or
+ * `declare -ar` for arrays). Invalid options fail with status 2.
+ */
 export function handleReadonly(assignments: string[], session: Session): Result {
-  for (const assign of assignments) {
+  const { flags, names, bad } = splitDeclFlags(assignments, READONLY_FLAGS)
+  if (bad !== null) {
+    const err = new TextEncoder().encode(
+      `bash: readonly: -${bad}: invalid option\n${READONLY_USAGE}`,
+    )
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'readonly', exitCode: 2, stderr: err }),
+    ]
+  }
+  if (names.length === 0) {
+    const lines = readonlyLines(session)
+    const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
+  }
+  void flags
+  for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
