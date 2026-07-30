@@ -19,8 +19,8 @@ import pytest
 from mirage import MountMode, RAMResource, Workspace
 from mirage.cache.index.config import IndexEntry
 from mirage.io.types import materialize
-from mirage.runtime.base import RunArgs, RunResult
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
+from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import CommandSafeguard
 
 

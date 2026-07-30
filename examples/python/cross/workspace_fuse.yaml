@@ -4,7 +4,8 @@ consistency: LAZY
 mounts:
   /:
     resource: ram
-    fuse: /tmp/demo
+    backend: fuse
+    mountpoint: /tmp/demo
 
   /notion:
     resource: notion

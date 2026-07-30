@@ -19,7 +19,7 @@ import { parseFindExpression, parseSize } from '../findParse.ts'
 import { PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
+import { respellRaw } from '../../../utils/path.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { optionsTree, prefixPathNodes } from '../findEval.ts'
 
@@ -234,7 +234,7 @@ export async function findGeneric(
       stat !== undefined
         ? await applyMtimeFilter(rootMatches, effMtimeMin, effMtimeMax, stat, prefix)
         : rootMatches
-    matches.push(...rebaseRaw(filtered, root.virtual, root.rawPath))
+    matches.push(...respellRaw(filtered, root.virtual, root.rawPath))
   }
   matches.sort()
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')

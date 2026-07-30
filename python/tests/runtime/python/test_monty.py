@@ -17,8 +17,10 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import RunArgs
+from mirage.runtime.errors import EvalError
+from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python import MontyRuntime
+from mirage.runtime.types import RunArgs
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 
@@ -108,7 +110,8 @@ def test_monty_host_filesystem_invisible():
 
 def test_monty_reads_virtual_file_via_dispatch():
     dispatch = FakeDispatch({"/s3/a.txt": b"virtual"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(RunArgs(code="print(open('/s3/a.txt').read().upper())")))
     assert result.exit_code == 0
@@ -117,7 +120,8 @@ def test_monty_reads_virtual_file_via_dispatch():
 
 def test_monty_missing_virtual_file():
     dispatch = FakeDispatch({})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(runtime.run(RunArgs(code="open('/s3/missing.txt')")))
     assert result.exit_code == 1
     assert b"FileNotFoundError" in result.stderr
@@ -125,7 +129,8 @@ def test_monty_missing_virtual_file():
 
 def test_monty_write_flushes_through_dispatch():
     dispatch = FakeDispatch({"/s3/seed.txt": b"x"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="from pathlib import Path\n"
@@ -137,7 +142,8 @@ def test_monty_write_flushes_through_dispatch():
 
 def test_monty_append_flushes_full_content():
     dispatch = FakeDispatch({"/s3/log.txt": b"a"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="with open('/s3/log.txt', 'a') as f:\n"
@@ -148,7 +154,8 @@ def test_monty_append_flushes_full_content():
 
 def test_monty_iterdir_lists_virtual_dir():
     dispatch = FakeDispatch({"/s3/a.txt": b"1", "/s3/b.txt": b"2"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="from pathlib import Path\n"
@@ -160,7 +167,8 @@ def test_monty_iterdir_lists_virtual_dir():
 
 def test_monty_unlink_routes_to_dispatch():
     dispatch = FakeDispatch({"/s3/a.txt": b"1"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="from pathlib import Path\n"
@@ -214,3 +222,51 @@ def test_workspace_explicit_monty_fails_loud(monkeypatch):
         Workspace({"/data": RAMResource()},
                   mode=MountMode.EXEC,
                   runtimes=["monty"])
+
+
+@pytest.mark.asyncio
+async def test_eval_returns_last_expression_with_inputs():
+    runtime = MontyRuntime()
+    result = await runtime.eval("print('hey'); ctx['a'] + 1",
+                                inputs={"ctx": {
+                                    "a": 41
+                                }})
+    assert result.value == 42
+    assert result.stdout == b"hey\n"
+    assert result.status == "complete"
+
+
+@pytest.mark.asyncio
+async def test_eval_sessions_keep_state_per_id():
+    runtime = MontyRuntime()
+    await runtime.eval("x = 5", session="a")
+    doubled = await runtime.eval("x * 2", session="a")
+    assert doubled.value == 10
+    other = await runtime.eval("x", session="b")
+    assert other.exit_code == 1
+    assert other.stderr is not None and b"NameError" in other.stderr
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_eval_session_open_block_reports_incomplete():
+    runtime = MontyRuntime()
+    result = await runtime.eval("def f():", session="a")
+    assert result.status == "incomplete"
+    assert result.value is None
+
+
+@pytest.mark.asyncio
+async def test_eval_errors_carry_monty_diagnostics():
+    runtime = MontyRuntime()
+    with pytest.raises(EvalError) as syntax_err:
+        await runtime.eval("def broken(")
+    assert syntax_err.value.syntax is True
+    with pytest.raises(EvalError) as runtime_err:
+        await runtime.eval("1 / 0")
+    assert runtime_err.value.syntax is False
+    assert "ZeroDivisionError" in str(runtime_err.value)
+
+
+def test_monty_is_an_evaluator():
+    assert isinstance(MontyRuntime(), EvaluatorMixin)

@@ -26,6 +26,7 @@ import {
   runCase,
   runScenario,
   seedFixture,
+  seedMountRoot,
 } from './harness.ts'
 
 const TS_HOSTS = ['typescript-node', 'typescript-browser']
@@ -60,7 +61,10 @@ async function runTarget(
 ): Promise<void> {
   const { ws, cleanup } = await ADAPTERS[target.mounts[0].resource](target)
   try {
-    for (const mount of target.mounts) await seedFixture(ws, mount.fixture, mount.path, root)
+    for (const mount of target.mounts) {
+      await seedFixture(ws, mount.fixture, mount.path, root)
+      if (mount.seed_root) await seedMountRoot(ws, mount.path)
+    }
     // Sessions a case can name via its `session` field. Mount grants take
     // either the mapping form ({ '/data': 'read' }) or the list form
     // (['/data'], which inherits the mount's own mode).

@@ -20,9 +20,9 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import RunArgs
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
+from mirage.runtime.types import RunArgs
 
 
 def _home_dir() -> str | None:
@@ -45,7 +45,7 @@ def test_missing_home_raises_hint(monkeypatch):
 
 def test_dir_without_wasm_raises_hint(tmp_path):
     with pytest.raises(FileNotFoundError, match="no qjs-wasi.wasm"):
-        QuickJsRuntime(home=str(tmp_path))
+        QuickJsRuntime(config={"home": str(tmp_path)})
 
 
 @live

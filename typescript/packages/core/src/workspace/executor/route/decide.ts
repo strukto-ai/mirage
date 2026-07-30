@@ -12,49 +12,59 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
-import { evalMontyValue } from '../python/runtimes/monty.ts'
 import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../runtime.ts'
+import { EvalError } from '../runtime_errors.ts'
+import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
+import type { EvalValue } from '../runtime_types.ts'
 import { RoutingDecisionError } from './errors.ts'
 import {
   ScriptSource,
+  routeContextPayload,
   type RoutingDecision,
   type RouteContext,
   type RouteFn,
   type RouteScript,
 } from './types.ts'
 
-function ctxPayload(ctx: RouteContext, runtime?: Runtime): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
-    line: ctx.line,
-    commands: ctx.commands.map((c) => ({
-      command: c.command,
-      words: [...c.words],
-      builtin: c.builtin,
-      paths: [...c.paths],
-    })),
-    command: ctx.command,
-    builtin: ctx.builtin,
-    cwd: ctx.cwd,
-    env: { ...ctx.env },
-    session_id: ctx.sessionId,
-    agent_id: ctx.agentId,
-    mounts: [...ctx.mounts],
+/**
+ * The world's policy engine: its first evaluator-capable entry.
+ *
+ * Config-borne route scripts run on it; any runtime implementing
+ * Evaluator qualifies (monty/pyodide in the default worlds, or a user
+ * runtime in any language). Null when the world has no evaluator,
+ * which only matters once a ScriptSource actually needs one.
+ */
+export function evaluatorOf(entries: readonly Runtime[]): (Runtime & Evaluator) | null {
+  for (const entry of entries) {
+    if (isEvaluator(entry)) return entry
   }
-  if (runtime !== undefined) {
-    payload.runtime = { name: runtime.name, captures: [...runtime.captures] }
-  }
-  return payload
+  return null
 }
 
-async function evalMonty(
+/**
+ * Evaluate a config script on the world's evaluator. The script sees
+ * the ctx payload as the `ctx` global and its LAST EXPRESSION is the
+ * verdict; the script's language is the evaluator's language.
+ */
+async function evalSource(
   source: string,
-  payload: Record<string, unknown>,
-  bridge: BridgeDispatchFn | null,
-): Promise<unknown> {
+  ctxPayload: Record<string, EvalValue>,
+  evaluator: Evaluator | null,
+): Promise<EvalValue> {
+  if (evaluator === null) {
+    throw new RoutingDecisionError(
+      'route scripts need an evaluator runtime in the workspace ' +
+        '(the default python runtime, or use a function instead)',
+    )
+  }
   try {
-    return await evalMontyValue(source, payload, bridge)
+    const result = await evaluator.eval(source, { inputs: { ctx: ctxPayload } })
+    return result.value
   } catch (caught) {
+    if (caught instanceof EvalError) {
+      const prefix = caught.syntax ? 'route script syntax error: ' : 'route script failed: '
+      throw new RoutingDecisionError(prefix + caught.message, { cause: caught })
+    }
     throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
       cause: caught,
     })
@@ -82,11 +92,11 @@ async function evaluateScript(
   script: RouteScript,
   ctx: RouteContext,
   runtime: Runtime,
-  bridge: BridgeDispatchFn | null,
+  evaluator: Evaluator | null,
 ): Promise<boolean> {
   const view = ctxForRuntime(ctx, runtime)
   if (script instanceof ScriptSource) {
-    return Boolean(await evalMonty(script.source, ctxPayload(view, runtime), bridge))
+    return Boolean(await evalSource(script.source, routeContextPayload(view, runtime), evaluator))
   }
   return await script(view)
 }
@@ -95,13 +105,15 @@ async function evaluateScript(
 async function evaluateRoute(
   route: RouteFn,
   ctx: RouteContext,
-  bridge: BridgeDispatchFn | null,
+  evaluator: Evaluator | null,
 ): Promise<string | null> {
+  // An untyped JS route can return undefined for "pass"; `?? null`
+  // folds it into python's None instead of erroring.
   const verdict =
     route instanceof ScriptSource
-      ? await evalMonty(route.source, ctxPayload(ctx), bridge)
-      : await route(ctx)
-  if (verdict === null || verdict === undefined) return null
+      ? await evalSource(route.source, routeContextPayload(ctx), evaluator)
+      : ((await route(ctx)) ?? null)
+  if (verdict === null) return null
   if (typeof verdict === 'string') return verdict
   throw new RoutingDecisionError(
     `route must return a runtime name or null, got ${JSON.stringify(verdict)}`,
@@ -117,16 +129,18 @@ async function evaluateRoute(
  * is always willing, and the willing entries re-bind in list order.
  * The vfs runtime is filtered exactly like the others; a command left
  * without a willing runtime is an admission failure at dispatch.
+ * Config-borne scripts run on the world's evaluator (evaluatorOf),
+ * never on a hardcoded interpreter.
  */
 export async function decideLine(
   entries: readonly Runtime[],
   route: RouteFn | null,
   ctx: RouteContext,
   staticBindings: Record<string, Runtime>,
-  bridge: BridgeDispatchFn | null,
 ): Promise<RoutingDecision> {
+  const evaluator = evaluatorOf(entries)
   if (route !== null) {
-    const name = await evaluateRoute(route, ctx, bridge)
+    const name = await evaluateRoute(route, ctx, evaluator)
     if (name !== null) {
       let overlay: Record<string, Runtime>
       try {
@@ -145,7 +159,7 @@ export async function decideLine(
   const willing: Runtime[] = []
   for (const entry of entries) {
     const wants =
-      entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, bridge)
+      entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, evaluator)
     if (wants) willing.push(entry)
   }
   // Every captured command resolves: to its first willing capturer, or

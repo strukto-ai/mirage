@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   const ws = new Workspace({
     "/seaweedfs/": new Mount(new SeaweedFSResource(cfg), {
       mode: MountMode.WRITE,
-      fuse: true,
+      backend: MountBackend.FUSE,
     }),
   });
 

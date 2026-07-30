@@ -14,10 +14,13 @@
 
 import pytest
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.route import (RouteContext, ScriptSource, command_facts,
-                                  decide_line, evaluate_route, evaluate_script)
+                                  decide_line, evaluate_route, evaluate_script,
+                                  evaluator_of)
 from mirage.runtime.table import VfsRuntime
+from mirage.runtime.types import RunArgs, RunResult
 from mirage.workspace.workspace import parse
 
 
@@ -63,29 +66,45 @@ async def test_script_callable_and_awaitable():
 
 
 @pytest.mark.asyncio
-async def test_script_monty_last_expression_is_verdict():
+async def test_script_source_last_expression_is_verdict():
     runtime = AlphaRuntime()
+    evaluator = MontyRuntime()
     script = ScriptSource(
         "ctx['runtime']['name'] == 'alpha' and ctx['command'] == 'cat'")
-    assert await evaluate_script(script, ctx_for("cat /a"), runtime, None)
-    assert not await evaluate_script(script, ctx_for("ls /a"), runtime, None)
+    assert await evaluate_script(script, ctx_for("cat /a"), runtime, evaluator)
+    assert not await evaluate_script(script, ctx_for("ls /a"), runtime,
+                                     evaluator)
 
 
 @pytest.mark.asyncio
-async def test_script_monty_errors_fail_loud():
+async def test_script_source_errors_fail_loud():
     with pytest.raises(ValueError, match="syntax error"):
         await evaluate_script(ScriptSource("def broken("), ctx_for("x"),
-                              AlphaRuntime(), None)
+                              AlphaRuntime(), MontyRuntime())
     with pytest.raises(ValueError, match="failed"):
         await evaluate_script(ScriptSource("1 / 0"), ctx_for("x"),
+                              AlphaRuntime(), MontyRuntime())
+
+
+@pytest.mark.asyncio
+async def test_script_source_needs_an_evaluator():
+    """A world with no evaluator refuses config scripts loud."""
+    with pytest.raises(ValueError, match="evaluator runtime"):
+        await evaluate_script(ScriptSource("True"), ctx_for("x"),
                               AlphaRuntime(), None)
+
+
+def test_evaluator_of_picks_first_evaluator_entry():
+    alpha, monty = AlphaRuntime(), MontyRuntime()
+    assert evaluator_of([alpha, monty, VfsRuntime()]) is monty
+    assert evaluator_of([alpha, VfsRuntime()]) is None
 
 
 @pytest.mark.asyncio
 async def test_route_returns_name_or_none_only():
     assert await evaluate_route(lambda c: None, ctx_for("x"), None) is None
     assert await evaluate_route(ScriptSource("'beta'"), ctx_for("x"),
-                                None) == "beta"
+                                MontyRuntime()) == "beta"
     with pytest.raises(ValueError, match="runtime name or None"):
         await evaluate_route(lambda c: 42, ctx_for("x"), None)
 
@@ -94,7 +113,7 @@ async def test_route_returns_name_or_none_only():
 async def test_decide_route_overlays_static_bindings():
     alpha, beta = AlphaRuntime(), BetaRuntime()
     routing = await decide_line([alpha, beta, VfsRuntime()], lambda c: "beta",
-                                ctx_for("python3 x"), {"python3": alpha}, None)
+                                ctx_for("python3 x"), {"python3": alpha})
     assert routing.bindings["python3"] is beta
     assert isinstance(routing.fallback, VfsRuntime)
 
@@ -104,7 +123,7 @@ async def test_decide_scripts_filter_in_list_order():
     alpha, beta = AlphaRuntime(), BetaRuntime()
     alpha.script = lambda c: False
     routing = await decide_line([alpha, beta, VfsRuntime()], None,
-                                ctx_for("python3 x"), {}, None)
+                                ctx_for("python3 x"), {})
     assert routing.bindings["python3"] is beta
 
 
@@ -113,7 +132,7 @@ async def test_decide_all_refuse_resolves_command_to_none():
     alpha = AlphaRuntime()
     alpha.script = lambda c: False
     routing = await decide_line([alpha, VfsRuntime()], None,
-                                ctx_for("python3 x"), {}, None)
+                                ctx_for("python3 x"), {})
     assert routing.bindings["python3"] is None
     assert isinstance(routing.fallback, VfsRuntime)
 
@@ -121,8 +140,8 @@ async def test_decide_all_refuse_resolves_command_to_none():
 @pytest.mark.asyncio
 async def test_decide_vfs_entry_script_gates_vfs():
     vfs = VfsRuntime(script=lambda c: "/secret" not in c.line)
-    allowed = await decide_line([vfs], None, ctx_for("cat /notes"), {}, None)
-    denied = await decide_line([vfs], None, ctx_for("cat /secret/x"), {}, None)
+    allowed = await decide_line([vfs], None, ctx_for("cat /notes"), {})
+    denied = await decide_line([vfs], None, ctx_for("cat /secret/x"), {})
     assert allowed.fallback is vfs
     assert denied.fallback is None
 
@@ -130,7 +149,7 @@ async def test_decide_vfs_entry_script_gates_vfs():
 @pytest.mark.asyncio
 async def test_decide_declared_captures_turn_the_catch_all_off():
     vfs = VfsRuntime(captures=["grep"])
-    routing = await decide_line([vfs], None, ctx_for("grep x /a"), {}, None)
+    routing = await decide_line([vfs], None, ctx_for("grep x /a"), {})
     assert routing.bindings["grep"] is vfs
     assert routing.fallback is None
 
@@ -141,7 +160,7 @@ async def test_scripts_see_their_own_stage_on_pipelines():
     seen: list[str] = []
     alpha.script = lambda c: seen.append(c.command) or True
     await decide_line([alpha, VfsRuntime()], None,
-                      ctx_for("cat /a.txt | python3 x"), {}, None)
+                      ctx_for("cat /a.txt | python3 x"), {})
     assert seen == ["python3"]
 
 

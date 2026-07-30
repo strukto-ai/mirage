@@ -1,6 +1,7 @@
 ---
 title: JavaScript
 description: Run node/js inside the workspace on quickjs, a sandboxed JavaScript engine for small scripts and pipe transforms.
+icon: js
 ---
 
 Shell lines like `node script.mjs` or `js -e "..."` need a JavaScript
@@ -87,13 +88,14 @@ from mirage.runtime.js import QuickJsRuntime
 
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
-               runtimes=[QuickJsRuntime(home="/path/to/qjs-dir"), "vfs"])
+               runtimes=[QuickJsRuntime(config={"home": "/path/to/qjs-dir"}), "vfs"])
 ```
 
 ```yaml
 runtimes:
   - name: quickjs
-    home: /path/to/qjs-dir
+    config:
+      home: /path/to/qjs-dir
   - vfs
 ```
 

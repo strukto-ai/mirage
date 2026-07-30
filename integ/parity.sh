@@ -29,7 +29,7 @@ mode: WRITE
 mounts:
   /:
     resource: ram
-    fuse: true
+    backend: fuse
 YML
 
 MODES_YAML=/tmp/parity-modes.yaml
@@ -176,7 +176,7 @@ probe() {
   echo "version.diff=$($cli workspace diff vw </dev/null | jq -rc '{added,modified,deleted}')"
   $cli workspace delete vw >/dev/null 2>&1 </dev/null || true
 
-  # ── fuse: fuse:true config is accepted and the workspace operates ──
+  # ── fuse: backend:fuse config is accepted and the workspace operates ──
   $cli workspace delete fw >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$FUSE_YAML" --id fw >/dev/null </dev/null
   echo "fuse.operates=$($cli execute -w fw -c 'echo alive' </dev/null | sout)"

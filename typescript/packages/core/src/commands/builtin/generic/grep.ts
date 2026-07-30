@@ -17,7 +17,7 @@ import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty, quietMatch } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
+import { respellRaw } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
   compilePattern,
@@ -164,7 +164,7 @@ export async function grepGeneric(
           filesOnlyOpts(f, recursive),
           warnings,
         )
-        for (const h of rebaseRaw(hits, p.virtual, p.rawPath)) results.push(h)
+        for (const h of respellRaw(hits, p.virtual, p.rawPath)) results.push(h)
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
       if (f.quiet)
@@ -216,7 +216,7 @@ export async function grepGeneric(
             warnings,
             false,
           )
-          for (const r of rebaseRaw(res, p.virtual, p.rawPath)) allResults.push(r)
+          for (const r of respellRaw(res, p.virtual, p.rawPath)) allResults.push(r)
         } else {
           const data = splitLinesNoTrailing(DEC.decode(await readBytesFn(p.virtual)))
           const hits = grepLines(p.rawPath, data, pat, f)

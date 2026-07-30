@@ -46,7 +46,7 @@ function buildConfig(): DropboxConfig {
 async function main(): Promise<void> {
   const resource = new DropboxResource(buildConfig());
   const ws = new Workspace({
-    "/dropbox": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/dropbox": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

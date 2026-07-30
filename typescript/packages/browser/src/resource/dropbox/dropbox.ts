@@ -44,6 +44,9 @@ export interface DropboxResourceState {
 export class DropboxResource implements Resource {
   readonly kind: string = ResourceName.DROPBOX
   readonly cachesReads: boolean = true
+  // list_folder carries an exact byte `size` for every file (0 included).
+  // Paper docs 409 on raw download, a loud error, never a silent empty read.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = DROPBOX_PROMPT
   readonly config: DropboxConfig

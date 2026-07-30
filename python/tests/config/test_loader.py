@@ -16,14 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from mirage import MountMode, Workspace
+from mirage import MountBackend, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
                            RedisStoreBlock, S3StoreBlock, WorkspaceConfig,
                            load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
-from mirage.runtime.base import ScriptSource
+from mirage.runtime.types import ScriptSource
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
@@ -58,9 +58,12 @@ def test_load_full_yaml_with_env_interpolation():
     assert cfg.cache.limit == "256MB"
     assert cfg.mounts["/s3"].config["bucket"] == "my-test-bucket"
     assert cfg.mounts["/s3"].config["aws_access_key_id"] == "AKIAEXAMPLE"
-    assert cfg.mounts["/"].fuse == "/tmp/mirage-fuse-full"
-    assert cfg.fuse_mounts() == {"/": "/tmp/mirage-fuse-full"}
-    assert "fuse_mounts" not in cfg.to_workspace_kwargs()
+    assert cfg.mounts["/"].backend is MountBackend.FUSE
+    assert cfg.mounts["/"].mountpoint == "/tmp/mirage-fuse-full"
+    assert cfg.kernel_mounts() == {
+        "/": (MountBackend.FUSE, "/tmp/mirage-fuse-full")
+    }
+    assert "kernel_mounts" not in cfg.to_workspace_kwargs()
 
 
 def test_missing_env_var_raises_with_full_list():

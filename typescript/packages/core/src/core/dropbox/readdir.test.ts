@@ -150,4 +150,28 @@ describe('dropbox readdir', () => {
     )
     expect(out).toEqual(['/dropbox/a.txt'])
   })
+
+  it('indexes 0-byte files with size 0', async () => {
+    vi.mocked(api.listFolder).mockResolvedValue([
+      {
+        '.tag': 'file',
+        id: 'id:empty',
+        name: 'empty.txt',
+        path_display: '/empty.txt',
+        size: 0,
+        server_modified: '2026-04-01T00:00:00Z',
+      },
+    ])
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const out = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      index,
+    )
+    expect(out).toEqual(['/empty.txt'])
+    const entry = (await index.get('/empty.txt')).entry
+    expect(entry?.size).toBe(0)
+  })
 })

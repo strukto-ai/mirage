@@ -89,9 +89,8 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
     ...(args.options.route !== undefined ? { route: args.options.route } : {}),
   })
   try {
-    for (const [prefix, target] of Object.entries(args.fuseMounts)) {
-      const mountpoint = typeof target === 'string' ? target : undefined
-      await workspace.addFuseMount(prefix, mountpoint)
+    for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
+      await workspace.addFuseMount(prefix, mountpoint, undefined, backend)
     }
   } catch (error) {
     await workspace.close()

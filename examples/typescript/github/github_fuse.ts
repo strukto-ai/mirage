@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   console.log(`Loading ${cfg.owner}/${cfg.repo} …`);
   const resource = await GitHubResource.create(cfg);
   const ws = new Workspace({
-    "/github": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/github": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

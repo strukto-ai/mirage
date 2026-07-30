@@ -21,6 +21,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { resolveAcrossMounts } from '../../commands/safeguard.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
+import { respellOne } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { keep } from '../../commands/builtin/findEval.ts'
 import {
@@ -49,6 +50,8 @@ export function shouldFanOut(
   if (cmdName === 'grep') {
     return flagKwargs.r === true || flagKwargs.R === true || flagKwargs.recursive === true
   }
+  // ripgrep recurses directories by default; no flag to check.
+  if (cmdName === 'rg') return true
   if (cmdName === 'ls') {
     return flagKwargs.R === true
   }
@@ -107,10 +110,13 @@ function adjustDepthTexts(
   return out
 }
 
+// Entries print in the operand's typed spelling (`raw`) like every
+// other line of the walk.
 function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly MountEntry[],
   texts: readonly string[],
+  raw: string,
 ): string {
   let expr: FindExpr
   try {
@@ -131,7 +137,7 @@ function synthesizeFindMountEntries(
     const segs = prefixNoSlash.split('/').filter((s) => s !== '')
     const base = segs[segs.length - 1] ?? prefixNoSlash
     if (!keep({ key: prefixNoSlash, name: base, kind: 'd', depth }, tree, minDepth)) continue
-    out.push(prefixNoSlash)
+    out.push(respellOne(prefixNoSlash, targetPath, raw))
   }
   return out.join('\n')
 }
@@ -211,13 +217,24 @@ export async function fanOutTraversal(
       const adjusted = adjustDepthFlags(flagKwargs, targetPath, mount.prefix)
       if (adjusted === null) continue
       subFlags = adjusted
+      if (cmdName === 'rg') {
+        // A tree search labels every hit; a descendant mount whose root
+        // is a single file would otherwise drop the filename (rg labels
+        // only multi-file or -H runs).
+        subFlags = { ...subFlags, H: true }
+      }
       subTexts = adjustDepthTexts(texts, targetPath, mount.prefix)
       const mountRoot = rstripSlash(mount.prefix) || '/'
+      // The descendant operand keeps the traversal root's typed spelling
+      // (grep -r . -> ./ram/...; the synthetic bare no-operand form ->
+      // ram/...); an absolute root leaves it absolute, the pre-existing
+      // output shape.
       subPaths = [
         new PathSpec({
           virtual: mountRoot,
           directory: mountRoot,
           resourcePath: mountKey(mountRoot, rstripSlash(mount.prefix)),
+          rawPath: respellOne(mountRoot, targetPath, paths[0]?.rawPath ?? targetPath),
         }),
       ]
     }
@@ -240,10 +257,18 @@ export async function fanOutTraversal(
     } catch {
       continue
     }
+    if (mount !== primaryMount && io.exitCode === 127) {
+      // A descendant that does not serve this command contributes
+      // nothing to the aggregate walk instead of failing it (du across
+      // a tree holding a view mount without a du op).
+      continue
+    }
     if (mount === primaryMount && descendantPrefixes.length > 0 && stdout !== null) {
       stdout = await filterUnderPrefixes(stdout, descendantPrefixes)
     } else if (mount !== primaryMount && cmdName === 'find' && stdout !== null) {
-      stdout = await dropMountRootLine(stdout, rstripSlash(mount.prefix) || '/')
+      // The child's own root line arrives respelled with the operand's
+      // typed base, so drop that spelling, not the absolute prefix.
+      stdout = await dropMountRootLine(stdout, subPaths[0]?.rawPath ?? '')
     }
     if (stdout !== null) {
       const data = await materialize(stdout)
@@ -258,7 +283,12 @@ export async function fanOutTraversal(
   }
 
   if (cmdName === 'find') {
-    const synthetic = synthesizeFindMountEntries(targetPath, descendants, texts)
+    const synthetic = synthesizeFindMountEntries(
+      targetPath,
+      descendants,
+      texts,
+      paths[0]?.rawPath ?? targetPath,
+    )
     if (synthetic !== '') allStdout.push(new TextEncoder().encode(synthetic))
   }
 

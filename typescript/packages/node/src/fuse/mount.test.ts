@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { appendDirectIO } from './mount.ts'
+import { appendDirectIO, appendMountOptions } from './mount.ts'
 
 function fakeFuse(serialize?: () => string) {
   const nop = (cb: (err: Error | null) => void): void => {
@@ -50,5 +50,27 @@ describe('appendDirectIO', () => {
     expect(() => {
       appendDirectIO(fuse)
     }).toThrow('_fuseOptions')
+  })
+})
+
+describe('appendMountOptions', () => {
+  it('appends the fskit recipe: backend=fskit + volname, no direct_io', () => {
+    // Issue #82's verified mount options, exactly what mount() appends for
+    // an fskit mount. Verified live; see examples/typescript/fuse/fskit.ts.
+    const fuse = fakeFuse(() => '-oattr_timeout=0')
+    appendMountOptions(fuse, ['backend=fskit', 'volname=mirage-abc'])
+    expect(fuse._fuseOptions?.()).toBe('-oattr_timeout=0,backend=fskit,volname=mirage-abc')
+  })
+
+  it('emits -o<extras> when no other option serializes', () => {
+    const fuse = fakeFuse(() => '')
+    appendMountOptions(fuse, ['backend=fskit', 'volname=v'])
+    expect(fuse._fuseOptions?.()).toBe('-obackend=fskit,volname=v')
+  })
+
+  it('appends only the options not already present', () => {
+    const fuse = fakeFuse(() => '-obackend=fskit')
+    appendMountOptions(fuse, ['backend=fskit', 'volname=v'])
+    expect(fuse._fuseOptions?.()).toBe('-obackend=fskit,volname=v')
   })
 })

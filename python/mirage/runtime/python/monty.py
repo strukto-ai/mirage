@@ -15,10 +15,16 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Any, Callable
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.errors import EvalError
+from mirage.runtime.mixin import EvaluatorMixin
+from mirage.runtime.types import (EvalResult, EvalValue, RunArgs, RunResult,
+                                  ScriptSource)
 from mirage.types import PathSpec
 
 pydantic_monty: Any
@@ -230,7 +236,7 @@ class _MirageOS(OSAccess):
             self._missing.add(str(path))
 
 
-class MontyRuntime(Runtime):
+class MontyRuntime(Runtime, EvaluatorMixin):
     """Run Python code on the Monty sandboxed interpreter.
 
     Code executes in Monty's Rust interpreter: no host filesystem,
@@ -246,12 +252,18 @@ class MontyRuntime(Runtime):
     name = "monty"
     captures = ("python3", "python")
 
-    def __init__(self, dispatch: Callable[..., Any] | None = None) -> None:
+    def __init__(
+            self,
+            captures: Sequence[str] | None = None,
+            config: RuntimeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
         if pydantic_monty is None:
             raise ImportError(
                 "the monty runtime requires the 'monty' extra. Install with: "
                 "pip install mirage-ai[monty], or select the 'local' runtime")
-        self._workspace_dispatch = dispatch
+        super().__init__(captures, config, script)
+        self._workspace_dispatch: Callable[..., Any] | None = None
+        self._eval_sessions: dict[str, Any] = {}
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:
@@ -285,6 +297,70 @@ class MontyRuntime(Runtime):
                              exit_code=1)
         stdout, stderr = _split_streams(collector)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=0)
+
+    async def eval(self,
+                   code: str,
+                   *,
+                   inputs: dict[str, EvalValue] | None = None,
+                   session: str | None = None) -> EvalResult:
+        """Evaluate code in-process; the last expression is the value.
+
+        One-shot mode evaluates on a throwaway repl; a session id
+        keeps the repl (heap and namespace) alive per id, which is
+        the console. Inputs bind as globals via monty's native
+        mechanism, and the code sees workspace files through the same
+        bridge agent code uses. In-process, so the returned value is
+        the real object, not a serialized approximation.
+
+        Args:
+            code (str): the python source.
+            inputs (dict[str, EvalValue] | None): named globals.
+            session (str | None): console session id, None for
+                one-shot.
+
+        Raises:
+            EvalError: the code failed to parse or raised; the
+                message is monty's own traceback.
+        """
+        loop = asyncio.get_running_loop()
+        collector = pydantic_monty.CollectStreams()
+        bridge = _MirageOS(loop, self._workspace_dispatch, {})
+        repl = self._eval_sessions.get(session) if session is not None \
+            else None
+        if repl is None:
+            repl = pydantic_monty.MontyRepl()
+            if session is not None:
+                self._eval_sessions[session] = repl
+        try:
+            value = await repl.feed_run_async(code,
+                                              inputs=dict(inputs or {}),
+                                              print_callback=collector,
+                                              os=bridge)
+        except pydantic_monty.MontySyntaxError as exc:
+            trace = exc.display(format="traceback")
+            # Console continuation, not a broken program: the source
+            # merely stopped early (an open block or unclosed suite).
+            incomplete = ("unexpected EOF" in trace
+                          or "Expected an indented block" in trace)
+            if session is not None:
+                if incomplete:
+                    return EvalResult(status="incomplete")
+                return EvalResult(stderr=(trace + "\n").encode(), exit_code=1)
+            raise EvalError(trace, syntax=True)
+        except pydantic_monty.MontyRuntimeError as exc:
+            trace = exc.display(format="traceback")
+            if session is not None:
+                stdout, stderr = _split_streams(collector)
+                return EvalResult(stdout=stdout,
+                                  stderr=(stderr or b"") +
+                                  (trace + "\n").encode(),
+                                  exit_code=1)
+            raise EvalError(trace)
+        stdout, stderr = _split_streams(collector)
+        return EvalResult(value=value, stdout=stdout, stderr=stderr)
+
+    async def close(self) -> None:
+        self._eval_sessions.clear()
 
 
 def _split_streams(

@@ -50,6 +50,9 @@ export interface NextcloudResourceState {
 export class NextcloudResource extends BaseResource implements Resource {
   readonly kind = ResourceName.NEXTCLOUD
   readonly cachesReads = true
+  // WebDAV PROPFIND carries getcontentlength for every file; readdir
+  // backfills any lister-omitted size with one stat per affected file.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot = true
   readonly prompt = NEXTCLOUD_PROMPT
   readonly accessor: NextcloudAccessor

@@ -20,8 +20,9 @@ from pathlib import Path
 
 from mirage.types import FileStat, PathSpec
 
-CASE_DIRS = ("unix", "bash", "crossmount", "runtime", "resources", "cli",
-             "session")
+# integ/runtime holds the runtime suite (its own schema and runners,
+# integ/runtime/run.{py,ts} + cli.sh), not battery cases; keep it out.
+CASE_DIRS = ("unix", "bash", "crossmount", "resources", "cli", "session")
 
 
 def integ_root() -> Path:
@@ -64,6 +65,26 @@ async def seed_fixture(ws, fixture: str | None, mount_path: str,
         parent = dest.rsplit("/", 1)[0]
         await ws.execute(f"mkdir -p {parent}")
         await ws.execute(f"tee {dest} > /dev/null", stdin=src.read_bytes())
+
+
+async def seed_mount_root(ws, mount_path: str) -> None:
+    """Materialise a fixtureless mount's backing folder on the service.
+
+    Prefix-scoped object stores treat an absent prefix as an empty
+    directory, and the gws adapter pre-creates each mount's root folder
+    chain, but folder-backed services (dropbox, sharepoint) 404 when a
+    mount roots at a folder nothing ever created. Writing and removing a
+    marker file rides the same workspace plumbing fixture seeding uses:
+    the upload auto-creates the folder chain and the delete leaves the
+    folders behind, so the mount lists as empty like every other target.
+
+    Args:
+        ws: the target workspace.
+        mount_path (str): the mount to materialise.
+    """
+    marker = f"{mount_path.rstrip('/')}/.seed"
+    await ws.execute(f"tee {marker} > /dev/null", stdin=b"seed\n")
+    await ws.execute(f"rm {marker}")
 
 
 def _check_field(st: FileStat, name: str) -> str:

@@ -13,63 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Sequence
+from typing import Any, Callable, ClassVar
 
-
-@dataclass(frozen=True, slots=True)
-class ScriptSource:
-    """Script source arriving from a workspace config, not from code.
-
-    The programmatic API takes callables; a yaml ``script:``/``route:``
-    value references a ``.py`` file whose content is embedded here at
-    load. The source sees ctx as a dict and its LAST EXPRESSION is the
-    verdict. It runs on the routing interpreter (monty today; a
-    sandbox runtime may take this over later).
-
-    Args:
-        source (str): the script program.
-    """
-
-    source: str
-
-
-@dataclass(frozen=True, slots=True)
-class RunArgs:
-    """One interpreter execution request, language-agnostic.
-
-    Args:
-        code (str): the source to run (script body or -c/-e payload).
-        args (list[str]): argv exposed to the script.
-        env (dict[str, str]): extra environment merged over the
-            runtime's own.
-        stdin (bytes | None): bytes fed to the interpreter's stdin.
-        flags (dict[str, Any]): interpreter-level switches parsed by
-            the command's spec (e.g. js module mode). Each runtime
-            reads its own switches and ignores the rest.
-    """
-
-    code: str
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    stdin: bytes | None = None
-    flags: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class RunResult:
-    """Outcome of one interpreter execution.
-
-    Args:
-        stdout (bytes): captured standard output.
-        stderr (bytes | None): captured standard error, None when
-            empty.
-        exit_code (int): interpreter exit code.
-    """
-
-    stdout: bytes
-    stderr: bytes | None
-    exit_code: int
+from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 
 class Runtime(ABC):
@@ -97,6 +45,35 @@ class Runtime(ABC):
     # run_line. Interpreter runtimes leave it False: they are the
     # engine inside one command (python3, node), never the line.
     runs_lines: bool = False
+    # Each runtime's config class; coerce() makes unknown fields fail
+    # loud, so runtimes need no per-field rejection code.
+    config_cls: ClassVar[type[RuntimeConfig]] = RuntimeConfig
+    config: RuntimeConfig = RuntimeConfig()
+
+    def __init__(
+            self,
+            captures: Sequence[str] | None = None,
+            config: RuntimeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
+        """Every runtime is constructed the same way.
+
+        Args:
+            captures (Sequence[str] | None): commands this runtime
+                claims, overriding the class default; ("*",) claims
+                every line for a runs_lines runtime. None keeps the
+                default.
+            config (RuntimeConfig | dict[str, Any] | None): the
+                runtime's implementation knobs, coerced through its
+                own config class (config_cls), so a field the runtime
+                does not have fails loud; the dict form is a yaml
+                entry's ``config`` block.
+            script (Callable | ScriptSource | None): per-line
+                admission script for the routing ladder.
+        """
+        if captures is not None:
+            self.captures = tuple(captures)
+        self.config = self.config_cls.coerce(config)
+        self.script = script
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:

@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { decideLine } from './decide.ts'
+export { decideLine, evaluatorOf } from './decide.ts'
 export { RoutingDecisionError } from './errors.ts'
 export { commandFacts } from './facts.ts'
-export { ScriptSource } from './types.ts'
+export { ScriptSource, routeContextFromPayload, routeContextPayload } from './types.ts'
 export type { CommandFacts, RoutingDecision, RouteContext, RouteFn, RouteScript } from './types.ts'

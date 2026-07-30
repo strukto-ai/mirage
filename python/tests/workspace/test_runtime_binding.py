@@ -18,9 +18,10 @@ import pytest_asyncio
 from mirage import MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
-from mirage.runtime.base import RunArgs, RunResult, Runtime, ScriptSource
+from mirage.runtime.base import Runtime
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.table import VfsRuntime
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 
 @pytest_asyncio.fixture

@@ -39,7 +39,7 @@ function buildConfig(): LinearConfig {
 async function main(): Promise<void> {
   const resource = new LinearResource(buildConfig());
   const ws = new Workspace({
-    "/linear": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/linear": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

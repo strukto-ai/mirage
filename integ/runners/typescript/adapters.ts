@@ -464,6 +464,20 @@ async function openHf(target: Target): Promise<Open> {
 
 const BOX_AUTH = { Authorization: 'Bearer integ-box-token' }
 
+async function boxCreateWebLink(
+  endpoint: string,
+  parentId: string,
+  name: string,
+  url: string,
+): Promise<void> {
+  const r = await fetch(`${endpoint}/2.0/web_links`, {
+    method: 'POST',
+    headers: { ...BOX_AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, url, parent: { id: parentId } }),
+  })
+  if (r.status !== 201) throw new Error(`box web_link seed failed: ${String(r.status)}`)
+}
+
 async function boxCreateFolder(endpoint: string, parentId: string, name: string): Promise<string> {
   const r = await fetch(`${endpoint}/2.0/folders`, {
     method: 'POST',
@@ -529,6 +543,11 @@ async function openBox(target: Target): Promise<Open> {
           new Uint8Array(readFileSync(file)),
         )
       }
+    }
+    if (m.seed === 'files/v1') {
+      // A weblink beside the fixture: sizeless and content-free, so
+      // listings must hide it and a direct stat must ENOENT.
+      await boxCreateWebLink(endpoint, folderId, 'homepage', 'https://example.com/')
     }
     mounts[m.path] = new BoxResource({
       accessToken: 'integ-box-token',
@@ -973,12 +992,24 @@ async function openSsh(target: Target): Promise<Open> {
   if (!host) throw new Error('ssh target requires SSH_HOST')
   const port = Number(process.env.SSH_PORT ?? '22')
   const base = `mirage-integ-${runId()}`
-  const admin = new Workspace(
-    { '/admin': new SSHResource({ host, port, username: 'integ' }) },
-    { mode: MountMode.WRITE },
-  )
+  const adminResource = new SSHResource({ host, port, username: 'integ' })
+  const admin = new Workspace({ '/admin': adminResource }, { mode: MountMode.WRITE })
   const paths = target.mounts.map((m) => `/admin/${base}/${String(m.root)}`).join(' ')
   await adminExec(admin, `mkdir -p ${paths}`)
+  // A server-side symlink in the /links mount: mirage's shell ln -s only
+  // makes namespace links, so the battery needs one created over SFTP to
+  // pin that ssh stat follows links (target size, not link-text length).
+  // Dangling until the fixture seeds poem.txt.
+  const sftp = await adminResource.accessor.sftp()
+  for (const m of target.mounts) {
+    if (m.root !== 'links') continue
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.symlink('../data/poem.txt', `/${base}/${String(m.root)}/poem_link.txt`, (err) => {
+        if (err !== undefined) rejectFn(err)
+        else resolveFn()
+      })
+    })
+  }
   const mounts: Record<string, SSHResource> = {}
   for (const m of target.mounts) {
     mounts[m.path] = new SSHResource({

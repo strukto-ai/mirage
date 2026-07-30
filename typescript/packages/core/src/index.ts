@@ -33,6 +33,8 @@ export {
   type FileStatInit,
   FileType,
   type FindFn,
+  KERNEL_BACKENDS,
+  MountBackend,
   MountMode,
   type MoveFn,
   type MoveStrategy,
@@ -90,7 +92,13 @@ export type {
   SessionSnapshot,
   WorkspaceStateDict,
 } from './workspace/snapshot/types.ts'
-export { BaseResource, type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
+export {
+  BaseResource,
+  type FindOptions,
+  type Resource,
+  sizesAlwaysKnown,
+  throwUnsupported,
+} from './resource/base.ts'
 export {
   hasRedactedSecret,
   REDACTED_SECRET,
@@ -476,17 +484,28 @@ export {
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
 export {
   bindCommands,
-  runtimeBindingsFor,
   DEFAULT_ENTRIES,
+  Runtime,
+  runtimeBindingsFor,
   VfsRuntime,
-  type RunArgs,
-  type RunResult,
-  type Runtime,
   type RuntimeEntry,
 } from './workspace/executor/runtime.ts'
+export { EvalError } from './workspace/executor/runtime_errors.ts'
+export { EVALUATOR, isEvaluator, type Evaluator } from './workspace/executor/runtime_mixin.ts'
+export {
+  type EvalResult,
+  type EvalStatus,
+  type EvalValue,
+  type RunArgs,
+  type RunResult,
+  type RuntimeOptions,
+} from './workspace/executor/runtime_types.ts'
 export {
   commandFacts,
   decideLine,
+  evaluatorOf,
+  routeContextFromPayload,
+  routeContextPayload,
   ScriptSource,
   RoutingDecisionError,
   type CommandFacts,
@@ -501,9 +520,8 @@ export {
   registerRuntime,
   RUNTIMES,
 } from './workspace/executor/runtime_table.ts'
-export { RemoteSandbox, type RemoteSandboxOptions } from './workspace/executor/sandbox/base.ts'
+export { RemoteSandbox } from './workspace/executor/sandbox/base.ts'
 export {
-  coerceConfig,
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './workspace/executor/sandbox/config.ts'

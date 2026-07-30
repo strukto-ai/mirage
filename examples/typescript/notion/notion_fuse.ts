@@ -39,7 +39,7 @@ function buildConfig(): NotionConfig {
 async function main(): Promise<void> {
   const resource = new NotionResource(buildConfig());
   const ws = new Workspace({
-    "/notion": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/notion": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

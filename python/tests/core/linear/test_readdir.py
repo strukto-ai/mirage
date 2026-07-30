@@ -19,10 +19,15 @@ import pytest
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.linear.normalize import (normalize_comment, normalize_issue,
+                                          normalize_team, normalize_user,
+                                          to_json_bytes, to_jsonl_bytes)
 from mirage.core.linear.readdir import readdir
 from mirage.resource.linear.config import LinearConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+_ISSUE_DIR = "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"
 
 
 @pytest.fixture
@@ -63,6 +68,12 @@ async def test_readdir_teams(accessor, index):
                      virtual="/teams",
                      directory="/teams"), index)
     assert result == ["/teams/ENG__Engineering__TEAM1"]
+    team_entry = await index.get("/teams/ENG__Engineering__TEAM1")
+    assert team_entry.entry is not None
+    assert team_entry.entry.extra["team_key"] == "ENG"
+    assert team_entry.entry.extra["team_name"] == "Engineering"
+    assert team_entry.entry.extra["team_json_size"] == len(
+        to_json_bytes(normalize_team(teams[0])))
 
 
 @pytest.mark.asyncio
@@ -120,6 +131,11 @@ async def test_readdir_team_members(accessor, index):
     assert result == [
         "/teams/ENG__Engineering__TEAM1/members/Alice__USER1.json"
     ]
+    member_entry = await index.get(
+        "/teams/ENG__Engineering__TEAM1/members/Alice__USER1.json")
+    assert member_entry.entry is not None
+    assert member_entry.entry.size == len(
+        to_json_bytes(normalize_user(users[0])))
 
 
 @pytest.mark.asyncio
@@ -132,22 +148,101 @@ async def test_readdir_issue_folder(accessor, index):
             resource_type="linear/issue",
             remote_time="2026-04-05T00:00:00Z",
             vfs_name="ENG-123__ISSUE1",
+            extra={
+                "issue_key": "ENG-123",
+                "issue_json_size": 42
+            },
         ),
     )
-    result = await readdir(
-        accessor,
-        PathSpec(
-            resource_path=(
-                "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"
-            ).strip("/"),
-            virtual="/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
-            directory="/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"),
-        index,
-    )
+    comments = [{
+        "id": "CMT1",
+        "body": "first",
+        "url": "https://linear.app/c/1",
+        "createdAt": "2026-04-05T00:00:00Z",
+        "updatedAt": "2026-04-06T00:00:00Z",
+        "user": {
+            "id": "USER1",
+            "name": "Alice",
+            "displayName": "Alice",
+            "email": "alice@example.com",
+        },
+    }]
+    with patch("mirage.core.linear.readdir.list_issue_comments",
+               new_callable=AsyncMock,
+               return_value=comments):
+        result = await readdir(
+            accessor,
+            PathSpec(
+                resource_path=_ISSUE_DIR.strip("/"),
+                virtual=_ISSUE_DIR,
+                directory=_ISSUE_DIR,
+            ),
+            index,
+        )
     assert result == [
         "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json",
         "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/comments.jsonl",
     ]
+    issue_file = await index.get(
+        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json")
+    assert issue_file.entry is not None
+    assert issue_file.entry.size == 42
+    comments_file = await index.get(
+        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/comments.jsonl")
+    assert comments_file.entry is not None
+    expected = to_jsonl_bytes([
+        normalize_comment(comments[0], issue_id="ISSUE1", issue_key="ENG-123")
+    ])
+    assert comments_file.entry.size == len(expected)
+    assert comments_file.entry.remote_time == "2026-04-06T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_readdir_issue_folder_fetches_issue_when_unsized(
+        accessor, index):
+    # An entry indexed before size push-down has no issue_json_size; the
+    # readdir falls back to one issue fetch so the files are still sized.
+    await index.put(
+        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
+        IndexEntry(
+            id="ISSUE1",
+            name="ENG-123",
+            resource_type="linear/issue",
+            remote_time="2026-04-05T00:00:00Z",
+            vfs_name="ENG-123__ISSUE1",
+        ),
+    )
+    issue = {
+        "id": "ISSUE1",
+        "identifier": "ENG-123",
+        "title": "Fix reads",
+        "description": "reads return empty",
+        "updatedAt": "2026-04-05T00:00:00Z",
+    }
+    with patch("mirage.core.linear.readdir.get_issue",
+               new_callable=AsyncMock,
+               return_value=issue) as fetched, \
+         patch("mirage.core.linear.readdir.list_issue_comments",
+               new_callable=AsyncMock,
+               return_value=[]):
+        await readdir(
+            accessor,
+            PathSpec(
+                resource_path=_ISSUE_DIR.strip("/"),
+                virtual=_ISSUE_DIR,
+                directory=_ISSUE_DIR,
+            ),
+            index,
+        )
+    fetched.assert_awaited_once()
+    issue_file = await index.get(
+        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json")
+    assert issue_file.entry is not None
+    assert issue_file.entry.size == len(to_json_bytes(normalize_issue(issue)))
+    comments_file = await index.get(
+        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/comments.jsonl")
+    assert comments_file.entry is not None
+    assert comments_file.entry.size == 0
 
 
 @pytest.mark.asyncio

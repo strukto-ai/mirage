@@ -55,6 +55,15 @@ export async function readdir(
       modified: info.lastModified ?? '',
     })
   }
+  // PROPFIND normally carries getcontentlength for every file; when the
+  // lister omits the metadata, one stat per affected file fills the gap so
+  // the index never caches an unknown size.
+  for (const [key, info] of metadata) {
+    if (directories.has(key) || info.size !== null) continue
+    const md = await op.stat(stripSlash(key))
+    info.size = md.contentLength !== null ? Number(md.contentLength) : null
+    if (info.modified === '' && md.lastModified !== null) info.modified = md.lastModified
+  }
   const targetKey = `/${stripSlash(target)}`
   if (names.length === 1 && names[0] === targetKey && !directories.has(targetKey)) {
     throw enotdir(path)

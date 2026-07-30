@@ -47,43 +47,44 @@ def _mounts(*prefixes):
 
 def test_synthesize_no_expression_emits_all():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, []) == "/ram\n/disk"
+    assert _synthesize_find_mount_entries("/", desc, [], "/") == "/ram\n/disk"
 
 
 def test_synthesize_positive_name():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc,
-                                          ["-name", "ram"]) == "/ram"
+    assert _synthesize_find_mount_entries("/", desc, ["-name", "ram"],
+                                          "/") == "/ram"
 
 
 def test_synthesize_honors_not():
     desc = _mounts("/ram/", "/disk/", "/notes/")
-    out = _synthesize_find_mount_entries("/", desc, ["-not", "-name", "ram"])
+    out = _synthesize_find_mount_entries("/", desc, ["-not", "-name", "ram"],
+                                         "/")
     assert out == "/disk\n/notes"
 
 
 def test_synthesize_honors_or():
     desc = _mounts("/ram/", "/disk/", "/notes/")
     out = _synthesize_find_mount_entries(
-        "/", desc, ["-name", "ram", "-o", "-name", "disk"])
+        "/", desc, ["-name", "ram", "-o", "-name", "disk"], "/")
     assert out == "/ram\n/disk"
 
 
 def test_synthesize_type_file_excludes_mount_dirs():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, ["-type", "f"]) == ""
+    assert _synthesize_find_mount_entries("/", desc, ["-type", "f"], "/") == ""
 
 
 def test_synthesize_type_dir_includes_mount_dirs():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc,
-                                          ["-type", "d"]) == "/ram\n/disk"
+    assert _synthesize_find_mount_entries("/", desc, ["-type", "d"],
+                                          "/") == "/ram\n/disk"
 
 
 def test_synthesize_maxdepth_window():
     desc = _mounts("/ram/", "/a/b/")
-    assert _synthesize_find_mount_entries("/", desc,
-                                          ["-maxdepth", "1"]) == "/ram"
+    assert _synthesize_find_mount_entries("/", desc, ["-maxdepth", "1"],
+                                          "/") == "/ram"
 
 
 def test_adjust_depth_texts_reduces_maxdepth_by_delta():
@@ -142,3 +143,10 @@ def test_fanout_propagates_unexpected_backend_error():
             _fan_out_traversal("tree", [path], [], {},
                                TraversalRegistry([child]), primary, "/",
                                "tree /", None))
+
+
+def test_synthesize_respells_entries_with_the_typed_base():
+    desc = _mounts("/ram/", "/disk/")
+    assert _synthesize_find_mount_entries("/", desc, [],
+                                          ".") == "./ram\n./disk"
+    assert _synthesize_find_mount_entries("/", desc, [], "") == "ram\ndisk"

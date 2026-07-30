@@ -14,27 +14,28 @@
 
 import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
 import { ScriptSource, type RouteScript } from './route/types.ts'
+import type { RunArgs, RunResult, RuntimeOptions } from './runtime_types.ts'
 
-/** One interpreter execution request, language-agnostic. */
-export interface RunArgs {
-  code: string
-  args: string[]
-  env: Record<string, string>
-  stdin: Uint8Array | null
-  /**
-   * Interpreter-level switches parsed by the command's spec (e.g. js
-   * module mode). Each runtime reads its own switches and ignores the
-   * rest.
-   */
-  flags?: Record<string, unknown>
-}
-
-/** Outcome of one interpreter execution. */
-export interface RunResult {
-  stdout: Uint8Array
-  /** Captured standard error, null when empty (mirrors Python). */
-  stderr: Uint8Array | null
-  exitCode: number
+/**
+ * A constructor's config option as the runtime's own config, mirroring
+ * Python's RuntimeConfig.coerce: keys outside the runtime's list fail
+ * loud (Python gets this from the dataclass raising TypeError; a TS
+ * object spread would silently swallow a typo key without it).
+ */
+function coerceRuntimeConfig<C extends object>(
+  value: C | undefined,
+  keys: readonly string[],
+  label = 'runtime',
+): C {
+  const config = value ?? ({} as C)
+  for (const key of Object.keys(config)) {
+    if (!keys.includes(key)) {
+      const known =
+        keys.length > 0 ? `expected: ${keys.map((k) => `'${k}'`).join(', ')}` : 'none allowed'
+      throw new Error(`unknown ${label} config key '${key}' (${known})`)
+    }
+  }
+  return { ...config }
 }
 
 /**
@@ -44,44 +45,70 @@ export interface RunResult {
  * machinery inside a handler, invisible to the dispatcher. Each runtime
  * declares the command names it captures; a command binds to the first
  * runtime in the workspace's ordered list that captures it.
+ * Implementations own their interpreter lifecycle (lazy boot, reuse
+ * across runs, teardown in close). Every runtime is constructed the
+ * same way (captures, config, script); each subclass hands the base
+ * its class-default captures and its config key list, so a config
+ * field the runtime does not have fails loud (config_cls in Python).
  */
-export interface Runtime {
-  readonly name: string
+export abstract class Runtime {
+  abstract readonly name: string
   readonly captures: readonly string[]
   /**
-   * Per-line admission script for the routing ladder, answering "do I
-   * want this line": a function taking a RouteContext, or a
-   * config-borne ScriptSource. Absent = always willing. Policy, not
-   * capability: it can only refuse lines the captures already allow.
-   */
-  script?: RouteScript
-  /**
-   * A runtime that runs whole lines sets this true and implements
-   * runLine. Interpreter runtimes leave it unset: they are the engine
+   * A runtime that runs whole lines sets this true and overrides
+   * runLine. Interpreter runtimes leave it false: they are the engine
    * inside one command (python3, node), never the line.
    */
-  readonly runsLines?: boolean
+  readonly runsLines: boolean = false
+  /** The runtime's coerced implementation knobs. */
+  config: object
+  script?: RouteScript
+
+  constructor(
+    options: RuntimeOptions<object> = {},
+    defaultCaptures: readonly string[] = [],
+    configKeys: readonly string[] = [],
+  ) {
+    if (typeof options.script === 'string') throw scriptStringError()
+    this.captures =
+      options.captures !== undefined ? options.captures.slice() : defaultCaptures.slice()
+    this.config = coerceRuntimeConfig(options.config, configKeys)
+    if (typeof options.script === 'function' || options.script instanceof ScriptSource) {
+      this.script = options.script
+    }
+  }
+
   /**
    * Late-wire workspace I/O into a user-constructed instance. The
    * workspace attaches its dispatch bridge at construction; runtimes
-   * that never touch workspace files keep this a no-op.
+   * that never touch workspace files keep the default no-op.
    */
-  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void
-  run(args: RunArgs): Promise<RunResult>
+  attach(_dispatch: BridgeDispatchFn, _listMounts: () => string[]): void {
+    // runtimes that never touch workspace files keep the no-op
+  }
+
+  abstract run(args: RunArgs): Promise<RunResult>
+
   /**
    * Execute one raw command line wholesale. Only runtimes with
-   * runsLines implement this: the runtime owns the entire line
+   * runsLines override this: the runtime owns the entire line
    * (pipes, redirects, its own cat), the workspace shell never
    * splits it. A line lands here when this runtime captures one of
    * the line's commands or "*".
    */
-  runLine?(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-  ): Promise<RunResult>
-  close(): Promise<void>
+  runLine(
+    _line: string,
+    _stdin: Uint8Array | null,
+    _env: Record<string, string>,
+    _cwd: string,
+  ): Promise<RunResult> {
+    return Promise.reject(new Error(`runtime '${this.name}' runs single commands, not whole lines`))
+  }
+
+  /** Release interpreter resources. Default: nothing held. */
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
 }
 
 /** A workspace runtimes-list entry: an instance or a name shorthand. */
@@ -107,15 +134,18 @@ export function scriptStringError(kind = 'a script'): Error {
  * pass your own instance to customize it. Its runLine is the workspace
  * executor itself, wired in at construction; run() stays unimplemented
  * because vfs has no single-command interpreter.
+ *
+ * Constructed like every runtime (captures, config, script), with two
+ * vfs readings: captures undefined (the default) keeps the catch-all
+ * behavior, an empty array serves nothing (full lockdown); and the
+ * config has no fields today, the slot exists for uniformity.
  */
-export class VfsRuntime implements Runtime {
+export class VfsRuntime extends Runtime {
   readonly name = 'vfs'
-  readonly captures: readonly string[] = []
   // Declaring captures (even empty) turns the catch-all off; the
   // dispatcher reads this bit, not the array's length.
-  readonly restricted: boolean = false
-  readonly runsLines = true
-  script?: RouteScript
+  readonly restricted: boolean
+  override readonly runsLines = true
   private executeLine:
     | ((
         line: string,
@@ -125,27 +155,12 @@ export class VfsRuntime implements Runtime {
       ) => Promise<RunResult>)
     | null = null
 
-  // The record form exists for the shared buildRuntime path, which
-  // hands every runtime its options object ({script?, captures?}).
-  constructor(options?: RouteScript | Record<string, unknown>) {
-    if (typeof options === 'function' || options instanceof ScriptSource) {
-      this.script = options
-      return
-    }
-    if (options === undefined) return
-    if (typeof options === 'string') throw scriptStringError()
-    const script = options.script
-    if (typeof script === 'string') throw scriptStringError()
-    if (typeof script === 'function' || script instanceof ScriptSource) {
-      this.script = script as RouteScript
-    }
-    if (Array.isArray(options.captures)) {
-      this.captures = (options.captures as string[]).slice()
-      this.restricted = true
-    }
+  constructor(options: RuntimeOptions = {}) {
+    super(options, [], [])
+    this.restricted = options.captures !== undefined
   }
 
-  attach(): void {
+  override attach(): void {
     // the workspace executor serves vfs commands; nothing to wire
   }
 
@@ -170,7 +185,7 @@ export class VfsRuntime implements Runtime {
     this.executeLine = execute
   }
 
-  runLine(
+  override runLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,
@@ -180,10 +195,6 @@ export class VfsRuntime implements Runtime {
       return Promise.reject(new Error('the vfs runtime is not attached to a workspace'))
     }
     return this.executeLine(line, stdin, env, cwd)
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve()
   }
 }
 

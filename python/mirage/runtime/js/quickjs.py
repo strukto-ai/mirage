@@ -14,10 +14,13 @@
 
 import asyncio
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 wasmtime: Any
@@ -35,10 +38,10 @@ _WASM_NAME = "qjs-wasi.wasm"
 _BUILD_HINT = (
     f"the quickjs runtime needs a {_WASM_NAME} module: download a WASI "
     "build of quickjs-ng from "
-    "https://github.com/quickjs-ng/quickjs/releases, and point the yaml "
-    "`runtimes: [{name: quickjs, home: ...}]` entry, the Workspace runtime "
-    f"argument, or the {QUICKJS_HOME_ENV} environment variable at the "
-    "directory containing it")
+    "https://github.com/quickjs-ng/quickjs/releases, and point the runtime "
+    "entry's config `home` (yaml `runtimes: [{name: quickjs, config: "
+    f"{{home: ...}}}}]`) or the {QUICKJS_HOME_ENV} environment variable at "
+    "the directory containing it")
 
 
 class QuickJsRuntime(Runtime):
@@ -60,43 +63,37 @@ class QuickJsRuntime(Runtime):
     wasm runtime), so a cancelled run traps it and reclaims the
     thread; a safeguard timeout stops the engine instead of leaking it.
 
-    The module comes from the `home` argument (the yaml
-    `runtimes:` entry `home` option ends up here) or the
-    MIRAGE_QUICKJS_HOME environment variable.
-
-    Args:
-        home (str | None): directory containing qjs-wasi.wasm. None
-            reads MIRAGE_QUICKJS_HOME.
-        dispatch (Callable | None): workspace dispatch the guest's file
-            I/O bridges through; None leaves mounts invisible.
-        mount_prefixes (Callable[[], list[str]] | None): live list of
-            workspace mount prefixes, read per run (mounts can come
-            and go).
+    The module comes from the config `home` (the yaml entry's
+    ``config`` block ends up here) or the MIRAGE_QUICKJS_HOME
+    environment variable.
     """
 
     name = "quickjs"
     captures = ("node", "js")
 
+    config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
+    config: HomeConfig
+
     def __init__(
-        self,
-        home: str | None = None,
-        dispatch: Callable[..., Any] | None = None,
-        mount_prefixes: Callable[[], list[str]] | None = None,
-    ) -> None:
+            self,
+            captures: Sequence[str] | None = None,
+            config: HomeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the quickjs runtime requires the 'quickjs' extra. Install "
                 "with: pip install mirage-ai[quickjs], or select another "
                 "runtime")
-        root = home or os.environ.get(QUICKJS_HOME_ENV)
+        super().__init__(captures, config, script)
+        root = self.config.home or os.environ.get(QUICKJS_HOME_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
         self._wasm = Path(root) / _WASM_NAME
         if not self._wasm.is_file():
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}")
-        self._dispatch = dispatch
-        self._mount_prefixes = mount_prefixes
+        self._dispatch: Callable[..., Any] | None = None
+        self._mount_prefixes: Callable[[], list[str]] | None = None
         self._runtime = WasmRuntime(self._wasm, "js")
 
     def attach(self, dispatch: Callable[..., Any],

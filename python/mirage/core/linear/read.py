@@ -21,8 +21,8 @@ from mirage.core.linear._client import (get_issue, list_issue_comments,
 from mirage.core.linear.normalize import (normalize_comment, normalize_cycle,
                                           normalize_document, normalize_issue,
                                           normalize_project, normalize_team,
-                                          normalize_user, to_json_bytes,
-                                          to_jsonl_bytes)
+                                          normalize_user, project_issue_rows,
+                                          to_json_bytes, to_jsonl_bytes)
 from mirage.core.linear.pathing import split_suffix_id
 from mirage.resource.linear.config import LinearConfig
 from mirage.types import PathSpec
@@ -84,19 +84,7 @@ async def read_bytes(
         team_issues = await list_team_issues(config, team_id)
         for project in projects:
             if project.get("id") == project_id:
-                project_issues = []
-                for issue in team_issues:
-                    if (issue.get("project") or {}).get("id") != project_id:
-                        continue
-                    state = issue.get("state") or {}
-                    project_issues.append({
-                        "issue_id": issue.get("id"),
-                        "issue_key": issue.get("identifier"),
-                        "title": issue.get("title"),
-                        "state_id": state.get("id"),
-                        "state_name": state.get("name"),
-                        "url": issue.get("url"),
-                    })
+                project_issues = project_issue_rows(team_issues, project_id)
                 return to_json_bytes(
                     normalize_project(
                         project,

@@ -44,6 +44,9 @@ export interface BoxResourceState {
 export class BoxResource implements Resource {
   readonly kind: string = ResourceName.BOX
   readonly cachesReads: boolean = true
+  // Box item listings carry an exact byte `size` for every file (0
+  // included); sizeless weblinks are filtered out of listings.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = BOX_PROMPT
   readonly config: BoxConfig

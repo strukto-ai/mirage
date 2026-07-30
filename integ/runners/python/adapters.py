@@ -403,6 +403,15 @@ class SSHService:
         paths = " ".join(f"/admin/{base}/{m['root']}"
                          for m in target["mounts"])
         await _admin_exec(admin_ws, f"mkdir -p {paths}")
+        # A server-side symlink in the /links mount: mirage's shell ln -s
+        # only makes namespace links, so the battery needs one created over
+        # SFTP to pin that ssh stat follows links (target size, not
+        # link-text length). Dangling until the fixture seeds poem.txt.
+        sftp = await admin.accessor.sftp()
+        for m in target["mounts"]:
+            if m["root"] == "links":
+                await sftp.symlink("../data/poem.txt",
+                                   f"/{base}/{m['root']}/poem_link.txt")
         return cls(host, port, server, root_dir, admin, admin_ws, base)
 
     def resource(self, mount: dict) -> SSHResource:
@@ -897,6 +906,11 @@ class BoxService:
                 rel = src.relative_to(base).as_posix()
                 self.state.seed_path(f"{mount['folder']}/{rel}",
                                      src.read_bytes())
+        if seed == "files/v1":
+            # A weblink beside the fixture: sizeless and content-free, so
+            # listings must hide it and a direct stat must ENOENT.
+            self.state.add_web_link(folder["id"], "homepage",
+                                    "https://example.com/")
         return BoxResource(
             BoxConfig(
                 access_token="integ-box-token",

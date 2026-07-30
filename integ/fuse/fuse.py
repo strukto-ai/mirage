@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background
 from mirage.resource.ram import RAMResource
 from mirage.types import FileStat
@@ -46,7 +47,12 @@ class SizelessOps:
 API_CONTENT = b'{"messages": 2}\n'
 
 
-def run_sizeless_probe() -> None:
+def run_sizeless_probe(result: dict[str, object]) -> None:
+    """Record the size-unknown semantics into the shared result.
+
+    Args:
+        result (dict[str, object]): the probe result to extend.
+    """
     api = RAMResource()
     api._store.dirs.add("/")
     api._store.files["/api.json"] = API_CONTENT
@@ -61,10 +67,10 @@ def run_sizeless_probe() -> None:
         # hydrate-on-open runs and even the pre-open stat sees the real size.
         pre = os.path.getsize(api_file)
         expected_pre = len(API_CONTENT) if sys.platform == "win32" else 0
-        print(f"api_stat_preopen_ok={'yes' if pre == expected_pre else 'no'}")
+        result["api_stat_preopen_ok"] = pre == expected_pre
         with open(api_file, "rb") as fh:
-            print(f"api_cat={fh.read().decode().strip()}")
-        print(f"api_size_postread={os.path.getsize(api_file)}")
+            result["api_cat"] = fh.read().decode().strip()
+        result["api_size_postread"] = os.path.getsize(api_file)
     finally:
         if sys.platform == "darwin":
             subprocess.run(["diskutil", "unmount", "force", mountpoint],
@@ -76,6 +82,7 @@ def run_sizeless_probe() -> None:
 
 
 def main() -> None:
+    result: dict[str, object] = {}
     data = RAMResource()
     data._store.dirs.add("/")
     data._store.files["/a.txt"] = b"alpha\n"
@@ -90,40 +97,45 @@ def main() -> None:
     # /data pins its mountpoint and overrides the workspace default to WRITE;
     # /logs gets a generated mountpoint and inherits the default READ.
     with Workspace({
-            "/data": Mount(data, mode=MountMode.WRITE, fuse=pinned),
-            "/logs": Mount(logs, fuse=True),
+            "/data":
+            Mount(data,
+                  mode=MountMode.WRITE,
+                  backend=MountBackend.FUSE,
+                  mountpoint=pinned),
+            "/logs":
+            Mount(logs, backend=MountBackend.FUSE),
     }) as ws:
         data_mp = ws.fuse_mountpoints["/data"]
         logs_mp = ws.fuse_mountpoints["/logs"]
 
         with open(f"{data_mp}/a.txt", "rb") as fh:
-            print(f"data_cat_a={fh.read().decode().strip()}")
+            result["data_cat_a"] = fh.read().decode().strip()
         with open(f"{logs_mp}/b.txt", "rb") as fh:
-            print(f"logs_cat_b={fh.read().decode().strip()}")
-        print(f"logs_size_b={os.path.getsize(f'{logs_mp}/b.txt')}")
-        print(f"data_pinned={'yes' if data_mp == pinned else 'no'}")
-        print(f"distinct_mounts={'yes' if data_mp != logs_mp else 'no'}")
+            result["logs_cat_b"] = fh.read().decode().strip()
+        result["logs_size_b"] = os.path.getsize(f"{logs_mp}/b.txt")
+        result["data_pinned"] = data_mp == pinned
+        result["distinct_mounts"] = data_mp != logs_mp
 
-        write_ok = ws.mount("/data").mode == MountMode.WRITE
-        read_ok = ws.mount("/logs").mode == MountMode.READ
-        print(f"data_mode_is_write={'yes' if write_ok else 'no'}")
-        print(f"logs_mode_is_read={'yes' if read_ok else 'no'}")
+        result["data_mode_is_write"] = ws.mount(
+            "/data").mode == MountMode.WRITE
+        result["logs_mode_is_read"] = ws.mount("/logs").mode == MountMode.READ
 
         try:
             _ = ws.fuse_mountpoint
-            singular = "no"
+            singular = False
         except RuntimeError:
-            singular = "yes"
-        print(f"singular_raises_multi={singular}")
+            singular = True
+        result["singular_raises_multi"] = singular
 
         try:
             ws.add_fuse_mount("/collide", pinned)
-            collision = "no"
+            collision = False
         except ValueError:
-            collision = "yes"
-        print(f"collision_rejected={collision}")
+            collision = True
+        result["collision_rejected"] = collision
 
-    run_sizeless_probe()
+    run_sizeless_probe(result)
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

@@ -88,7 +88,7 @@ describe('configToWorkspaceArgs', () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
       runtimes: [
-        { name: 'pyodide', home: 'https://assets.example.com/pyodide/' },
+        { name: 'pyodide', config: { home: 'https://assets.example.com/pyodide/' } },
         'quickjs',
         'vfs',
       ],
@@ -100,6 +100,31 @@ describe('configToWorkspaceArgs', () => {
     expect((entries?.[0] as { name: string }).name).toBe('pyodide')
     expect((entries?.[1] as { name: string }).name).toBe('quickjs')
     expect((entries?.[2] as { name: string }).name).toBe('vfs')
+  })
+
+  it('camelizes the snake_case keys of a runtime entry config block', async () => {
+    // Yaml carries Python-shaped keys; the TS runtime config classes
+    // are camelCase, so the loader must translate the block's keys
+    // (values, like an env map, pass through untouched).
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtimes: [
+        { name: 'pyodide', config: { auto_load_from_imports: false, home: '/assets' } },
+        'vfs',
+      ],
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.runtimes).toHaveLength(2)
+  })
+
+  it('rejects a flat option on a runtime entry (knobs live in config)', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtimes: [{ name: 'pyodide', home: '/assets' }],
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
+      /unknown pyodide runtime option 'home'/,
+    )
   })
 
   it('rejects an unknown runtime entry name', async () => {
@@ -323,23 +348,26 @@ describe('configToWorkspaceArgs', () => {
     ).rejects.toThrow(/invalid consistency/)
   })
 
-  it('threads per-mount fuse into top-level fuseMounts and yields {} otherwise', async () => {
+  it('threads per-mount backend into top-level kernelMounts and yields {} otherwise', async () => {
     const withFuse = await configToWorkspaceArgs(
       loadWorkspaceConfig({
         mounts: {
-          '/data': { resource: 'ram', fuse: '/tmp/mt' },
-          '/s3': { resource: 'ram', fuse: true },
+          '/data': { resource: 'ram', backend: 'fuse', mountpoint: '/tmp/mt' },
+          '/s3': { resource: 'ram', backend: 'fuse' },
           '/logs': { resource: 'ram' },
         },
       }),
     )
-    expect(withFuse.fuseMounts).toEqual({ '/data': '/tmp/mt', '/s3': true })
-    expect('fuseMounts' in withFuse.options).toBe(false)
+    expect(withFuse.kernelMounts).toEqual({
+      '/data': ['fuse', '/tmp/mt'],
+      '/s3': ['fuse', undefined],
+    })
+    expect('kernelMounts' in withFuse.options).toBe(false)
     const withoutFuse = await configToWorkspaceArgs(
       loadWorkspaceConfig({ mounts: { '/': { resource: 'ram' } } }),
     )
-    expect(withoutFuse.fuseMounts).toEqual({})
-    expect('fuseMounts' in withoutFuse.options).toBe(false)
+    expect(withoutFuse.kernelMounts).toEqual({})
+    expect('kernelMounts' in withoutFuse.options).toBe(false)
   })
 
   it('leaves mount config snake_case keys untouched (resource credentials)', () => {

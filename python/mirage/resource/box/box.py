@@ -36,6 +36,9 @@ class BoxResource(BaseResource):
     name: str = ResourceName.BOX
     caches_reads: bool = True
     index_ttl: float = 86_400
+    # Box item listings carry an exact byte `size` for every file (0
+    # included); sizeless weblinks are filtered out of listings.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
 
     def __init__(self, config: BoxConfig) -> None:

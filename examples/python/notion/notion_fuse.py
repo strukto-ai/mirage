@@ -17,7 +17,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.notion import NotionConfig, NotionResource
 
 load_dotenv(".env.development")
@@ -25,8 +25,10 @@ load_dotenv(".env.development")
 config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
 resource = NotionResource(config=config)
 
-with Workspace({"/notion/": Mount(resource, mode=MountMode.READ,
-                                  fuse=True)}) as ws:
+with Workspace({
+        "/notion/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

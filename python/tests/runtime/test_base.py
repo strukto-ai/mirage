@@ -14,7 +14,11 @@
 
 import asyncio
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+import pytest
+
+from mirage.runtime.base import Runtime
+from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.types import RunArgs, RunResult
 
 
 class EchoRuntime(Runtime):
@@ -23,14 +27,6 @@ class EchoRuntime(Runtime):
 
     async def run(self, args: RunArgs) -> RunResult:
         return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
-
-
-def test_run_args_defaults():
-    args = RunArgs(code="x")
-    assert args.args == []
-    assert args.env == {}
-    assert args.stdin is None
-    assert args.flags == {}
 
 
 def test_attach_defaults_to_noop():
@@ -43,3 +39,29 @@ def test_attach_defaults_to_noop():
 
 def test_close_defaults_to_noop():
     asyncio.run(EchoRuntime().close())
+
+
+def test_uniform_constructor_defaults():
+    rt = EchoRuntime()
+    assert rt.captures == ("echo-run", )
+    assert rt.config == RuntimeConfig()
+    assert rt.script is None
+
+
+def test_captures_override():
+    rt = EchoRuntime(captures=["only-this"])
+    assert rt.captures == ("only-this", )
+
+
+def test_script_stored():
+
+    def wants(ctx):
+        return True
+
+    rt = EchoRuntime(script=wants)
+    assert rt.script is wants
+
+
+def test_unknown_config_key_fails_loud():
+    with pytest.raises(TypeError):
+        EchoRuntime(config={"no_such_knob": 1})

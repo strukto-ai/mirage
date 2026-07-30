@@ -70,6 +70,8 @@ class GridFSResource(BaseResource):
 
     accessor: GridFSAccessor
     name: str = ResourceName.GRIDFS
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _GRIDFS_OPS
     PROMPT: str = PROMPT

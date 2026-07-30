@@ -1,0 +1,14 @@
+{
+  "under_volumes": true,
+  "tagged_fskit": true,
+  "cat": "{\"messages\": 2}",
+  "size": 16,
+  "read_bytes": 16,
+  "write_in_place": "ok",
+  "create_file": "ok",
+  "mkdir": "ok",
+  "rename": "ok",
+  "unlink": "ok",
+  "new_file_write": "ok",
+  "new_file_store_zeroed": true
+}

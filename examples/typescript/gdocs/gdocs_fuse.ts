@@ -45,7 +45,7 @@ function buildConfig(): GDocsConfig {
 async function main(): Promise<void> {
   const resource = new GDocsResource(buildConfig());
   const ws = new Workspace({
-    "/gdocs": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/gdocs": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

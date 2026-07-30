@@ -24,9 +24,11 @@ from mirage.accessor.s3 import S3Config
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
-from mirage.runtime.base import Runtime, ScriptSource
+from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
-from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
+from mirage.runtime.types import ScriptSource
+from mirage.types import (KERNEL_BACKENDS, CommandSafeguard, ConsistencyPolicy,
+                          MountBackend, MountMode)
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import (DEFAULT_STATE_ROOT,
                                     DiskWorkspaceStateStore,
@@ -228,7 +230,10 @@ class MountBlock(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     command_safeguards: dict[str,
                              CommandSafeguard] = Field(default_factory=dict)
-    fuse: bool | str = False
+    # How the mount is exposed: vfs (default, mirage's own filesystem only),
+    # fuse, or fskit. mountpoint is honored by the kernel backends.
+    backend: MountBackend = MountBackend.VFS
+    mountpoint: str | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -302,12 +307,11 @@ def _build_runtime_entries(
 
     Args:
         entries (list[str | dict[str, Any]]): name strings, or maps
-            carrying a name plus a ``script`` and constructor options
-            flat on the entry.
+            carrying a name plus the uniform runtime options
+            (``captures``, ``config``, ``script``).
 
     Raises:
-        ValueError: a map entry without a name, or non-script options
-            on vfs.
+        ValueError: a map entry without a name, or a non-path script.
     """
     out: list[Runtime | str] = []
     for entry in entries:
@@ -322,10 +326,9 @@ def _build_runtime_entries(
         if script is not None and not isinstance(script, str):
             raise ValueError(
                 "a runtime entry script must be a .py path string")
-        built = build_runtime(name, **options)
         if script is not None:
-            built.script = _load_script_source(script)
-        out.append(built)
+            options["script"] = _load_script_source(script)
+        out.append(build_runtime(name, **options))
     return out
 
 
@@ -334,8 +337,8 @@ class WorkspaceConfig(BaseModel):
 
     mounts: dict[str, MountBlock]
     # The workspace's ordered runtime world: name strings or maps
-    # with a name plus constructor options flat on the entry
-    # ({name: wasi, home: /opt/...}). Unset = the default world.
+    # with a name plus the uniform runtime options ({name: wasi,
+    # config: {home: /opt/...}}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
     # Global route script: a .py path whose content is embedded at
     # load. Its last expression names the runtime for the line, or
@@ -399,16 +402,21 @@ class WorkspaceConfig(BaseModel):
             kwargs["route"] = _load_script_source(self.route)
         return kwargs
 
-    def fuse_mounts(self) -> dict[str, bool | str]:
-        """Declarative FUSE mounts keyed by mount prefix.
+    def kernel_mounts(self) -> dict[str, tuple[MountBackend, str | None]]:
+        """Declarative kernel mounts keyed by mount prefix.
+
+        Mounts left on the default ``vfs`` backend are absent: they are
+        served inside mirage's own filesystem and register nothing with the
+        kernel.
 
         Returns:
-            dict[str, bool | str]: prefix to ``fuse`` block value (a
-                mountpoint path or ``True``) for mounts that request FUSE.
+            dict[str, tuple[MountBackend, str | None]]: prefix to
+                (backend, mountpoint) for mounts that request one.
         """
         return {
-            prefix: block.fuse
-            for prefix, block in self.mounts.items() if block.fuse
+            prefix: (block.backend, block.mountpoint)
+            for prefix, block in self.mounts.items()
+            if block.backend in KERNEL_BACKENDS
         }
 
 

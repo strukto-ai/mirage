@@ -16,7 +16,7 @@ import pytest
 
 from mirage.utils.path import (ancestors, drop_trailing_segments, expand_tilde,
                                glob_prefix_match, gnu_basename, gnu_dirname,
-                               norm, parent, resolve_path)
+                               norm, parent, resolve_path, respell_one)
 
 
 def test_norm_strips_and_adds_leading_slash():
@@ -221,3 +221,35 @@ def test_drop_trailing_segments_is_clamped():
     # An ancestor name must stay a path; returning "" would quote nothing.
     assert drop_trailing_segments("/a", 1) == "/a"
     assert drop_trailing_segments("a/b", 5) == "a/b"
+
+
+@pytest.mark.parametrize("path,original,raw,expected", [
+    ("/data/sub/x", "/data", ".", "./sub/x"),
+    ("/data/sub", "/data/sub", "sub", "sub"),
+    ("/data/x:hit", "/data", ".", "./x:hit"),
+    ("/other/x", "/data", ".", "/other/x"),
+    ("/data/x", "/data", "/data", "/data/x"),
+])
+def test_respell_one_respells_the_typed_base(path, original, raw, expected):
+    assert respell_one(path, original, raw) == expected
+
+
+@pytest.mark.parametrize("path,original,expected", [
+    ("/data/sub/x", "/data", "sub/x"),
+    ("/data/x:hit", "/data", "x:hit"),
+    ("/ram/a.txt:hello", "/", "ram/a.txt:hello"),
+    ("/data", "/data", "."),
+])
+def test_respell_one_empty_raw_is_the_bare_no_operand_spelling(
+        path, original, expected):
+    # GNU grep -r with no path operand prints names relative to the cwd
+    # with no ./ prefix; the synthetic operand carries raw_path "".
+    assert respell_one(path, original, "") == expected
+
+
+def test_respell_one_root_original_collapses_to_raw():
+    # A traversal rooted at "/" respells the root line itself: bare
+    # form and typed "." both print ".", never "./".
+    assert respell_one("/", "/", ".") == "."
+    assert respell_one("/", "/", "") == "."
+    assert respell_one("/ram/a.txt", "/", ".") == "./ram/a.txt"

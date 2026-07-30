@@ -44,7 +44,7 @@ readFileSync('/data/x.txt')  // hits the real filesystem, throws ENOENT
 
     ```ts
     import { readFile } from 'node:fs/promises'
-    const ws = new Workspace({ '/data': new Mount(new RAMResource(), { fuse: true }) })
+    const ws = new Workspace({ '/data': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
     await ws.fuseReady()
     // The `/data` subtree is exposed at the mountpoint root, so paths are relative to it.
     const bytes = await readFile(`${ws.fuseMountpoint}/x.txt`)
@@ -77,7 +77,7 @@ readFileSync('/data/x.txt')  // hits the real filesystem, throws ENOENT
 **The problem.** `@zkochan/fuse-native` dispatches every FUSE request (`getattr`, `read`, …) as a callback on the mounting process's Node event loop. Any *synchronous* access to your own mountpoint from that same process (`readFileSync`, `statSync`, `execFileSync('cat', …)`) blocks the loop that must answer the request: the call deadlocks, the kernel eventually times the filesystem out, and later operations fail with `Device not configured` / `ENOTCONN`.
 
 ```ts
-const ws = new Workspace({ '/data': new Mount(new RAMResource(), { fuse: true }) })
+const ws = new Workspace({ '/data': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
 await ws.fuseReady()
 const mp = ws.fuseMountpoint
 

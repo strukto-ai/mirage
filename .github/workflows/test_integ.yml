@@ -105,9 +105,8 @@ jobs:
               - 'typescript/packages/node/src/resource/jaeger/**'
               - '.github/workflows/test_integ.yml'
             fuse:
-              - 'integ/fuse.py'
-              - 'integ/fuse.ts'
-              - 'integ/truth_fuse.txt'
+              - 'integ/fuse/**'
+              - 'integ/check_json.py'
               - 'integ/check_lines.sh'
               - 'integ/package.json'
               - 'python/mirage/fuse/**'
@@ -686,8 +685,8 @@ jobs:
 
       - name: Run Python FUSE mount and check (real libfuse)
         run: |
-          ./python/.venv/bin/python integ/fuse.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_fuse.txt
+          ./python/.venv/bin/python integ/fuse/fuse.py 2>&1 \
+            | ./python/.venv/bin/python integ/check_json.py integ/fuse/truth_fuse.json
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -714,8 +713,8 @@ jobs:
       - name: Run TypeScript FUSE mount and check (real libfuse)
         working-directory: integ
         run: |
-          pnpm exec tsx fuse.ts 2>&1 \
-            | bash check_lines.sh truth_fuse.txt
+          pnpm exec tsx fuse/fuse.ts 2>&1 \
+            | ../python/.venv/bin/python check_json.py fuse/truth_fuse.json
 
   integ-fuse-windows:
     needs: changes
@@ -773,38 +772,57 @@ jobs:
         # Dump the raw output before checking: on failure the traceback is
         # the whole point of this advisory job.
         run: |
-          ./python/.venv/Scripts/python integ/fuse.py > /tmp/fuse-win.out 2>&1 || true
+          ./python/.venv/Scripts/python integ/fuse/fuse.py > /tmp/fuse-win.out 2>&1 || true
           cat /tmp/fuse-win.out
-          bash integ/check_lines.sh integ/truth_fuse.txt < /tmp/fuse-win.out
+          ./python/.venv/Scripts/python integ/check_json.py integ/fuse/truth_fuse.json < /tmp/fuse-win.out
 
-  runtime-py:
+  integ-fskit-macos:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
-    runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      mongodb:
-        image: mongo:8
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      REDIS_URL: redis://localhost:6379/0
-      MONGODB_URI: mongodb://localhost:27017
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
+    runs-on: macos-15
+    # Not in the gate. Everything installs and enables headlessly, but the
+    # mount request never reaches macFUSE's FSKit module on a hosted runner
+    # (engaging the module appears to need the GUI approval in System
+    # Settings), so the known mount timeout is reported as a skip below.
+    # Green = environment-limited or verified; red = something new broke
+    # (a guard regression, a crash, or the runner starts mounting and the
+    # results diverge from integ/fuse/truth_fskit.json). Real verification
+    # runs on a Mac with macFUSE 5.x: integ/fuse/fskit.py | integ/check_json.py.
+    # Python only for now: TypeScript reaches fskit too (fuse.node links
+    # the installed libfuse), but one leg is enough to probe the runner.
     steps:
       - uses: actions/checkout@v7
+
+      - name: Show macOS version (FSKit needs 15.4+)
+        run: sw_vers
+
+      - name: Install macFUSE 5.x
+        run: brew install --cask macfuse
+
+      - name: Enable the macFUSE FSKit modules
+        # The installer auto-registers only the -local module; the non-local
+        # one ships in the same bundle but never appears in pluginkit on a
+        # runner (both are registered on a developer Mac). Add every appex
+        # explicitly, then enable it.
+        run: |
+          exts=/Library/Filesystems/macfuse.fs/Contents/Resources/macfuse.app/Contents/Extensions
+          ls -la "$exts" || true
+          for appex in "$exts"/*.appex; do
+            echo "registering $appex"
+            pluginkit -a "$appex" || true
+          done
+          pluginkit -e use -i io.macfuse.app.fsmodule.macfuse || true
+          pluginkit -e use -i io.macfuse.app.fsmodule.macfuse-local || true
+          echo "--- registered FSKit modules (+ means enabled) ---"
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
+
+      - name: Confirm no kext is loaded
+        run: |
+          kextstat | grep -i fuse || echo "no macFUSE kext (expected)"
+          echo "--- /dev/macfuse* (kext devices, absent without the kext) ---"
+          ls -la /dev/macfuse* 2>&1 || true
+          echo "--- systemextensionsctl ---"
+          systemextensionsctl list 2>&1 || true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -816,18 +834,53 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (base + fuse only)
         working-directory: python
-        run: uv sync --all-extras --no-extra camel
+        run: uv sync --extra fuse
 
-      - name: Run python3 across ram/redis/s3/mongodb mounts and diff against truth
+      - name: Run the fskit mount and check
+        # The known hosted-runner limit surfaces as exactly one signature:
+        # the readiness TimeoutError (the module never engages, libfuse
+        # emits nothing). That case is a skip; any other failure is real.
         run: |
-          ./python/.venv/bin/python integ/runtime.py > /tmp/runtime_py.out
-          diff integ/truth_runtime_py.txt /tmp/runtime_py.out
+          ./python/.venv/bin/python integ/fuse/fskit.py > /tmp/fskit.out 2>&1 || true
+          cat /tmp/fskit.out
+          if grep -q "did not become ready" /tmp/fskit.out; then
+            echo "SKIP: this runner cannot engage the macFUSE FSKit module" \
+                 "(known hosted-runner limit; verified locally instead)"
+            exit 0
+          fi
+          ./python/.venv/bin/python integ/check_json.py \
+            integ/fuse/truth_fskit.json < /tmp/fskit.out
 
-  runtime-ts:
+      - name: Run the CLI fskit battery (workspace YAML with an fskit mount)
+        # Same classification as above: the script itself reports SKIP with
+        # exit 0 when the daemon's mount never engages the FSKit module.
+        run: bash integ/fuse/cli_fskit.sh "python/.venv/bin/mirage"
+
+      - name: Host state after the probe
+        if: always()
+        run: |
+          echo "--- mount ---"
+          mount
+          echo "--- /Volumes ---"
+          ls -la /Volumes
+          echo "--- FSKit modules ---"
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
+          echo "--- macFUSE bundle ---"
+          ls -la /Library/Filesystems/ || true
+          echo "--- macfuse-only log (what the mount attempt did) ---"
+          log show --last 3m --style compact \
+            --predicate 'eventMessage CONTAINS[c] "macfuse" OR senderImagePath CONTAINS[c] "macfuse"' \
+            2>/dev/null | tail -80 || true
+          echo "--- fskitd/fskit_agent errors ---"
+          log show --last 3m --style compact \
+            --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
+            2>/dev/null | tail -40 || true
+
+  integ-runtime:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
     services:
       redis:
@@ -854,8 +907,31 @@ jobs:
       S3_ENDPOINT: http://localhost:9000
       AWS_ACCESS_KEY_ID: minio
       AWS_SECRET_ACCESS_KEY: minio123
+      QUICKJS_BUILD: v0.15.1
+      WASI_BUILD: python-3.14.6-wasi_sdk-24
+      MIRAGE_QUICKJS_HOME: /tmp/quickjs
+      MIRAGE_WASI_HOME: /tmp/cpython-wasi
+      MIRAGE_INTEG_DOCKER_CONTAINER: mirage-integ-runtime-box
+      # Suites with unmet requirements fail instead of skipping, so a
+      # broken build download cannot silently drop wasi/quickjs/docker
+      # coverage.
+      INTEG_RUNTIME_STRICT: "1"
     steps:
       - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -867,17 +943,46 @@ jobs:
         with:
           version: 10.32.1
 
-      - name: Install dependencies
+      - name: Install TypeScript dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
 
-      - name: Build mirage-core
+      - name: Build TypeScript packages
         working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core build
+        run: pnpm -r build
 
-      - name: Build mirage-node
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-node build
+      - name: Cache the quickjs WASI build
+        id: quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
+
+      - name: Download the quickjs WASI build
+        if: steps.quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
+      - name: Cache the CPython WASI build
+        id: wasi-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/cpython-wasi
+          key: cpython-wasi-${{ env.WASI_BUILD }}
+
+      - name: Download the CPython WASI build
+        if: steps.wasi-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/cpython-wasi
+          gh release download v3.14.6 -R brettcannon/cpython-wasi-build \
+            -p "$WASI_BUILD.zip" -O /tmp/wasi-build.zip
+          unzip -q /tmp/wasi-build.zip -d /tmp/cpython-wasi
 
       - name: Start MinIO
         run: |
@@ -893,13 +998,21 @@ jobs:
             sleep 1
           done
 
-      - name: Run python3 across ram/redis/s3/mongodb mounts and check against truth
-        shell: bash
+      - name: Start the docker sandbox container (user-provisioned)
+        run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:stable-slim sleep infinity
+
+      - name: Run every runtime through the JSON suites (python)
+        run: ./python/.venv/bin/python integ/runtime/run.py
+
+      - name: Run every runtime through the JSON suites (typescript)
         working-directory: integ
+        run: pnpm exec tsx runtime/run.ts
+
+      - name: Run every runtime through the CLI and both daemons
         run: |
-          set -o pipefail
-          pnpm exec tsx runtime.ts 2>&1 \
-            | bash check_lines.sh truth_runtime.txt
+          bash integ/runtime/cli.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
 
   integ-observability:
     needs: changes
@@ -1119,7 +1232,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, integ-runtime]
     if: always()
     steps:
       - name: Check required jobs

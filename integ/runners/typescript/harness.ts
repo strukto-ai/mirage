@@ -16,7 +16,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const CASE_DIRS = ['unix', 'bash', 'crossmount', 'runtime', 'resources', 'cli', 'session']
+// integ/runtime holds the runtime suite (its own schema and runners,
+// integ/runtime/run.{py,ts} + cli.sh), not battery cases; keep it out.
+const CASE_DIRS = ['unix', 'bash', 'crossmount', 'resources', 'cli', 'session']
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
@@ -29,6 +31,9 @@ export interface Mount {
   // Fixture seeded by the adapter (over the backend API) instead of the
   // harness tee path -- used by read-only backends like box.
   seed?: string
+  // Materialise the mount's backing folder even without a fixture --
+  // folder-backed services 404 on a root nothing ever created.
+  seed_root?: boolean
   folder?: string
   bucket?: string
   volume?: string
@@ -180,6 +185,19 @@ export async function seedFixture(
     await ws.execute(`mkdir -p ${parent}`)
     await ws.execute(`tee ${dest} > /dev/null`, { stdin: new Uint8Array(readFileSync(file)) })
   }
+}
+
+export async function seedMountRoot(ws: ExecWorkspace, mountPath: string): Promise<void> {
+  // Prefix-scoped object stores treat an absent prefix as an empty
+  // directory, and the gws adapter pre-creates each mount's root folder
+  // chain, but folder-backed services (dropbox, sharepoint) 404 when a
+  // mount roots at a folder nothing ever created. Writing and removing a
+  // marker file rides the same workspace plumbing fixture seeding uses:
+  // the upload auto-creates the folder chain and the delete leaves the
+  // folders behind, so the mount lists as empty like every other target.
+  const marker = `${mountPath.replace(/\/+$/, '')}/.seed`
+  await ws.execute(`tee ${marker} > /dev/null`, { stdin: ENC.encode('seed\n') })
+  await ws.execute(`rm ${marker}`)
 }
 
 export async function runScenario(

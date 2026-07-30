@@ -44,7 +44,7 @@ async function jsCommand(
       null,
       new IOResult({
         exitCode: 127,
-        stderr: ENC.encode('js: javascript runtime is not available\n'),
+        stderr: ENC.encode('js: command not found\n'),
       }),
     ]
   }

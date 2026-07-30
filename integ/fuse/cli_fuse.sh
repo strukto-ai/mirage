@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CLI end-to-end FUSE parity. Drives the daemon-backed CLI to create a workspace
 # with TWO per-mount FUSE subtrees pinned to known OS paths plus ONE generated
-# mount (fuse: true), writes content through the VFS, then reads it back THROUGH
+# mount (backend: fuse), writes content through the VFS, then reads it back THROUGH
 # the kernel mountpoints. The daemon hosts the mounts in its own process, so the
 # reading shell never deadlocks. Proves the CLI really mounts each subtree on
 # both languages, and that close() cleanup is ownership-aware: caller-owned
@@ -33,19 +33,21 @@ mode: WRITE
 mounts:
   /data:
     resource: ram
-    fuse: $dmnt
+    backend: fuse
+    mountpoint: $dmnt
   /logs:
     resource: ram
-    fuse: $lmnt
+    backend: fuse
+    mountpoint: $lmnt
   /auto:
     resource: ram
-    fuse: true
+    backend: fuse
 YML
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
 
-  # Collision rejection: two mounts whose fuse: resolves to the SAME OS path must
+  # Collision rejection: two mounts whose mountpoint resolves to the SAME OS path must
   # be rejected at workspace-create time (server returns 409, CLI exits non-zero),
   # and the server must not leak a partial mount. Self-contained sub-check that
   # never touches the main cf workspace.
@@ -56,10 +58,12 @@ mode: WRITE
 mounts:
   /one:
     resource: ram
-    fuse: $collide_mp
+    backend: fuse
+    mountpoint: $collide_mp
   /two:
     resource: ram
-    fuse: $collide_mp
+    backend: fuse
+    mountpoint: $collide_mp
 YML
   $cli workspace delete cfx >/dev/null 2>&1 </dev/null || true
   if $cli workspace create "$yaml_collide" --id cfx >/dev/null 2>&1 </dev/null; then
@@ -67,6 +71,34 @@ YML
     $cli workspace delete cfx >/dev/null 2>&1 </dev/null || true
   else
     echo "collision_rejected=yes"
+  fi
+
+  # fskit is macOS-only; off macOS the CLI must reject a backend: fskit
+  # workspace cleanly (non-zero exit, no partial workspace left behind),
+  # not silently fall back to fuse or vfs.
+  if [ "$(uname)" != "Darwin" ]; then
+    local yaml_fskit="/tmp/cli-fuse-$lang-fskit.yaml"
+    cat > "$yaml_fskit" <<YML
+mode: WRITE
+mounts:
+  /one:
+    resource: ram
+    backend: fskit
+YML
+    $cli workspace delete cff >/dev/null 2>&1 </dev/null || true
+    if $cli workspace create "$yaml_fskit" --id cff >/dev/null 2>&1 </dev/null; then
+      echo "fskit_offmac_rejected=no"
+      $cli workspace delete cff >/dev/null 2>&1 </dev/null || true
+    else
+      echo "fskit_offmac_rejected=yes"
+    fi
+    if $cli workspace get cff >/dev/null 2>&1 </dev/null; then
+      echo "fskit_offmac_no_leftover=no"
+      $cli workspace delete cff >/dev/null 2>&1 </dev/null || true
+    else
+      echo "fskit_offmac_no_leftover=yes"
+    fi
+    rm -f "$yaml_fskit"
   fi
 
   $cli workspace delete cf >/dev/null 2>&1 </dev/null || true
@@ -129,7 +161,8 @@ mode: WRITE
 mounts:
   /data:
     resource: ram
-    fuse: $dmnt
+    backend: fuse
+    mountpoint: $dmnt
 YML
   $cli workspace delete cf2 >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$reuse_yaml" --id cf2 >/dev/null </dev/null
@@ -194,6 +227,10 @@ expect "logs_dir_survives" "yes"
 expect "gen_dir_removed" "yes"
 expect "collision_rejected" "yes"
 expect "reuse_after_recreate" "reused"
+if [ "$(uname)" != "Darwin" ]; then
+  expect "fskit_offmac_rejected" "yes"
+  expect "fskit_offmac_no_leftover" "yes"
+fi
 
 if [ "$fail" != "0" ]; then
   echo

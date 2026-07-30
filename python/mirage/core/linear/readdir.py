@@ -14,9 +14,15 @@
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.core.linear._client import (list_team_cycles, list_team_documents,
+from mirage.core.linear._client import (get_issue, list_issue_comments,
+                                        list_team_cycles, list_team_documents,
                                         list_team_issues, list_team_members,
                                         list_team_projects, list_teams)
+from mirage.core.linear.normalize import (normalize_comment, normalize_cycle,
+                                          normalize_document, normalize_issue,
+                                          normalize_project, normalize_team,
+                                          normalize_user, project_issue_rows,
+                                          to_json_bytes, to_jsonl_bytes)
 from mirage.core.linear.pathing import (cycle_filename, document_filename,
                                         issue_dirname, member_filename,
                                         project_filename, team_dirname)
@@ -25,6 +31,59 @@ from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 VIRTUAL_ROOTS = ("teams", )
+
+
+async def _size_issue_files(
+    accessor: LinearAccessor,
+    idx_key: str,
+    entry: IndexEntry,
+    index: IndexCacheStore,
+) -> None:
+    """Store sized index entries for an issue directory's two files.
+
+    issue.json is sized from the payload the issues listing already fetched
+    (stored on the issue entry by the parent readdir); comments.jsonl costs
+    the one bounded comments call, paid only when this directory is entered.
+    """
+    issue_id = entry.id
+    issue_json_size = entry.extra.get("issue_json_size")
+    issue_key = entry.extra.get("issue_key")
+    if issue_json_size is None:
+        issue = await get_issue(accessor.config, issue_id)
+        normalized = normalize_issue(issue)
+        issue_json_size = len(to_json_bytes(normalized))
+        issue_key = normalized.get("issue_key")
+    comments = await list_issue_comments(accessor.config, issue_id)
+    rows = [
+        normalize_comment(comment, issue_id=issue_id, issue_key=issue_key)
+        for comment in comments
+    ]
+    comments_time = max((row.get("updated_at") or "" for row in rows),
+                        default="")
+    await index.set_dir(idx_key, [
+        (
+            "issue.json",
+            IndexEntry(
+                id=issue_id,
+                name="issue.json",
+                resource_type="linear/issue_json",
+                remote_time=entry.remote_time,
+                vfs_name="issue.json",
+                size=issue_json_size,
+            ),
+        ),
+        (
+            "comments.jsonl",
+            IndexEntry(
+                id=issue_id,
+                name="comments.jsonl",
+                resource_type="linear/comments",
+                remote_time=comments_time or entry.remote_time,
+                vfs_name="comments.jsonl",
+                size=len(to_jsonl_bytes(rows)),
+            ),
+        ),
+    ])
 
 
 async def readdir(
@@ -60,6 +119,11 @@ async def readdir(
                 resource_type="linear/team",
                 remote_time=team.get("updatedAt") or "",
                 vfs_name=dirname,
+                extra={
+                    "team_key": team.get("key"),
+                    "team_name": team.get("name"),
+                    "team_json_size": len(to_json_bytes(normalize_team(team))),
+                },
             )
             entries.append((dirname, entry))
         await index.set_dir(idx_key, entries)
@@ -120,6 +184,7 @@ async def readdir(
                     resource_type="linear/user",
                     remote_time=user.get("updatedAt") or "",
                     vfs_name=filename,
+                    size=len(to_json_bytes(normalize_user(user))),
                 ),
             ))
         await index.set_dir(idx_key, entries)
@@ -155,6 +220,12 @@ async def readdir(
                     resource_type="linear/issue",
                     remote_time=issue.get("updatedAt") or "",
                     vfs_name=dirname,
+                    extra={
+                        "issue_key":
+                        issue.get("identifier"),
+                        "issue_json_size":
+                        len(to_json_bytes(normalize_issue(issue))),
+                    },
                 ),
             ))
         await index.set_dir(idx_key, entries)
@@ -173,6 +244,9 @@ async def readdir(
             result = await index.get(idx_key)
         if result.entry is None:
             raise enoent(virtual)
+        listing = await index.list_dir(idx_key)
+        if listing.entries is None:
+            await _size_issue_files(accessor, idx_key, result.entry, index)
         return [f"{prefix}/{key}/issue.json", f"{prefix}/{key}/comments.jsonl"]
 
     if len(parts) == 3 and parts[0] == "teams" and parts[2] == "projects":
@@ -194,8 +268,24 @@ async def readdir(
         if listing.entries is not None:
             return [f"{prefix}{entry}" for entry in listing.entries]
         projects = await list_team_projects(accessor.config, team_id)
+        team_key = result.entry.extra.get("team_key")
+        team_name = result.entry.extra.get("team_name")
+        if "team_key" not in result.entry.extra:
+            teams = await list_teams(accessor.config)
+            team = next((item for item in teams if item.get("id") == team_id),
+                        {})
+            team_key = team.get("key")
+            team_name = team.get("name")
+        team_issues = await list_team_issues(accessor.config, team_id)
         entries = []
         for project in projects:
+            rendered = normalize_project(
+                project,
+                team_id=team_id,
+                team_key=team_key,
+                team_name=team_name,
+                issues=project_issue_rows(team_issues, project.get("id")),
+            )
             filename = project_filename(project)
             entries.append((
                 filename,
@@ -205,6 +295,7 @@ async def readdir(
                     resource_type="linear/project",
                     remote_time=project.get("updatedAt") or "",
                     vfs_name=filename,
+                    size=len(to_json_bytes(rendered)),
                 ),
             ))
         await index.set_dir(idx_key, entries)
@@ -240,6 +331,9 @@ async def readdir(
                     resource_type="linear/cycle",
                     remote_time=cycle.get("updatedAt") or "",
                     vfs_name=filename,
+                    size=len(
+                        to_json_bytes(normalize_cycle(cycle,
+                                                      team_id=team_id))),
                 ),
             ))
         await index.set_dir(idx_key, entries)
@@ -275,6 +369,7 @@ async def readdir(
                     resource_type="linear/document",
                     remote_time=document.get("updatedAt") or "",
                     vfs_name=filename,
+                    size=len(to_json_bytes(normalize_document(document))),
                 ),
             ))
         await index.set_dir(idx_key, entries)

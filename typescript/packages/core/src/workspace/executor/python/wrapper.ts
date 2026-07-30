@@ -32,6 +32,7 @@ if _sid not in _repl_session_globals:
         '__builtins__': __builtins__,
     }
 _repl_globals = _repl_session_globals[_sid]
+_repl_globals.update(dict(_repl_inputs))
 
 _out_bytes = io.BytesIO()
 _err_bytes = io.BytesIO()
@@ -85,6 +86,67 @@ elif _codeobj is not False:
         sys.stdin = _saved_stdin
 
 _repl_result = (_out_bytes.getvalue(), _err_bytes.getvalue(), _exit_code, _status)
+`
+
+// One-shot eval: bind _eval_inputs as globals, run the code, capture
+// the LAST EXPRESSION (monty semantics). The value crosses the
+// JS/WASM boundary as JSON, which is the Evaluator contract's honest
+// transport for pyodide; bytes values ride as a tagged base64 object
+// that the JS side restores to Uint8Array (see EVAL_BYTES_TAG).
+export const PYTHON_EVAL_WRAPPER = `
+import ast, base64, io, json, sys, traceback
+
+def _eval_enc(_o):
+    if isinstance(_o, (bytes, bytearray)):
+        _b64 = base64.b64encode(bytes(_o)).decode('ascii')
+        return {'__mirage_bytes__': _b64}
+    raise TypeError('%s is not JSON-serializable' % type(_o).__name__)
+
+_out_bytes = io.BytesIO()
+_err_bytes = io.BytesIO()
+_out_text = io.TextIOWrapper(_out_bytes, encoding='utf-8', errors='replace',
+                             write_through=True, line_buffering=True)
+_err_text = io.TextIOWrapper(_err_bytes, encoding='utf-8', errors='replace',
+                             write_through=True, line_buffering=True)
+
+_ok = True
+_syntax = False
+_value_json = 'null'
+try:
+    _tree = ast.parse(_user_code)
+except SyntaxError:
+    _ok = False
+    _syntax = True
+    traceback.print_exc(file=_err_text)
+else:
+    _last = None
+    if _tree.body and isinstance(_tree.body[-1], ast.Expr):
+        _last = ast.Expression(_tree.body[-1].value)
+        _tree.body = _tree.body[:-1]
+    _g = dict(_eval_inputs)
+    _g.setdefault('__builtins__', __builtins__)
+    _saved_stdout, _saved_stderr = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = _out_text, _err_text
+    try:
+        exec(compile(_tree, '<eval>', 'exec'), _g)
+        _value = None
+        if _last is not None:
+            _value = eval(compile(_last, '<eval>', 'eval'), _g)
+        try:
+            _value_json = json.dumps(_value, default=_eval_enc)
+        except TypeError:
+            _ok = False
+            _err_text.write('eval: result of type %s is not JSON-serializable\\n'
+                            % type(_value).__name__)
+    except BaseException:
+        _ok = False
+        traceback.print_exc(file=_err_text)
+    finally:
+        _out_text.flush()
+        _err_text.flush()
+        sys.stdout, sys.stderr = _saved_stdout, _saved_stderr
+
+_eval_result = (_value_json, _out_bytes.getvalue(), _err_bytes.getvalue(), _ok, _syntax)
 `
 
 export const PYTHON_WRAPPER = `

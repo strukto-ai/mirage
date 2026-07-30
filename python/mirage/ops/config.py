@@ -102,3 +102,6 @@ class OpsMount:
     index: IndexCacheStore
     mode: MountMode
     ops: list[Any] = field(default_factory=list[Any])
+    # Mirrors BaseResource.SIZES_ALWAYS_KNOWN. Read by the fskit mount
+    # guard, which cannot serve a resource that sizes files only on read.
+    sizes_always_known: bool = False

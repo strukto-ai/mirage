@@ -35,7 +35,7 @@
       }
     },
     {
-      "id": "rg_usage_no_input",
+      "id": "rg_bare_searches_cwd",
       "seq": 582,
       "targets": [
         "ram",
@@ -61,11 +61,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg foo",
+      "command": "rg zqxjv",
       "expect": {
-        "exit": 2,
+        "exit": 1,
         "stdout": "",
-        "stderr": "rg: usage: rg [flags] pattern [path]\n"
+        "stderr": ""
       }
     }
   ]

@@ -39,7 +39,7 @@ function buildConfig(): SlackConfig {
 async function main(): Promise<void> {
   const resource = new SlackResource(buildConfig());
   const ws = new Workspace({
-    "/slack": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/slack": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

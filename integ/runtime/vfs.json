@@ -1,0 +1,133 @@
+{
+  "suite": "vfs",
+  "cases": [
+    {
+      "id": "captures_restrict_py",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "monty",
+          {
+            "name": "vfs",
+            "captures": [
+              "echo",
+              "cat"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo vfs-captured",
+          "expect": {
+            "exit": 0,
+            "stdout": "vfs-captured\n"
+          }
+        },
+        {
+          "command": "ls /ram",
+          "expect": {
+            "exit": 126,
+            "stderr": "mirage: ls: no runtime accepted this line\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "captures_restrict_js",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "quickjs",
+          {
+            "name": "vfs",
+            "captures": [
+              "echo",
+              "cat"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo vfs-captured",
+          "expect": {
+            "exit": 0,
+            "stdout": "vfs-captured\n"
+          }
+        },
+        {
+          "command": "ls /ram",
+          "expect": {
+            "exit": 126,
+            "stderr": "mirage: ls: no runtime accepted this line\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "lockdown_script",
+      "world": {
+        "runtimes": [
+          {
+            "name": "vfs",
+            "script": "'secret' not in ctx['line']"
+          },
+          {
+            "name": "monty",
+            "captures": []
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo fine",
+          "expect": {
+            "exit": 0,
+            "stdout": "fine\n"
+          }
+        },
+        {
+          "command": "cat /ram/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr_contains": "no runtime accepted this line"
+          }
+        }
+      ]
+    }
+  ]
+}

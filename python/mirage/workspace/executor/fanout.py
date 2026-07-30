@@ -20,6 +20,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.types import ExecutionNode
@@ -65,6 +66,9 @@ def _should_fan_out(
     if cmd_name == "grep":
         return (flag_kwargs.get("r") is True or flag_kwargs.get("R") is True
                 or flag_kwargs.get("recursive") is True)
+    if cmd_name == "rg":
+        # ripgrep recurses directories by default; no flag to check.
+        return True
     if cmd_name == "ls":
         return flag_kwargs.get("R") is True
     return False
@@ -144,6 +148,7 @@ def _synthesize_find_mount_entries(
     target_path: str,
     descendants: list[MountEntry],
     texts: list[str],
+    raw: str,
 ) -> str:
     """Return synthetic find lines for descendant mount roots.
 
@@ -152,11 +157,14 @@ def _synthesize_find_mount_entries(
     expression is parsed into a predicate tree and evaluated per mount
     root (kind "d"), mirroring the per-backend cores, so -not / -o /
     -path / -type and the -maxdepth / -mindepth window all apply.
+    Entries print in the operand's typed spelling like every other
+    line of the walk.
 
     Args:
         target_path (str): the find start path the fan-out runs from.
         descendants (list): descendant mounts to inject as entries.
         texts (list[str]): the find expression tokens.
+        raw (str): the operand's typed spelling (``PathSpec.raw_path``).
     """
     try:
         expr = parse_find_expression(list(texts))
@@ -179,7 +187,7 @@ def _synthesize_find_mount_entries(
                           depth=depth)
         if not keep(entry, tree, min_depth):
             continue
-        out.append(prefix_no_slash)
+        out.append(respell_one(prefix_no_slash, target_path, raw))
     return "\n".join(out)
 
 
@@ -280,12 +288,23 @@ async def _fan_out_traversal(
             if adjusted is None:
                 continue
             sub_flags = adjusted
+            if cmd_name == "rg":
+                # A tree search labels every hit; a descendant mount
+                # whose root is a single file would otherwise drop the
+                # filename (rg labels only multi-file or -H runs).
+                sub_flags["H"] = True
             sub_texts = _adjust_depth_texts(texts, target_path, mount.prefix)
+            # The descendant operand keeps the traversal root's typed
+            # spelling (grep -r . -> ./ram/...; the synthetic bare
+            # no-operand form -> ram/...); an absolute root leaves it
+            # absolute, the pre-existing output shape.
             sub_paths = [
                 PathSpec(virtual=mount_root,
                          directory=mount_root,
                          resource_path="",
-                         resolved=True)
+                         resolved=True,
+                         raw_path=respell_one(mount_root, target_path,
+                                              paths[0].raw_path))
             ]
         stdout, io = await mount.execute_cmd(cmd_name,
                                              sub_paths,
@@ -294,10 +313,18 @@ async def _fan_out_traversal(
                                              stdin=stdin,
                                              cwd=cwd)
 
+        if mount is not primary_mount and io.exit_code == 127:
+            # A descendant that does not serve this command contributes
+            # nothing to the aggregate walk instead of failing it (du
+            # across a tree holding a view mount without a du op).
+            continue
         if mount is primary_mount and descendant_prefixes and stdout:
             stdout = await _filter_under_prefixes(stdout, descendant_prefixes)
         elif mount is not primary_mount and cmd_name == "find" and stdout:
-            stdout = await _drop_mount_root_line(stdout, mount_root)
+            # The child's own root line arrives respelled with the
+            # operand's typed base, so drop that spelling, not the
+            # absolute prefix.
+            stdout = await _drop_mount_root_line(stdout, sub_paths[0].raw_path)
 
         if stdout is not None:
             data = await materialize(stdout)
@@ -311,7 +338,7 @@ async def _fan_out_traversal(
 
     if cmd_name == "find":
         synthetic = _synthesize_find_mount_entries(target_path, descendants,
-                                                   texts)
+                                                   texts, paths[0].raw_path)
         if synthetic:
             all_stdout.append(synthetic.encode("utf-8"))
 

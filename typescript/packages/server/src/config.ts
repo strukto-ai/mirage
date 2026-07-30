@@ -19,6 +19,8 @@ import {
   buildResource,
   CommandSafeguard,
   ConsistencyPolicy,
+  KERNEL_BACKENDS,
+  MountBackend,
   ScriptSource,
   MountMode,
   OnExceed,
@@ -79,9 +81,9 @@ function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
     if (script !== undefined && typeof script !== 'string') {
       throw new Error('a runtime entry script must be a .py path string')
     }
-    const built = buildRuntime(name, options)
-    if (script !== undefined) built.script = loadScriptSource(script)
-    out.push(built)
+    const withScript: Record<string, unknown> =
+      script !== undefined ? { ...options, script: loadScriptSource(script) } : options
+    out.push(buildRuntime(name, withScript))
   }
   return out
 }
@@ -146,9 +148,19 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
     out.store = store
   }
   if (Array.isArray(out.runtimes)) {
-    out.runtimes = out.runtimes.map((entry): unknown =>
-      isPlainObject(entry) ? camelizeKeys(entry) : entry,
-    )
+    // A runtime entry's config block carries the runtime's own knobs
+    // (sandbox_id, api_key, home, ...), snake_case in yaml like every
+    // Python-shaped key; the TS runtime config classes are camelCase,
+    // so camelize the block's keys too. Only the keys: values such as
+    // the env map pass through untouched.
+    out.runtimes = out.runtimes.map((entry): unknown => {
+      if (!isPlainObject(entry)) return entry
+      const normalized = camelizeKeys(entry)
+      if (isPlainObject(normalized.config)) {
+        normalized.config = camelizeKeys(normalized.config)
+      }
+      return normalized
+    })
   }
   return out
 }
@@ -220,7 +232,9 @@ export interface MountBlock {
   mode?: string
   config?: Record<string, unknown>
   command_safeguards?: Record<string, Record<string, unknown>>
-  fuse?: boolean | string
+  /** vfs (default), fuse, or fskit. Mirrors Python's MountBlock.backend. */
+  backend?: string
+  mountpoint?: string
 }
 
 interface RamCacheBlock {
@@ -370,7 +384,7 @@ export interface WorkspaceArgs {
     runtimes?: RuntimeEntry[]
     route?: ScriptSource
   }
-  fuseMounts: Record<string, boolean | string>
+  kernelMounts: Record<string, [MountBackend, string | undefined]>
 }
 
 function buildCache(
@@ -438,12 +452,13 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
   const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
-  const fuseMounts: Record<string, boolean | string> = {}
+  const kernelMounts: Record<string, [MountBackend, string | undefined]> = {}
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await buildResource(block.resource, block.config ?? {})
     const m = coerceMountMode(block.mode, wsMode)
     resources[prefix] = [r, m, parseSafeguards(block.command_safeguards)]
-    if (block.fuse !== undefined && block.fuse !== false) fuseMounts[prefix] = block.fuse
+    const backend = (block.backend ?? MountBackend.VFS) as MountBackend
+    if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]
   }
   const cache = buildCache(cfg.cache)
   const index = buildIndex(cfg.index)
@@ -466,6 +481,6 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
         ? { route: loadScriptSource(cfg.route) }
         : {}),
     },
-    fuseMounts,
+    kernelMounts,
   }
 }

@@ -52,6 +52,10 @@ class DropboxResource(BaseResource):
     name: str = ResourceName.DROPBOX
     caches_reads: bool = True
     index_ttl: float = 86_400
+    # list_folder carries an exact byte `size` for every file (0 included).
+    # Paper docs 409 on raw download, a loud error, never a silent empty
+    # read.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _DROPBOX_OPS
     PROMPT: str = PROMPT
 

@@ -12,10 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RunArgs, RunResult } from '../../runtime.ts'
+import { Runtime } from '../../runtime.ts'
+import { EvalError } from '../../runtime_errors.ts'
+import { EVALUATOR, type Evaluator } from '../../runtime_mixin.ts'
+import type {
+  EvalResult,
+  EvalValue,
+  RunArgs,
+  RunResult,
+  RuntimeOptions,
+} from '../../runtime_types.ts'
 import type { BridgeDispatchFn } from '../mirage_bridge.ts'
-import { MONTY_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
-import type { PythonReplRunArgs, PythonReplRunResult } from '../types.ts'
+import { MONTY_RUNTIME } from './interface.ts'
 
 export class MontyUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -58,8 +66,6 @@ function displayError(err: unknown): string {
   return e instanceof Error ? e.message : String(err)
 }
 
-export type MontyRuntimeOptions = PythonRuntimeOptions
-
 /**
  * Run Python code on the Monty sandboxed interpreter (`@pydantic/monty`).
  *
@@ -73,23 +79,22 @@ export type MontyRuntimeOptions = PythonRuntimeOptions
  * bridgeable yet (the JS binding cannot return a file handle from an
  * `os` callback) — use `pathlib` for file I/O, or the pyodide runtime.
  */
-export class MontyRuntime implements PythonRuntime {
+export class MontyRuntime extends Runtime implements Evaluator {
   readonly name = MONTY_RUNTIME
+  readonly [EVALUATOR] = true as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
-  readonly captures = MontyRuntime.commands
-  private workspaceBridge: BridgeDispatchFn | null
-  private listMounts: () => string[]
+  private workspaceBridge: BridgeDispatchFn | null = null
+  private listMounts: () => string[] = () => []
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
   private poolPromise: Promise<MontyPoolLike> | null = null
-  private readonly replSessions = new Map<string, MontySessionLike>()
+  private readonly evalSessions = new Map<string, MontySessionLike>()
 
-  constructor(options: MontyRuntimeOptions = {}) {
-    this.workspaceBridge = options.workspaceBridge ?? null
-    this.listMounts = options.listMounts ?? ((): string[] => [])
+  constructor(options: RuntimeOptions = {}) {
+    super(options, MontyRuntime.commands, [])
   }
 
-  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+  override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
       this.listMounts = listMounts
@@ -106,39 +111,104 @@ export class MontyRuntime implements PythonRuntime {
     }
   }
 
-  async runRepl(args: PythonReplRunArgs): Promise<PythonReplRunResult> {
+  /**
+   * Evaluate code in-process; the last expression is the value.
+   *
+   * One-shot mode evaluates on a throwaway pool session; a session id
+   * keeps the session (heap and namespace) alive per id, which is the
+   * console. Inputs bind as globals via monty's native mechanism, and
+   * the code sees workspace files through the same bridge agent code
+   * uses. Console failures come back as transcript results (stderr +
+   * exitCode 1); one-shot failures reject with EvalError.
+   */
+  async eval(
+    code: string,
+    opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
+  ): Promise<EvalResult> {
     const pool = await this.ensurePool()
-    let session = this.replSessions.get(args.sessionId)
-    if (session === undefined) {
-      session = await pool.checkout()
-      this.replSessions.set(args.sessionId, session)
-    }
-    const result = await this.feedOne(session, args.code, {
-      code: args.code,
-      args: [],
-      env: {},
-      stdin: null,
-    })
-    const incomplete =
-      result.exitCode !== 0 &&
-      result.stderr !== null &&
-      new TextDecoder().decode(result.stderr).includes('unexpected EOF while parsing')
-    if (incomplete) {
-      return {
-        stdout: new Uint8Array(),
-        stderr: null,
-        exitCode: 0,
-        status: 'incomplete',
+    const module = await this.loadModule()
+    let session: MontySessionLike
+    if (opts.session !== undefined) {
+      let existing = this.evalSessions.get(opts.session)
+      if (existing === undefined) {
+        existing = await pool.checkout()
+        this.evalSessions.set(opts.session, existing)
       }
+      session = existing
+    } else {
+      session = await pool.checkout()
     }
-    return { ...result, status: 'complete' }
+    const out: string[] = []
+    const err: string[] = []
+    const options: Record<string, unknown> = {
+      inputs: { ...(opts.inputs ?? {}) },
+      printCallback: (stream: 'stdout' | 'stderr', text: string) => {
+        if (stream === 'stderr') err.push(text)
+        else out.push(text)
+      },
+      os: this.buildOsCallback(module, {}),
+    }
+    const enc = new TextEncoder()
+    try {
+      const value = (await session.feedRun(code, options)) as EvalValue
+      return {
+        value,
+        stdout: enc.encode(out.join('')),
+        stderr: err.length > 0 ? enc.encode(err.join('')) : null,
+        exitCode: 0,
+        status: 'complete',
+      }
+    } catch (caught) {
+      if (caught instanceof module.MontySyntaxError) {
+        const trace = displayError(caught)
+        // Console continuation, not a broken program: the source
+        // merely stopped early (an open block or unclosed suite).
+        const incomplete =
+          trace.includes('unexpected EOF') || trace.includes('Expected an indented block')
+        if (opts.session !== undefined) {
+          if (incomplete) {
+            return {
+              value: null,
+              stdout: new Uint8Array(),
+              stderr: null,
+              exitCode: 0,
+              status: 'incomplete',
+            }
+          }
+          return {
+            value: null,
+            stdout: enc.encode(out.join('')),
+            stderr: enc.encode(trace + '\n'),
+            exitCode: 1,
+            status: 'complete',
+          }
+        }
+        throw new EvalError(trace, { syntax: true, cause: caught })
+      }
+      if (caught instanceof module.MontyRuntimeError) {
+        const trace = displayError(caught)
+        if (opts.session !== undefined) {
+          return {
+            value: null,
+            stdout: enc.encode(out.join('')),
+            stderr: enc.encode(err.join('') + trace + '\n'),
+            exitCode: 1,
+            status: 'complete',
+          }
+        }
+        throw new EvalError(trace, { cause: caught })
+      }
+      throw caught
+    } finally {
+      if (opts.session === undefined) await session.close()
+    }
   }
 
-  async close(): Promise<void> {
-    for (const session of this.replSessions.values()) {
+  override async close(): Promise<void> {
+    for (const session of this.evalSessions.values()) {
       await session.close()
     }
-    this.replSessions.clear()
+    this.evalSessions.clear()
     if (this.pool !== null) {
       await this.pool.close()
       this.pool = null
@@ -269,99 +339,6 @@ export class MontyRuntime implements PythonRuntime {
       const norm = p.endsWith('/') ? p : p + '/'
       return path.startsWith(norm) || path === norm.slice(0, -1)
     })
-  }
-}
-
-let routeModulePromise: Promise<MontyModuleLike> | null = null
-let routePool: MontyPoolLike | null = null
-let routePoolPromise: Promise<MontyPoolLike> | null = null
-
-async function routeModule(): Promise<MontyModuleLike> {
-  routeModulePromise ??= import('@pydantic/monty').then(
-    (m) => m as unknown as MontyModuleLike,
-    (err: unknown) => {
-      routeModulePromise = null
-      throw new MontyUnavailableError(
-        "route scripts run on monty; install '@pydantic/monty' or use a function instead",
-        { cause: err },
-      )
-    },
-  )
-  return routeModulePromise
-}
-
-/**
- * Evaluate a route script on monty; the snippet's trailing expression
- * is the verdict. The script sees the ctx payload as the `ctx` global
- * and gets read-only workspace file access through the bridge.
- */
-export async function evalMontyValue(
-  code: string,
-  payload: Record<string, unknown>,
-  bridge: BridgeDispatchFn | null,
-): Promise<unknown> {
-  const module = await routeModule()
-  if (routePool === null) {
-    routePoolPromise ??= module.Monty.create()
-    routePool = await routePoolPromise
-  }
-  const session = await routePool.checkout()
-  try {
-    return await session.feedRun(code, {
-      inputs: { ctx: payload },
-      os: routeOsCallback(module, bridge),
-    })
-  } catch (caught) {
-    if (caught instanceof module.MontySyntaxError) {
-      throw new Error('route script syntax error: ' + displayError(caught))
-    }
-    if (caught instanceof module.MontyRuntimeError) {
-      throw new Error('route script failed: ' + displayError(caught))
-    }
-    throw caught
-  } finally {
-    await session.close()
-  }
-}
-
-function routeOsCallback(
-  module: MontyModuleLike,
-  bridge: BridgeDispatchFn | null,
-): (name: string, args: unknown[]) => unknown {
-  const notHandled = module.NOT_HANDLED
-  return (name: string, args: unknown[]): unknown => {
-    if (bridge === null) return notHandled
-    const path = pathArg(args[0])
-    if (path === null) return notHandled
-    switch (name) {
-      case 'Path.read_bytes':
-        return readBytes(bridge, path)
-      case 'Path.read_text':
-        return readBytes(bridge, path).then((b) => new TextDecoder().decode(b))
-      case 'Path.iterdir':
-        return listEntries(bridge, path).then((entries) => entries.map((e) => e.path))
-      case 'Path.is_dir':
-        return listEntries(bridge, path).then(
-          () => true,
-          () => false,
-        )
-      case 'Path.is_file':
-        return entryFor(bridge, path).then(
-          (e) => e !== null && !e.isDir,
-          () => false,
-        )
-      case 'Path.exists':
-        return entryFor(bridge, path).then(
-          (e) => e !== null,
-          () =>
-            listEntries(bridge, path).then(
-              () => true,
-              () => false,
-            ),
-        )
-      default:
-        return notHandled
-    }
   }
 }
 

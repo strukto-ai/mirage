@@ -22,7 +22,7 @@ from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +145,7 @@ async def grep(
                     warnings=warnings,
                     read_stream_fn=None,
                 )
-                results.extend(rebase_raw(hits, p.virtual, p.raw_path))
+                results.extend(respell_raw(hits, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings)
             if f.quiet:
                 return b"", IOResult(exit_code=0 if results else 1,
@@ -189,7 +189,7 @@ async def grep(
                         warnings=warnings,
                         read_stream_fn=None,
                     )
-                    all_results.extend(rebase_raw(res, p.virtual, p.raw_path))
+                    all_results.extend(respell_raw(res, p.virtual, p.raw_path))
                 else:
                     data = split_lines(
                         (await rb(p.virtual)).decode(errors="replace"))

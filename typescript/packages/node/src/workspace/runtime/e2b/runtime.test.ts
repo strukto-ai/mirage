@@ -14,7 +14,7 @@
 
 import { stdinRedirect, buildRuntime } from '@struktoai/mirage-core'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import type { RuntimeOptions } from '@struktoai/mirage-core'
 import type { E2BConfig } from './config.ts'
 import { E2BRuntime, type E2bSdk } from './runtime.ts'
 
@@ -81,7 +81,7 @@ class FakedE2BRuntime extends E2BRuntime {
 }
 
 function makeRuntime(
-  options: RemoteSandboxOptions<E2BConfig> | Record<string, unknown> = {
+  options: RuntimeOptions<E2BConfig> | Record<string, unknown> = {
     config: { sandboxId: 'sb-live' },
   },
 ): FakedE2BRuntime {

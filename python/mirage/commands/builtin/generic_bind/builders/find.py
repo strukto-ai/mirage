@@ -24,7 +24,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.config import StatOverlay
 from mirage.types import PathSpec
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 
 async def find(
@@ -126,7 +126,7 @@ async def _find_walk(
                                  args=args)
         # GNU prints each result under the operand as typed; walk_find
         # returns virtual paths, so rebase like generic_find does.
-        results.extend(rebase_raw(walked, search.virtual, search.raw_path))
+        results.extend(respell_raw(walked, search.virtual, search.raw_path))
     return format_records(results), IOResult()
 
 

@@ -16,13 +16,11 @@ import { spawn } from 'node:child_process'
 import {
   registerRuntime,
   RemoteSandbox,
-  type RemoteSandboxOptions,
+  type RuntimeOptions,
   type RunResult,
 } from '@struktoai/mirage-core'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 import { DOCKER_CLI_HINT } from './constants.ts'
-
-export const DOCKER_OPTION_KEYS: readonly string[] = ['captures', 'config', 'script']
 
 interface DockerResult {
   stdout: Uint8Array
@@ -43,7 +41,7 @@ interface DockerResult {
 export class DockerRuntime extends RemoteSandbox<DockerConfig> {
   readonly name = 'docker'
 
-  constructor(options: RemoteSandboxOptions<DockerConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<DockerConfig> | Record<string, unknown> = {}) {
     super(options, DOCKER_CONFIG_KEYS)
     if (!this.config.container) {
       throw new Error('docker config needs container: the id or name of a running container')
@@ -108,4 +106,4 @@ function decode(bytes: Uint8Array): string {
   return DECODER.decode(bytes)
 }
 
-registerRuntime('docker', DockerRuntime, DOCKER_OPTION_KEYS)
+registerRuntime('docker', DockerRuntime)

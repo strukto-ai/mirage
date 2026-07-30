@@ -16,9 +16,10 @@ import asyncio
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import Runtime
 from mirage.runtime.route.types import RouteScript
 from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.types import RunArgs, RunResult
 
 
 class RemoteSandbox(Runtime):
@@ -33,33 +34,21 @@ class RemoteSandbox(Runtime):
     session cwd and every path in a line resolve unchanged. Mirage
     only connects and execs lines. Subclasses adapt one provider by
     implementing connect() and exec_line(); routing, captures, and
-    per-line scripts are inherited.
-
-    Args:
-        captures (Sequence[str]): commands that place a whole line
-            here; ("*",) claims every line.
-        config (SandboxConfig | dict[str, Any] | None): how to reach
-            the sandbox, coerced through the provider's own config
-            class (config_cls), so a field the provider does not have
-            fails loud; the dict form is a yaml entry's ``config``
-            block.
-        script (RouteScript | None): per-line admission script, the
-            same contract as any runtime.
+    per-line scripts are inherited. Constructed like every runtime
+    (captures, config, script); config is how to reach the sandbox,
+    coerced through the provider's own config class.
     """
 
     runs_lines = True
     captures: tuple[str, ...] = ("*", )
-    # Each provider's config class; coerce() makes unknown fields
-    # fail loud, so providers need no per-field rejection code.
     config_cls: ClassVar[type[SandboxConfig]] = SandboxConfig
+    config: SandboxConfig
 
     def __init__(self,
-                 captures: Sequence[str] = ("*", ),
+                 captures: Sequence[str] | None = None,
                  config: SandboxConfig | dict[str, Any] | None = None,
                  script: RouteScript | None = None) -> None:
-        self.captures = tuple(captures)
-        self.config = self.config_cls.coerce(config)
-        self.script = script
+        super().__init__(captures, config, script)
         # Connect-once latch: the first captured line connects; later
         # lines just execute. A failed connect leaves it unset so the
         # next line retries.

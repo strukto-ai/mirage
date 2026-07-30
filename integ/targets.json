@@ -579,7 +579,8 @@
           "resource": "dropbox",
           "backend": "dropbox",
           "bucket": "shared",
-          "root": "team/reports/data2"
+          "root": "team/reports/data2",
+          "seed_root": true
         },
         {
           "path": "/res",
@@ -610,7 +611,8 @@
           "path": "/data2",
           "resource": "onedrive",
           "backend": "onedrive",
-          "prefix": "xm2"
+          "prefix": "xm2",
+          "seed_root": true
         },
         {
           "path": "/res",
@@ -648,6 +650,12 @@
           "backend": "ssh",
           "root": "res",
           "fixture": "columnar/v1"
+        },
+        {
+          "path": "/links",
+          "resource": "ssh",
+          "backend": "ssh",
+          "root": "links"
         }
       ]
     },
@@ -732,7 +740,8 @@
           "resource": "sharepoint",
           "backend": "sharepoint",
           "drive": "shared",
-          "prefix": "team/reports/data2"
+          "prefix": "team/reports/data2",
+          "seed_root": true
         },
         {
           "path": "/res",

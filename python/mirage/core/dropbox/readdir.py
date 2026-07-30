@@ -78,8 +78,7 @@ async def readdir(
             resource_type=_resource_type(f),
             remote_time=modified,
             vfs_name=filename,
-            size=size
-            if not is_dir and isinstance(size, int) and size > 0 else None,
+            size=size if not is_dir and isinstance(size, int) else None,
         )
         entries.append((filename, entry, is_dir))
 

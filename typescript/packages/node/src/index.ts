@@ -59,6 +59,18 @@ export {
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/redis/file.ts'
 export { FuseManager } from './workspace/fuse.ts'
 export { MirageFS, type MirageFSOptions, type FuseAttr } from './fuse/fs.ts'
+export { MountCore, type MountCoreOptions } from './fuse/core.ts'
+export { classifyErrno, classifyError } from './fuse/errors.ts'
+export {
+  checkMountpoint,
+  checkPlatform,
+  checkSizes,
+  FSKIT_MOUNT_ROOT,
+  prepareBackend,
+  requireKernelBackend,
+  resolveBackend,
+  unsizedMounts,
+} from './fuse/backend.ts'
 export {
   mount as fuseMount,
   mountBackground as fuseMountBackground,
@@ -386,11 +398,11 @@ export {
 export { EmailAccessor } from './accessor/email.ts'
 export { EMAIL_COMMANDS } from './commands/builtin/email/index.ts'
 export { EMAIL_OPS } from './ops/email/index.ts'
-export { DaytonaRuntime, DAYTONA_OPTION_KEYS } from './workspace/runtime/daytona/runtime.ts'
+export { DaytonaRuntime } from './workspace/runtime/daytona/runtime.ts'
 export { DAYTONA_CONFIG_KEYS, type DaytonaConfig } from './workspace/runtime/daytona/config.ts'
-export { E2BRuntime, E2B_OPTION_KEYS } from './workspace/runtime/e2b/runtime.ts'
+export { E2BRuntime } from './workspace/runtime/e2b/runtime.ts'
 export { E2B_CONFIG_KEYS, type E2BConfig } from './workspace/runtime/e2b/config.ts'
-export { DockerRuntime, DOCKER_OPTION_KEYS } from './workspace/runtime/docker/runtime.ts'
+export { DockerRuntime } from './workspace/runtime/docker/runtime.ts'
 export { DOCKER_CONFIG_KEYS, type DockerConfig } from './workspace/runtime/docker/config.ts'
 export {
   buildResource,

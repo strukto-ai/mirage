@@ -16,7 +16,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from mirage.runtime.base import Runtime, ScriptSource
+from mirage.runtime.base import Runtime
+from mirage.runtime.types import ScriptSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +110,17 @@ class RouteContext:
         return self
 
     def to_dict(self, runtime: Runtime | None = None) -> dict[str, Any]:
-        """The monty-facing ctx payload.
+        """The ctx payload as any evaluator's script sees it.
+
+        This is the route context WIRE SCHEMA, a public contract:
+        JSON-shaped (strings, bools, lists, dicts), snake_case keys,
+        identical in both languages, so a script in any evaluator's
+        language (and any transport, in-process or remote) receives
+        the same structure. Keys: line, commands (command/words/
+        builtin/paths per stage), command, builtin, cwd, env,
+        session_id, agent_id, mounts, plus runtime (name/captures)
+        for per-runtime scripts. from_dict is the inverse, so a
+        payload can be stored as JSON and replayed.
 
         Args:
             runtime (Runtime | None): the runtime being asked, added as
@@ -145,6 +156,35 @@ class RouteContext:
                 "captures": list(runtime.captures),
             }
         return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RouteContext":
+        """Rebuild a context from its wire-schema payload.
+
+        The inverse of to_dict for the context's own fields (the
+        payload's ``runtime`` block is per-consultation decoration and
+        is ignored), so a stored JSON payload replays through scripts
+        and routes in tests or debugging.
+
+        Args:
+            payload (dict[str, Any]): a to_dict-shaped payload.
+        """
+        return cls(
+            line=str(payload["line"]),
+            commands=tuple(
+                CommandFacts(command=str(c["command"]),
+                             words=tuple(c["words"]),
+                             builtin=bool(c["builtin"]),
+                             paths=tuple(c["paths"]))
+                for c in payload["commands"]),
+            command=str(payload["command"]),
+            builtin=bool(payload["builtin"]),
+            cwd=str(payload["cwd"]),
+            env=dict(payload["env"]),
+            session_id=str(payload["session_id"]),
+            agent_id=str(payload["agent_id"]),
+            mounts=tuple(payload["mounts"]),
+        )
 
 
 # A per-runtime willingness script, answering "do I want this line?".

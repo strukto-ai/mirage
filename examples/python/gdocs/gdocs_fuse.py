@@ -17,7 +17,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.gdocs import GDocsConfig, GDocsResource
 
 load_dotenv(".env.development")
@@ -29,8 +29,10 @@ config = GDocsConfig(
 )
 resource = GDocsResource(config=config)
 
-with Workspace({"/gdocs/": Mount(resource, mode=MountMode.READ,
-                                 fuse=True)}) as ws:
+with Workspace({
+        "/gdocs/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

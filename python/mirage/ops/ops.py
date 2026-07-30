@@ -74,6 +74,49 @@ class Ops:
         """
         return [m.prefix for m in self._mounts]
 
+    def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
+        """Mounts whose files cannot be sized without reading them.
+
+        Args:
+            root_prefix (str): when non-empty, only consider the mount
+                serving this prefix and anything nested under it, matching
+                how a scoped mount narrows the tree.
+
+        Returns:
+            list[tuple[str, str]]: (prefix, resource_type) pairs, in mount
+            resolution order.
+        """
+        root = root_prefix.rstrip("/")
+        found = []
+        for m in self._mounts:
+            if root and not (m.prefix.rstrip("/") == root
+                             or m.prefix.startswith(root + "/")):
+                continue
+            if not m.sizes_always_known:
+                found.append((m.prefix, m.resource_type))
+        return found
+
+    def writable_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
+        """Mounts that accept writes, in mount resolution order.
+
+        Args:
+            root_prefix (str): when non-empty, only consider the mount
+                serving this prefix and anything nested under it, matching
+                how a scoped mount narrows the tree.
+
+        Returns:
+            list[tuple[str, str]]: (prefix, resource_type) pairs.
+        """
+        root = root_prefix.rstrip("/")
+        found = []
+        for m in self._mounts:
+            if root and not (m.prefix.rstrip("/") == root
+                             or m.prefix.startswith(root + "/")):
+                continue
+            if m.mode is not MountMode.READ:
+                found.append((m.prefix, m.resource_type))
+        return found
+
     def register_op(self, fn) -> None:
         if hasattr(fn, "_registered_ops"):
             for ro in fn._registered_ops:

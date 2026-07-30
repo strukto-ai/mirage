@@ -55,6 +55,8 @@ export interface RAMResourceState {
 export class RAMResource extends BaseResource implements Resource {
   readonly kind = ResourceName.RAM
   readonly cachesReads: boolean = false
+  // byte store: stat() sizes every file from metadata
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   readonly store = new RAMStore()
   readonly accessor = new RAMAccessor(this.store)

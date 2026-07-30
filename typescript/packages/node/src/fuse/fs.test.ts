@@ -297,8 +297,11 @@ describe('MirageFS — size=null resources (API-backed)', () => {
   })
 })
 
-describe('MirageFS — release does not auto-flush', () => {
-  it('pending write_buf survives release (kernel issues flush first)', async () => {
+describe('MirageFS — release flushes pending writes', () => {
+  it('pending write_buf is persisted by release when no flush arrived', async () => {
+    // The kext always issues FLUSH on close, but the macFUSE FSKit shim
+    // issues WRITE then RELEASE with no FLUSH in between; dropping the
+    // buffer at release silently lost data written through an fskit mount.
     const ws = await mkWs()
     const mfs = new MirageFS(ws)
     const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/greeting.txt', 0)
@@ -306,9 +309,8 @@ describe('MirageFS — release does not auto-flush', () => {
     await callOp(mfs, 'write', '/data/greeting.txt', fh, data, data.byteLength, 0)
     const [releaseCode] = await callOp<[number]>(mfs, 'release', '/data/greeting.txt', fh)
     expect(releaseCode).toBe(0)
-    // Without flush(), the file on disk is untouched.
     const current = await ws.fs.readFile('/data/greeting.txt')
-    expect(new TextDecoder().decode(current)).toBe('hello world\n')
+    expect(new TextDecoder().decode(current)).toBe('clobberorld\n')
   })
 
   it('flush persists the buffered writes', async () => {

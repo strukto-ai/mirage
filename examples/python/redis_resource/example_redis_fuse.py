@@ -15,7 +15,7 @@
 import asyncio
 import os
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.redis import RedisResource
 
 REDIS_URL = "redis://localhost:6379/0"
@@ -36,8 +36,10 @@ print("Seeded Redis with sample files")
 
 resource = RedisResource(url=REDIS_URL, key_prefix=KEY_PREFIX)
 
-with Workspace({"/data/": Mount(resource, mode=MountMode.WRITE,
-                                fuse=True)}) as ws:
+with Workspace({
+        "/data/":
+        Mount(resource, mode=MountMode.WRITE, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"\n=== FUSE MODE: mounted at {mp} ===\n")

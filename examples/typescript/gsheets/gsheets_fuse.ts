@@ -45,7 +45,7 @@ function buildConfig(): GSheetsConfig {
 async function main(): Promise<void> {
   const resource = new GSheetsResource(buildConfig());
   const ws = new Workspace({
-    "/gsheets": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/gsheets": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

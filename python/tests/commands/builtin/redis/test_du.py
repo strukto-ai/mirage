@@ -76,11 +76,11 @@ async def test_du_c_total(workspace):
 
 @pytest.mark.asyncio
 async def test_du_without_operand_measures_the_working_directory(workspace):
-    """GNU du with no operand summarises '.'; it does not error."""
+    """GNU du with no operand summarises '.', dot-spelled; no error."""
     await workspace.ops.write("/a.txt", b"hello")
     io = await workspace.execute("du")
     assert io.exit_code == 0
-    assert io.stdout.decode().splitlines()[-1] == "5\t/"
+    assert "5\t." in io.stdout.decode().splitlines()
 
 
 @pytest.mark.asyncio

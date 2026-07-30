@@ -33,43 +33,141 @@ uv add "mirage-ai[fuse]"
 ## Verify
 
 ```python
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 with Workspace(
-    {"/data": Mount(RAMResource(), mode=MountMode.WRITE, fuse=True)}) as ws:
+    {"/data": Mount(RAMResource(), mode=MountMode.WRITE,
+                    backend=MountBackend.FUSE)}) as ws:
     print("mountpoints:", ws.fuse_mountpoints)
 ```
 
 If the printed path exists under `/tmp/mirage-*`, FUSE is wired up correctly.
 
-The `Workspace` constructor blocks until every `fuse` mount is live, so the
+The `Workspace` constructor blocks until every kernel mount is live, so the
 mountpoint is ready to read as soon as the `with` block is entered, no sleep
 needed. (In TypeScript, where mounts are async, you `await ws.fuseReady()`
 instead.)
 
-## Per-mount FUSE
+## Per-mount backends
 
-FUSE is configured **per mount**. Each mount whose `fuse` is set is exposed at
-its own mountpoint, showing only that mount's subtree. The value is either
-`true` (mount at a fresh temp directory) or a path string (mount there,
-creating the directory if missing):
+How a mount is exposed is configured **per mount**, through one `backend`
+field:
+
+| `backend` | Effect |
+| --- | --- |
+| `vfs` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
+| `fuse` | Also exposed as a real mountpoint via FUSE. |
+| `fskit` | Also exposed as a real mountpoint via FSKit, with no kernel extension. macOS 15.4+ only; see below. |
+
+A kernel-backed mount shows only that mount's subtree. `mountpoint` pins
+where it lands; omit it for a fresh temp directory:
 
 ```yaml
 mode: WRITE
 mounts:
   /data:
     resource: ram
-    fuse: /tmp/data-repo   # explicit path
+    backend: fuse
+    mountpoint: /tmp/data-repo   # explicit path
   /s3:
     resource: s3
-    fuse: true             # temp directory
+    backend: MountBackend.FUSE             # temp directory
   /logs:
     resource: disk
-    # no fuse key, not FUSE-exposed
+    # no backend key: stays on the vfs default, not kernel-mounted
 ```
 
 `ws.fuse_mountpoints` returns a `{prefix: path}` map of the live mountpoints.
+
+## Mounting without the kernel extension (FSKit)
+
+Apple has deprecated third-party kernel extensions: on Apple Silicon the
+macFUSE kext already needs a reduced-security boot plus admin approval, and
+future macOS releases are expected to stop loading it entirely. FSKit
+(macOS 15.4+) is Apple's supported userspace replacement, and macFUSE 5.x
+serves the same libfuse API through it. `backend=fskit` is mirage's path to
+keep real mounts working on Macs where the kext is blocked. Only the
+kernel-to-userspace hop changes:
+
+```mermaid
+flowchart LR
+    A[cat /Volumes/.../file] --> K[kernel VFS]
+    K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
+    K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
+    L --> M[MirageFS] --> R[resource]
+```
+
+Set `backend` on the mount:
+
+```python
+from mirage import Mount, MountBackend, MountMode, Workspace
+from mirage.resource.ram import RAMResource
+
+with Workspace({
+    "/data/": Mount(RAMResource(), mode=MountMode.WRITE,
+                    backend=MountBackend.FSKIT)
+}) as ws:
+    print(ws.fuse_mountpoint)   # /Volumes/mirage-...
+```
+
+`kextstat` stays empty and the mount table tags the volume `fskit`. Two rules
+are enforced at mount time rather than discovered at run time:
+
+- **The mountpoint must be under `/Volumes`.** FSKit refuses anything else.
+  Mirage names one automatically when you do not pass a path, and rejects an
+  explicit path outside it.
+- **Mirage does not create the mountpoint, macOS does.** An FSKit mount is a
+  volume: the `/Volumes` entry appears when the filesystem goes live and is
+  removed when it unmounts. `/Volumes` is root-owned, so nothing here needs
+  (or could get) elevated permissions.
+- **Every mounted resource must be able to size its files.** See below.
+
+There is deliberately **no `auto`** value: auto-selecting FSKit would silently
+break every API-backed mount, and an option whose safe value is always the
+default is a trap. `MountBackend.FSKIT` is macOS-only and raises elsewhere.
+
+The metadata write surface works: create, mkdir, rename, unlink and
+in-place overwrites, pinned by `integ/fuse/truth_fskit.json`. This depends
+on `mirage/fuse/darwin.py`, which declares macFUSE's Darwin-only callbacks
+(`setattr_x`, `renamex`) that the FSKit shim uses to finalize new items and
+route renames; stock mfusepy leaves those slots NULL, which fails every
+create with ENOSYS after the file already landed.
+
+<Warning>
+  **Treat fskit mounts as read-mostly.** The macFUSE FSKit shim flushes
+  pages a file did not already have (a new file, `cp`, `>` truncation) as
+  NUL bytes; appends are hit-or-miss. The writer sees no error, and the
+  kernel page cache serves the written data back, so the corruption only
+  shows in the backing store. Mirage warns at mount time on writable fskit
+  mounts (`check_writes`); use `MountBackend.FUSE` for writes. Pinned in
+  `integ/fuse/truth_fskit.json` so a shim fix flips the test.
+</Warning>
+
+<Warning>
+  **Two more upstream FSKit-shim caveats** (macFUSE 5.3.3):
+  [#1181](https://github.com/macfuse/macfuse/issues/1181), running a binary
+  off an fskit mount fails until the file has been read once; and
+  [#1165](https://github.com/macfuse/macfuse/issues/1165), new entries in
+  the volume root may not appear in a live mount because the root readdir
+  cache cannot be invalidated.
+</Warning>
+
+<Warning>
+  **Size-unknown files read as empty.** There is no `direct_io`, so reads
+  stop at the size `stat` reported; a file that stats 0 pre-open reads as
+  empty with exit code 0. Mirage warns at mount time, naming the degraded
+  mounts (`SIZES_ALWAYS_KNOWN`). Byte stores (ram, disk, redis, s3,
+  gridfs) and Linear (size push-down) qualify; for the rest, use
+  `MountBackend.FUSE` or scope the fskit mount to a sized subtree.
+</Warning>
+
+`examples/python/fuse/fskit.py` runs all of this end to end: the size
+warning, exact reads on a live mount, and each write op with its result.
+
+TypeScript supports the same backend with the same guards
+([details](/typescript/setup/fuse#mounting-without-the-kernel-extension-fskit));
+`examples/typescript/fuse/fskit.ts` is its live end-to-end check.
 
 ## Size semantics for API-backed files
 
@@ -106,7 +204,7 @@ returning real sizes eagerly would fire one API call per file on every
   **macOS allows only one in-process FUSE mount.** macFUSE registers a
   process-global signal source, so a second simultaneous mount in the same
   process fails with `fuse: cannot register signal source`. Multiple per-mount
-  FUSE mounts work on Linux and Windows; on macOS, enable `fuse` on a single
+  FUSE mounts work on Linux and Windows; on macOS, use a kernel backend on a single
   mount per workspace (or run additional mounts in separate processes).
 </Warning>
 

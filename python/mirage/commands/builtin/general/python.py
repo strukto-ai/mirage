@@ -21,7 +21,6 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.runtime.base import Runtime
-from mirage.runtime.python import MontyRuntime
 from mirage.types import PathSpec
 
 
@@ -36,6 +35,7 @@ async def _python3(
     env: dict[str, str] | None = None,
     exec_allowed: bool = True,
     runtime: Runtime | None = None,
+    runtime_unavailable: str | None = None,
     **_extra: object,
 ) -> CommandOutput:
     error, prepared = await resolve_source("python3", paths, texts, c, stdin,
@@ -43,13 +43,8 @@ async def _python3(
     if error is not None or prepared is None:
         assert error is not None
         return error
-    return await run_code("python3",
-                          prepared,
-                          env, {},
-                          runtime,
-                          fallback=MontyRuntime,
-                          fallback_errors=(ImportError, ),
-                          dispatch=dispatch)
+    return await run_code("python3", prepared, env, {}, runtime,
+                          runtime_unavailable)
 
 
 python3 = command("python3", resource=None, spec=SPECS["python3"])(_python3)

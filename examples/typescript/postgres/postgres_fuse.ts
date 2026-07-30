@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     maxReadBytes: 512 * 1024 * 1024,
   });
   const ws = new Workspace({
-    "/pg/": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/pg/": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

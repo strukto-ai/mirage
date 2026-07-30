@@ -14,12 +14,12 @@
 
 from typing import Any
 
-from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (sdk_install_hint, stdin_path,
                                               stdin_redirect)
 from mirage.runtime.sandbox.daytona import sdk
 from mirage.runtime.sandbox.daytona.config import DaytonaConfig
+from mirage.runtime.types import RunResult
 
 
 class DaytonaRuntime(RemoteSandbox):

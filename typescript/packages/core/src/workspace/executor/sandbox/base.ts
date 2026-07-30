@@ -12,19 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ScriptSource, type RouteScript } from '../route/types.ts'
-import { scriptStringError, type RunArgs, type RunResult, type Runtime } from '../runtime.ts'
-import { coerceConfig, type NormalizedSandboxConfig, type SandboxConfig } from './config.ts'
-
-/** Constructor options for a RemoteSandbox subclass (a yaml entry's keys). */
-export interface RemoteSandboxOptions<C extends SandboxConfig = SandboxConfig> {
-  /** Commands that place a whole line here; ["*"] claims every line. */
-  captures?: readonly string[]
-  /** How to reach the sandbox (a yaml entry's `config` block). */
-  config?: C
-  /** Per-line admission script, the same contract as any runtime. */
-  script?: RouteScript
-}
+import { Runtime } from '../runtime.ts'
+import type { RunArgs, RunResult, RuntimeOptions } from '../runtime_types.ts'
+import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } from './config.ts'
 
 /**
  * A runtime that runs whole lines inside a sandbox the user runs.
@@ -38,36 +28,31 @@ export interface RemoteSandboxOptions<C extends SandboxConfig = SandboxConfig> {
  * cwd and every path in a line resolve unchanged. Mirage only
  * connects and execs lines. Subclasses adapt one provider by
  * implementing connect() and execLine(); routing, captures, and
- * per-line scripts are inherited.
+ * per-line scripts are inherited. Constructed like every runtime
+ * (captures, config, script); config is how to reach the sandbox,
+ * coerced against the provider's own key list.
  */
-export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig> implements Runtime {
-  abstract readonly name: string
-  readonly runsLines = true
-  readonly captures: readonly string[]
-  readonly config: NormalizedSandboxConfig<C>
-  script?: RouteScript
+export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig> extends Runtime {
+  override readonly runsLines = true
+  declare config: NormalizedSandboxConfig<C>
   // Connect-once latch: the first captured line connects; later lines
   // just execute. Single-flight so concurrent first lines share one
   // connect, and a failed connect clears the slot so the next line
   // retries.
   private connecting: Promise<void> | null = null
 
-  // Each provider passes its own config key list, so a field the
-  // provider does not have fails loud (mirrors Python's config_cls).
   constructor(
-    options: RemoteSandboxOptions<C> | Record<string, unknown> = {},
+    options: RuntimeOptions<C> | Record<string, unknown> = {},
     configKeys?: readonly string[],
   ) {
-    const opts = options as RemoteSandboxOptions<C>
-    if (typeof opts.script === 'string') throw scriptStringError()
-    this.captures = opts.captures !== undefined ? opts.captures.slice() : ['*']
-    this.config = coerceConfig(opts.config, configKeys)
-    if (typeof opts.script === 'function' || opts.script instanceof ScriptSource) {
-      this.script = opts.script
-    }
+    super(options as RuntimeOptions, ['*'], configKeys ?? BASE_CONFIG_KEYS)
+    // The sandbox refinement of the base's coerced copy: the shared
+    // collection fields are always present (env).
+    const config = this.config as C
+    this.config = { ...config, env: { ...config.env } }
   }
 
-  attach(): void {
+  override attach(): void {
     // the sandbox serves the workspace itself; nothing to wire
   }
 
@@ -88,7 +73,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig> imp
    * so nothing is rewritten. The session environment merges over the
    * config environment.
    */
-  async runLine(
+  override async runLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,
@@ -115,7 +100,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig> imp
   ): Promise<RunResult>
 
   /** Release provider client resources; the sandbox itself is the user's. */
-  close(): Promise<void> {
+  override close(): Promise<void> {
     return Promise.resolve()
   }
 }

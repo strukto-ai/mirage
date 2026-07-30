@@ -75,16 +75,19 @@ async def readdir(
     items = await list_folder_items(accessor.token_manager, folder_id)
     entries: list[tuple[str, IndexEntry, bool]] = []
     for it in items:
+        if it.get("type") == "web_link":
+            # Weblinks are bookmarks: no content endpoint, no size. Hide
+            # them from listings instead of serving an unreadable entry.
+            continue
         is_dir = it.get("type") == "folder"
         filename = it["name"]
-        size = it.get("size")
         entry = IndexEntry(
             id=it["id"],
             name=filename,
             resource_type=resource_type_for(it),
             remote_time=it.get("modified_at") or "",
             vfs_name=filename,
-            size=size if not is_dir and size else None,
+            size=None if is_dir else it.get("size"),
         )
         entries.append((filename, entry, is_dir))
 

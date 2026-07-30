@@ -18,7 +18,8 @@ from typing import Any, Callable
 from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, CommandOutput, IOResult
-from mirage.runtime.base import RunArgs, Runtime
+from mirage.runtime.base import Runtime
+from mirage.runtime.types import RunArgs
 from mirage.types import PathSpec
 
 
@@ -126,11 +127,17 @@ async def run_code(
     env: dict[str, str] | None,
     flags: dict[str, Any],
     runtime: Runtime | None,
-    fallback: Callable[..., Runtime],
-    fallback_errors: tuple[type[Exception], ...],
-    dispatch: Callable[..., Any] | None,
+    unavailable: str | None,
 ) -> CommandOutput:
     """Run a prepared source on the bound runtime, shared by all.
+
+    An unbound command (no workspace runtime entry captures it) is
+    refused: an explicit runtimes list is policy, and a builtin that
+    spun up its own interpreter would bypass captures and admission
+    scripts (TS parity). The refusal names the recorded reason when
+    the default world dropped the entry (the registry keys build
+    failures by captured command), so no command code ever names a
+    runtime class or probes one.
 
     Args:
         label (str): the command name used in error messages.
@@ -139,22 +146,18 @@ async def run_code(
         flags (dict[str, Any]): interpreter-level switches for the
             runtime (each runtime reads its own).
         runtime (Runtime | None): the workspace-bound runtime for this
-            command; None when the workspace default could not build.
-        fallback (Callable[..., Runtime]): runtime factory invoked
-            with a dispatch keyword per
-            invocation when unbound, preserving the install-hint
-            behavior.
-        fallback_errors (tuple[type[Exception], ...]): construction
-            errors the fallback reports as exit 127 hints.
-        dispatch (Callable[..., Any] | None): workspace dispatch the
-            fallback bridges file I/O through.
+            command; None when no entry captures it.
+        unavailable (str | None): the dispatcher-recorded reason this
+            command has no runtime (a default entry's build error),
+            None when nothing captures it at all.
     """
     if runtime is None:
-        try:
-            runtime = fallback(dispatch=dispatch)
-        except fallback_errors as exc:
-            return None, IOResult(exit_code=127,
-                                  stderr=f"{label}: {exc}\n".encode())
+        # GNU wording (bash prints `bash: python3: command not found`;
+        # the shell prefix is dropped workspace-wide), unless the
+        # default world recorded why the entry failed to build.
+        hint = unavailable or "command not found"
+        return None, IOResult(exit_code=127,
+                              stderr=f"{label}: {hint}\n".encode())
     result = await runtime.run(
         RunArgs(code=prepared.code,
                 args=prepared.args,

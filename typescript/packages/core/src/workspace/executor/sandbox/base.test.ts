@@ -17,8 +17,8 @@ import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { CommandSafeguard, MountMode } from '../../../types.ts'
 import { Workspace } from '../../workspace.ts'
-import { RemoteSandbox, type RemoteSandboxOptions } from './base.ts'
-import type { RunResult } from '../runtime.ts'
+import { RemoteSandbox } from './base.ts'
+import type { RunResult, RuntimeOptions } from '../runtime_types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -28,7 +28,7 @@ class RecordingSandbox extends RemoteSandbox {
   readonly execs: [string, Uint8Array | null, Record<string, string>, string][] = []
   connectedCount = 0
 
-  constructor(options: RemoteSandboxOptions = {}) {
+  constructor(options: RuntimeOptions = {}) {
     super(options)
   }
 
@@ -189,6 +189,6 @@ describe('RemoteSandbox', () => {
 
   it('rejects unknown config keys', () => {
     const options = { config: { snapshot: 'mirage-fuse' } } as Record<string, unknown>
-    expect(() => new RecordingSandbox(options)).toThrow("unknown sandbox config key 'snapshot'")
+    expect(() => new RecordingSandbox(options)).toThrow("unknown runtime config key 'snapshot'")
   })
 })

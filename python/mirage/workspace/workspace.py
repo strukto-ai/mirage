@@ -44,17 +44,19 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import RunResult, Runtime
+from mirage.runtime.base import Runtime
 from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
-from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
-                                  build_runtime, catch_all,
+from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
+                                  bind_commands, build_runtime, catch_all,
                                   runtime_bindings_for, whole_line_runtime)
+from mirage.runtime.types import RunResult
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
-from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
-                          MountMode, PathSpec, StateKey, parse_mount_mode)
+from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, DriftPolicy,
+                          FileEvent, FileStat, MountBackend, MountMode,
+                          PathSpec, StateKey, parse_mount_mode)
 from mirage.utils.errors import format_fs_error
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.watch.watcher import Watcher
@@ -233,16 +235,18 @@ class Workspace:
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch_runtime: WatchDelegate | None = None
 
-        fuse_targets: list[tuple[str, bool | str]] = []
+        mount_targets: list[tuple[str, MountBackend, str | None]] = []
         for prefix, value in resources.items():
             mount_safeguards: dict[str, CommandSafeguard] = {}
-            mount_fuse: bool | str = False
+            mount_backend = MountBackend.VFS
+            mount_point: str | None = None
             if isinstance(value, Mount):
                 prov = value.resource
                 mount_mode = value.mode if value.mode is not None else mode
                 if value.command_safeguards:
                     mount_safeguards = dict(value.command_safeguards)
-                mount_fuse = value.fuse
+                mount_backend = value.backend
+                mount_point = value.mountpoint
             elif isinstance(value, tuple):
                 if len(value) not in (2, 3):
                     raise TypeError(
@@ -259,8 +263,8 @@ class Workspace:
             mount_obj = self._registry.mount(prefix, prov, mount_mode)
             if mount_safeguards:
                 mount_obj.command_safeguards.update(mount_safeguards)
-            if mount_fuse:
-                fuse_targets.append((prefix, mount_fuse))
+            if mount_backend in KERNEL_BACKENDS:
+                mount_targets.append((prefix, mount_backend, mount_point))
 
         self._implicit_root = self._registry.root_mount is None
         if self._implicit_root:
@@ -298,9 +302,8 @@ class Workspace:
         _reject_config_script("route", route)
         self._route = route
 
-        for prefix, fuse_target in fuse_targets:
-            mountpoint = fuse_target if isinstance(fuse_target, str) else None
-            self.add_fuse_mount(prefix, mountpoint)
+        for prefix, target_backend, target_point in mount_targets:
+            self.add_fuse_mount(prefix, target_point, backend=target_backend)
 
     async def history(self) -> list[dict[str, Any]]:
         """Command events recorded by the hidden recorder.
@@ -392,7 +395,8 @@ class Workspace:
     def add_fuse_mount(self,
                        prefix: str,
                        mountpoint: str | None = None,
-                       session_id: str | None = None) -> str:
+                       session_id: str | None = None,
+                       backend: str | MountBackend = MountBackend.FUSE) -> str:
         # Register a pinned path BEFORE mounting so a collision is rejected
         # without leaving a partial mount. Each mount gets its own manager,
         # so a workspace can expose any number of FUSE subtrees at once.
@@ -408,7 +412,11 @@ class Workspace:
         fm = FuseManager()
         self._fuse_managers[key] = fm
         try:
-            mp = fm.setup(self._ops, prefix, mountpoint, session=session)
+            mp = fm.setup(self._ops,
+                          prefix,
+                          mountpoint,
+                          session=session,
+                          backend=backend)
         except Exception:
             # The mount never came up; drop the manager and any registered
             # path so fuse_mountpoints does not misreport it as live.
@@ -469,7 +477,13 @@ class Workspace:
             for name in DEFAULT_ENTRIES:
                 try:
                     entries.append(build_runtime(name))
-                except (ImportError, FileNotFoundError):
+                except (ImportError, FileNotFoundError) as exc:
+                    # The skipped class still declares its captures, so
+                    # the dispatcher can answer "why is python3 dead"
+                    # with the install hint instead of a blank refusal.
+                    for cmd in NAMED[name].captures:
+                        self._registry.runtime_unavailable.setdefault(
+                            cmd, str(exc))
                     continue
         else:
             for entry in runtimes:
@@ -603,8 +617,7 @@ class Workspace:
         )
         try:
             return await decide_line(self._runtime_entries, self._route, ctx,
-                                     self._registry.runtime_bindings,
-                                     self.dispatch)
+                                     self._registry.runtime_bindings)
         except RoutingDecisionError:
             raise
         except (ValueError, ImportError) as exc:

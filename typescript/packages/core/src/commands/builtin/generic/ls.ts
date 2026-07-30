@@ -19,7 +19,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatLsLong } from '../utils/formatting.ts'
 import { gnuStrerror } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { rebaseOne } from '../../../utils/path.ts'
+import { respellOne } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
@@ -340,7 +340,7 @@ export async function lsGeneric(
     for (const [dirSpec, entries] of operand.groups) {
       if (headed) {
         if (printed) lines.push('')
-        lines.push(`${rebaseOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)}:`)
+        lines.push(`${respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)}:`)
       }
       appendListing(entries, long, human, classify, lines)
       printed = true

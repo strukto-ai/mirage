@@ -14,12 +14,12 @@
 
 from typing import Any
 
-from mirage.runtime.base import RunResult
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (sdk_install_hint, stdin_path,
                                               stdin_redirect)
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
+from mirage.runtime.types import RunResult
 
 
 class E2BRuntime(RemoteSandbox):

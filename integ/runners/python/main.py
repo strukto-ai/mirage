@@ -68,6 +68,8 @@ async def run_target(target: dict, cases: list[dict], root: Path,
         for mount in target["mounts"]:
             await harness.seed_fixture(ws, mount.get("fixture"), mount["path"],
                                        root)
+            if mount.get("seed_root"):
+                await harness.seed_mount_root(ws, mount["path"])
         # Sessions a case can name via its "session" field. Mount grants take
         # either the mapping form ({"/data": "read"}) or the list form
         # (["/data"], which inherits the mount's own mode).

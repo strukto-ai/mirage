@@ -62,9 +62,8 @@ import type { ProvisionResult } from '../provision/types.ts'
 import { WorkspaceFS } from './fs.ts'
 import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
-import { handlePythonRepl } from './executor/python/handle.ts'
 import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bridge.ts'
-import type { PythonRuntime } from './executor/python/runtimes/interface.ts'
+import { MontyUnavailableError } from './executor/python/runtimes/monty.ts'
 import {
   commandFacts,
   decideLine,
@@ -76,17 +75,18 @@ import {
 import {
   bindCommands,
   catchAll,
+  DEFAULT_ENTRIES,
   runtimeBindingsFor,
   scriptStringError,
-  wholeLineRuntime,
-  DEFAULT_ENTRIES,
   VfsRuntime,
+  wholeLineRuntime,
   type Runtime,
   type RuntimeEntry,
-  type RunResult,
 } from './executor/runtime.ts'
+import { isEvaluator } from './executor/runtime_mixin.ts'
+import type { EvalResult, RunResult } from './executor/runtime_types.ts'
 import { buildRuntime } from './executor/runtime_table.ts'
-import type { PythonReplRunResult } from './executor/python/types.ts'
+import { PyodideUnavailableError } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
 import { Dispatcher } from './dispatcher.ts'
 import { Namespace } from './mount/namespace/namespace.ts'
@@ -339,7 +339,9 @@ export class Workspace {
     this.runtimeEntries = []
     if (options.runtimes === undefined) {
       for (const name of DEFAULT_ENTRIES) {
-        this.runtimeEntries.push(buildRuntime(name, name === 'pyodide' ? { ...userPython } : {}))
+        this.runtimeEntries.push(
+          buildRuntime(name, name === 'pyodide' ? { config: { ...userPython } } : {}),
+        )
       }
     } else {
       for (const entry of options.runtimes) {
@@ -491,7 +493,7 @@ export class Workspace {
     decision: RoutingDecision | null,
   ): Runtime | null {
     const candidates = this.runtimeEntries.some(
-      (entry) => entry.runsLines === true && !(entry instanceof VfsRuntime),
+      (entry) => entry.runsLines && !(entry instanceof VfsRuntime),
     )
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =
@@ -554,13 +556,7 @@ export class Workspace {
       agentId: options.agentId ?? this.agentId ?? '',
       mounts: this.sandboxVisibleMounts(),
     }
-    return decideLine(
-      this.runtimeEntries,
-      this.route,
-      ctx,
-      this.runtimeBindings,
-      this.buildWorkspaceBridge(),
-    )
+    return decideLine(this.runtimeEntries, this.route, ctx, this.runtimeBindings)
   }
 
   /**
@@ -1380,17 +1376,33 @@ export class Workspace {
     return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode)
   }
 
-  async executePythonRepl(
-    code: string,
-    options: { sessionId?: string } = {},
-  ): Promise<PythonReplRunResult> {
+  /**
+   * The python console: eval-with-a-session on whatever evaluator
+   * captures `python3`. Snippet failures are transcript results (the
+   * console reports and keeps going); only a missing/incapable
+   * runtime throws.
+   */
+  async executePythonRepl(code: string, options: { sessionId?: string } = {}): Promise<EvalResult> {
     if (this.closed) throw new Error('Workspace is closed')
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
     const bound = this.runtimeBindings.python3
-    if (bound === undefined || !('runRepl' in bound)) {
-      throw new Error('no python runtime bound for the repl')
+    if (bound === undefined || !isEvaluator(bound)) {
+      throw new Error('no evaluator runtime bound for the repl')
     }
-    return handlePythonRepl(code, sessionId, { runtime: bound as PythonRuntime })
+    try {
+      return await bound.eval(code, { session: sessionId })
+    } catch (err) {
+      const unavailable =
+        err instanceof PyodideUnavailableError || err instanceof MontyUnavailableError
+      const msg = err instanceof Error ? err.message : String(err)
+      return {
+        value: null,
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode(`python3: ${msg}\n`),
+        exitCode: unavailable ? 127 : 1,
+        status: 'complete',
+      }
+    }
   }
 
   async snapshot(target: string): Promise<number> {

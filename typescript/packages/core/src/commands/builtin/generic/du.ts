@@ -17,7 +17,7 @@ import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { isMissingPath } from '../../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
+import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
@@ -332,7 +332,7 @@ async function duOne(
   }
 
   const rows = rollup(entries, path.virtual, { all: flags.a, maxDepth: flags.maxDepth })
-  const shown = rebaseRaw(
+  const shown = respellRaw(
     rows.map(([p]) => p),
     path.virtual,
     label,

@@ -14,7 +14,7 @@
 
 import os
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.ssh import SSHConfig, SSHResource
 
 # ~/.ssh/config:
@@ -31,8 +31,10 @@ config = SSHConfig(
 )
 resource = SSHResource(config)
 
-with Workspace({"/ssh/": Mount(resource, mode=MountMode.WRITE,
-                               fuse=True)}) as ws:
+with Workspace({
+        "/ssh/":
+        Mount(resource, mode=MountMode.WRITE, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

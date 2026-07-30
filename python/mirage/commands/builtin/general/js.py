@@ -21,7 +21,6 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.runtime.base import Runtime
-from mirage.runtime.js import QuickJsRuntime
 from mirage.types import PathSpec
 
 
@@ -38,6 +37,7 @@ async def _js(
     env: dict[str, str] | None = None,
     exec_allowed: bool = True,
     runtime: Runtime | None = None,
+    runtime_unavailable: str | None = None,
     **_extra: object,
 ) -> CommandOutput:
     error, prepared = await resolve_source("js", paths, texts, e, stdin,
@@ -47,13 +47,8 @@ async def _js(
         return error
     as_module = m or module or (prepared.script_path is not None and
                                 prepared.script_path.virtual.endswith(".mjs"))
-    return await run_code("js",
-                          prepared,
-                          env, {"module": as_module},
-                          runtime,
-                          fallback=QuickJsRuntime,
-                          fallback_errors=(ImportError, FileNotFoundError),
-                          dispatch=dispatch)
+    return await run_code("js", prepared, env, {"module": as_module}, runtime,
+                          runtime_unavailable)
 
 
 js = command("js", resource=None, spec=SPECS["js"])(_js)

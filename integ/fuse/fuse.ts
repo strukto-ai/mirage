@@ -21,6 +21,7 @@ import {
   FileType,
   fuseMount,
   Mount,
+  MountBackend,
   MountMode,
   RAMResource,
   Workspace,
@@ -32,7 +33,9 @@ import {
 // fully afterwards (see the CLAUDE.md FUSE section).
 const API_CONTENT = '{"messages": 2}\n';
 
-async function runSizelessProbe(): Promise<void> {
+async function runSizelessProbe(
+  result: Record<string, string | number | boolean | null>,
+): Promise<void> {
   const enc = new TextEncoder();
   const api = new RAMResource();
   api.store.dirs.add("/");
@@ -53,13 +56,9 @@ async function runSizelessProbe(): Promise<void> {
     // hydrate-on-open runs and even the pre-open stat sees the real size.
     const pre = (await stat(apiFile)).size;
     const expectedPre = process.platform === "win32" ? API_CONTENT.length : 0;
-    process.stdout.write(
-      `api_stat_preopen_ok=${pre === expectedPre ? "yes" : "no"}\n`,
-    );
-    process.stdout.write(
-      `api_cat=${(await readFile(apiFile, "utf8")).trim()}\n`,
-    );
-    process.stdout.write(`api_size_postread=${(await stat(apiFile)).size}\n`);
+    result.api_stat_preopen_ok = pre === expectedPre;
+    result.api_cat = (await readFile(apiFile, "utf8")).trim();
+    result.api_size_postread = (await stat(apiFile)).size;
   } finally {
     await handle.unmount();
   }
@@ -70,6 +69,7 @@ async function runSizelessProbe(): Promise<void> {
 // mounts' napi callbacks run on the single Node event loop, so a *sync* read
 // would block the loop that has to service the callback and deadlock.
 async function main(): Promise<void> {
+  const result: Record<string, string | number | boolean | null> = {};
   const enc = new TextEncoder();
   const data = new RAMResource();
   data.store.dirs.add("/");
@@ -85,56 +85,49 @@ async function main(): Promise<void> {
   // /data pins its mountpoint and overrides the workspace default to WRITE;
   // /logs gets a generated mountpoint and inherits the default READ.
   const ws = new Workspace({
-    "/data": new Mount(data, { mode: MountMode.WRITE, fuse: pinned }),
-    "/logs": new Mount(logs, { fuse: true }),
+    "/data": new Mount(data, {
+      mode: MountMode.WRITE,
+      backend: MountBackend.FUSE,
+      mountpoint: pinned,
+    }),
+    "/logs": new Mount(logs, { backend: MountBackend.FUSE }),
   });
   try {
     await ws.fuseReady();
     const dataMp = ws.fuseMountpoints["/data"];
     const logsMp = ws.fuseMountpoints["/logs"];
 
-    process.stdout.write(
-      `data_cat_a=${(await readFile(`${dataMp}/a.txt`, "utf8")).trim()}\n`,
-    );
-    process.stdout.write(
-      `logs_cat_b=${(await readFile(`${logsMp}/b.txt`, "utf8")).trim()}\n`,
-    );
-    process.stdout.write(
-      `logs_size_b=${(await stat(`${logsMp}/b.txt`)).size}\n`,
-    );
-    process.stdout.write(`data_pinned=${dataMp === pinned ? "yes" : "no"}\n`);
-    process.stdout.write(
-      `distinct_mounts=${dataMp !== logsMp ? "yes" : "no"}\n`,
-    );
+    result.data_cat_a = (await readFile(`${dataMp}/a.txt`, "utf8")).trim();
+    result.logs_cat_b = (await readFile(`${logsMp}/b.txt`, "utf8")).trim();
+    result.logs_size_b = (await stat(`${logsMp}/b.txt`)).size;
+    result.data_pinned = dataMp === pinned;
+    result.distinct_mounts = dataMp !== logsMp;
 
     const [, , dataMode] = await ws.resolve("/data");
     const [, , logsMode] = await ws.resolve("/logs");
-    process.stdout.write(
-      `data_mode_is_write=${dataMode === MountMode.WRITE ? "yes" : "no"}\n`,
-    );
-    process.stdout.write(
-      `logs_mode_is_read=${logsMode === MountMode.READ ? "yes" : "no"}\n`,
-    );
+    result.data_mode_is_write = dataMode === MountMode.WRITE;
+    result.logs_mode_is_read = logsMode === MountMode.READ;
 
-    let singular = "no";
+    let singular = false;
     try {
       void ws.fuseMountpoint;
     } catch {
-      singular = "yes";
+      singular = true;
     }
-    process.stdout.write(`singular_raises_multi=${singular}\n`);
+    result.singular_raises_multi = singular;
 
-    let collision = "no";
+    let collision = false;
     try {
       await ws.addFuseMount("/collide", pinned);
     } catch {
-      collision = "yes";
+      collision = true;
     }
-    process.stdout.write(`collision_rejected=${collision}\n`);
+    result.collision_rejected = collision;
   } finally {
     await ws.close();
   }
-  await runSizelessProbe();
+  await runSizelessProbe(result);
+  process.stdout.write(JSON.stringify(result) + "\n");
 }
 
 main().catch((err: unknown) => {

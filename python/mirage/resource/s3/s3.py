@@ -70,6 +70,8 @@ class S3Resource(BaseResource):
 
     accessor: S3Accessor
     name: str = ResourceName.S3
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _S3_OPS
     PROMPT: str = PROMPT
