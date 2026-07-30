@@ -291,6 +291,7 @@ OPS_INVENTORY = {
         ("readdir", "ssh", "", False),
         ("rename", "ssh", "", True),
         ("rmdir", "ssh", "", True),
+        ("setattr", "ssh", "", True),
         ("stat", "ssh", "", False),
         ("truncate", "ssh", "", True),
         ("unlink", "ssh", "", True),

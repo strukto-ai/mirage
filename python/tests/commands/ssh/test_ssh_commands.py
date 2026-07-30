@@ -33,6 +33,9 @@ class MockSFTPAttrs:
         self.size = size
         self.mtime = mtime or int(
             datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp())
+        # Real asyncssh SFTPAttrs always carry these (default None).
+        self.permissions = None
+        self.atime = None
 
 
 class MockSFTPName:

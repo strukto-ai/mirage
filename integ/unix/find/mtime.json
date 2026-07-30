@@ -44,7 +44,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "printf hi > /data/mtprobe.txt; find /data -name mtprobe.txt -mtime -1",
       "expect": {
@@ -60,7 +61,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "find /data -name mtprobe.txt -mtime +5; echo code=$?",
       "expect": {
@@ -76,7 +78,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "touch -d 2020-01-01 /data/mtprobe.txt; find /data -name mtprobe.txt -mtime +5",
       "expect": {
@@ -92,7 +95,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "rm /data/mtprobe.txt; echo done",
       "expect": {

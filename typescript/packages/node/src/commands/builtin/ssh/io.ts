@@ -27,6 +27,7 @@ import { readdir as sshReaddir } from '../../../core/ssh/readdir.ts'
 import { rename as sshRename } from '../../../core/ssh/rename.ts'
 import { rmR as sshRmR } from '../../../core/ssh/rm.ts'
 import { rmdir as sshRmdir } from '../../../core/ssh/rmdir.ts'
+import { setAttrs as sshSetAttrs } from '../../../core/ssh/set_attrs.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
 import { stream as sshStream } from '../../../core/ssh/stream.ts'
 import { truncate as sshTruncate } from '../../../core/ssh/truncate.ts'
@@ -55,4 +56,5 @@ export const SSH_IO: CommandIO<SSHAccessor> = {
   find: sshFind,
   duSize: sshDu,
   duEntries: sshDuAll,
+  setAttrs: sshSetAttrs,
 }
