@@ -29,6 +29,10 @@ from aiohttp import web
 
 FILES_ROUTE = "/api/2.0/fs/files/{tail:.*}"
 DIRS_ROUTE = "/api/2.0/fs/directories/{tail:.*}"
+# Files whose file_size is omitted from directory listings (HEAD metadata
+# still reports it), exercising the reader-side size backfill the same way
+# a real listing gap would.
+SIZELESS_IN_LISTINGS = {"poem.txt"}
 
 
 def _norm(path: str) -> str:
@@ -97,13 +101,17 @@ class VolumeStore:
         entries: list[dict[str, Any]] = []
         for file_path, (data, mtime) in self.files.items():
             if _parent(file_path) == norm:
-                entries.append({
+                name = file_path.rsplit("/", 1)[-1]
+                entry = {
                     "path": file_path,
-                    "name": file_path.rsplit("/", 1)[-1],
+                    "name": name,
                     "is_directory": False,
                     "file_size": len(data),
                     "last_modified": int(mtime * 1000),
-                })
+                }
+                if name in SIZELESS_IN_LISTINGS:
+                    del entry["file_size"]
+                entries.append(entry)
         for dir_path in self.dirs:
             if dir_path != "/" and _parent(dir_path) == norm:
                 entries.append({

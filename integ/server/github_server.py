@@ -83,6 +83,7 @@ class FakeRepo:
         self.terms: dict[str, set[str]] = {}
         self.blobs: dict[str, bytes] = {}
         self.submodules: set[str] = set()
+        self.truncated = False
 
     @property
     def full_name(self) -> str:
@@ -242,10 +243,25 @@ class GitHubServer:
             if not matches:
                 return _error(404, "Not Found")
             scope = matches[0]
+            # A per-sha tree GET is one level deep in git; only the
+            # ref-name request carries recursive=1.
+            items = [
+                it for it in repo.tree_items(scope) if "/" not in it["path"]
+            ]
+            return web.json_response({
+                "sha": _tree_sha(scope),
+                "tree": items,
+                "truncated": False,
+            })
+        items = repo.tree_items(scope)
+        if repo.truncated:
+            # A truncated recursive tree keeps only the top-level entries,
+            # like git dropping deep paths past its entry cap.
+            items = [it for it in items if "/" not in it["path"]]
         return web.json_response({
             "sha": _tree_sha(scope),
-            "tree": repo.tree_items(scope),
-            "truncated": False,
+            "tree": items,
+            "truncated": repo.truncated,
         })
 
     async def blob(self, request: web.Request) -> web.Response:
@@ -358,7 +374,10 @@ async def _serve(port: int, repos: list[str]) -> None:
     fixtures = Path(__file__).resolve().parents[1] / "fixtures"
     for spec in repos:
         full_name, _, fixture = spec.partition("=")
+        fixture, _, flag = fixture.partition(":")
         seed_from_dir(state, full_name, fixtures / fixture)
+        if flag == "truncated":
+            state.repos[full_name].truncated = True
     server = GitHubServer(state)
     runner = web.AppRunner(build_app(server))
     await runner.setup()
@@ -376,7 +395,8 @@ def main() -> None:
         "--repo",
         action="append",
         default=[],
-        help="owner/name=<fixture dir under integ/fixtures>, repeatable")
+        help="owner/name=<fixture dir under integ/fixtures>[:truncated], "
+        "repeatable")
     args = parser.parse_args()
     asyncio.run(_serve(args.port, args.repo))
 

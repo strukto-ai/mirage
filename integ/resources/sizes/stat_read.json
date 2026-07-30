@@ -235,6 +235,71 @@
         "stdout": "",
         "stderr": "stat: /repo/extern: No such file or directory\n"
       }
+    },
+    {
+      "id": "sz_github_trunc_ls_root",
+      "seq": 680030,
+      "targets": [
+        "github"
+      ],
+      "command": "ls /trunc",
+      "expect": {
+        "exit": 0,
+        "stdout": "README.md\ndocs\npyproject.toml\nsrc\ntests\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_ls_docs",
+      "seq": 680031,
+      "targets": [
+        "github"
+      ],
+      "command": "ls /trunc/docs",
+      "expect": {
+        "exit": 0,
+        "stdout": "architecture.md\ncontributing.md\nrelease.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_stat_doc",
+      "seq": 680032,
+      "targets": [
+        "github"
+      ],
+      "command": "stat -c %s /trunc/docs/architecture.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "77\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_read_doc",
+      "seq": 680033,
+      "targets": [
+        "github"
+      ],
+      "command": "cat /trunc/docs/architecture.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "77\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_submodule_stat_enoent",
+      "seq": 680034,
+      "targets": [
+        "github"
+      ],
+      "command": "stat /trunc/docs/vendored",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /trunc/docs/vendored: No such file or directory\n"
+      }
     }
   ]
 }
