@@ -49,7 +49,8 @@ async def _python3(
                           runtime,
                           fallback=MontyRuntime,
                           fallback_errors=(ImportError, ),
-                          dispatch=dispatch)
+                          dispatch=dispatch,
+                          family="python")
 
 
 python3 = command("python3", resource=None, spec=SPECS["python3"])(_python3)

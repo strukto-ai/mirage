@@ -400,40 +400,7 @@
       ]
     },
     {
-      "id": "captures_narrowed_miss_py",
-      "hosts": [
-        "python"
-      ],
-      "world": {
-        "runtimes": [
-          {
-            "name": "monty",
-            "captures": [
-              "python3"
-            ]
-          }
-        ],
-        "mounts": {
-          "/ram": {
-            "resource": "ram"
-          }
-        }
-      },
-      "steps": [
-        {
-          "command": "python -c \"print(1)\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "1\n"
-          }
-        }
-      ]
-    },
-    {
-      "id": "captures_narrowed_miss_ts",
-      "hosts": [
-        "typescript"
-      ],
+      "id": "captures_narrowed_miss",
       "world": {
         "runtimes": [
           {
@@ -454,7 +421,7 @@
           "command": "python -c \"print(1)\"",
           "expect": {
             "exit": 127,
-            "stderr_contains": "python runtime is not available"
+            "stderr_contains": "python3: python runtime is not available"
           }
         }
       ]

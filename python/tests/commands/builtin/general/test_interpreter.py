@@ -115,7 +115,8 @@ async def test_run_source_uses_bound_runtime_and_flags():
     runtime = EchoRuntime()
     prepared = Source(code="hi")
     stdout, io = await run_code("js", prepared, {"K": "V"}, {"module": True},
-                                runtime, EchoRuntime, (ImportError, ), None)
+                                runtime, EchoRuntime, (ImportError, ), None,
+                                "javascript")
     assert io.exit_code == 0
     assert runtime.seen[0].flags == {"module": True}
     assert runtime.seen[0].env == {"K": "V"}
@@ -125,6 +126,16 @@ async def test_run_source_uses_bound_runtime_and_flags():
 async def test_run_source_fallback_failure_is_exit_127_hint():
     prepared = Source(code="hi")
     stdout, io = await run_code("python3", prepared, None, {}, None,
-                                BrokenRuntime, (ImportError, ), None)
+                                BrokenRuntime, (ImportError, ), None, "python")
     assert io.exit_code == 127
     assert b"needs the broken extra" in io.stderr
+
+
+@pytest.mark.asyncio
+async def test_run_source_unbound_refuses_without_fallback_run():
+    """No captured runtime means refusal, not a hidden interpreter."""
+    prepared = Source(code="hi")
+    stdout, io = await run_code("python3", prepared, None, {}, None,
+                                EchoRuntime, (ImportError, ), None, "python")
+    assert io.exit_code == 127
+    assert io.stderr == b"python3: python runtime is not available\n"

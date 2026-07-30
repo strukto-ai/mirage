@@ -53,7 +53,8 @@ async def _js(
                           runtime,
                           fallback=QuickJsRuntime,
                           fallback_errors=(ImportError, FileNotFoundError),
-                          dispatch=dispatch)
+                          dispatch=dispatch,
+                          family="javascript")
 
 
 js = command("js", resource=None, spec=SPECS["js"])(_js)
