@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountBackend, MountMode, RAMResource } from '@struktoai/mirage-core'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import {
   checkMountpoint,
@@ -170,5 +170,24 @@ describe('unsizedMounts / checkSizes', () => {
     expect(() => {
       checkSizes(MountBackend.FSKIT, ws, '/ram/')
     }).not.toThrow()
+  })
+
+  it('warns for a size-unknown mount but lets it proceed', () => {
+    class UnsizedResource extends RAMResource {
+      override readonly sizesAlwaysKnown: boolean = false
+    }
+    const ws = new Workspace({ '/api/': new UnsizedResource() }, { mode: MountMode.READ })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      expect(() => {
+        checkSizes(MountBackend.FSKIT, ws, '')
+      }).not.toThrow()
+      expect(warn).toHaveBeenCalledOnce()
+      const message = String(warn.mock.calls[0]?.[0])
+      expect(message).toContain('will read as empty')
+      expect(message).toContain('/api/')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

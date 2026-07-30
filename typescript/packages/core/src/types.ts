@@ -32,9 +32,10 @@ export type MountMode = (typeof MountMode)[keyof typeof MountMode]
  * the kernel. `fuse` and `fskit` additionally expose it as a real mountpoint.
  *
  * `fskit` is macOS 15.4+ only and needs no kernel extension. It has no
- * `direct_io` equivalent, so it can only serve resources that set
- * `sizesAlwaysKnown`. There is deliberately no `auto`: auto-selecting fskit
- * would silently break every API-backed mount.
+ * `direct_io` equivalent, so it serves correct reads only for resources that
+ * set `sizesAlwaysKnown`; the mount-time guard warns about resources whose
+ * size-unknown files will read as empty. There is deliberately no `auto`:
+ * auto-selecting fskit would silently degrade every API-backed mount.
  */
 export const MountBackend = Object.freeze({
   VFS: 'vfs',

@@ -18,18 +18,21 @@ Needs macOS 15.4+ and macFUSE 5.x with its FSKit module enabled. Run it:
     ./python/.venv/bin/python examples/python/fuse/fskit.py
 
 It mounts, exercises the full read and write surface, and shows the one
-guard that will bite you: FSKit refuses API-backed resources whose file
-sizes are unknown before a read. Writes work because mirage installs
-macFUSE's Darwin-only callbacks (mirage/fuse/darwin.py); without them the
-FSKit shim fails every create/mkdir/rename with ENOSYS.
+warning that will bite you: FSKit clamps reads to the size reported at
+lookup, so API-backed resources whose file sizes are unknown before a read
+mount with a warning and their files read as empty. Writes work because
+mirage installs macFUSE's Darwin-only callbacks (mirage/fuse/darwin.py);
+without them the FSKit shim fails every create/mkdir/rename with ENOSYS.
 """
 
 import errno
+import logging
 import os
 import subprocess
 from typing import Callable
 
 from mirage import Mount, MountBackend, MountMode, Workspace
+from mirage.fuse.backend import check_sizes
 from mirage.resource.ram import RAMResource
 
 CONTENT = b'{"messages": 2}\n'
@@ -57,26 +60,27 @@ def attempt(fn: Callable[[], object]) -> str:
         return errno.errorcode.get(err.errno or 0, str(err.errno))
 
 
-def show_size_guard() -> None:
-    """Show FSKit refusing a resource whose sizes are unknown."""
-    print("=== the size guard ===")
-    try:
-        Workspace({
-            "/api":
-            Mount(SizeUnknownRAM(),
-                  mode=MountMode.READ,
-                  backend=MountBackend.FSKIT),
-        })
-        print("  mounted (unexpected)")
-    except RuntimeError as err:
-        print(f"  refused: {err}")
-    print("  FSKit has no direct_io, so a read is driven entirely by the")
-    print("  size stat reports. A resource that cannot size its files would")
-    print("  serve silent empty files, so mirage refuses up front.\n")
+def show_size_warning() -> None:
+    """Show the mount-time warning for a size-unknown resource.
+
+    The warning is demonstrated through ``check_sizes`` directly (the same
+    guard every fskit mount path runs) rather than a second kernel mount,
+    because macOS allows one FUSE mount per process and the working mount
+    below needs it.
+    """
+    print("=== the size warning ===")
+    ws = Workspace({"/api": Mount(SizeUnknownRAM(), mode=MountMode.READ)})
+    check_sizes(MountBackend.FSKIT, ws.ops, "")
+    print("  FSKit has no direct_io: a read is clamped to the size stat")
+    print("  reported at lookup, and that clamp is never refreshed. A")
+    print("  size-unknown file mounts anyway, stats as 0, and reads as")
+    print("  empty, so the mount logs the warning above naming the mounts")
+    print("  affected. Size push-down (issue #83) closes this per backend.\n")
 
 
 def main() -> None:
-    show_size_guard()
+    logging.basicConfig(level=logging.WARNING, format="  warning: %(message)s")
+    show_size_warning()
 
     data = RAMResource()
     data._store.dirs.add("/")
@@ -106,7 +110,7 @@ def main() -> None:
         print(f"  cat api.json  -> {body.decode().strip()}")
         print(f"  stat size     -> {os.path.getsize(f'{mp}/api.json')}")
         print(f"  bytes read    -> {len(body)}")
-        print("  the two agree, which is the whole point of the guard\n")
+        print("  the two agree, which is what fskit needs sizes for\n")
 
         print("=== writes: the full surface ===")
         print("  append to existing -> " +

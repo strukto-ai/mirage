@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 import sys
 
 from mirage.ops import Ops
 from mirage.types import KERNEL_BACKENDS, MountBackend
+
+logger = logging.getLogger(__name__)
 
 # FSKit mounts only under /Volumes. Anywhere else the mount fails with an
 # opaque driver error, so the rule is enforced here rather than discovered
@@ -112,21 +115,21 @@ def check_mountpoint(backend: MountBackend, mountpoint: str) -> None:
 def check_sizes(backend: MountBackend,
                 ops: Ops,
                 root_prefix: str = "") -> None:
-    """Refuse an fskit mount that would serve silently empty files.
+    """Warn when an fskit mount will serve size-unknown files as empty.
 
     FSKit drives reads from the size the filesystem reports and has no
     ``direct_io`` escape hatch, so a resource that cannot size a file
     without fetching it reports 0, the kernel issues no reads, and every
-    such file comes back empty with exit code 0. That is worse than a
-    failed mount, so it fails here by name instead.
+    such file comes back empty with exit code 0 (verified on a live fskit
+    mount: the read clamp is pinned at lookup-time size and never
+    refreshed, so hydrate-on-open does not help). The mount proceeds
+    anyway: per-backend size push-down is closing this gap, and the
+    degraded mounts are named loudly here rather than refused.
 
     Args:
         backend (MountBackend): the requested backend.
         ops (Ops): the op facade whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
-
-    Raises:
-        RuntimeError: at least one mounted resource cannot size its files.
     """
     if backend is not MountBackend.FSKIT:
         return
@@ -137,12 +140,12 @@ def check_sizes(backend: MountBackend,
     # the "ResourceName.SLACK" repr Python 3.12 gives a str-mixin Enum.
     listed = ", ".join(f"{prefix} ({getattr(name, 'value', name)})"
                        for prefix, name in offenders)
-    raise RuntimeError(
-        f"the fskit mount backend cannot serve resources whose file sizes "
-        f"are only known after a read; these mounts would return empty "
-        f"files: {listed}. Mount them with backend='fuse', or scope the "
-        f"fskit mount to a byte-store resource (ram, disk, redis, s3, "
-        f"gridfs).")
+    logger.warning(
+        "the fskit mount backend cannot serve resources whose file sizes "
+        "are only known after a read; size-unknown files under these "
+        "mounts will read as empty: %s. Mount them with backend='fuse', "
+        "or scope the fskit mount to a byte-store resource (ram, disk, "
+        "redis, s3, gridfs).", listed)
 
 
 def prepare_backend(value: "str | MountBackend | None",

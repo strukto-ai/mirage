@@ -79,15 +79,17 @@ def test_prepare_backend_asserts_macos_for_fskit(monkeypatch):
         prepare_backend("fskit")
 
 
-def test_prepare_backend_runs_every_fskit_guard(monkeypatch):
+def test_prepare_backend_runs_every_fskit_guard(monkeypatch, caplog):
     monkeypatch.setattr("mirage.fuse.backend.sys.platform", "darwin")
     ws = Workspace({"/slack/": _slack()}, mode=MountMode.READ)
     # mountpoint guard
     with pytest.raises(ValueError, match="only mounts under /Volumes"):
         prepare_backend("fskit", mountpoint="/tmp/x")
-    # size guard
-    with pytest.raises(RuntimeError, match="would return empty files"):
-        prepare_backend("fskit", ops=ws.ops)
+    # size guard: warns but the mount proceeds
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
+        assert prepare_backend("fskit", ops=ws.ops,
+                               mountpoint="/Volumes/m") is MountBackend.FSKIT
+    assert "will read as empty" in caplog.text
     # both satisfied
     ram = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     assert prepare_backend("fskit", ops=ram.ops,
@@ -129,40 +131,44 @@ def test_check_mountpoint_ignores_fuse_backend():
     check_mountpoint(MountBackend.FUSE, "/tmp/mirage-abc")
 
 
-def test_check_sizes_passes_for_byte_stores():
+def test_check_sizes_passes_for_byte_stores(caplog):
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     assert ws.ops.unsized_mounts() == []
-    check_sizes(MountBackend.FSKIT, ws.ops, "")
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
+        check_sizes(MountBackend.FSKIT, ws.ops, "")
+    assert caplog.text == ""
 
 
-def test_check_sizes_refuses_size_unknown_resource():
+def test_check_sizes_warns_for_size_unknown_resource(caplog):
     ws = Workspace({"/slack/": _slack()}, mode=MountMode.READ)
-    with pytest.raises(RuntimeError, match="would return empty files"):
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
         check_sizes(MountBackend.FSKIT, ws.ops, "")
+    assert "will read as empty" in caplog.text
 
 
-def test_check_sizes_names_the_offending_mount():
+def test_check_sizes_names_the_offending_mount(caplog):
     ws = Workspace({
         "/ram/": RAMResource(),
         "/slack/": _slack()
     },
                    mode=MountMode.READ)
-    with pytest.raises(RuntimeError) as exc:
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
         check_sizes(MountBackend.FSKIT, ws.ops, "")
-    message = str(exc.value)
-    assert "/slack/ (slack)" in message
-    assert "/ram/" not in message
+    assert "/slack/ (slack)" in caplog.text
+    assert "/ram/" not in caplog.text
 
 
-def test_check_sizes_respects_the_root_prefix():
+def test_check_sizes_respects_the_root_prefix(caplog):
     ws = Workspace({
         "/ram/": RAMResource(),
         "/slack/": _slack()
     },
                    mode=MountMode.READ)
-    # Scoping the mount to the byte-store subtree is the supported escape
-    # hatch for a workspace that also holds API resources.
-    check_sizes(MountBackend.FSKIT, ws.ops, "/ram/")
+    # Scoping the mount to the byte-store subtree keeps the warning quiet
+    # for a workspace that also holds API resources.
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
+        check_sizes(MountBackend.FSKIT, ws.ops, "/ram/")
+    assert caplog.text == ""
 
 
 def test_check_sizes_ignores_fuse_backend():

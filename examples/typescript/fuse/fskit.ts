@@ -18,15 +18,17 @@
 //     pnpm --dir examples/typescript exec tsx fuse/fskit.ts
 //
 // It mounts, reads, then shows the two things that will bite you: the
-// size guard that refuses API-backed resources, and the partial write
-// surface. Every probe below runs in a child process: a TS FUSE mount is
-// served by this process's event loop, so touching the mountpoint
-// synchronously from here would deadlock it.
+// mount-time warning for size-unknown resources (their files read as
+// empty over fskit), and the partial write surface. Every probe below
+// runs in a child process: a TS FUSE mount is served by this process's
+// event loop, so touching the mountpoint synchronously from here would
+// deadlock it.
 
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import { promisify } from "node:util";
 import {
+  checkSizes,
   Mount,
   MountBackend,
   MountMode,
@@ -61,17 +63,20 @@ async function attempt(cmd: string, args: string[]): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  console.log("=== the size guard ===");
-  // addFuseMount rejects; constructor auto-mounts only warn on stderr
-  // (the deliberate auto-mount failure policy in workspace.ts).
+  console.log("=== the size warning ===");
+  // Demonstrated through checkSizes directly (the same guard every fskit
+  // mount path runs) rather than a second kernel mount, because macOS
+  // allows one FUSE mount per process and the working mount below needs it.
   const guarded = new Workspace({
     "/api": new Mount(seed(new SizeUnknownRAM()), { mode: MountMode.READ }),
   });
   try {
-    await guarded.addFuseMount("/api", undefined, undefined, MountBackend.FSKIT);
-    console.log("  mounted (unexpected)");
-  } catch (err) {
-    console.log(`  refused: ${(err as Error).message}`);
+    checkSizes(MountBackend.FSKIT, guarded, "");
+    console.log("  FSKit has no direct_io: a read is clamped to the size");
+    console.log("  stat reported at lookup, and that clamp is never");
+    console.log("  refreshed. A size-unknown file mounts anyway, stats as");
+    console.log("  0, and reads as empty; the warning above names the");
+    console.log("  mounts affected. Size push-down (#83) closes this.");
   } finally {
     await guarded.close();
   }
