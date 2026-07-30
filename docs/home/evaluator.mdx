@@ -1,0 +1,71 @@
+---
+title: Evaluator
+description: The opt-in runtime capability that evaluates code to a value, powering route scripts and the python console.
+icon: calculator
+---
+
+Some consumers need a **value** back from code, not a process's output: the
+routing policy engine asks a script for a verdict, and the python console
+needs each snippet's result. That is the evaluator capability, which a
+runtime opts into alongside its normal run surface.
+
+<CodeGroup>
+
+```python Python
+result = await runtime.eval("sum(xs) * factor",
+                            inputs={"xs": [1, 2, 3], "factor": 2})
+result.value  # 12
+```
+
+```typescript TypeScript
+const result = await runtime.eval('sum * 2', { inputs: { sum: 6 } })
+result.value // 12
+```
+
+</CodeGroup>
+
+## The contract
+
+- `eval(code, inputs=..., session=...)` returns an `EvalResult`: `value`,
+  `stdout`, `stderr`, `exit_code`, `status`.
+- `inputs` bind as globals in the runtime's own idiom, and the code's
+  **last expression** is the value.
+- Without a session id the call is one-shot, and a failure raises
+  `EvalError` (with a `syntax` flag). With a session id, state persists
+  per id and failures come back as console transcripts instead: the
+  traceback on `stderr` with a nonzero `exit_code`.
+- Inputs and values stay within `EvalValue`: `None`, booleans, numbers,
+  strings, bytes, lists, and string-keyed dicts. The contract promises the
+  shape, not object fidelity, so any transport can carry them.
+
+## Who has it
+
+`monty` implements it in both languages, and `pyodide` in TypeScript.
+Detection is nominal: `isinstance(runtime, EvaluatorMixin)` in Python, the
+`EVALUATOR` brand behind `isEvaluator` in TypeScript. A runtime with some
+unrelated `eval` method never qualifies by accident.
+
+The workspace's **first** evaluator entry is its routing policy engine:
+route scripts from a config file run there, so a world that uses them must
+include one. An entry that captures nothing is the pure-policy idiom:
+
+```yaml
+runtimes:
+  - name: monty
+    captures: [] # evaluates route scripts, serves no commands
+  - name: docker
+    captures: ["python3"]
+    config:
+      container: my-box
+  - vfs
+```
+
+## Bring your own
+
+Inherit `EvaluatorMixin` (Python) or implement `Evaluator` and set the
+`EVALUATOR` brand (TypeScript), then implement `eval` however your runtime
+reaches its interpreter; the value transport is yours to choose. The docker
+examples give any container the capability by piping a small harness to its
+stock `python3 -`:
+[python](https://github.com/strukto-ai/mirage/blob/main/examples/python/runtimes/docker/docker_eval.py),
+[typescript](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/runtimes/docker/docker_eval.ts).

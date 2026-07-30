@@ -201,3 +201,12 @@ A captured line is a command like any other: the same `command_safeguards`
 that guard `cat` or `grep` guard `python3`, including in the sandbox. A run
 that exceeds `timeout_seconds` answers exit 124; `max_bytes` and `max_lines`
 cap its output the same way. There is no sandbox-specific limit surface.
+
+## Evaluator
+
+A sandbox runs whole lines; it does not evaluate expressions. To make one
+also serve as an [evaluator](/home/evaluator) (the capability behind route
+scripts and the python console), subclass it and implement `eval` with your
+own transport. The
+[docker eval examples](https://github.com/strukto-ai/mirage/tree/main/examples)
+do exactly that by piping a small harness to the container's `python3 -`.
