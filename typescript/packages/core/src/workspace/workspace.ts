@@ -1155,12 +1155,24 @@ export class Workspace {
     } catch (caught) {
       if (caught instanceof PolicyDeny) {
         // A deny is a policy outcome, not a mistake: it folds into the
-        // line's result the way a timeout does, never a throw.
+        // line's result the way a timeout does, never a throw. The
+        // typed line still records and the session still flushes,
+        // mirroring Python's finally path.
         const msg = new TextEncoder().encode(`mirage: policy denied: ${caught.reason}\n`)
-        const deniedSession = this.sessionManager.get(
-          options.sessionId ?? this.sessionManager.defaultId,
-        )
+        const deniedSessionId = options.sessionId ?? this.sessionManager.defaultId
+        const deniedSession = this.sessionManager.get(deniedSessionId)
         deniedSession.lastExitCode = 126
+        if (options.record !== false) {
+          await this.observer.logExecution(
+            command,
+            new IOResult({ exitCode: 126, stderr: msg }),
+            [],
+            options.agentId ?? this.agentId ?? '',
+            deniedSessionId,
+            options.cwd ?? deniedSession.cwd,
+          )
+        }
+        await this.sessionManager.flush()
         return new ExecuteResult(new Uint8Array(), msg, 126)
       }
       throw caught

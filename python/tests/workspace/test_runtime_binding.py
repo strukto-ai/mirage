@@ -332,6 +332,11 @@ async def test_policy_deny_folds_into_the_line_result():
         io = await ws.execute("echo ok")
         assert await materialize(io.stdout) == b"ok\n"
         assert io.exit_code == 0
+        # The denied line is still a typed line: it records like any
+        # other command.
+        events = await ws.history()
+        assert [e["command"] for e in events] == ["python3 -c 'x'", "echo ok"]
+        assert events[0]["exit_code"] == 126
     finally:
         await ws.close()
 

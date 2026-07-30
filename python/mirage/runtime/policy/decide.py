@@ -111,7 +111,7 @@ def parse_verdict(verdict: Any) -> str | None:
     exclusive. Unknown keys fail loud so a typo never silently passes.
 
     Args:
-        verdict: whatever the policy returned.
+        verdict (Any): whatever the policy returned.
 
     Raises:
         PolicyDeny: the verdict is {"deny": reason}.

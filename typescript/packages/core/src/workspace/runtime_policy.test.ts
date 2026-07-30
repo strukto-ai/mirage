@@ -213,6 +213,11 @@ describe('routing ladder', () => {
       const ok = await ws.execute('echo ok')
       expect(DEC.decode(ok.stdout)).toBe('ok\n')
       expect(ok.exitCode).toBe(0)
+      // The denied line is still a typed line: it records like any
+      // other command, mirroring Python's finally path.
+      const events = await ws.history()
+      expect(events.map((e) => e.command)).toEqual(['python3 -c "x"', 'echo ok'])
+      expect(events[0]?.exit_code).toBe(126)
     } finally {
       await ws.close()
     }
