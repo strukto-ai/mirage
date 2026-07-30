@@ -147,20 +147,24 @@ await ws.fuseReady()
 ws.fuseMountpoints['/data'] // => /Volumes/mirage-<id>, tagged fskit
 ```
 
-The same rules as Python apply, enforced at mount time: macOS-only, the
+The same rules as Python apply, checked at mount time: macOS-only, the
 mountpoint must be under `/Volumes` (named by mirage, created by the
-system), and every mounted resource must report exact sizes
-(`sizesAlwaysKnown`; the `checkSizes` guard refuses anything else by name).
+system), and every mounted resource should report exact sizes
+(`sizesAlwaysKnown`; the `checkSizes` guard warns about anything else by
+name, and those files read as empty).
 
-Unlike Python, **TS fskit mounts are read-mostly**: in-place writes and
-`unlink` work, while `create`, `mkdir` and `rename` return ENOSYS, and a
-failed create can still apply. The FSKit shim finalizes new items through
-macFUSE's Darwin-only `setattr_x`/`renamex` callbacks; Python declares them
-at runtime (`mirage/fuse/darwin.py`), but `@zkochan/fuse-native`'s compiled
-op table cannot gain new C callbacks from JavaScript, so fixing this side
-needs a native-binding change. See
+**TS fskit mounts are read-mostly**, twice over. First, the data-write
+zeroing described on
 [the Python page](/python/setup/fuse#mounting-without-the-kernel-extension-fskit)
-for the working end state.
+lives in the macFUSE shim, so it applies to both languages: pages a file
+did not already have flush to the store as NUL bytes, and `checkWrites`
+warns at mount time when an fskit mount accepts writes. Second, TypeScript
+cannot create new names at all: `create`, `mkdir` and `rename` return
+ENOSYS, and a failed create can still apply. The FSKit shim finalizes new
+items through macFUSE's Darwin-only `setattr_x`/`renamex` callbacks; Python
+declares them at runtime (`mirage/fuse/darwin.py`), but
+`@zkochan/fuse-native`'s compiled op table cannot gain new C callbacks from
+JavaScript, so fixing this side needs a native-binding change.
 
 <Warning>
   **A wedged FSKit mount blocks more than itself.** A TS mount is served by
