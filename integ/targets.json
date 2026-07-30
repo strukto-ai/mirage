@@ -579,7 +579,8 @@
           "resource": "dropbox",
           "backend": "dropbox",
           "bucket": "shared",
-          "root": "team/reports/data2"
+          "root": "team/reports/data2",
+          "seed_root": true
         },
         {
           "path": "/res",
@@ -732,7 +733,8 @@
           "resource": "sharepoint",
           "backend": "sharepoint",
           "drive": "shared",
-          "prefix": "team/reports/data2"
+          "prefix": "team/reports/data2",
+          "seed_root": true
         },
         {
           "path": "/res",

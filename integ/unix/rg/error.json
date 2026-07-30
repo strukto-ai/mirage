@@ -64,7 +64,8 @@
       "command": "rg zqxjv",
       "expect": {
         "exit": 1,
-        "stdout": ""
+        "stdout": "",
+        "stderr": ""
       }
     }
   ]
