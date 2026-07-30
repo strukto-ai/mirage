@@ -51,6 +51,21 @@ class BaseResource:
     # at load. See docs/home/snapshot.mdx for the contract.
     SUPPORTS_SNAPSHOT: bool = False
 
+    # Whether stat() can size every regular file without fetching its
+    # content, i.e. FileStat.size is None only for directories. True for
+    # byte stores that keep a length in their metadata (ram, disk, redis,
+    # s3, gridfs); False for resources that render content on read, where
+    # the size is unknowable until the bytes exist (slack, gmail, notion,
+    # postgres rows.jsonl, dify documents).
+    #
+    # The FUSE path does not need this: direct_io + attr_timeout=0 +
+    # hydrate-on-open make size-unknown files read correctly anyway. FSKit
+    # has no direct_io equivalent, so a mount there is driven entirely by
+    # the reported size and a False resource would serve silent empty
+    # files. mount-time checks refuse rather than let that happen; see
+    # docs/python/setup/fuse.mdx.
+    SIZES_ALWAYS_KNOWN: bool = False
+
     def __init__(
         self,
         index: IndexConfig | None = None,

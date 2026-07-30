@@ -66,9 +66,9 @@ async def create_workspace(req: CreateWorkspaceRequest,
         # missing runtime extra) are the caller's to fix, not a 500.
         raise HTTPException(status_code=400, detail=str(e))
     try:
-        for prefix, target in req.config.fuse_mounts().items():
-            mountpoint = target if isinstance(target, str) else None
-            ws.add_fuse_mount(prefix, mountpoint)
+        for prefix, (backend,
+                     mountpoint) in req.config.kernel_mounts().items():
+            ws.add_fuse_mount(prefix, mountpoint, backend=backend)
         entry = registry.add(ws, workspace_id=wid)
     except ValueError as e:
         await ws.close()

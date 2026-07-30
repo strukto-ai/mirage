@@ -367,6 +367,7 @@ class MountRegistry:
                 index=m.resource.index,
                 mode=m.mode,
                 ops=m.resource.ops_list(),
+                sizes_always_known=m.resource.SIZES_ALWAYS_KNOWN,
             ) for m in self._mounts
         ]
 

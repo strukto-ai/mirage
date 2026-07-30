@@ -12,13 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandSafeguard, MountMode, Resource } from '@struktoai/mirage-core'
+import type { CommandSafeguard, MountBackend, MountMode, Resource } from '@struktoai/mirage-core'
 
 export interface MountSpecOptions {
   /** Per-mount mode override; falls back to the workspace default when unset. */
   mode?: MountMode
-  /** `true` mounts at a temp dir; a string pins the mountpoint to that path. */
-  fuse?: boolean | string
+  /**
+   * How the mount is exposed. `vfs` (the default) keeps it inside mirage's
+   * own filesystem; `fuse` and `fskit` also register a real mountpoint.
+   */
+  backend?: MountBackend
+  /**
+   * Where to mount, for the kernel backends. Omitted picks a temporary
+   * directory appropriate for the backend. Ignored when backend is `vfs`.
+   */
+  mountpoint?: string
   commandSafeguards?: Record<string, CommandSafeguard>
 }
 

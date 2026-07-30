@@ -46,7 +46,7 @@ function buildConfig(): GmailConfig {
 async function main(): Promise<void> {
   const resource = new GmailResource(buildConfig());
   const ws = new Workspace({
-    "/gmail": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/gmail": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

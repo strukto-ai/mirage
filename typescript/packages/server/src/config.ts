@@ -19,6 +19,8 @@ import {
   buildResource,
   CommandSafeguard,
   ConsistencyPolicy,
+  KERNEL_BACKENDS,
+  MountBackend,
   ScriptSource,
   MountMode,
   OnExceed,
@@ -230,7 +232,9 @@ export interface MountBlock {
   mode?: string
   config?: Record<string, unknown>
   command_safeguards?: Record<string, Record<string, unknown>>
-  fuse?: boolean | string
+  /** vfs (default), fuse, or fskit. Mirrors Python's MountBlock.backend. */
+  backend?: string
+  mountpoint?: string
 }
 
 interface RamCacheBlock {
@@ -380,7 +384,7 @@ export interface WorkspaceArgs {
     runtimes?: RuntimeEntry[]
     route?: ScriptSource
   }
-  fuseMounts: Record<string, boolean | string>
+  kernelMounts: Record<string, [MountBackend, string | undefined]>
 }
 
 function buildCache(
@@ -448,12 +452,13 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
   const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
-  const fuseMounts: Record<string, boolean | string> = {}
+  const kernelMounts: Record<string, [MountBackend, string | undefined]> = {}
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await buildResource(block.resource, block.config ?? {})
     const m = coerceMountMode(block.mode, wsMode)
     resources[prefix] = [r, m, parseSafeguards(block.command_safeguards)]
-    if (block.fuse !== undefined && block.fuse !== false) fuseMounts[prefix] = block.fuse
+    const backend = (block.backend ?? MountBackend.VFS) as MountBackend
+    if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]
   }
   const cache = buildCache(cfg.cache)
   const index = buildIndex(cfg.index)
@@ -476,6 +481,6 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
         ? { route: loadScriptSource(cfg.route) }
         : {}),
     },
-    fuseMounts,
+    kernelMounts,
   }
 }

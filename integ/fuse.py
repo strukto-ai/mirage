@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background
 from mirage.resource.ram import RAMResource
 from mirage.types import FileStat
@@ -90,8 +90,13 @@ def main() -> None:
     # /data pins its mountpoint and overrides the workspace default to WRITE;
     # /logs gets a generated mountpoint and inherits the default READ.
     with Workspace({
-            "/data": Mount(data, mode=MountMode.WRITE, fuse=pinned),
-            "/logs": Mount(logs, fuse=True),
+            "/data":
+            Mount(data,
+                  mode=MountMode.WRITE,
+                  backend=MountBackend.FUSE,
+                  mountpoint=pinned),
+            "/logs":
+            Mount(logs, backend=MountBackend.FUSE),
     }) as ws:
         data_mp = ws.fuse_mountpoints["/data"]
         logs_mp = ws.fuse_mountpoints["/logs"]

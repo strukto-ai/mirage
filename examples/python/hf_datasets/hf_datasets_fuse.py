@@ -16,7 +16,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.hf_datasets import HfDatasetsConfig, HfDatasetsResource
 
 load_dotenv(".env.development")
@@ -28,8 +28,9 @@ config = HfDatasetsConfig(
 )
 resource = HfDatasetsResource(config)
 
-with Workspace({"/ds/": Mount(resource, mode=MountMode.READ,
-                              fuse=True)}) as ws:
+with Workspace(
+    {"/ds/": Mount(resource, mode=MountMode.READ,
+                   backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
 

@@ -348,23 +348,26 @@ describe('configToWorkspaceArgs', () => {
     ).rejects.toThrow(/invalid consistency/)
   })
 
-  it('threads per-mount fuse into top-level fuseMounts and yields {} otherwise', async () => {
+  it('threads per-mount backend into top-level kernelMounts and yields {} otherwise', async () => {
     const withFuse = await configToWorkspaceArgs(
       loadWorkspaceConfig({
         mounts: {
-          '/data': { resource: 'ram', fuse: '/tmp/mt' },
-          '/s3': { resource: 'ram', fuse: true },
+          '/data': { resource: 'ram', backend: 'fuse', mountpoint: '/tmp/mt' },
+          '/s3': { resource: 'ram', backend: 'fuse' },
           '/logs': { resource: 'ram' },
         },
       }),
     )
-    expect(withFuse.fuseMounts).toEqual({ '/data': '/tmp/mt', '/s3': true })
-    expect('fuseMounts' in withFuse.options).toBe(false)
+    expect(withFuse.kernelMounts).toEqual({
+      '/data': ['fuse', '/tmp/mt'],
+      '/s3': ['fuse', undefined],
+    })
+    expect('kernelMounts' in withFuse.options).toBe(false)
     const withoutFuse = await configToWorkspaceArgs(
       loadWorkspaceConfig({ mounts: { '/': { resource: 'ram' } } }),
     )
-    expect(withoutFuse.fuseMounts).toEqual({})
-    expect('fuseMounts' in withoutFuse.options).toBe(false)
+    expect(withoutFuse.kernelMounts).toEqual({})
+    expect('kernelMounts' in withoutFuse.options).toBe(false)
   })
 
   it('leaves mount config snake_case keys untouched (resource credentials)', () => {

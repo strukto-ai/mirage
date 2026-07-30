@@ -44,7 +44,12 @@ describe('bare invocations default to the cwd', () => {
     expect(io.exitCode).toBe(0)
     const out = stdoutStr(io)
     expect(out.startsWith('.\n./a.txt\n./sub\n./sub/b.txt\n')).toBe(true)
-    expect(out.trim().split('\n').every((line) => line.startsWith('.'))).toBe(true)
+    expect(
+      out
+        .trim()
+        .split('\n')
+        .every((line) => line.startsWith('.')),
+    ).toBe(true)
   })
 
   it('find with only an expression implies the leading dot', async () => {

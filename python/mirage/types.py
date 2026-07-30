@@ -185,6 +185,29 @@ class MountMode(str, Enum):
     EXEC = "exec"
 
 
+class MountBackend(StrEnum):
+    """How a mount is exposed to the outside world.
+
+    VFS is the default: the mount lives only inside mirage's own filesystem
+    and is reached through the command surface, with nothing registered with
+    the kernel. FUSE and FSKIT additionally expose it as a real mountpoint.
+
+    FSKIT is macOS 15.4+ only and needs no kernel extension. It has no
+    ``direct_io`` equivalent, so it can only serve resources that set
+    ``SIZES_ALWAYS_KNOWN``; ``mirage.fuse.backend`` enforces that at mount
+    time. There is deliberately no ``auto``: auto-selecting FSKIT would
+    silently break every API-backed mount.
+    """
+
+    VFS = "vfs"
+    FUSE = "fuse"
+    FSKIT = "fskit"
+
+
+# Backends that register a real mountpoint with the kernel.
+KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
+    {MountBackend.FUSE, MountBackend.FSKIT})
+
 MOUNT_MODE_RANK: dict[MountMode, int] = {
     MountMode.READ: 1,
     MountMode.WRITE: 2,

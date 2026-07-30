@@ -17,7 +17,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.gmail import GmailConfig, GmailResource
 
 load_dotenv(".env.development")
@@ -29,8 +29,10 @@ config = GmailConfig(
 )
 resource = GmailResource(config=config)
 
-with Workspace({"/gmail/": Mount(resource, mode=MountMode.READ,
-                                 fuse=True)}) as ws:
+with Workspace({
+        "/gmail/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

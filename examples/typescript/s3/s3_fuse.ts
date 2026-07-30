@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const ws = new Workspace({
     "/s3/": new Mount(new S3Resource(cfg), {
       mode: MountMode.READ,
-      fuse: true,
+      backend: MountBackend.FUSE,
     }),
     "/deep/": new S3Resource(deepCfg),
   });

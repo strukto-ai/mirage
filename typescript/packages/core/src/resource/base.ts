@@ -65,6 +65,21 @@ export interface Resource {
    * check fires at load.
    */
   readonly supportsSnapshot?: boolean
+  /**
+   * Whether {@link Resource.stat} can size every regular file without
+   * fetching its content, i.e. {@link FileStat.size} is null only for
+   * directories. True for byte stores that keep a length in their
+   * metadata (ram, disk, redis, s3, gridfs); false for resources that
+   * render content on read, where the size is unknowable until the bytes
+   * exist (slack, gmail, notion, postgres rows.jsonl, dify documents).
+   *
+   * FUSE does not need this: direct_io + attrTimeout '0' + hydrate-on-open
+   * make size-unknown files read correctly anyway. FSKit has no direct_io
+   * equivalent, so a mount there is driven entirely by the reported size
+   * and a false resource would serve silent empty files. Mirrors Python's
+   * `BaseResource.SIZES_ALWAYS_KNOWN`.
+   */
+  readonly sizesAlwaysKnown?: boolean
   readonly index?: IndexCacheStore
   readonly accessor?: Accessor
   readonly opsMap?: Record<string, unknown>
@@ -104,6 +119,10 @@ export function throwUnsupported(op: string): never {
 
 export function cachesReads(resource: Resource): boolean {
   return resource.cachesReads === true
+}
+
+export function sizesAlwaysKnown(resource: Resource): boolean {
+  return resource.sizesAlwaysKnown === true
 }
 
 export abstract class BaseResource {

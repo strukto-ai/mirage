@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   }
   const resource = new MongoDBResource({ uri, databases: [DB] });
   const ws = new Workspace({
-    "/mongodb/": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/mongodb/": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

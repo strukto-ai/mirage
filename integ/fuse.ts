@@ -21,6 +21,7 @@ import {
   FileType,
   fuseMount,
   Mount,
+  MountBackend,
   MountMode,
   RAMResource,
   Workspace,
@@ -85,8 +86,12 @@ async function main(): Promise<void> {
   // /data pins its mountpoint and overrides the workspace default to WRITE;
   // /logs gets a generated mountpoint and inherits the default READ.
   const ws = new Workspace({
-    "/data": new Mount(data, { mode: MountMode.WRITE, fuse: pinned }),
-    "/logs": new Mount(logs, { fuse: true }),
+    "/data": new Mount(data, {
+      mode: MountMode.WRITE,
+      backend: MountBackend.FUSE,
+      mountpoint: pinned,
+    }),
+    "/logs": new Mount(logs, { backend: MountBackend.FUSE }),
   });
   try {
     await ws.fuseReady();

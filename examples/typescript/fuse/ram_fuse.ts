@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   }
 
   const ws = new Workspace({
-    "/data/": new Mount(resource, { mode: MountMode.WRITE, fuse: true }),
+    "/data/": new Mount(resource, { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

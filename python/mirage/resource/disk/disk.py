@@ -64,6 +64,8 @@ _DISK_OPS = {
 class DiskResource(BaseResource):
 
     name: str = ResourceName.DISK
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     accessor: DiskAccessor
     index_ttl: float = 60
     _ops: dict[str, Any] = _DISK_OPS

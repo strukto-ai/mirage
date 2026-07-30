@@ -123,9 +123,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       let entry
       try {
-        for (const [prefix, target] of Object.entries(args.fuseMounts)) {
-          const mountpoint = typeof target === 'string' ? target : undefined
-          await ws.addFuseMount(prefix, mountpoint)
+        for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
+          await ws.addFuseMount(prefix, mountpoint, undefined, backend)
         }
         entry = deps.registry.add(ws, wid)
       } catch (e) {

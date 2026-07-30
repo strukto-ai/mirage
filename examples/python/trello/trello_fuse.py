@@ -17,7 +17,7 @@ import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.trello import TrelloConfig, TrelloResource
 
 load_dotenv(".env.development")
@@ -28,8 +28,10 @@ config = TrelloConfig(
 )
 resource = TrelloResource(config=config)
 
-with Workspace({"/trello/": Mount(resource, mode=MountMode.READ,
-                                  fuse=True)}) as ws:
+with Workspace({
+        "/trello/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

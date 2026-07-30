@@ -65,6 +65,9 @@ class DevResource(BaseResource):
 
     accessor: RAMAccessor
     name: str = ResourceName.RAM
+    # /dev/null and /dev/zero are synthesized at fixed lengths, so the RAM
+    # stat path sizes them without a fetch.
+    SIZES_ALWAYS_KNOWN: bool = True
 
     def __init__(self) -> None:
         super().__init__()

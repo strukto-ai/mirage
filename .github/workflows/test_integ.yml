@@ -107,7 +107,10 @@ jobs:
             fuse:
               - 'integ/fuse.py'
               - 'integ/fuse.ts'
+              - 'integ/fskit.py'
+              - 'integ/check_json.py'
               - 'integ/truth_fuse.txt'
+              - 'integ/truth_fskit.json'
               - 'integ/check_lines.sh'
               - 'integ/package.json'
               - 'python/mirage/fuse/**'
@@ -776,6 +779,103 @@ jobs:
           ./python/.venv/Scripts/python integ/fuse.py > /tmp/fuse-win.out 2>&1 || true
           cat /tmp/fuse-win.out
           bash integ/check_lines.sh integ/truth_fuse.txt < /tmp/fuse-win.out
+
+  integ-fskit-macos:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
+    runs-on: macos-15
+    # Not in the gate. Everything installs and enables headlessly, but the
+    # mount request never reaches macFUSE's FSKit module on a hosted runner
+    # (engaging the module appears to need the GUI approval in System
+    # Settings), so the known mount timeout is reported as a skip below.
+    # Green = environment-limited or verified; red = something new broke
+    # (a guard regression, a crash, or the runner starts mounting and the
+    # results diverge from integ/truth_fskit.json). Real verification runs
+    # on a Mac with macFUSE 5.x: integ/fskit.py | integ/check_json.py.
+    # Python only for now: TypeScript reaches fskit too (fuse.node links
+    # the installed libfuse), but one leg is enough to probe the runner.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show macOS version (FSKit needs 15.4+)
+        run: sw_vers
+
+      - name: Install macFUSE 5.x
+        run: brew install --cask macfuse
+
+      - name: Enable the macFUSE FSKit modules
+        # The installer auto-registers only the -local module; the non-local
+        # one ships in the same bundle but never appears in pluginkit on a
+        # runner (both are registered on a developer Mac). Add every appex
+        # explicitly, then enable it.
+        run: |
+          exts=/Library/Filesystems/macfuse.fs/Contents/Resources/macfuse.app/Contents/Extensions
+          ls -la "$exts" || true
+          for appex in "$exts"/*.appex; do
+            echo "registering $appex"
+            pluginkit -a "$appex" || true
+          done
+          pluginkit -e use -i io.macfuse.app.fsmodule.macfuse || true
+          pluginkit -e use -i io.macfuse.app.fsmodule.macfuse-local || true
+          echo "--- registered FSKit modules (+ means enabled) ---"
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
+
+      - name: Confirm no kext is loaded
+        run: |
+          kextstat | grep -i fuse || echo "no macFUSE kext (expected)"
+          echo "--- /dev/macfuse* (kext devices, absent without the kext) ---"
+          ls -la /dev/macfuse* 2>&1 || true
+          echo "--- systemextensionsctl ---"
+          systemextensionsctl list 2>&1 || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies (base + fuse only)
+        working-directory: python
+        run: uv sync --extra fuse
+
+      - name: Run the fskit mount and check
+        # The known hosted-runner limit surfaces as exactly one signature:
+        # the readiness TimeoutError (the module never engages, libfuse
+        # emits nothing). That case is a skip; any other failure is real.
+        run: |
+          ./python/.venv/bin/python integ/fskit.py > /tmp/fskit.out 2>&1 || true
+          cat /tmp/fskit.out
+          if grep -q "did not become ready" /tmp/fskit.out; then
+            echo "SKIP: this runner cannot engage the macFUSE FSKit module" \
+                 "(known hosted-runner limit; verified locally instead)"
+            exit 0
+          fi
+          ./python/.venv/bin/python integ/check_json.py \
+            integ/truth_fskit.json < /tmp/fskit.out
+
+      - name: Host state after the probe
+        if: always()
+        run: |
+          echo "--- mount ---"
+          mount
+          echo "--- /Volumes ---"
+          ls -la /Volumes
+          echo "--- FSKit modules ---"
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
+          echo "--- macFUSE bundle ---"
+          ls -la /Library/Filesystems/ || true
+          echo "--- macfuse-only log (what the mount attempt did) ---"
+          log show --last 3m --style compact \
+            --predicate 'eventMessage CONTAINS[c] "macfuse" OR senderImagePath CONTAINS[c] "macfuse"' \
+            2>/dev/null | tail -80 || true
+          echo "--- fskitd/fskit_agent errors ---"
+          log show --last 3m --style compact \
+            --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
+            2>/dev/null | tail -40 || true
 
   integ-runtime:
     needs: changes

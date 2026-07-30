@@ -18,7 +18,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
 
 load_dotenv(".env.development")
@@ -30,8 +30,10 @@ VIEW = "high_rated_films"
 config = MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=[DB])
 resource = MongoDBResource(config=config)
 
-with Workspace({"/mongodb/": Mount(resource, mode=MountMode.READ,
-                                   fuse=True)}) as ws:
+with Workspace({
+        "/mongodb/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

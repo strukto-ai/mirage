@@ -45,7 +45,7 @@ function buildConfig(): GDriveConfig {
 async function main(): Promise<void> {
   const resource = new GDriveResource(buildConfig());
   const ws = new Workspace({
-    "/gdrive": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/gdrive": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;
