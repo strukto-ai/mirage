@@ -110,10 +110,13 @@ function adjustDepthTexts(
   return out
 }
 
+// Entries print in the operand's typed spelling (`raw`) like every
+// other line of the walk.
 function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly MountEntry[],
   texts: readonly string[],
+  raw: string,
 ): string {
   let expr: FindExpr
   try {
@@ -134,7 +137,7 @@ function synthesizeFindMountEntries(
     const segs = prefixNoSlash.split('/').filter((s) => s !== '')
     const base = segs[segs.length - 1] ?? prefixNoSlash
     if (!keep({ key: prefixNoSlash, name: base, kind: 'd', depth }, tree, minDepth)) continue
-    out.push(prefixNoSlash)
+    out.push(respellOne(prefixNoSlash, targetPath, raw))
   }
   return out.join('\n')
 }
@@ -254,10 +257,18 @@ export async function fanOutTraversal(
     } catch {
       continue
     }
+    if (mount !== primaryMount && io.exitCode === 127) {
+      // A descendant that does not serve this command contributes
+      // nothing to the aggregate walk instead of failing it (du across
+      // a tree holding a view mount without a du op).
+      continue
+    }
     if (mount === primaryMount && descendantPrefixes.length > 0 && stdout !== null) {
       stdout = await filterUnderPrefixes(stdout, descendantPrefixes)
     } else if (mount !== primaryMount && cmdName === 'find' && stdout !== null) {
-      stdout = await dropMountRootLine(stdout, rstripSlash(mount.prefix) || '/')
+      // The child's own root line arrives respelled with the operand's
+      // typed base, so drop that spelling, not the absolute prefix.
+      stdout = await dropMountRootLine(stdout, subPaths[0]?.rawPath ?? '')
     }
     if (stdout !== null) {
       const data = await materialize(stdout)
@@ -272,7 +283,12 @@ export async function fanOutTraversal(
   }
 
   if (cmdName === 'find') {
-    const synthetic = synthesizeFindMountEntries(targetPath, descendants, texts)
+    const synthetic = synthesizeFindMountEntries(
+      targetPath,
+      descendants,
+      texts,
+      paths[0]?.rawPath ?? targetPath,
+    )
     if (synthetic !== '') allStdout.push(new TextEncoder().encode(synthetic))
   }
 

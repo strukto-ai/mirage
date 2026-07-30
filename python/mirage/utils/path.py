@@ -252,7 +252,7 @@ def respell_one(path: str, original: str, raw: str) -> str:
     if raw == original:
         return path
     base = original.rstrip("/")
-    if path == base:
+    if path == base or (base == "" and path == "/"):
         return raw or "."
     if path.startswith(base + "/"):
         if raw == "":

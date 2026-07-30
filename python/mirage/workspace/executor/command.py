@@ -67,27 +67,35 @@ from mirage.workspace.types import ExecutionNode
 
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
 
-# Commands a bare invocation makes search the working directory: GNU
-# grep does it only under -r/-R and ignores stdin; ripgrep is recursive
-# by default but an attached stdin wins (its readable-stdin rule).
-_RECURSIVE_CWD_COMMANDS = frozenset({"grep", "rg"})
+# Commands a bare invocation points at the working directory, mapped to
+# the typed spelling their synthetic operand carries. GNU find/tree/du/
+# ls behave exactly as if `.` had been typed (./-prefixed output); GNU
+# grep -r and bare rg print bare relative names (empty raw). Two gates:
+# grep only defaults under -r/-R (and ignores stdin, GNU's rule); rg
+# yields to an attached stdin, even an empty one (its readable-stdin
+# rule). All pinned on debian:stable-slim / ripgrep 14.
+_CWD_DEFAULT_RAW = {
+    "grep": "",
+    "rg": "",
+    "find": ".",
+    "tree": ".",
+    "du": ".",
+    "ls": ".",
+}
 
 
-def _default_recursive_operand(parts: list[str | PathSpec], cmd_name: str,
-                               registry: MountRegistry, cwd: str,
-                               stdin: ByteSource | None) -> PathSpec | None:
-    """The synthetic cwd operand for a recursive search typed bare.
+def _default_cwd_operand(parts: list[str | PathSpec], cmd_name: str,
+                         registry: MountRegistry, cwd: str,
+                         stdin: ByteSource | None) -> PathSpec | None:
+    """The synthetic cwd operand for a _CWD_DEFAULT_RAW command typed bare.
 
-    GNU grep ``-r``/``-R`` with no path operand searches the working
-    directory and ignores stdin; bare ``rg`` does the same whenever no
-    stdin is attached (a piped stdin, even empty, wins). Both print
-    results as bare relative names (``a.txt:hit``, not ``./a.txt:hit``,
-    pinned on debian:stable-slim / ripgrep 14). The empty ``raw_path``
-    carries that spelling through :func:`respell_raw`.
+    Injected before routing, so mount resolution, fan-out across
+    descendant mounts, and :func:`respell_raw` treat it exactly like a
+    typed operand; backends never see the difference.
 
     Args:
         parts (list[str | PathSpec]): classified command words.
-        cmd_name (str): command name (a _RECURSIVE_CWD_COMMANDS member).
+        cmd_name (str): command name (a _CWD_DEFAULT_RAW key).
         registry (MountRegistry): mount registry resolving the cwd.
         cwd (str): session working directory.
         stdin (ByteSource | None): the line's stdin, consulted for rg.
@@ -103,12 +111,12 @@ def _default_recursive_operand(parts: list[str | PathSpec], cmd_name: str,
         kwargs = parse_to_kwargs(parsed)
         if kwargs.get("r") is not True and kwargs.get("R") is not True:
             return None
-    elif stdin is not None:
+    elif cmd_name == "rg" and stdin is not None:
         return None
     operand = classify_bare_path(".", registry, cwd)
     if not isinstance(operand, PathSpec):
         return None
-    return dataclasses.replace(operand, raw_path="")
+    return dataclasses.replace(operand, raw_path=_CWD_DEFAULT_RAW[cmd_name])
 
 
 def _path_flag_scopes(cmd_name: str, argv: list[str],
@@ -686,11 +694,18 @@ async def handle_command(
             session._local_vars = None
             session._local_arrays = None
 
-    if cmd_name in _RECURSIVE_CWD_COMMANDS:
-        operand = _default_recursive_operand(parts, cmd_name, registry,
-                                             session.cwd, stdin)
+    if cmd_name in _CWD_DEFAULT_RAW:
+        operand = _default_cwd_operand(parts, cmd_name, registry, session.cwd,
+                                       stdin)
         if operand is not None:
-            parts = [*parts, operand]
+            # Where GNU's implied `.` sits: after the pattern for
+            # grep/rg (the first positional is the pattern), right
+            # after the command name for find/tree/du/ls (find's
+            # expression tokens must stay behind the path).
+            if cmd_name in ("grep", "rg"):
+                parts = [*parts, operand]
+            else:
+                parts = [parts[0], operand, *parts[1:]]
 
     # Cross-mount: paths span different mounts (e.g. cp /ram/a /disk/b).
     # Use dispatch to read/write across mounts directly.

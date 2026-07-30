@@ -76,18 +76,27 @@ interface RunOnMountCtx {
   routingDecision?: RoutingDecision
 }
 
-// Commands a bare invocation makes search the working directory: GNU
-// grep does it only under -r/-R and ignores stdin; ripgrep is recursive
-// by default but an attached stdin wins (its readable-stdin rule).
-const RECURSIVE_CWD_COMMANDS = new Set(['grep', 'rg'])
+// Commands a bare invocation points at the working directory, mapped to
+// the typed spelling their synthetic operand carries. GNU find/tree/du/
+// ls behave exactly as if `.` had been typed (./-prefixed output); GNU
+// grep -r and bare rg print bare relative names (empty raw). Two gates:
+// grep only defaults under -r/-R (and ignores stdin, GNU's rule); rg
+// yields to an attached stdin, even an empty one (its readable-stdin
+// rule). All pinned on debian:stable-slim / ripgrep 14.
+const CWD_DEFAULT_RAW: Record<string, string> = {
+  grep: '',
+  rg: '',
+  find: '.',
+  tree: '.',
+  du: '.',
+  ls: '.',
+}
 
-// The synthetic cwd operand for a recursive search typed bare. GNU grep
-// -r/-R with no path operand searches the working directory and ignores
-// stdin; bare rg does the same whenever no stdin is attached (a piped
-// stdin, even empty, wins). Both print results as bare relative names
-// (a.txt:hit, not ./a.txt:hit; pinned on debian:stable-slim / ripgrep
-// 14). The empty rawPath carries that spelling through respellRaw.
-function defaultRecursiveOperand(
+// The synthetic cwd operand for a CWD_DEFAULT_RAW command typed bare.
+// Injected before routing, so mount resolution, fan-out across
+// descendant mounts, and respellRaw treat it exactly like a typed
+// operand; backends never see the difference.
+function defaultCwdOperand(
   parts: readonly (string | PathSpec)[],
   cmdName: string,
   registry: MountRegistry,
@@ -102,7 +111,7 @@ function defaultRecursiveOperand(
   if (cmdName === 'grep') {
     const kwargs = parseToKwargs(parsed)
     if (kwargs.r !== true && kwargs.R !== true) return null
-  } else if (stdin !== null) {
+  } else if (cmdName === 'rg' && stdin !== null) {
     return null
   }
   const operand = classifyBarePath('.', registry, cwd)
@@ -113,7 +122,7 @@ function defaultRecursiveOperand(
     resourcePath: operand.resourcePath,
     pattern: operand.pattern,
     resolved: operand.resolved,
-    rawPath: '',
+    rawPath: CWD_DEFAULT_RAW[cmdName] ?? '',
   })
 }
 
@@ -427,9 +436,18 @@ export async function handleCommand(
     )
   }
 
-  if (RECURSIVE_CWD_COMMANDS.has(cmdName)) {
-    const operand = defaultRecursiveOperand(parts, cmdName, registry, session.cwd, stdin)
-    if (operand !== null) parts = [...parts, operand]
+  if (cmdName in CWD_DEFAULT_RAW) {
+    const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
+    if (operand !== null) {
+      // Where GNU's implied `.` sits: after the pattern for grep/rg
+      // (the first positional is the pattern), right after the command
+      // name for find/tree/du/ls (find's expression tokens must stay
+      // behind the path).
+      parts =
+        cmdName === 'grep' || cmdName === 'rg'
+          ? [...parts, operand]
+          : [head, operand, ...parts.slice(1)]
+    }
   }
 
   const pathScopes: PathSpec[] = []

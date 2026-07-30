@@ -245,3 +245,11 @@ def test_respell_one_empty_raw_is_the_bare_no_operand_spelling(
     # GNU grep -r with no path operand prints names relative to the cwd
     # with no ./ prefix; the synthetic operand carries raw_path "".
     assert respell_one(path, original, "") == expected
+
+
+def test_respell_one_root_original_collapses_to_raw():
+    # A traversal rooted at "/" respells the root line itself: bare
+    # form and typed "." both print ".", never "./".
+    assert respell_one("/", "/", ".") == "."
+    assert respell_one("/", "/", "") == "."
+    assert respell_one("/ram/a.txt", "/", ".") == "./ram/a.txt"
