@@ -202,7 +202,10 @@ def query(query_host: str, path: str) -> dict:
         with urllib.request.urlopen(f"{query_host.rstrip('/')}{path}") as resp:
             body = json.loads(resp.read().decode())
             return body if isinstance(body, dict) else {}
-    except (urllib.error.URLError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
+        # OSError, not just URLError: while the container boots,
+        # docker-proxy accepts the connection and resets it mid-read,
+        # which raises a raw ConnectionResetError past urllib.
         print(f"query not ready: {exc}", file=sys.stderr)
         return {}
 
