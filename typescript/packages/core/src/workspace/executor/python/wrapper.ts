@@ -32,6 +32,7 @@ if _sid not in _repl_session_globals:
         '__builtins__': __builtins__,
     }
 _repl_globals = _repl_session_globals[_sid]
+_repl_globals.update(dict(_repl_inputs))
 
 _out_bytes = io.BytesIO()
 _err_bytes = io.BytesIO()
@@ -90,9 +91,16 @@ _repl_result = (_out_bytes.getvalue(), _err_bytes.getvalue(), _exit_code, _statu
 // One-shot eval: bind _eval_inputs as globals, run the code, capture
 // the LAST EXPRESSION (monty semantics). The value crosses the
 // JS/WASM boundary as JSON, which is the Evaluator contract's honest
-// transport for pyodide.
+// transport for pyodide; bytes values ride as a tagged base64 object
+// that the JS side restores to Uint8Array (see EVAL_BYTES_TAG).
 export const PYTHON_EVAL_WRAPPER = `
-import ast, io, json, sys, traceback
+import ast, base64, io, json, sys, traceback
+
+def _eval_enc(_o):
+    if isinstance(_o, (bytes, bytearray)):
+        _b64 = base64.b64encode(bytes(_o)).decode('ascii')
+        return {'__mirage_bytes__': _b64}
+    raise TypeError('%s is not JSON-serializable' % type(_o).__name__)
 
 _out_bytes = io.BytesIO()
 _err_bytes = io.BytesIO()
@@ -125,7 +133,7 @@ else:
         if _last is not None:
             _value = eval(compile(_last, '<eval>', 'eval'), _g)
         try:
-            _value_json = json.dumps(_value)
+            _value_json = json.dumps(_value, default=_eval_enc)
         except TypeError:
             _ok = False
             _err_text.write('eval: result of type %s is not JSON-serializable\\n'

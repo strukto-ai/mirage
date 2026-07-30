@@ -16,6 +16,15 @@ import type { Runtime } from './runtime.ts'
 import type { EvalResult, EvalValue } from './runtime_types.ts'
 
 /**
+ * The nominal evaluator brand (python's EvaluatorMixin inheritance).
+ * Detection is by this marker, never by probing for an `eval` method,
+ * so a runtime with an unrelated `eval` cannot accidentally become
+ * the policy engine. `Symbol.for` keeps the brand stable even when
+ * two copies of the package are loaded.
+ */
+export const EVALUATOR: unique symbol = Symbol.for('mirage.evaluator')
+
+/**
  * The evaluator capability: named inputs in, a value out (Python's
  * EvaluatorMixin). A Runtime that also implements this can evaluate
  * expressions, which is what the routing policy engine and the repl
@@ -26,6 +35,8 @@ import type { EvalResult, EvalValue } from './runtime_types.ts'
  * evaluator's own diagnostics wrapped in EvalError.
  */
 export interface Evaluator {
+  readonly [EVALUATOR]: true
+
   /**
    * Evaluate one program and return its last expression. `inputs`
    * bind as globals in the evaluator's own idiom; a `session` id
@@ -40,5 +51,5 @@ export interface Evaluator {
 
 /** Whether this runtime carries the evaluator capability. */
 export function isEvaluator(runtime: Runtime): runtime is Runtime & Evaluator {
-  return typeof (runtime as Partial<Evaluator>).eval === 'function'
+  return (runtime as Partial<Evaluator>)[EVALUATOR] === true
 }

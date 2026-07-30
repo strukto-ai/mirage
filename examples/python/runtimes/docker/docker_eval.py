@@ -12,6 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import json
+
+from mirage.runtime.errors import EvalError
+from mirage.runtime.mixin import EvaluatorMixin
+from mirage.runtime.sandbox.docker import DockerRuntime
+from mirage.runtime.types import EvalResult, EvalValue
+
 # How to give YOUR OWN runtime the evaluator capability: inherit
 # EvaluatorMixin and implement eval (inputs in, the last expression's
 # value out). The transport is yours to choose; mirage only defines
@@ -24,14 +32,6 @@
 #     docker run -d --name mirage-eval-demo python:3.12-slim sleep infinity
 #
 # and remove it when done: docker rm -f mirage-eval-demo
-
-import asyncio
-import json
-
-from mirage.runtime.errors import EvalError
-from mirage.runtime.mixin import EvaluatorMixin
-from mirage.runtime.sandbox.docker import DockerRuntime
-from mirage.runtime.types import EvalResult, EvalValue
 
 CONTAINER = "mirage-eval-demo"
 

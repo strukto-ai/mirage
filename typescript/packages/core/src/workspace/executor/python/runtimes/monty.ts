@@ -14,7 +14,7 @@
 
 import { Runtime } from '../../runtime.ts'
 import { EvalError } from '../../runtime_errors.ts'
-import type { Evaluator } from '../../runtime_mixin.ts'
+import { EVALUATOR, type Evaluator } from '../../runtime_mixin.ts'
 import type {
   EvalResult,
   EvalValue,
@@ -81,6 +81,7 @@ function displayError(err: unknown): string {
  */
 export class MontyRuntime extends Runtime implements Evaluator {
   readonly name = MONTY_RUNTIME
+  readonly [EVALUATOR] = true as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private workspaceBridge: BridgeDispatchFn | null = null
   private listMounts: () => string[] = () => []

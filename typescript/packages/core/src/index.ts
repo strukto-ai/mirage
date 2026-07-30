@@ -491,7 +491,7 @@ export {
   type RuntimeEntry,
 } from './workspace/executor/runtime.ts'
 export { EvalError } from './workspace/executor/runtime_errors.ts'
-export { isEvaluator, type Evaluator } from './workspace/executor/runtime_mixin.ts'
+export { EVALUATOR, isEvaluator, type Evaluator } from './workspace/executor/runtime_mixin.ts'
 export {
   type EvalResult,
   type EvalStatus,

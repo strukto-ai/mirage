@@ -12,26 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// How to give YOUR OWN runtime the evaluator capability: implement the
-// Evaluator interface's eval (inputs in, the last expression's value
-// out). The transport is yours to choose; mirage only defines the
-// contract. Here a docker container evaluates python by piping a
-// harness to its stock `python3 -`: the value comes back as JSON
-// behind a NUL sentinel on stdout (NUL cannot appear in JSON text, so
-// user prints cannot forge it). An evaluator runtime can also serve as
-// the workspace's routing policy engine. Start the container first:
-//
-//     docker run -d --name mirage-eval-demo python:3.12-slim sleep infinity
-//
-// and remove it when done: docker rm -f mirage-eval-demo
-
 import {
   DockerRuntime,
+  EVALUATOR,
   EvalError,
   type EvalResult,
   type Evaluator,
   type EvalValue,
 } from '@struktoai/mirage-node'
+
+// How to give YOUR OWN runtime the evaluator capability: implement the
+// Evaluator interface (its EVALUATOR brand plus eval: inputs in, the
+// last expression's value out). The transport is yours to choose;
+// mirage only defines the contract. Here a docker container evaluates
+// python by piping a harness to its stock `python3 -`: the value comes
+// back as JSON behind a NUL sentinel on stdout (NUL cannot appear in
+// JSON text, so user prints cannot forge it). An evaluator runtime can
+// also serve as the workspace's routing policy engine. Start the
+// container first:
+//
+//     docker run -d --name mirage-eval-demo python:3.12-slim sleep infinity
+//
+// and remove it when done: docker rm -f mirage-eval-demo
 
 const CONTAINER = 'mirage-eval-demo'
 
@@ -70,6 +72,8 @@ function lastIndexOfBytes(haystack: Uint8Array, needle: Uint8Array): number {
 }
 
 class EvalDockerRuntime extends DockerRuntime implements Evaluator {
+  readonly [EVALUATOR] = true as const
+
   async eval(
     code: string,
     opts: { inputs?: Record<string, EvalValue>; session?: string } = {},

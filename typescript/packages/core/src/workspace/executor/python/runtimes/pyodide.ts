@@ -14,7 +14,7 @@
 
 import { Runtime } from '../../runtime.ts'
 import { EvalError } from '../../runtime_errors.ts'
-import type { Evaluator } from '../../runtime_mixin.ts'
+import { EVALUATOR, type Evaluator } from '../../runtime_mixin.ts'
 import type {
   EvalResult,
   EvalStatus,
@@ -41,6 +41,22 @@ function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
 function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null {
   const bytes = bridgeBytes(value)
   return bytes.length > 0 ? bytes : null
+}
+
+// The eval wrapper ships python bytes as {'__mirage_bytes__': <b64>}
+// (bytes are valid EvalValues but not JSON); this reviver restores
+// them to Uint8Array while everything else parses as plain JSON.
+const EVAL_BYTES_TAG = '__mirage_bytes__'
+
+function reviveEvalValue(_key: string, value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value
+  const record = value as Record<string, unknown>
+  const tagged = record[EVAL_BYTES_TAG]
+  if (typeof tagged !== 'string' || Object.keys(record).length !== 1) return value
+  const binary = atob(tagged)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
 }
 
 function runtimeEnv(): Record<string, string> {
@@ -98,6 +114,7 @@ const PYODIDE_CONFIG_KEYS: readonly string[] = [
 
 export class PyodideRuntime extends Runtime implements Evaluator {
   readonly name = PYODIDE_RUNTIME
+  readonly [EVALUATOR] = true as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
@@ -157,7 +174,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     opts: { inputs?: Record<string, EvalValue>; session?: string },
   ): Promise<EvalResult> {
     if (opts.session !== undefined) {
-      const repl = await this.runOneRepl(code, opts.session)
+      const repl = await this.runOneRepl(code, opts.session, opts.inputs ?? {})
       return { value: null, ...repl }
     }
     const pyodide = await this.ensureLoaded()
@@ -187,7 +204,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
         throw new EvalError(detail !== '' ? detail : 'evaluation failed', { syntax })
       }
       return {
-        value: JSON.parse(valueJson) as EvalValue,
+        value: JSON.parse(valueJson, reviveEvalValue) as EvalValue,
         stdout: bridgeBytes(out),
         stderr: bridgeStderr(errBytes),
         exitCode: 0,
@@ -331,12 +348,17 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     }
   }
 
-  private async runOneRepl(code: string, sessionId: string): Promise<Omit<EvalResult, 'value'>> {
+  private async runOneRepl(
+    code: string,
+    sessionId: string,
+    inputs: Record<string, EvalValue> = {},
+  ): Promise<Omit<EvalResult, 'value'>> {
     const pyodide = await this.ensureLoaded()
     await this.loadImports(pyodide, code)
 
     pyodide.globals.set('_user_code', code)
     pyodide.globals.set('_repl_session_id', sessionId)
+    pyodide.globals.set('_repl_inputs', pyodide.toPy(inputs))
 
     try {
       await pyodide.runPythonAsync(PYTHON_REPL_WRAPPER)
@@ -368,6 +390,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     } finally {
       pyodide.globals.delete?.('_user_code')
       pyodide.globals.delete?.('_repl_session_id')
+      pyodide.globals.delete?.('_repl_inputs')
       pyodide.globals.delete?.('_repl_result')
     }
   }
