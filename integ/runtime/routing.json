@@ -250,6 +250,57 @@
           }
         }
       ]
+    },
+    {
+      "id": "runtime_arg_uncaptured_inert",
+      "world": {
+        "runtimes": [
+          "monty"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "grep -r xxx /ram",
+          "runtime": "monty",
+          "expect": {
+            "exit": 1,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "grep -r hello /ram",
+          "runtime": "monty",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/a.txt:hello\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "runtime_arg_vfs_refused",
+      "world": {
+        "runtimes": [
+          "monty"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi",
+          "runtime": "vfs",
+          "expect": {
+            "throws_contains": "not a runtime you can select"
+          }
+        }
+      ]
     }
   ]
 }
