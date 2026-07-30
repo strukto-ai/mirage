@@ -1,0 +1,57 @@
+---
+title: Policy Engine
+description: Script which runtime serves each command line; route scripts run on the workspace's evaluator runtime.
+icon: route
+---
+
+A workspace can hold several runtimes for the same command: `python3` might
+run on sandboxed `monty` normally, but on a `docker` sandbox when the line
+touches heavy data. Which entry serves a line is a **routing decision**, and
+you script it from the config file:
+
+```yaml
+runtimes:
+  - name: monty
+    captures: [] # the policy engine: evaluates scripts, serves no commands
+  - name: docker
+    captures: ["python3"]
+    config:
+      container: my-box
+  - vfs
+route: ./route.py
+```
+
+```python route.py
+# The last expression is the verdict: a runtime name, or None to pass.
+"docker" if "train.py" in ctx["line"] else None
+```
+
+The script sees the line's context as the `ctx` global: `line`, `command`,
+`builtin`, `commands` (per-stage words and paths), `cwd`, `env`, `mounts`,
+`session_id`, `agent_id`. Besides the global `route`, each runtime entry can
+carry its own `script:`, answering true or false: am I willing to serve this
+line? The first willing capturer wins.
+
+## What runs the scripts
+
+A config file can only carry source text, so something must evaluate it.
+That is the workspace's **policy engine**: its first runtime with the
+evaluator capability (`monty` in both languages, `pyodide` in TypeScript),
+asked to evaluate each script with `ctx` bound as a global. The
+`captures: []` entry above is the idiom for "policy engine only": it
+evaluates scripts but serves no commands. A world that uses route scripts
+without any evaluator entry fails loudly at the first decision.
+
+In code you can skip all of this and pass real functions as `route=` or
+`script=`; functions run directly and need no evaluator.
+
+## Bring your own
+
+The capability is open: inherit `EvaluatorMixin` (Python) or implement
+`Evaluator` with the `EVALUATOR` brand (TypeScript) on your own runtime,
+and it becomes eligible as the policy engine. `eval(code, inputs=...)`
+returns the last expression's value; how the value travels is your
+runtime's choice. The docker examples give a stock container the
+capability by piping a harness to `python3 -`:
+[python](https://github.com/strukto-ai/mirage/blob/main/examples/python/runtimes/docker/docker_eval.py),
+[typescript](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/runtimes/docker/docker_eval.ts).

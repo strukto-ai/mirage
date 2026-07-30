@@ -75,7 +75,7 @@
               "home/cache",
               "home/snapshot",
               "home/observer",
-              "home/evaluator",
+              "home/policy-engine",
               "home/auth"
             ]
           },
