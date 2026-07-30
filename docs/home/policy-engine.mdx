@@ -11,10 +11,9 @@ you script it from the config file:
 
 ```yaml
 runtimes:
-  - name: monty
-    captures: [] # the policy engine: evaluates scripts, serves no commands
+  - monty # captures python3 by default: the everyday interpreter
   - name: docker
-    captures: ["python3"]
+    captures: ["python3"] # captures python3 too, for the heavy lines
     config:
       container: my-box
   - vfs
@@ -25,6 +24,10 @@ route: ./route.py
 # The last expression is the verdict: a runtime name, or None to pass.
 "docker" if "train.py" in ctx["line"] else None
 ```
+
+Both entries capture `python3`. Without a verdict (`None`), the first
+capturer in the list serves it, so `monty` is the default; a verdict names
+the runtime that takes the line instead.
 
 The script sees the line's context as the `ctx` global: `line`, `command`,
 `builtin`, `commands` (per-stage words and paths), `cwd`, `env`, `mounts`,
@@ -37,10 +40,24 @@ line? The first willing capturer wins.
 A config file can only carry source text, so something must evaluate it.
 That is the workspace's **policy engine**: its first runtime with the
 evaluator capability (`monty` in both languages, `pyodide` in TypeScript),
-asked to evaluate each script with `ctx` bound as a global. The
-`captures: []` entry above is the idiom for "policy engine only": it
-evaluates scripts but serves no commands. A world that uses route scripts
-without any evaluator entry fails loudly at the first decision.
+asked to evaluate each script with `ctx` bound as a global. Above, `monty`
+plays both roles: it serves `python3` and evaluates the scripts. A world
+that uses route scripts without any evaluator entry fails loudly at the
+first decision.
+
+When every command should run in the sandbox and `monty` should serve
+nothing, keep it as the engine only by declaring empty captures:
+
+```yaml
+runtimes:
+  - name: monty
+    captures: [] # evaluates scripts, serves no commands
+  - name: docker
+    captures: ["python3"]
+    config:
+      container: my-box
+  - vfs
+```
 
 In code you can skip all of this and pass real functions as `route=` or
 `script=`; functions run directly and need no evaluator.
