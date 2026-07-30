@@ -35,9 +35,6 @@ Packages split by role, one module per concern, the same way in both languages:
 - **`config.py`** — configuration knobs and their coercion (e.g. `runtime/config.py` holds `RuntimeConfig`, which fails loud on unknown fields).
 - **`mixin.py`** — opt-in capability mixins: stateless, no constructor, abstract methods only (e.g. `runtime/mixin.py` holds `EvaluatorMixin`). Capability is detected by type (`isinstance`), never by probing for a method.
 - **`base.py`** — the package's core ABC and nothing else (e.g. `runtime/base.py` is just `Runtime`).
-- **`table.py`** — name-to-class registries and resolution.
-
-`mirage/runtime/` and `mirage/runtime/route/` are the reference layouts. TypeScript mirrors the split with prefixed siblings when there is no package directory (`runtime_types.ts` / `runtime_errors.ts` / `runtime_mixin.ts` beside `runtime.ts`, following the `runtime_table.ts` precedent), and interfaces plus a type guard where python uses a mixin (`Evaluator` + `isEvaluator`). When a module grows past one concern, split it along these lines instead of letting a grab-bag `base.py` accumulate; move consumers to the canonical module, no re-export shims.
 
 ## History
 
