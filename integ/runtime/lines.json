@@ -44,6 +44,10 @@
             ],
             "script": "'keep-out' not in ctx['line']"
           },
+          {
+            "name": "monty",
+            "captures": []
+          },
           "vfs"
         ],
         "mounts": {

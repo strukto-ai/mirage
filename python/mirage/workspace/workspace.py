@@ -48,8 +48,8 @@ from mirage.runtime.base import RunResult, Runtime
 from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
                                   RoutingDecisionError, command_facts,
                                   decide_line)
-from mirage.runtime.table import (DEFAULT_ENTRIES, VfsRuntime, bind_commands,
-                                  build_runtime, catch_all,
+from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
+                                  bind_commands, build_runtime, catch_all,
                                   runtime_bindings_for, whole_line_runtime)
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
@@ -476,7 +476,13 @@ class Workspace:
             for name in DEFAULT_ENTRIES:
                 try:
                     entries.append(build_runtime(name))
-                except (ImportError, FileNotFoundError):
+                except (ImportError, FileNotFoundError) as exc:
+                    # The skipped class still declares its captures, so
+                    # the dispatcher can answer "why is python3 dead"
+                    # with the install hint instead of a blank refusal.
+                    for cmd in NAMED[name].captures:
+                        self._registry.runtime_unavailable.setdefault(
+                            cmd, str(exc))
                     continue
         else:
             for entry in runtimes:
@@ -610,8 +616,7 @@ class Workspace:
         )
         try:
             return await decide_line(self._runtime_entries, self._route, ctx,
-                                     self._registry.runtime_bindings,
-                                     self.dispatch)
+                                     self._registry.runtime_bindings)
         except RoutingDecisionError:
             raise
         except (ValueError, ImportError) as exc:

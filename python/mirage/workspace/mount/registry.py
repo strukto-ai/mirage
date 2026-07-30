@@ -75,6 +75,12 @@ class MountRegistry:
         # Catch-all when its captures are empty; explicit captures make
         # unclaimed commands an admission failure (126).
         self.vfs_runtime: Runtime | None = None
+        # Why a command that SOME runtime class captures has no live
+        # binding: default-world entries that failed to build (missing
+        # extra) record their construction error per captured command,
+        # so the refusal at dispatch carries the install hint without
+        # any command naming a runtime class.
+        self.runtime_unavailable: dict[str, str] = {}
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None

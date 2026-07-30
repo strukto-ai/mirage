@@ -421,7 +421,7 @@
           "command": "python -c \"print(1)\"",
           "expect": {
             "exit": 127,
-            "stderr_contains": "python3: python runtime is not available"
+            "stderr_contains": "python3: no runtime captures this command"
           }
         }
       ]

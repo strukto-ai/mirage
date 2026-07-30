@@ -32,16 +32,6 @@ class EchoRuntime(Runtime):
         return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
 
 
-class BrokenRuntime(Runtime):
-    name = "broken"
-
-    def __init__(self, dispatch=None):
-        raise ImportError("needs the broken extra")
-
-    async def run(self, args: RunArgs) -> RunResult:
-        raise AssertionError("unreachable")
-
-
 async def fake_dispatch(op, path, *args, **kwargs):
     if path.virtual == "/script.py":
         return b"print('from-script')", None
@@ -115,27 +105,26 @@ async def test_run_source_uses_bound_runtime_and_flags():
     runtime = EchoRuntime()
     prepared = Source(code="hi")
     stdout, io = await run_code("js", prepared, {"K": "V"}, {"module": True},
-                                runtime, EchoRuntime, (ImportError, ), None,
-                                "javascript")
+                                runtime, None)
     assert io.exit_code == 0
     assert runtime.seen[0].flags == {"module": True}
     assert runtime.seen[0].env == {"K": "V"}
 
 
 @pytest.mark.asyncio
-async def test_run_source_fallback_failure_is_exit_127_hint():
+async def test_run_source_unbound_reports_recorded_hint():
+    """A default entry's build error surfaces as the 127 hint."""
     prepared = Source(code="hi")
     stdout, io = await run_code("python3", prepared, None, {}, None,
-                                BrokenRuntime, (ImportError, ), None, "python")
+                                "needs the broken extra")
     assert io.exit_code == 127
-    assert b"needs the broken extra" in io.stderr
+    assert io.stderr == b"python3: needs the broken extra\n"
 
 
 @pytest.mark.asyncio
-async def test_run_source_unbound_refuses_without_fallback_run():
+async def test_run_source_unbound_refuses_without_hint():
     """No captured runtime means refusal, not a hidden interpreter."""
     prepared = Source(code="hi")
-    stdout, io = await run_code("python3", prepared, None, {}, None,
-                                EchoRuntime, (ImportError, ), None, "python")
+    stdout, io = await run_code("python3", prepared, None, {}, None, None)
     assert io.exit_code == 127
-    assert io.stderr == b"python3: python runtime is not available\n"
+    assert io.stderr == b"python3: no runtime captures this command\n"

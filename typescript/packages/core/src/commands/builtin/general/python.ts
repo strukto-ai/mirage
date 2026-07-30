@@ -44,7 +44,7 @@ async function pythonCommand(
       null,
       new IOResult({
         exitCode: 127,
-        stderr: ENC.encode('python3: python runtime is not available\n'),
+        stderr: ENC.encode('python3: no runtime captures this command\n'),
       }),
     ]
   }

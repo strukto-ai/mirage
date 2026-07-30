@@ -126,20 +126,17 @@ async def run_code(
     env: dict[str, str] | None,
     flags: dict[str, Any],
     runtime: Runtime | None,
-    fallback: Callable[..., Runtime],
-    fallback_errors: tuple[type[Exception], ...],
-    dispatch: Callable[..., Any] | None,
-    family: str,
+    unavailable: str | None,
 ) -> CommandOutput:
     """Run a prepared source on the bound runtime, shared by all.
 
     An unbound command (no workspace runtime entry captures it) is
     refused: an explicit runtimes list is policy, and a builtin that
     spun up its own interpreter would bypass captures and admission
-    scripts (TS parity). The fallback factory is probed only for its
-    construction error, which keeps the actionable install hint when
-    the default world dropped the entry (monty extra missing, quickjs
-    build absent).
+    scripts (TS parity). The refusal names the recorded reason when
+    the default world dropped the entry (the registry keys build
+    failures by captured command), so no command code ever names a
+    runtime class or probes one.
 
     Args:
         label (str): the command name used in error messages.
@@ -149,24 +146,14 @@ async def run_code(
             runtime (each runtime reads its own).
         runtime (Runtime | None): the workspace-bound runtime for this
             command; None when no entry captures it.
-        fallback (Callable[..., Runtime]): runtime factory probed for
-            its construction error when unbound.
-        fallback_errors (tuple[type[Exception], ...]): construction
-            errors the probe reports as exit 127 hints.
-        dispatch (Callable[..., Any] | None): workspace dispatch (the
-            bound runtime already carries it via attach).
-        family (str): the runtime family named in the refusal
-            ("python", "javascript").
+        unavailable (str | None): the dispatcher-recorded reason this
+            command has no runtime (a default entry's build error),
+            None when nothing captures it at all.
     """
     if runtime is None:
-        try:
-            fallback()
-        except fallback_errors as exc:
-            return None, IOResult(exit_code=127,
-                                  stderr=f"{label}: {exc}\n".encode())
-        return None, IOResult(
-            exit_code=127,
-            stderr=f"{label}: {family} runtime is not available\n".encode())
+        hint = unavailable or "no runtime captures this command"
+        return None, IOResult(exit_code=127,
+                              stderr=f"{label}: {hint}\n".encode())
     result = await runtime.run(
         RunArgs(code=prepared.code,
                 args=prepared.args,

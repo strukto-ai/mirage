@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import RunArgs
+from mirage.runtime.base import EvalError, EvaluatorMixin, RunArgs
 from mirage.runtime.python import MontyRuntime
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -220,3 +220,51 @@ def test_workspace_explicit_monty_fails_loud(monkeypatch):
         Workspace({"/data": RAMResource()},
                   mode=MountMode.EXEC,
                   runtimes=["monty"])
+
+
+@pytest.mark.asyncio
+async def test_eval_returns_last_expression_with_inputs():
+    runtime = MontyRuntime()
+    result = await runtime.eval("print('hey'); ctx['a'] + 1",
+                                inputs={"ctx": {
+                                    "a": 41
+                                }})
+    assert result.value == 42
+    assert result.stdout == b"hey\n"
+    assert result.status == "complete"
+
+
+@pytest.mark.asyncio
+async def test_eval_sessions_keep_state_per_id():
+    runtime = MontyRuntime()
+    await runtime.eval("x = 5", session="a")
+    doubled = await runtime.eval("x * 2", session="a")
+    assert doubled.value == 10
+    other = await runtime.eval("x", session="b")
+    assert other.exit_code == 1
+    assert other.stderr is not None and b"NameError" in other.stderr
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_eval_session_open_block_reports_incomplete():
+    runtime = MontyRuntime()
+    result = await runtime.eval("def f():", session="a")
+    assert result.status == "incomplete"
+    assert result.value is None
+
+
+@pytest.mark.asyncio
+async def test_eval_errors_carry_monty_diagnostics():
+    runtime = MontyRuntime()
+    with pytest.raises(EvalError) as syntax_err:
+        await runtime.eval("def broken(")
+    assert syntax_err.value.syntax is True
+    with pytest.raises(EvalError) as runtime_err:
+        await runtime.eval("1 / 0")
+    assert runtime_err.value.syntax is False
+    assert "ZeroDivisionError" in str(runtime_err.value)
+
+
+def test_monty_is_an_evaluator():
+    assert isinstance(MontyRuntime(), EvaluatorMixin)

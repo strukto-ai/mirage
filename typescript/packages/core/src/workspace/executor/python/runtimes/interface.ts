@@ -12,20 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../../runtime.ts'
-import type { PythonReplRunArgs, PythonReplRunResult } from '../types.ts'
-
 export const PYODIDE_RUNTIME = 'pyodide'
 export const MONTY_RUNTIME = 'monty'
 
-/**
- * A Python interpreter the workspace can execute `python3` code on.
- *
- * Implementations own their interpreter lifecycle (lazy boot, reuse across
- * runs, teardown in `close`). How an implementation sees workspace files is
- * its own concern: an in-process interpreter bridges reads through the
- * workspace dispatch, while a host subprocess only sees the host filesystem.
- */
-export interface PythonRuntime extends Runtime {
-  runRepl(args: PythonReplRunArgs): Promise<PythonReplRunResult>
-}
+// There is deliberately no PythonRuntime type: a python interpreter is
+// just a Runtime, and the repl rides the general Evaluator capability
+// (`isEvaluator` + `eval` with a session id), so nothing python-shaped
+// leaks into the runtime contract.

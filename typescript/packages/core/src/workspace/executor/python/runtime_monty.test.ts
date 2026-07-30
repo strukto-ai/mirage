@@ -170,12 +170,19 @@ describe('MontyRuntime', () => {
     expect(text(result.stderr)).toContain('Error')
   }, 30_000)
 
-  it('repl keeps state per session id', async () => {
+  it('eval keeps state per session id', async () => {
     const rt = make()
-    await rt.runRepl({ code: 'x = 40', sessionId: 's1' })
-    const result = await rt.runRepl({ code: 'print(x + 2)', sessionId: 's1' })
+    await rt.eval('x = 40', { session: 's1' })
+    const result = await rt.eval('print(x + 2)', { session: 's1' })
     expect(result.status).toBe('complete')
     expect(text(result.stdout)).toBe('42\n')
+  }, 30_000)
+
+  it('eval returns the last expression with inputs bound', async () => {
+    const rt = make()
+    const result = await rt.eval("ctx['a'] + 1", { inputs: { ctx: { a: 41 } } })
+    expect(result.value).toBe(42)
+    expect(result.status).toBe('complete')
   }, 30_000)
 
   it('a missing virtual file surfaces as an error without poisoning the runtime', async () => {
@@ -238,7 +245,6 @@ describe('monty unavailable', () => {
       config: {},
       attach: () => undefined,
       run: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
-      runRepl: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
       runLine: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
       close: () => Promise.resolve(),
     }

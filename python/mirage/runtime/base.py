@@ -15,9 +15,19 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Literal, TypeAlias
 
 from mirage.runtime.config import RuntimeConfig
+
+# The value contract of eval: never richer than JSON plus bytes, so any
+# evaluator (in-process or remote over a serialized transport) can carry
+# it, in either direction (inputs in, verdict out).
+EvalValue: TypeAlias = (None | bool | int | float | str | bytes
+                        | list["EvalValue"] | dict[str, "EvalValue"])
+
+# "incomplete" is console semantics: the source needs a continuation
+# line (session mode only). "exit" is an explicit exit() call.
+EvalStatus: TypeAlias = Literal["complete", "incomplete", "exit"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +83,90 @@ class RunResult:
     stdout: bytes
     stderr: bytes | None
     exit_code: int
+
+
+@dataclass(frozen=True, slots=True)
+class EvalResult:
+    """Outcome of one evaluation.
+
+    One-shot mode raises EvalError on any failure, so a returned
+    result is always a success. Session (console) mode is a
+    transcript: a failing snippet comes back as a result too (its
+    traceback on stderr, a nonzero exit_code), because a console
+    reports errors and keeps going.
+
+    Args:
+        value (EvalValue): the program's last expression. In-process
+            evaluators return it directly; remote ones return what the
+            transport could carry. Session (console) mode may report
+            None when the evaluator only streams output.
+        stdout (bytes): output the program printed while running.
+        stderr (bytes | None): captured standard error, None when
+            empty.
+        exit_code (int): 0 outside session mode; a console snippet's
+            exit (1 on error, exit(N)'s N).
+        status (EvalStatus): console verdict; always "complete"
+            outside session mode.
+    """
+
+    value: EvalValue = None
+    stdout: bytes = b""
+    stderr: bytes | None = None
+    exit_code: int = 0
+    status: EvalStatus = "complete"
+
+
+class EvalError(Exception):
+    """An evaluation that could not produce a value.
+
+    The message carries the evaluator's own diagnostics (a traceback,
+    a transport failure, a non-serializable result).
+
+    Args:
+        message (str): the evaluator's diagnostic text.
+        syntax (bool): True when the program failed to parse, so
+            callers can distinguish "bad script" from "script raised".
+    """
+
+    def __init__(self, message: str, syntax: bool = False) -> None:
+        super().__init__(message)
+        self.syntax = syntax
+
+
+class EvaluatorMixin(ABC):
+    """The evaluator capability: named inputs in, a value out.
+
+    A true mixin: no state, no constructor, one method. A Runtime
+    that also inherits this can evaluate expressions, which is what
+    the routing policy engine and the repl consume; process-only
+    runtimes never inherit it and are never asked to evaluate. The
+    contract promises the shape, not value fidelity: inputs and the
+    returned value stay within EvalValue so any transport can carry
+    them, and errors surface as the evaluator's own diagnostics
+    wrapped in EvalError.
+    """
+
+    @abstractmethod
+    async def eval(self,
+                   code: str,
+                   *,
+                   inputs: dict[str, EvalValue] | None = None,
+                   session: str | None = None) -> EvalResult:
+        """Evaluate one program and return its last expression.
+
+        Args:
+            code (str): the source to evaluate.
+            inputs (dict[str, EvalValue] | None): named values the
+                program sees as globals, bound in the evaluator's own
+                idiom.
+            session (str | None): a session id for stateful console
+                semantics (globals persist per id); None evaluates
+                one-shot.
+
+        Raises:
+            EvalError: the program failed to parse, raised, or its
+                value could not be carried back.
+        """
 
 
 class Runtime(ABC):

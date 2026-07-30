@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.route.decide import (decide_line, evaluate_route,
-                                         evaluate_script)
+                                         evaluate_script, evaluator_of)
 from mirage.runtime.route.errors import RoutingDecisionError
 from mirage.runtime.route.facts import command_facts
 from mirage.runtime.route.types import (CommandFacts, RouteContext, RouteFn,
@@ -32,4 +32,5 @@ __all__ = [
     "decide_line",
     "evaluate_route",
     "evaluate_script",
+    "evaluator_of",
 ]

@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime, type RunArgs, type RunResult } from './executor/runtime.ts'
+import { MontyRuntime } from './executor/python/runtimes/monty.ts'
 import { ScriptSource } from './executor/route/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
@@ -214,9 +215,13 @@ for c in ctx['commands']:
             big = True
 not big
 `)
+    // Config scripts run on the world's evaluator: a captures-empty
+    // monty is a pure policy engine, so alpha stays python3's only
+    // capturer and its refusal is still an admission failure.
+    const engine = new MontyRuntime({ captures: [] })
     const ws = new Workspace(
       { '/': new RAMResource() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, 'vfs'] },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, engine, 'vfs'] },
     )
     try {
       await ws.execute("echo 'x = 1' > /fine.py")

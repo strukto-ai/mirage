@@ -440,6 +440,7 @@ class MountEntry:
         env: dict[str, str] | None = None,
         exec_allowed: bool = True,
         runtime: Runtime | None = None,
+        runtime_unavailable: str | None = None,
         stat_overlay: StatOverlay | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
@@ -520,6 +521,8 @@ class MountEntry:
             kw["stat_overlay"] = stat_overlay
         if runtime is not None:
             kw["runtime"] = runtime
+        if runtime_unavailable is not None:
+            kw["runtime_unavailable"] = runtime_unavailable
 
         prev_prefix = push_mount_prefix(mount_prefix)
         revs_token = push_revisions(self.revisions or None)

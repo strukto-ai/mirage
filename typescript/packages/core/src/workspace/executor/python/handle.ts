@@ -19,18 +19,13 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { ExecutionNode } from '../../types.ts'
-import type { PythonRuntime } from './runtimes/interface.ts'
 import { MontyUnavailableError } from './runtimes/monty.ts'
-import { PyodideUnavailableError, type PythonReplRunResult } from './types.ts'
+import { PyodideUnavailableError } from './types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 export interface HandlePythonDeps {
   runtime: Runtime
-}
-
-export interface HandlePythonReplDeps {
-  runtime: PythonRuntime
 }
 
 function readAllBytes(data: unknown): Promise<Uint8Array> {
@@ -123,31 +118,5 @@ export async function handlePython(
       }),
       new ExecutionNode({ command: cmdStr, exitCode: 1 }),
     ]
-  }
-}
-
-export async function handlePythonRepl(
-  code: string,
-  sessionId: string,
-  deps: HandlePythonReplDeps,
-): Promise<PythonReplRunResult> {
-  try {
-    return await deps.runtime.runRepl({ code, sessionId })
-  } catch (err) {
-    if (err instanceof PyodideUnavailableError || err instanceof MontyUnavailableError) {
-      return {
-        stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(`python3: ${err.message}\n`),
-        exitCode: 127,
-        status: 'complete',
-      }
-    }
-    const msg = err instanceof Error ? err.message : String(err)
-    return {
-      stdout: new Uint8Array(),
-      stderr: new TextEncoder().encode(`python3: ${msg}\n`),
-      exitCode: 1,
-      status: 'complete',
-    }
   }
 }

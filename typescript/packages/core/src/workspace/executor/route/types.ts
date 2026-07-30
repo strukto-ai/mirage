@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../runtime.ts'
+import type { EvalValue, Runtime } from '../runtime.ts'
 
 /** Parse facts for one command of the line being routed. */
 export interface CommandFacts {
@@ -60,6 +60,72 @@ export interface RouteContext {
   sessionId: string
   agentId: string
   mounts: readonly string[]
+}
+
+/**
+ * The ctx payload as any evaluator's script sees it.
+ *
+ * This is the route context WIRE SCHEMA, a public contract:
+ * JSON-shaped (strings, bools, lists, dicts), snake_case keys,
+ * identical in both languages, so a script in any evaluator's
+ * language (and any transport, in-process or remote) receives the
+ * same structure. Keys: line, commands (command/words/builtin/paths
+ * per stage), command, builtin, cwd, env, session_id, agent_id,
+ * mounts, plus runtime (name/captures) for per-runtime scripts.
+ * routeContextFromPayload is the inverse, so a payload can be stored
+ * as JSON and replayed.
+ */
+export function routeContextPayload(
+  ctx: RouteContext,
+  runtime?: Runtime,
+): Record<string, EvalValue> {
+  const payload: Record<string, EvalValue> = {
+    line: ctx.line,
+    commands: ctx.commands.map((c) => ({
+      command: c.command,
+      words: [...c.words],
+      builtin: c.builtin,
+      paths: [...c.paths],
+    })),
+    command: ctx.command,
+    builtin: ctx.builtin,
+    cwd: ctx.cwd,
+    env: { ...ctx.env },
+    session_id: ctx.sessionId,
+    agent_id: ctx.agentId,
+    mounts: [...ctx.mounts],
+  }
+  if (runtime !== undefined) {
+    payload.runtime = { name: runtime.name, captures: [...runtime.captures] }
+  }
+  return payload
+}
+
+/**
+ * Rebuild a context from its wire-schema payload: the inverse of
+ * routeContextPayload for the context's own fields (the payload's
+ * `runtime` block is per-consultation decoration and is ignored), so
+ * a stored JSON payload replays through scripts and routes in tests
+ * or debugging.
+ */
+export function routeContextFromPayload(payload: Record<string, unknown>): RouteContext {
+  const commands = (payload.commands as Record<string, unknown>[]).map((c) => ({
+    command: String(c.command),
+    words: (c.words as string[]).slice(),
+    builtin: Boolean(c.builtin),
+    paths: (c.paths as string[]).slice(),
+  }))
+  return {
+    line: String(payload.line),
+    commands,
+    command: String(payload.command),
+    builtin: Boolean(payload.builtin),
+    cwd: String(payload.cwd),
+    env: { ...(payload.env as Record<string, string>) },
+    sessionId: String(payload.session_id),
+    agentId: String(payload.agent_id),
+    mounts: (payload.mounts as string[]).slice(),
+  }
 }
 
 /**

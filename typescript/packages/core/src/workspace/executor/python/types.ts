@@ -12,20 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export interface PythonReplRunArgs {
-  code: string
-  sessionId: string
-}
-
-export type ReplStatus = 'complete' | 'incomplete' | 'exit'
-
-export interface PythonReplRunResult {
-  stdout: Uint8Array
-  /** Captured standard error, null when empty (mirrors RunResult). */
-  stderr: Uint8Array | null
-  exitCode: number
-  status: ReplStatus
-}
+// The repl types are gone: the console rides the general Evaluator
+// capability (eval with a session id), returning the shared
+// EvalResult from executor/runtime.ts.
 
 export class PyodideUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

@@ -485,17 +485,27 @@ export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
 export {
   bindCommands,
   runtimeBindingsFor,
+  isEvaluator,
   DEFAULT_ENTRIES,
   VfsRuntime,
   Runtime,
+  EvalError,
+  type Evaluator,
+  type EvalResult,
+  type EvalStatus,
+  type EvalValue,
   type RunArgs,
   type RunResult,
   type RuntimeEntry,
   type RuntimeOptions,
 } from './workspace/executor/runtime.ts'
+export { pythonEvalHarness, splitEnvelope } from './workspace/executor/envelope.ts'
 export {
   commandFacts,
   decideLine,
+  evaluatorOf,
+  routeContextFromPayload,
+  routeContextPayload,
   ScriptSource,
   RoutingDecisionError,
   type CommandFacts,

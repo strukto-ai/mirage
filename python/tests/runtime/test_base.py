@@ -16,7 +16,8 @@ import asyncio
 
 import pytest
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import (EvalError, EvalResult, EvaluatorMixin,
+                                 RunArgs, RunResult, Runtime)
 from mirage.runtime.config import RuntimeConfig
 
 
@@ -72,3 +73,38 @@ def test_script_stored():
 def test_unknown_config_key_fails_loud():
     with pytest.raises(TypeError):
         EchoRuntime(config={"no_such_knob": 1})
+
+
+def test_eval_result_defaults():
+    result = EvalResult()
+    assert result.value is None
+    assert result.stdout == b""
+    assert result.stderr is None
+    assert result.status == "complete"
+
+
+def test_eval_error_carries_the_syntax_bit():
+    assert EvalError("boom").syntax is False
+    assert EvalError("boom", syntax=True).syntax is True
+
+
+class PlainRuntime(Runtime):
+    name = "plain"
+
+    async def run(self, args: RunArgs) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class EvalingRuntime(Runtime, EvaluatorMixin):
+    name = "evaling"
+
+    async def run(self, args: RunArgs) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    async def eval(self, code, *, inputs=None, session=None) -> EvalResult:
+        return EvalResult(value=code)
+
+
+def test_evaluator_mixin_is_a_type_level_capability():
+    assert not isinstance(PlainRuntime(), EvaluatorMixin)
+    assert isinstance(EvalingRuntime(), EvaluatorMixin)

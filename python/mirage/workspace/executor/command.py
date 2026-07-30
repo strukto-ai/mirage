@@ -404,6 +404,7 @@ async def run_on_mount(
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
             runtime=line_runtime,
+            runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
             stat_overlay=stat_overlay,
         )
     except UsageError as exc:

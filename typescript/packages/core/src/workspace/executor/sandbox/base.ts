@@ -12,7 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Runtime, type RunArgs, type RunResult, type RuntimeOptions } from '../runtime.ts'
+import { pythonEvalHarness, splitEnvelope } from '../envelope.ts'
+import {
+  EvalError,
+  Runtime,
+  type EvalResult,
+  type Evaluator,
+  type EvalValue,
+  type RunArgs,
+  type RunResult,
+  type RuntimeOptions,
+} from '../runtime.ts'
 import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } from './config.ts'
 
 /**
@@ -31,7 +41,10 @@ import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } fr
  * (captures, config, script); config is how to reach the sandbox,
  * coerced against the provider's own key list.
  */
-export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig> extends Runtime {
+export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
+  extends Runtime
+  implements Evaluator
+{
   override readonly runsLines = true
   declare config: NormalizedSandboxConfig<C>
   // Connect-once latch: the first captured line connects; later lines
@@ -85,6 +98,37 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig> ext
     await this.connecting
     const merged = { ...this.config.env, ...env }
     return this.execLine(line, stdin, merged, cwd)
+  }
+
+  /**
+   * Evaluate python code in the sandbox via the result envelope.
+   *
+   * The code is wrapped in the envelope harness and piped to the
+   * sandbox's stock `python3 -`: inputs travel in as embedded JSON,
+   * the trailing expression's value comes home as JSON behind the
+   * envelope sentinel, and the program's own prints stay ordinary
+   * stdout. Requires python3 in the sandbox image. Sessions are
+   * unsupported: a sandbox exec is one process per run, so no state
+   * persists between calls.
+   */
+  async eval(
+    code: string,
+    opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
+  ): Promise<EvalResult> {
+    if (opts.session !== undefined) {
+      throw new EvalError(
+        `runtime '${this.name}' evaluates one-shot; ` +
+          `eval sessions are not supported in a sandbox`,
+      )
+    }
+    const harness = pythonEvalHarness(code, opts.inputs)
+    const result = await this.runLine('python3 -', new TextEncoder().encode(harness), {}, '/')
+    if (result.exitCode !== 0) {
+      const detail = result.stderr !== null ? new TextDecoder().decode(result.stderr).trim() : ''
+      throw new EvalError(detail !== '' ? detail : `evaluation exited ${String(result.exitCode)}`)
+    }
+    const [stdout, value] = splitEnvelope(result.stdout)
+    return { value, stdout, stderr: result.stderr, exitCode: 0, status: 'complete' }
   }
 
   /** Attach to the user's live sandbox, failing loud if absent. */

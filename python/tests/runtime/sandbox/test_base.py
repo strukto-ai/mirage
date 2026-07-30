@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import sys
 
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.cache.index.config import IndexEntry
 from mirage.io.types import materialize
-from mirage.runtime.base import RunArgs, RunResult
+from mirage.runtime.base import EvalError, EvaluatorMixin, RunArgs, RunResult
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.types import CommandSafeguard
 
@@ -188,3 +189,58 @@ async def test_remote_line_invalidates_local_read_caches():
         assert looked.entry is None
     finally:
         await ws.close()
+
+
+class PythonSandbox(RemoteSandbox):
+    """A sandbox whose python3 is the host interpreter, for eval tests."""
+
+    name = "pybox"
+
+    async def connect(self) -> None:
+        pass
+
+    async def exec_line(self, line: str, stdin: bytes | None,
+                        env: dict[str, str], cwd: str) -> RunResult:
+        assert line == "python3 -"
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await process.communicate(stdin)
+        return RunResult(stdout=stdout,
+                         stderr=stderr or None,
+                         exit_code=process.returncode or 0)
+
+
+@pytest.mark.asyncio
+async def test_eval_round_trips_value_and_stdout_through_the_envelope():
+    box = PythonSandbox()
+    result = await box.eval("print('inside'); ctx['n'] * 3",
+                            inputs={"ctx": {
+                                "n": 14
+                            }})
+    assert result.value == 42
+    assert result.stdout == b"inside\n"
+    assert result.status == "complete"
+
+
+@pytest.mark.asyncio
+async def test_eval_refuses_sessions():
+    box = PythonSandbox()
+    with pytest.raises(EvalError, match="one-shot"):
+        await box.eval("1", session="s1")
+
+
+@pytest.mark.asyncio
+async def test_eval_failure_carries_the_remote_traceback():
+    box = PythonSandbox()
+    with pytest.raises(EvalError, match="ZeroDivisionError"):
+        await box.eval("1 / 0")
+
+
+@pytest.mark.asyncio
+async def test_eval_sandboxes_are_evaluators():
+    assert isinstance(PythonSandbox(), EvaluatorMixin)
+    assert isinstance(RecordingSandbox(), EvaluatorMixin)
