@@ -30,25 +30,4 @@ export interface SandboxConfig {
 export type NormalizedSandboxConfig<C extends SandboxConfig = SandboxConfig> = C &
   Required<Pick<SandboxConfig, 'env'>>
 
-const BASE_CONFIG_KEYS: readonly string[] = ['env']
-
-/**
- * A constructor's config option as the provider's normalized config,
- * mirroring Python's SandboxConfig.coerce: keys outside the
- * provider's list fail loud (Python gets this from the dataclass
- * raising TypeError; a TS object spread would silently swallow a
- * typo key without it).
- */
-export function coerceConfig<C extends SandboxConfig>(
-  value: C | undefined,
-  keys: readonly string[] = BASE_CONFIG_KEYS,
-): NormalizedSandboxConfig<C> {
-  const config = value ?? ({} as C)
-  for (const key of Object.keys(config)) {
-    if (!keys.includes(key)) {
-      const known = keys.map((k) => `'${k}'`).join(', ')
-      throw new Error(`unknown sandbox config key '${key}' (expected: ${known})`)
-    }
-  }
-  return { ...config, env: { ...config.env } }
-}
+export const BASE_CONFIG_KEYS: readonly string[] = ['env']

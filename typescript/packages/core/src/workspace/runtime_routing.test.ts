@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { VfsRuntime, type RunArgs, type Runtime, type RunResult } from './executor/runtime.ts'
-import { ScriptSource, type RouteScript } from './executor/route/index.ts'
+import { Runtime, VfsRuntime, type RunArgs, type RunResult } from './executor/runtime.ts'
+import { ScriptSource } from './executor/route/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -23,12 +23,9 @@ import { Workspace } from './workspace.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-class NamedFakeRuntime implements Runtime {
-  readonly captures = ['python3', 'python']
-  script?: RouteScript
-  constructor(readonly name: string) {}
-  attach(): void {
-    // wiring is a no-op for the fake
+class NamedFakeRuntime extends Runtime {
+  constructor(readonly name: string) {
+    super({ captures: ['python3', 'python'] })
   }
   run(_args: RunArgs): Promise<RunResult> {
     return Promise.resolve({
@@ -36,9 +33,6 @@ class NamedFakeRuntime implements Runtime {
       stderr: new Uint8Array(),
       exitCode: 0,
     })
-  }
-  close(): Promise<void> {
-    return Promise.resolve()
   }
 }
 
@@ -165,7 +159,7 @@ describe('routing ladder', () => {
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new VfsRuntime((ctx) => !ctx.line.includes('/secret'))],
+        runtimes: [new VfsRuntime({ script: (ctx) => !ctx.line.includes('/secret') })],
       },
     )
     try {
@@ -344,19 +338,21 @@ describe('script context', () => {
   })
 })
 
-class LineBox implements Runtime {
+class LineBox extends Runtime {
   readonly name = 'sandbox'
-  captures: readonly string[] = ['nvidia-smi']
-  readonly runsLines = true
-  script?: RouteScript
+  declare captures: readonly string[]
+  override readonly runsLines = true
   lines: [string, Uint8Array | null, string][] = []
-  attach(): void {
-    // wiring is a no-op for the fake
+
+  constructor() {
+    super({ captures: ['nvidia-smi'] })
   }
+
   run(_args: RunArgs): Promise<RunResult> {
     return Promise.reject(new Error('runLine runtimes never get single stages'))
   }
-  runLine(
+
+  override runLine(
     line: string,
     stdin: Uint8Array | null,
     _env: Record<string, string>,
@@ -364,9 +360,6 @@ class LineBox implements Runtime {
   ): Promise<RunResult> {
     this.lines.push([line, stdin, cwd])
     return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
-  }
-  close(): Promise<void> {
-    return Promise.resolve()
   }
 }
 

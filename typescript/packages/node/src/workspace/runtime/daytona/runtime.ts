@@ -16,7 +16,7 @@ import {
   loadOptionalPeer,
   registerRuntime,
   RemoteSandbox,
-  type RemoteSandboxOptions,
+  type RuntimeOptions,
   type RunResult,
   stdinPath,
   stdinRedirect,
@@ -28,8 +28,6 @@ import type * as daytonaSdk from '@daytonaio/sdk'
 export type DaytonaSdk = typeof daytonaSdk
 
 const ENC = new TextEncoder()
-
-export const DAYTONA_OPTION_KEYS: readonly string[] = ['captures', 'config', 'script']
 
 /**
  * A Daytona sandbox the user runs as a whole-line runtime.
@@ -46,7 +44,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: RemoteSandboxOptions<DaytonaConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<DaytonaConfig> | Record<string, unknown> = {}) {
     super(options, DAYTONA_CONFIG_KEYS)
     if (!this.config.sandboxId) {
       throw new Error('daytona config needs sandboxId: the id of a live sandbox you created')
@@ -110,4 +108,4 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   }
 }
 
-registerRuntime('daytona', DaytonaRuntime, DAYTONA_OPTION_KEYS)
+registerRuntime('daytona', DaytonaRuntime)

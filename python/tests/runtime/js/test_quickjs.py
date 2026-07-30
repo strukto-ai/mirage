@@ -45,7 +45,7 @@ def test_missing_home_raises_hint(monkeypatch):
 
 def test_dir_without_wasm_raises_hint(tmp_path):
     with pytest.raises(FileNotFoundError, match="no qjs-wasi.wasm"):
-        QuickJsRuntime(home=str(tmp_path))
+        QuickJsRuntime(config={"home": str(tmp_path)})
 
 
 @live

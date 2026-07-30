@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PYTHON_ONLY_HINTS, VfsRuntime, type Runtime } from './runtime.ts'
+import { PYTHON_ONLY_HINTS, VfsRuntime, type Runtime, type RuntimeOptions } from './runtime.ts'
 import { MontyRuntime } from './python/runtimes/monty.ts'
 import { PyodideRuntime } from './python/runtimes/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
@@ -21,7 +21,7 @@ import { QuickJsRuntime } from './js/quickjs.ts'
 // is derived from each class's captures, never hand-maintained.
 export const RUNTIMES = [PyodideRuntime, MontyRuntime, QuickJsRuntime] as const
 
-const NAMED: Record<string, new (options?: Record<string, unknown>) => Runtime> = {
+const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = {
   pyodide: PyodideRuntime,
   monty: MontyRuntime,
   quickjs: QuickJsRuntime,
@@ -33,36 +33,24 @@ export function candidates(command: string): (typeof RUNTIMES)[number][] {
   return RUNTIMES.filter((cls) => cls.commands.includes(command))
 }
 
-// Constructor option keys per runtime name. Python gets this check
-// for free (`**options` raises TypeError on an unknown kwarg); a TS
-// object literal would silently swallow a typo key without it.
-const OPTION_KEYS: Record<string, readonly string[]> = {
-  pyodide: [
-    'workspaceBridge',
-    'listMounts',
-    'autoLoadFromImports',
-    'bootstrapCode',
-    'denyPackages',
-    'home',
-  ],
-  monty: ['workspaceBridge', 'listMounts'],
-  quickjs: ['workspaceBridge', 'listMounts'],
-  vfs: ['script', 'captures'],
-}
+// Every runtime is constructed the same way; config keys are checked
+// inside each class (its config key list), so the entry level only
+// knows the uniform options. Python gets this check for free
+// (`**options` raises TypeError on an unknown kwarg); a TS object
+// literal would silently swallow a typo key without it.
+const ENTRY_KEYS: readonly string[] = ['captures', 'config', 'script']
 
 /**
- * Register a runtime class under a config name, with its allowed
- * constructor option keys. Runtime packages extend the table with
- * their own runtimes (e.g. `daytona` from `@struktoai/mirage-node`),
- * mirroring Python's NAMED dict; existing entries are overwritten.
+ * Register a runtime class under a config name. Runtime packages
+ * extend the table with their own runtimes (e.g. `daytona` from
+ * `@struktoai/mirage-node`), mirroring Python's NAMED dict; existing
+ * entries are overwritten.
  */
 export function registerRuntime(
   name: string,
-  cls: new (options?: Record<string, unknown>) => Runtime,
-  optionKeys: readonly string[],
+  cls: new (options?: RuntimeOptions<never>) => Runtime,
 ): void {
   NAMED[name] = cls
-  OPTION_KEYS[name] = optionKeys
 }
 
 /**
@@ -79,12 +67,11 @@ export function buildRuntime(name: string, options: Record<string, unknown> = {}
       .join(', ')
     throw new Error(`unknown runtime: '${name}' (expected one of ${known})`)
   }
-  const allowed = OPTION_KEYS[name] ?? []
   for (const key of Object.keys(options)) {
-    if (!allowed.includes(key)) {
-      const knownKeys = allowed.map((k) => `'${k}'`).join(', ')
+    if (!ENTRY_KEYS.includes(key)) {
+      const knownKeys = ENTRY_KEYS.map((k) => `'${k}'`).join(', ')
       throw new Error(`unknown ${name} runtime option '${key}' (expected: ${knownKeys})`)
     }
   }
-  return new cls(options)
+  return new cls(options as RuntimeOptions<never>)
 }

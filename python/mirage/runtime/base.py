@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
+
+from mirage.runtime.config import RuntimeConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +100,35 @@ class Runtime(ABC):
     # run_line. Interpreter runtimes leave it False: they are the
     # engine inside one command (python3, node), never the line.
     runs_lines: bool = False
+    # Each runtime's config class; coerce() makes unknown fields fail
+    # loud, so runtimes need no per-field rejection code.
+    config_cls: ClassVar[type[RuntimeConfig]] = RuntimeConfig
+    config: RuntimeConfig = RuntimeConfig()
+
+    def __init__(
+            self,
+            captures: Sequence[str] | None = None,
+            config: RuntimeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
+        """Every runtime is constructed the same way.
+
+        Args:
+            captures (Sequence[str] | None): commands this runtime
+                claims, overriding the class default; ("*",) claims
+                every line for a runs_lines runtime. None keeps the
+                default.
+            config (RuntimeConfig | dict[str, Any] | None): the
+                runtime's implementation knobs, coerced through its
+                own config class (config_cls), so a field the runtime
+                does not have fails loud; the dict form is a yaml
+                entry's ``config`` block.
+            script (Callable | ScriptSource | None): per-line
+                admission script for the routing ladder.
+        """
+        if captures is not None:
+            self.captures = tuple(captures)
+        self.config = self.config_cls.coerce(config)
+        self.script = script
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:

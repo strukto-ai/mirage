@@ -16,7 +16,7 @@ import {
   loadOptionalPeer,
   registerRuntime,
   RemoteSandbox,
-  type RemoteSandboxOptions,
+  type RuntimeOptions,
   type RunResult,
   stdinPath,
   stdinRedirect,
@@ -28,8 +28,6 @@ import type * as e2bSdk from 'e2b'
 export type E2bSdk = typeof e2bSdk
 
 const ENC = new TextEncoder()
-
-export const E2B_OPTION_KEYS: readonly string[] = ['captures', 'config', 'script']
 
 /**
  * An E2B sandbox the user runs as a whole-line runtime.
@@ -45,7 +43,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: RemoteSandboxOptions<E2BConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<E2BConfig> | Record<string, unknown> = {}) {
     super(options, E2B_CONFIG_KEYS)
     if (!this.config.sandboxId) {
       throw new Error('e2b config needs sandboxId: the id of a live sandbox you created')
@@ -111,4 +109,4 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
   }
 }
 
-registerRuntime('e2b', E2BRuntime, E2B_OPTION_KEYS)
+registerRuntime('e2b', E2BRuntime)

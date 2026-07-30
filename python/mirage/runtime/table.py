@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 
 from mirage.runtime.base import Runtime, ScriptSource
+from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
@@ -42,28 +43,25 @@ class VfsRuntime(Runtime):
     workspace executor itself, wired in at construction; run() stays
     unimplemented because vfs has no single-command interpreter.
 
-    Args:
-        script (Callable | ScriptSource | None): per-line admission
-            script, the same contract as any runtime's script.
-        captures (Sequence[str] | None): restrict the workspace to
-            exactly these commands, the same field every runtime uses.
-            An empty sequence serves nothing (full lockdown). None
-            (the default) keeps the catch-all behavior.
+    Constructed like every runtime (captures, config, script), with
+    two vfs readings: captures None (the default) keeps the catch-all
+    behavior, an empty sequence serves nothing (full lockdown); and
+    the config has no fields today, the slot exists for uniformity.
     """
 
     name = "vfs"
     captures: tuple[str, ...] = ()
     runs_lines = True
 
-    def __init__(self,
-                 script: Callable[..., Any] | ScriptSource | None = None,
-                 captures: Sequence[str] | None = None) -> None:
-        self.script = script
+    def __init__(
+            self,
+            captures: Sequence[str] | None = None,
+            config: RuntimeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
         # Declaring captures (even empty) turns the catch-all off; the
         # dispatcher reads this bit, not the tuple's length.
         self.restricted = captures is not None
-        if captures is not None:
-            self.captures = tuple(captures)
+        super().__init__(captures, config, script)
         self._execute_line: Callable[..., Any] | None = None
 
     def bind_line_executor(self, execute: Callable[..., Any]) -> None:

@@ -108,7 +108,8 @@ def test_monty_host_filesystem_invisible():
 
 def test_monty_reads_virtual_file_via_dispatch():
     dispatch = FakeDispatch({"/s3/a.txt": b"virtual"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(RunArgs(code="print(open('/s3/a.txt').read().upper())")))
     assert result.exit_code == 0
@@ -117,7 +118,8 @@ def test_monty_reads_virtual_file_via_dispatch():
 
 def test_monty_missing_virtual_file():
     dispatch = FakeDispatch({})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(runtime.run(RunArgs(code="open('/s3/missing.txt')")))
     assert result.exit_code == 1
     assert b"FileNotFoundError" in result.stderr
@@ -125,7 +127,8 @@ def test_monty_missing_virtual_file():
 
 def test_monty_write_flushes_through_dispatch():
     dispatch = FakeDispatch({"/s3/seed.txt": b"x"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="from pathlib import Path\n"
@@ -137,7 +140,8 @@ def test_monty_write_flushes_through_dispatch():
 
 def test_monty_append_flushes_full_content():
     dispatch = FakeDispatch({"/s3/log.txt": b"a"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="with open('/s3/log.txt', 'a') as f:\n"
@@ -148,7 +152,8 @@ def test_monty_append_flushes_full_content():
 
 def test_monty_iterdir_lists_virtual_dir():
     dispatch = FakeDispatch({"/s3/a.txt": b"1", "/s3/b.txt": b"2"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="from pathlib import Path\n"
@@ -160,7 +165,8 @@ def test_monty_iterdir_lists_virtual_dir():
 
 def test_monty_unlink_routes_to_dispatch():
     dispatch = FakeDispatch({"/s3/a.txt": b"1"})
-    runtime = MontyRuntime(dispatch)
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
             RunArgs(code="from pathlib import Path\n"

@@ -17,9 +17,9 @@ import {
   bindCommands,
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
+  Runtime,
   VfsRuntime,
   type RunArgs,
-  type Runtime,
   type RunResult,
 } from './runtime.ts'
 import { buildRuntime, candidates } from './runtime_table.ts'
@@ -27,17 +27,15 @@ import { MontyRuntime } from './python/runtimes/monty.ts'
 import { PyodideRuntime } from './python/runtimes/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
 
-class FakeRuntime implements Runtime {
+class FakeRuntime extends Runtime {
   readonly name = 'fake'
-  readonly captures = ['python3', 'made-up']
-  attach(): void {
-    // wiring is a no-op for the fake
+
+  constructor() {
+    super({ captures: ['python3', 'made-up'] })
   }
+
   run(_args: RunArgs): Promise<RunResult> {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 })
-  }
-  close(): Promise<void> {
-    return Promise.resolve()
   }
 }
 
@@ -99,8 +97,19 @@ describe('buildRuntime option validation', () => {
     )
   })
 
-  it('accepts declared option keys', () => {
-    expect(() => buildRuntime('pyodide', { home: '/assets/pyodide' })).not.toThrow()
+  it('every runtime takes the uniform entry keys', () => {
+    expect(() => buildRuntime('pyodide', { config: { home: '/assets/pyodide' } })).not.toThrow()
+    expect(() => buildRuntime('quickjs', { config: { home: '/x' } })).not.toThrow()
+    expect([...buildRuntime('monty', { captures: ['python3'] }).captures]).toEqual(['python3'])
+  })
+
+  it('unknown config keys fail loud inside the runtime', () => {
+    expect(() => buildRuntime('pyodide', { config: { homee: '/typo' } })).toThrow(
+      /unknown runtime config key 'homee'/,
+    )
+    expect(() => buildRuntime('monty', { config: { home: '/x' } })).toThrow(
+      /unknown runtime config key 'home'/,
+    )
   })
 })
 

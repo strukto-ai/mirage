@@ -302,12 +302,11 @@ def _build_runtime_entries(
 
     Args:
         entries (list[str | dict[str, Any]]): name strings, or maps
-            carrying a name plus a ``script`` and constructor options
-            flat on the entry.
+            carrying a name plus the uniform runtime options
+            (``captures``, ``config``, ``script``).
 
     Raises:
-        ValueError: a map entry without a name, or non-script options
-            on vfs.
+        ValueError: a map entry without a name, or a non-path script.
     """
     out: list[Runtime | str] = []
     for entry in entries:
@@ -322,10 +321,9 @@ def _build_runtime_entries(
         if script is not None and not isinstance(script, str):
             raise ValueError(
                 "a runtime entry script must be a .py path string")
-        built = build_runtime(name, **options)
         if script is not None:
-            built.script = _load_script_source(script)
-        out.append(built)
+            options["script"] = _load_script_source(script)
+        out.append(build_runtime(name, **options))
     return out
 
 
@@ -334,8 +332,8 @@ class WorkspaceConfig(BaseModel):
 
     mounts: dict[str, MountBlock]
     # The workspace's ordered runtime world: name strings or maps
-    # with a name plus constructor options flat on the entry
-    # ({name: wasi, home: /opt/...}). Unset = the default world.
+    # with a name plus the uniform runtime options ({name: wasi,
+    # config: {home: /opt/...}}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
     # Global route script: a .py path whose content is embedded at
     # load. Its last expression names the runtime for the line, or

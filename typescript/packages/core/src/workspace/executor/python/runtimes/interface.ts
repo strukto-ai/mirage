@@ -12,23 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { BridgeDispatchFn } from '../mirage_bridge.ts'
 import type { Runtime } from '../../runtime.ts'
 import type { PythonReplRunArgs, PythonReplRunResult } from '../types.ts'
 
 export const PYODIDE_RUNTIME = 'pyodide'
 export const MONTY_RUNTIME = 'monty'
-
-/**
- * Options every Python runtime understands. `workspaceBridge` routes the
- * sandbox's file I/O through the workspace dispatch; `listMounts` is the
- * live view of workspace mount prefixes the runtime may service. Concrete
- * runtimes extend this with implementation-specific knobs.
- */
-export interface PythonRuntimeOptions {
-  workspaceBridge?: BridgeDispatchFn
-  listMounts?: () => string[]
-}
 
 /**
  * A Python interpreter the workspace can execute `python3` code on.

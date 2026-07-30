@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RunArgs, RunResult } from '../../runtime.ts'
+import { Runtime, type RunArgs, type RunResult, type RuntimeOptions } from '../../runtime.ts'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
 import {
   createMirageBridge,
@@ -22,7 +22,7 @@ import {
 } from '../mirage_bridge.ts'
 import { MIRAGE_FS_SHIM_PY } from '../mirage_fs_shim.ts'
 import { PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from '../wrapper.ts'
-import { PYODIDE_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
+import { PYODIDE_RUNTIME, type PythonRuntime } from './interface.ts'
 import type { PythonReplRunArgs, PythonReplRunResult, ReplStatus } from '../types.ts'
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
@@ -69,43 +69,49 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
   )
 }
 
-export interface PyodideRuntimeOptions extends PythonRuntimeOptions {
+/** The pyodide runtime's implementation knobs (its `config` block). */
+export interface PyodideConfig {
   autoLoadFromImports?: boolean
   bootstrapCode?: string
   denyPackages?: readonly string[]
-  // Where the pyodide distribution loads from (the yaml
-  // `runtime: pyodide: home:` entry ends up here); falls back to
+  // Where the pyodide distribution loads from; falls back to
   // MIRAGE_PYODIDE_HOME, then the installed package in Node or the
   // pinned CDN in the browser. Override for self-hosted assets.
   home?: string
 }
 
-export class PyodideRuntime implements PythonRuntime {
+const PYODIDE_CONFIG_KEYS: readonly string[] = [
+  'autoLoadFromImports',
+  'bootstrapCode',
+  'denyPackages',
+  'home',
+]
+
+export class PyodideRuntime extends Runtime implements PythonRuntime {
   readonly name = PYODIDE_RUNTIME
   static readonly commands: readonly string[] = ['python3', 'python'] as const
-  readonly captures = PyodideRuntime.commands
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
   private bootstrapPromise: Promise<void> | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private readonly autoLoadFromImports: boolean
   private readonly bootstrapCode: string | null
-  private workspaceBridge: BridgeDispatchFn | null
+  private workspaceBridge: BridgeDispatchFn | null = null
   private readonly denyPackages: ReadonlySet<string>
-  private listMounts: () => string[]
+  private listMounts: () => string[] = () => []
   private readonly home: string | null
   private bridge: MirageBridge | null = null
 
-  constructor(options: PyodideRuntimeOptions = {}) {
-    this.autoLoadFromImports = options.autoLoadFromImports ?? true
-    this.bootstrapCode = options.bootstrapCode ?? null
-    this.workspaceBridge = options.workspaceBridge ?? null
-    this.denyPackages = new Set(options.denyPackages ?? [])
-    this.listMounts = options.listMounts ?? ((): string[] => [])
-    this.home = options.home ?? null
+  constructor(options: RuntimeOptions<PyodideConfig> = {}) {
+    super(options, PyodideRuntime.commands, PYODIDE_CONFIG_KEYS)
+    const config = this.config as PyodideConfig
+    this.autoLoadFromImports = config.autoLoadFromImports ?? true
+    this.bootstrapCode = config.bootstrapCode ?? null
+    this.denyPackages = new Set(config.denyPackages ?? [])
+    this.home = config.home ?? null
   }
 
-  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+  override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
       this.listMounts = listMounts
@@ -126,7 +132,7 @@ export class PyodideRuntime implements PythonRuntime {
     return next
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     try {
       await this.queue
     } catch {

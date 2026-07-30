@@ -15,10 +15,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Any, Callable
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import RunArgs, RunResult, Runtime, ScriptSource
+from mirage.runtime.config import RuntimeConfig
 from mirage.types import PathSpec
 
 pydantic_monty: Any
@@ -246,12 +248,17 @@ class MontyRuntime(Runtime):
     name = "monty"
     captures = ("python3", "python")
 
-    def __init__(self, dispatch: Callable[..., Any] | None = None) -> None:
+    def __init__(
+            self,
+            captures: Sequence[str] | None = None,
+            config: RuntimeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
         if pydantic_monty is None:
             raise ImportError(
                 "the monty runtime requires the 'monty' extra. Install with: "
                 "pip install mirage-ai[monty], or select the 'local' runtime")
-        self._workspace_dispatch = dispatch
+        super().__init__(captures, config, script)
+        self._workspace_dispatch: Callable[..., Any] | None = None
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:

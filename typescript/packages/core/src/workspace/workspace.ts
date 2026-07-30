@@ -339,7 +339,9 @@ export class Workspace {
     this.runtimeEntries = []
     if (options.runtimes === undefined) {
       for (const name of DEFAULT_ENTRIES) {
-        this.runtimeEntries.push(buildRuntime(name, name === 'pyodide' ? { ...userPython } : {}))
+        this.runtimeEntries.push(
+          buildRuntime(name, name === 'pyodide' ? { config: { ...userPython } } : {}),
+        )
       }
     } else {
       for (const entry of options.runtimes) {
@@ -491,7 +493,7 @@ export class Workspace {
     decision: RoutingDecision | null,
   ): Runtime | null {
     const candidates = this.runtimeEntries.some(
-      (entry) => entry.runsLines === true && !(entry instanceof VfsRuntime),
+      (entry) => entry.runsLines && !(entry instanceof VfsRuntime),
     )
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =

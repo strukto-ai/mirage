@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RunArgs, RunResult } from '../../runtime.ts'
+import { Runtime, type RunArgs, type RunResult, type RuntimeOptions } from '../../runtime.ts'
 import type { BridgeDispatchFn } from '../mirage_bridge.ts'
-import { MONTY_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
+import { MONTY_RUNTIME, type PythonRuntime } from './interface.ts'
 import type { PythonReplRunArgs, PythonReplRunResult } from '../types.ts'
 
 export class MontyUnavailableError extends Error {
@@ -58,8 +58,6 @@ function displayError(err: unknown): string {
   return e instanceof Error ? e.message : String(err)
 }
 
-export type MontyRuntimeOptions = PythonRuntimeOptions
-
 /**
  * Run Python code on the Monty sandboxed interpreter (`@pydantic/monty`).
  *
@@ -73,23 +71,21 @@ export type MontyRuntimeOptions = PythonRuntimeOptions
  * bridgeable yet (the JS binding cannot return a file handle from an
  * `os` callback) — use `pathlib` for file I/O, or the pyodide runtime.
  */
-export class MontyRuntime implements PythonRuntime {
+export class MontyRuntime extends Runtime implements PythonRuntime {
   readonly name = MONTY_RUNTIME
   static readonly commands: readonly string[] = ['python3', 'python'] as const
-  readonly captures = MontyRuntime.commands
-  private workspaceBridge: BridgeDispatchFn | null
-  private listMounts: () => string[]
+  private workspaceBridge: BridgeDispatchFn | null = null
+  private listMounts: () => string[] = () => []
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
   private poolPromise: Promise<MontyPoolLike> | null = null
   private readonly replSessions = new Map<string, MontySessionLike>()
 
-  constructor(options: MontyRuntimeOptions = {}) {
-    this.workspaceBridge = options.workspaceBridge ?? null
-    this.listMounts = options.listMounts ?? ((): string[] => [])
+  constructor(options: RuntimeOptions = {}) {
+    super(options, MontyRuntime.commands, [])
   }
 
-  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+  override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
       this.listMounts = listMounts
@@ -134,7 +130,7 @@ export class MontyRuntime implements PythonRuntime {
     return { ...result, status: 'complete' }
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     for (const session of this.replSessions.values()) {
       await session.close()
     }

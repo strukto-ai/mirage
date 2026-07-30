@@ -82,7 +82,7 @@ export class ScriptSource {
  * ScriptSource (its last expression is the verdict).
  *
  * ```
- * new VfsRuntime((ctx) => ctx.builtin && !ctx.line.includes('/secret'))
+ * new VfsRuntime({ script: (ctx) => ctx.builtin && !ctx.line.includes('/secret') })
  *
  * // workspace yaml: guard.py next to the config file
  * // runtimes:

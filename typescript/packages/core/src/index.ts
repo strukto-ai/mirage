@@ -479,10 +479,11 @@ export {
   runtimeBindingsFor,
   DEFAULT_ENTRIES,
   VfsRuntime,
+  Runtime,
   type RunArgs,
   type RunResult,
-  type Runtime,
   type RuntimeEntry,
+  type RuntimeOptions,
 } from './workspace/executor/runtime.ts'
 export {
   commandFacts,
@@ -501,9 +502,8 @@ export {
   registerRuntime,
   RUNTIMES,
 } from './workspace/executor/runtime_table.ts'
-export { RemoteSandbox, type RemoteSandboxOptions } from './workspace/executor/sandbox/base.ts'
+export { RemoteSandbox } from './workspace/executor/sandbox/base.ts'
 export {
-  coerceConfig,
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './workspace/executor/sandbox/config.ts'

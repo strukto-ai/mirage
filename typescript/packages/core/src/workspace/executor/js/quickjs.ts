@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RunArgs, RunResult } from '../runtime.ts'
+import { Runtime, type RunArgs, type RunResult, type RuntimeOptions } from '../runtime.ts'
 import {
   createMirageBridge,
   type BridgeDispatchFn,
   type MirageBridge,
 } from '../python/mirage_bridge.ts'
-import { QUICKJS_RUNTIME, type JsRuntime, type JsRuntimeOptions } from './interface.ts'
+import { QUICKJS_RUNTIME } from './interface.ts'
 import { installMirageFs, MIRAGE_FS_BOOTSTRAP } from './mirage_fs.ts'
 import { QuickJsUnavailableError } from './types.ts'
 import type {
@@ -62,26 +62,26 @@ globalThis.std = {
 };
 `
 
-// quickjs-emscripten bundles its own wasm, so the `home` option the
-// config accepts (for parity with the Python quickjs runtime, which
-// locates qjs-wasi.wasm) has nothing to locate here and is ignored. The
-// asyncify variant is used so `std.open`/`os.readdir` can suspend the
-// guest while a workspace-mount read or write awaits the dispatch,
+// quickjs-emscripten bundles its own wasm, so the `home` config key
+// (for parity with the Python quickjs runtime, which locates
+// qjs-wasi.wasm) has nothing to locate here and is ignored.
+const QUICKJS_CONFIG_KEYS: readonly string[] = ['home']
+
+// The asyncify variant is used so `std.open`/`os.readdir` can suspend
+// the guest while a workspace-mount read or write awaits the dispatch,
 // matching the Python runtime's live file I/O.
-export class QuickJsRuntime implements JsRuntime {
+export class QuickJsRuntime extends Runtime {
   readonly name = QUICKJS_RUNTIME
   static readonly commands: readonly string[] = ['node', 'js'] as const
-  readonly captures = QuickJsRuntime.commands
   private newAsyncModule: NewAsyncModule | null = null
-  private workspaceBridge: BridgeDispatchFn | null
-  private listMounts: () => string[]
+  private workspaceBridge: BridgeDispatchFn | null = null
+  private listMounts: () => string[] = () => []
 
-  constructor(options: JsRuntimeOptions = {}) {
-    this.workspaceBridge = options.workspaceBridge ?? null
-    this.listMounts = options.listMounts ?? ((): string[] => [])
+  constructor(options: RuntimeOptions = {}) {
+    super(options, QuickJsRuntime.commands, QUICKJS_CONFIG_KEYS)
   }
 
-  attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+  override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
       this.listMounts = listMounts
@@ -145,7 +145,7 @@ export class QuickJsRuntime implements JsRuntime {
     }
   }
 
-  close(): Promise<void> {
+  override close(): Promise<void> {
     // Each run disposes its own runtime/context; nothing persists.
     return Promise.resolve()
   }

@@ -120,6 +120,11 @@ async def resolve_source(
                         script_path=script_path)
 
 
+def _no_mount_prefixes() -> list[str]:
+    """Mount-prefix view for a fallback runtime: no scoping."""
+    return []
+
+
 async def run_code(
     label: str,
     prepared: Source,
@@ -141,9 +146,9 @@ async def run_code(
         runtime (Runtime | None): the workspace-bound runtime for this
             command; None when the workspace default could not build.
         fallback (Callable[..., Runtime]): runtime factory invoked
-            with a dispatch keyword per
-            invocation when unbound, preserving the install-hint
-            behavior.
+            bare per invocation when unbound, preserving the
+            install-hint behavior; workspace dispatch is attached
+            after construction like any runtime.
         fallback_errors (tuple[type[Exception], ...]): construction
             errors the fallback reports as exit 127 hints.
         dispatch (Callable[..., Any] | None): workspace dispatch the
@@ -151,10 +156,12 @@ async def run_code(
     """
     if runtime is None:
         try:
-            runtime = fallback(dispatch=dispatch)
+            runtime = fallback()
         except fallback_errors as exc:
             return None, IOResult(exit_code=127,
                                   stderr=f"{label}: {exc}\n".encode())
+        if dispatch is not None:
+            runtime.attach(dispatch, _no_mount_prefixes)
     result = await runtime.run(
         RunArgs(code=prepared.code,
                 args=prepared.args,

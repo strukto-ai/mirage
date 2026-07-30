@@ -14,10 +14,12 @@
 
 import asyncio
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.base import RunArgs, RunResult, Runtime, ScriptSource
+from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 wasmtime: Any
@@ -34,8 +36,8 @@ _BUILD_HINT = (
     "the wasi runtime needs a CPython WASI build directory (python.wasm "
     "plus lib/): download one from "
     "https://github.com/brettcannon/cpython-wasi-build/releases, unzip it, "
-    "and point the yaml `runtimes: [{name: wasi, home: ...}]` entry, the "
-    f"runtime entry's `home` option, or the {WASI_HOME_ENV} environment "
+    "and point the runtime entry's config `home` (yaml `runtimes: [{name: "
+    f"wasi, config: {{home: ...}}}}]`) or the {WASI_HOME_ENV} environment "
     "variable at the directory")
 
 
@@ -57,35 +59,29 @@ class WasiRuntime(Runtime):
     bumps the epoch, which traps the run and reclaims the thread, so a
     safeguard timeout stops the interpreter instead of leaking it.
 
-    The build directory comes from the `home` argument (the yaml
-    `runtimes:` entry `home` option ends up here) or the MIRAGE_WASI_HOME
-    environment variable. It is read-only inside the sandbox; guest
-    writes land in the workspace or answer EACCES, never in the bundle.
-
-    Args:
-        home (str | None): path to the unzipped CPython WASI build
-            directory. None reads MIRAGE_WASI_HOME.
-        dispatch (Callable | None): workspace dispatch the guest's file
-            I/O bridges through; None leaves mounts invisible.
-        mount_prefixes (Callable[[], list[str]] | None): live list of
-            workspace mount prefixes, read per run (mounts can come
-            and go).
+    The build directory comes from the config `home` (the yaml entry's
+    ``config`` block ends up here) or the MIRAGE_WASI_HOME environment
+    variable. It is read-only inside the sandbox; guest writes land in
+    the workspace or answer EACCES, never in the bundle.
     """
 
     name = "wasi"
     captures = ("python3", "python")
 
+    config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
+    config: HomeConfig
+
     def __init__(
-        self,
-        home: str | None = None,
-        dispatch: Callable[..., Any] | None = None,
-        mount_prefixes: Callable[[], list[str]] | None = None,
-    ) -> None:
+            self,
+            captures: Sequence[str] | None = None,
+            config: HomeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the wasi runtime requires the 'wasi' extra. Install with: "
                 "pip install mirage-ai[wasi], or select another runtime")
-        root = home or os.environ.get(WASI_HOME_ENV)
+        super().__init__(captures, config, script)
+        root = self.config.home or os.environ.get(WASI_HOME_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
         self._root = Path(root)
@@ -97,8 +93,8 @@ class WasiRuntime(Runtime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}")
         self._pythonhome = f"/lib/{stdlibs[-1].name}"
-        self._dispatch = dispatch
-        self._mount_prefixes = mount_prefixes
+        self._dispatch: Callable[..., Any] | None = None
+        self._mount_prefixes: Callable[[], list[str]] | None = None
         self._runtime = WasmRuntime(self._root / "python.wasm", "python3")
 
     def attach(self, dispatch: Callable[..., Any],

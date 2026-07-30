@@ -100,7 +100,7 @@ unzip a release from
 pip install mirage-ai[wasi]
 ```
 
-Point mirage at the build directory with the `home` option on the
+Point mirage at the build directory with the config `home` on the
 runtime entry (or the MIRAGE_WASI_HOME environment variable):
 
 ```python
@@ -108,13 +108,14 @@ from mirage.runtime.python import WasiRuntime
 
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
-               runtimes=[WasiRuntime(home="/path/to/unzipped/build"), "vfs"])
+               runtimes=[WasiRuntime(config={"home": "/path/to/unzipped/build"}), "vfs"])
 ```
 
 ```yaml
 runtimes:
   - name: wasi
-    home: /path/to/unzipped/build
+    config:
+      home: /path/to/unzipped/build
   - vfs
 ```
 
@@ -136,14 +137,16 @@ ws = Workspace({"/data": RAMResource()},
                runtimes=["local", "vfs"])
 ```
 
-It defaults to the interpreter running mirage; point the `home` option
-on the runtime entry (or the MIRAGE_LOCAL_HOME environment variable)
-at another binary, e.g. a project venv whose packages the code needs:
+It defaults to the interpreter running mirage; point the config
+`home` on the runtime entry (or the MIRAGE_LOCAL_HOME environment
+variable) at another binary, e.g. a project venv whose packages the
+code needs:
 
 ```yaml
 runtimes:
   - name: local
-    home: /path/to/venv/bin/python
+    config:
+      home: /path/to/venv/bin/python
   - vfs
 ```
 
@@ -153,15 +156,16 @@ host filesystem.
 ## Selecting in YAML
 
 Workspace config files take a top-level `runtimes` list: the ordered
-world of runtimes, each entry a name or a mapping with the name plus
-constructor options flat on the entry. The first entry that captures a
-command binds it; `vfs` is the in-process catch-all:
+world of runtimes, each entry a name or a mapping with the uniform
+runtime options (`captures`, `config`, `script`). The first entry that
+captures a command binds it; `vfs` is the in-process catch-all:
 
 ```yaml
 runtimes:
   - monty         # or: wasi, local
-  - name: wasi    # options live flat on the entry
-    home: /opt/cpython-wasi
+  - name: wasi    # knobs live in the entry's config block
+    config:
+      home: /opt/cpython-wasi
   - vfs
 
 mounts:

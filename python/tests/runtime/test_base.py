@@ -14,7 +14,10 @@
 
 import asyncio
 
+import pytest
+
 from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.config import RuntimeConfig
 
 
 class EchoRuntime(Runtime):
@@ -43,3 +46,29 @@ def test_attach_defaults_to_noop():
 
 def test_close_defaults_to_noop():
     asyncio.run(EchoRuntime().close())
+
+
+def test_uniform_constructor_defaults():
+    rt = EchoRuntime()
+    assert rt.captures == ("echo-run", )
+    assert rt.config == RuntimeConfig()
+    assert rt.script is None
+
+
+def test_captures_override():
+    rt = EchoRuntime(captures=["only-this"])
+    assert rt.captures == ("only-this", )
+
+
+def test_script_stored():
+
+    def wants(ctx):
+        return True
+
+    rt = EchoRuntime(script=wants)
+    assert rt.script is wants
+
+
+def test_unknown_config_key_fails_loud():
+    with pytest.raises(TypeError):
+        EchoRuntime(config={"no_such_knob": 1})

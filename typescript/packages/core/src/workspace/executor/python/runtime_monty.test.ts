@@ -68,8 +68,12 @@ const text = (b: Uint8Array | null): string => (b === null ? '' : new TextDecode
 
 describe('MontyRuntime', () => {
   const runtimes: MontyRuntime[] = []
-  const make = (options: ConstructorParameters<typeof MontyRuntime>[0] = {}): MontyRuntime => {
-    const rt = new MontyRuntime(options)
+  const make = (
+    dispatch?: Parameters<MontyRuntime['attach']>[0],
+    listMounts: () => string[] = () => [],
+  ): MontyRuntime => {
+    const rt = new MontyRuntime()
+    if (dispatch !== undefined) rt.attach(dispatch, listMounts)
     runtimes.push(rt)
     return rt
   }
@@ -113,7 +117,7 @@ describe('MontyRuntime', () => {
 
   it('reads a virtual file through the bridge via pathlib', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new TextEncoder().encode('virtual') })
-    const rt = make({ workspaceBridge: dispatch })
+    const rt = make(dispatch)
     const result = await run(
       rt,
       "from pathlib import Path\nprint(Path('/s3/a.txt').read_text().upper())",
@@ -124,7 +128,7 @@ describe('MontyRuntime', () => {
 
   it('writes flush back through the bridge', async () => {
     const { dispatch, writes } = makeBridge({ '/s3/seed.txt': new Uint8Array([1]) })
-    const rt = make({ workspaceBridge: dispatch })
+    const rt = make(dispatch)
     const result = await run(rt, "from pathlib import Path\nPath('/s3/out.txt').write_text('data')")
     expect(result.exitCode).toBe(0)
     expect(writes).toHaveLength(1)
@@ -137,7 +141,7 @@ describe('MontyRuntime', () => {
       '/s3/a.txt': new Uint8Array([1]),
       '/s3/b.txt': new Uint8Array([2]),
     })
-    const rt = make({ workspaceBridge: dispatch })
+    const rt = make(dispatch)
     const result = await run(
       rt,
       "from pathlib import Path\nprint(sorted(str(p) for p in Path('/s3').iterdir()))",
@@ -148,7 +152,7 @@ describe('MontyRuntime', () => {
 
   it('exists/is_file answer from the bridge', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
-    const rt = make({ workspaceBridge: dispatch })
+    const rt = make(dispatch)
     const result = await run(
       rt,
       "from pathlib import Path\nprint(Path('/s3/a.txt').is_file(), Path('/s3/nope').exists())",
@@ -176,7 +180,7 @@ describe('MontyRuntime', () => {
 
   it('a missing virtual file surfaces as an error without poisoning the runtime', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
-    const rt = make({ workspaceBridge: dispatch })
+    const rt = make(dispatch)
     const bad = await run(rt, "from pathlib import Path\nPath('/s3/missing.txt').read_text()")
     expect(bad.exitCode).toBe(1)
     expect(text(bad.stderr)).toContain('Error')
@@ -187,7 +191,7 @@ describe('MontyRuntime', () => {
 
   it('paths outside the live mount view never reach the bridge', async () => {
     const { dispatch } = makeBridge({ '/etc/passwd': new TextEncoder().encode('leak') })
-    const rt = make({ workspaceBridge: dispatch, listMounts: () => ['/s3/'] })
+    const rt = make(dispatch, () => ['/s3/'])
     const result = await run(rt, "from pathlib import Path\nprint(Path('/etc/passwd').read_text())")
     expect(result.exitCode).toBe(1)
     expect(text(result.stdout)).not.toContain('leak')
@@ -230,9 +234,12 @@ describe('monty unavailable', () => {
     const runtime = {
       name: 'monty',
       captures: ['python3', 'python'],
+      runsLines: false,
+      config: {},
       attach: () => undefined,
       run: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
       runRepl: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
+      runLine: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
       close: () => Promise.resolve(),
     }
     const dispatch = (() => Promise.reject(new Error('unused'))) as never

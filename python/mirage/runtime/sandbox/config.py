@@ -12,42 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass, field, fields
-from typing import Any, TypeVar
+from dataclasses import dataclass, field
 
-T = TypeVar("T", bound="SandboxConfig")
+from mirage.runtime.config import RuntimeConfig
 
 
 @dataclass(frozen=True, slots=True)
-class SandboxConfig:
+class SandboxConfig(RuntimeConfig):
     """How the sandbox machine is built: the fields every provider has.
 
     This base carries only what all providers support; each provider
     extends it with its own fields (DockerConfig, DaytonaConfig,
     E2BConfig), so an option a provider cannot honor is simply not a
-    field there and fails loud at construction. In yaml this is the
-    runtime entry's ``config`` block, mirroring a mount's.
+    field there and fails loud at construction (RuntimeConfig.coerce).
+    In yaml this is the runtime entry's ``config`` block, mirroring a
+    mount's.
 
     Args:
         env (dict[str, str]): environment set in the sandbox.
     """
 
     env: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    def coerce(cls: type[T],
-               value: "SandboxConfig | dict[str, Any] | None") -> T:
-        """A constructor's config argument as this provider's config.
-
-        Args:
-            value (SandboxConfig | dict | None): an instance, its
-                dict form (a yaml ``config`` block), or None for the
-                defaults. Unknown keys fail loud.
-        """
-        if value is None:
-            return cls()
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, SandboxConfig):
-            value = {f.name: getattr(value, f.name) for f in fields(value)}
-        return cls(**value)

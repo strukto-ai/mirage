@@ -14,7 +14,7 @@
 
 import { buildRuntime, stdinRedirect } from '@struktoai/mirage-core'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { RemoteSandboxOptions } from '@struktoai/mirage-core'
+import type { RuntimeOptions } from '@struktoai/mirage-core'
 import type { DaytonaConfig } from './config.ts'
 import { DaytonaRuntime, type DaytonaSdk } from './runtime.ts'
 
@@ -79,7 +79,7 @@ class FakedDaytonaRuntime extends DaytonaRuntime {
 }
 
 function makeRuntime(
-  options: RemoteSandboxOptions<DaytonaConfig> | Record<string, unknown> = {
+  options: RuntimeOptions<DaytonaConfig> | Record<string, unknown> = {
     config: { sandboxId: 'sb-live' },
   },
 ): FakedDaytonaRuntime {

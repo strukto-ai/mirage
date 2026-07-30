@@ -52,7 +52,8 @@ describe('PyodideRuntime mount visibility', () => {
   it('mounted prefixes are preloaded into MEMFS so Python reads see them', async () => {
     const { dispatch, files } = makeBridge()
     files.set('/ram/hello.txt', new TextEncoder().encode('world'))
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => ['/ram/'] })
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/ram/'])
     const result = await rt.run({
       code: `with open('/ram/hello.txt') as f: print(f.read())`,
       args: [],
@@ -66,7 +67,8 @@ describe('PyodideRuntime mount visibility', () => {
 
   it('writes under a mounted prefix flush via the bridge on close', async () => {
     const { dispatch, calls } = makeBridge()
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => ['/ram/'] })
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/ram/'])
     await rt.run({
       code: `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`,
       args: [],
@@ -85,7 +87,8 @@ describe('PyodideRuntime mount visibility', () => {
   it('removing a prefix from the live mount view stops flushing', async () => {
     const { dispatch, calls } = makeBridge()
     const mounts: string[] = ['/ram/']
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => mounts })
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => mounts)
     await rt.run({
       code: 'pass',
       args: [],
@@ -107,7 +110,8 @@ describe('PyodideRuntime mount visibility', () => {
     const { dispatch, calls, files } = makeBridge()
     files.set('/ram/lazy.txt', new TextEncoder().encode('lazy'))
     const mounts: string[] = []
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => mounts })
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => mounts)
     await rt.run({
       code: 'pass',
       args: [],
