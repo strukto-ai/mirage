@@ -76,27 +76,35 @@ interface RunOnMountCtx {
   routingDecision?: RoutingDecision
 }
 
-// Commands whose recursive flag makes a bare invocation search the
-// working directory (GNU grep -r/-R with no path operand).
-const RECURSIVE_CWD_COMMANDS = new Set(['grep'])
+// Commands a bare invocation makes search the working directory: GNU
+// grep does it only under -r/-R and ignores stdin; ripgrep is recursive
+// by default but an attached stdin wins (its readable-stdin rule).
+const RECURSIVE_CWD_COMMANDS = new Set(['grep', 'rg'])
 
 // The synthetic cwd operand for a recursive search typed bare. GNU grep
 // -r/-R with no path operand searches the working directory and ignores
-// stdin, printing results as bare relative names (a.txt:hit, not
-// ./a.txt:hit). The empty rawPath carries that spelling through rebaseRaw.
+// stdin; bare rg does the same whenever no stdin is attached (a piped
+// stdin, even empty, wins). Both print results as bare relative names
+// (a.txt:hit, not ./a.txt:hit; pinned on debian:stable-slim / ripgrep
+// 14). The empty rawPath carries that spelling through respellRaw.
 function defaultRecursiveOperand(
   parts: readonly (string | PathSpec)[],
   cmdName: string,
   registry: MountRegistry,
   cwd: string,
+  stdin: ByteSource | null,
 ): PathSpec | null {
   const spec = SPECS[cmdName]
   if (spec === undefined) return null
   const argv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
   const parsed = parseCommand(spec, argv, cwd)
   if (parsed.paths().length > 0) return null
-  const kwargs = parseToKwargs(parsed)
-  if (kwargs.r !== true && kwargs.R !== true) return null
+  if (cmdName === 'grep') {
+    const kwargs = parseToKwargs(parsed)
+    if (kwargs.r !== true && kwargs.R !== true) return null
+  } else if (stdin !== null) {
+    return null
+  }
   const operand = classifyBarePath('.', registry, cwd)
   if (typeof operand === 'string') return null
   return new PathSpec({
@@ -420,7 +428,7 @@ export async function handleCommand(
   }
 
   if (RECURSIVE_CWD_COMMANDS.has(cmdName)) {
-    const operand = defaultRecursiveOperand(parts, cmdName, registry, session.cwd)
+    const operand = defaultRecursiveOperand(parts, cmdName, registry, session.cwd, stdin)
     if (operand !== null) parts = [...parts, operand]
   }
 

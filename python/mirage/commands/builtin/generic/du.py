@@ -9,7 +9,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +354,7 @@ async def _du_one(
         return [_line(virtual[0][1], flags.h, label)], total
 
     rows = rollup(virtual, path.virtual, a=flags.a, max_depth=flags.max_depth)
-    shown = rebase_raw([node for node, _ in rows], path.virtual, label)
+    shown = respell_raw([node for node, _ in rows], path.virtual, label)
     lines = [
         _line(size, flags.h, name) for name, (_, size) in zip(shown, rows)
     ]

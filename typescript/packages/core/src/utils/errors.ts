@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dropTrailingSegments, rebaseOne } from './path.ts'
+import { dropTrailingSegments, respellOne } from './path.ts'
 import { rstripSlash } from './slash.ts'
 
 export interface FsError extends Error {
@@ -239,7 +239,7 @@ export function operandSpelling(
   if (raw === virtual) return path
   if (path === virtual) return raw
   const base = rstripSlash(virtual)
-  if (path.startsWith(base + '/')) return rebaseOne(path, virtual, raw)
+  if (path.startsWith(base + '/')) return respellOne(path, virtual, raw)
   const trimmed = rstripSlash(path)
   if (base.startsWith(trimmed + '/')) {
     const segments = (p: string): number => p.split('/').filter((s) => s !== '').length

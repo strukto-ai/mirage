@@ -70,13 +70,13 @@ export function expandTilde(word: string, home: string | null): string {
 // Rewrite the base of walked output paths (find/grep -r results) to the
 // as-typed form (`PathSpec.rawPath`); `raw` equal to `virtual` leaves the
 // paths unchanged (the absolute-argument case).
-export function rebaseRaw(paths: string[], virtual: string, raw: string): string[] {
+export function respellRaw(paths: string[], virtual: string, raw: string): string[] {
   if (raw === virtual) return paths
-  return paths.map((p) => rebaseOne(p, virtual, raw))
+  return paths.map((p) => respellOne(p, virtual, raw))
 }
 
 // The prefix of `path` with `count` trailing segments removed. The ancestor
-// counterpart of rebaseOne: it names a path above another one while keeping the
+// counterpart of respellOne: it names a path above another one while keeping the
 // original spelling, so a relative argument stays relative. `count` is clamped
 // so the result never loses every segment, which would leave an empty string
 // where a path belongs. Mirrors Python's drop_trailing_segments.
@@ -88,7 +88,7 @@ export function dropTrailingSegments(path: string, count: number): string {
   return joined === '' ? '/' : joined
 }
 
-export function rebaseOne(path: string, virtual: string, raw: string): string {
+export function respellOne(path: string, virtual: string, raw: string): string {
   if (raw === virtual) return path
   const base = rstripSlash(virtual)
   if (path === base) return raw === '' ? '.' : raw

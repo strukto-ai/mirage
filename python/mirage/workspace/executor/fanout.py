@@ -20,7 +20,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
-from mirage.utils.path import rebase_one
+from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.types import ExecutionNode
@@ -66,6 +66,9 @@ def _should_fan_out(
     if cmd_name == "grep":
         return (flag_kwargs.get("r") is True or flag_kwargs.get("R") is True
                 or flag_kwargs.get("recursive") is True)
+    if cmd_name == "rg":
+        # ripgrep recurses directories by default; no flag to check.
+        return True
     if cmd_name == "ls":
         return flag_kwargs.get("R") is True
     return False
@@ -281,6 +284,11 @@ async def _fan_out_traversal(
             if adjusted is None:
                 continue
             sub_flags = adjusted
+            if cmd_name == "rg":
+                # A tree search labels every hit; a descendant mount
+                # whose root is a single file would otherwise drop the
+                # filename (rg labels only multi-file or -H runs).
+                sub_flags["H"] = True
             sub_texts = _adjust_depth_texts(texts, target_path, mount.prefix)
             # The descendant operand keeps the traversal root's typed
             # spelling (grep -r . -> ./ram/...; the synthetic bare
@@ -291,8 +299,8 @@ async def _fan_out_traversal(
                          directory=mount_root,
                          resource_path="",
                          resolved=True,
-                         raw_path=rebase_one(mount_root, target_path,
-                                             paths[0].raw_path))
+                         raw_path=respell_one(mount_root, target_path,
+                                              paths[0].raw_path))
             ]
         stdout, io = await mount.execute_cmd(cmd_name,
                                              sub_paths,

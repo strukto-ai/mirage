@@ -18,7 +18,7 @@ import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
+import { respellRaw } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
   compilePattern,
@@ -246,7 +246,7 @@ export async function rgGeneric(
         warnings,
         label ? p.rawPath : null,
       )
-      results.push(...rebaseRaw(hitsFull, p.virtual, p.rawPath))
+      results.push(...respellRaw(hitsFull, p.virtual, p.rawPath))
     }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {

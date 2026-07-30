@@ -19,7 +19,7 @@ import {
   expandTilde,
   globPrefixMatch,
   posixNormpath,
-  rebaseOne,
+  respellOne,
   resolvePath,
   resolveSymlinks,
   dropTrailingSegments,
@@ -170,7 +170,7 @@ describe('dropTrailingSegments', () => {
   })
 })
 
-describe('rebaseOne', () => {
+describe('respellOne', () => {
   it.each([
     ['/data/sub/x', '/data', '.', './sub/x'],
     ['/data/sub', '/data/sub', 'sub', 'sub'],
@@ -178,7 +178,7 @@ describe('rebaseOne', () => {
     ['/other/x', '/data', '.', '/other/x'],
     ['/data/x', '/data', '/data', '/data/x'],
   ])('respells %s under %s typed as %s', (path, original, raw, want) => {
-    expect(rebaseOne(path, original, raw)).toBe(want)
+    expect(respellOne(path, original, raw)).toBe(want)
   })
 
   // GNU grep -r with no path operand prints names relative to the cwd
@@ -189,6 +189,6 @@ describe('rebaseOne', () => {
     ['/ram/a.txt:hello', '/', 'ram/a.txt:hello'],
     ['/data', '/data', '.'],
   ])('empty raw renders %s under %s bare', (path, original, want) => {
-    expect(rebaseOne(path, original, '')).toBe(want)
+    expect(respellOne(path, original, '')).toBe(want)
   })
 })

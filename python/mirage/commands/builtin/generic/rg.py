@@ -25,7 +25,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,7 +180,7 @@ async def rg(
                     file_prefix=p.raw_path if label else None,
                     no_filename=f.no_filename,
                 )
-                results.extend(rebase_raw(hits_full, p.virtual, p.raw_path))
+                results.extend(respell_raw(hits_full, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings_f)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)

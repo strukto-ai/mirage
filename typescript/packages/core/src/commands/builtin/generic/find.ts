@@ -19,7 +19,7 @@ import { parseFindExpression, parseSize } from '../findParse.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
+import { respellRaw } from '../../../utils/path.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { optionsTree, prefixPathNodes } from '../findEval.ts'
 
@@ -190,7 +190,7 @@ export async function findGeneric(
             : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       rootMatches.push(displayPath)
     }
-    matches.push(...rebaseRaw(rootMatches, root.virtual, root.rawPath))
+    matches.push(...respellRaw(rootMatches, root.virtual, root.rawPath))
   }
   matches.sort()
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')

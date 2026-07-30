@@ -67,26 +67,30 @@ from mirage.workspace.types import ExecutionNode
 
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
 
-# Commands whose recursive flag makes a bare invocation search the
-# working directory (GNU grep -r/-R with no path operand).
-_RECURSIVE_CWD_COMMANDS = frozenset({"grep"})
+# Commands a bare invocation makes search the working directory: GNU
+# grep does it only under -r/-R and ignores stdin; ripgrep is recursive
+# by default but an attached stdin wins (its readable-stdin rule).
+_RECURSIVE_CWD_COMMANDS = frozenset({"grep", "rg"})
 
 
 def _default_recursive_operand(parts: list[str | PathSpec], cmd_name: str,
-                               registry: MountRegistry,
-                               cwd: str) -> PathSpec | None:
+                               registry: MountRegistry, cwd: str,
+                               stdin: ByteSource | None) -> PathSpec | None:
     """The synthetic cwd operand for a recursive search typed bare.
 
     GNU grep ``-r``/``-R`` with no path operand searches the working
-    directory and ignores stdin, printing results as bare relative
-    names (``a.txt:hit``, not ``./a.txt:hit``). The empty ``raw_path``
-    carries that spelling through :func:`rebase_raw`.
+    directory and ignores stdin; bare ``rg`` does the same whenever no
+    stdin is attached (a piped stdin, even empty, wins). Both print
+    results as bare relative names (``a.txt:hit``, not ``./a.txt:hit``,
+    pinned on debian:stable-slim / ripgrep 14). The empty ``raw_path``
+    carries that spelling through :func:`respell_raw`.
 
     Args:
         parts (list[str | PathSpec]): classified command words.
         cmd_name (str): command name (a _RECURSIVE_CWD_COMMANDS member).
         registry (MountRegistry): mount registry resolving the cwd.
         cwd (str): session working directory.
+        stdin (ByteSource | None): the line's stdin, consulted for rg.
     """
     spec = SPECS.get(cmd_name)
     if spec is None:
@@ -95,8 +99,11 @@ def _default_recursive_operand(parts: list[str | PathSpec], cmd_name: str,
     parsed = parse_command(spec, argv, cwd)
     if parsed.paths():
         return None
-    kwargs = parse_to_kwargs(parsed)
-    if kwargs.get("r") is not True and kwargs.get("R") is not True:
+    if cmd_name == "grep":
+        kwargs = parse_to_kwargs(parsed)
+        if kwargs.get("r") is not True and kwargs.get("R") is not True:
+            return None
+    elif stdin is not None:
         return None
     operand = classify_bare_path(".", registry, cwd)
     if not isinstance(operand, PathSpec):
@@ -681,7 +688,7 @@ async def handle_command(
 
     if cmd_name in _RECURSIVE_CWD_COMMANDS:
         operand = _default_recursive_operand(parts, cmd_name, registry,
-                                             session.cwd)
+                                             session.cwd, stdin)
         if operand is not None:
             parts = [*parts, operand]
 

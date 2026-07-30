@@ -16,7 +16,7 @@ import errno
 from collections.abc import Awaitable, Callable
 
 from mirage.types import PathSpec
-from mirage.utils.path import drop_trailing_segments, rebase_one
+from mirage.utils.path import drop_trailing_segments, respell_one
 
 
 class OperationNotSupportedError(OSError):
@@ -177,7 +177,7 @@ def operand_spelling(path: str, operand: PathSpec) -> str:
         return raw
     base = virtual.rstrip("/")
     if path.startswith(base + "/"):
-        return rebase_one(path, virtual, raw)
+        return respell_one(path, virtual, raw)
     trimmed = path.rstrip("/")
     if base.startswith(trimmed + "/"):
         depth = len(_segments(base)) - len(_segments(trimmed))

@@ -16,7 +16,7 @@ import pytest
 
 from mirage.utils.path import (ancestors, drop_trailing_segments, expand_tilde,
                                glob_prefix_match, gnu_basename, gnu_dirname,
-                               norm, parent, rebase_one, resolve_path)
+                               norm, parent, resolve_path, respell_one)
 
 
 def test_norm_strips_and_adds_leading_slash():
@@ -230,8 +230,8 @@ def test_drop_trailing_segments_is_clamped():
     ("/other/x", "/data", ".", "/other/x"),
     ("/data/x", "/data", "/data", "/data/x"),
 ])
-def test_rebase_one_respells_the_typed_base(path, original, raw, expected):
-    assert rebase_one(path, original, raw) == expected
+def test_respell_one_respells_the_typed_base(path, original, raw, expected):
+    assert respell_one(path, original, raw) == expected
 
 
 @pytest.mark.parametrize("path,original,expected", [
@@ -240,8 +240,8 @@ def test_rebase_one_respells_the_typed_base(path, original, raw, expected):
     ("/ram/a.txt:hello", "/", "ram/a.txt:hello"),
     ("/data", "/data", "."),
 ])
-def test_rebase_one_empty_raw_is_the_bare_no_operand_spelling(
+def test_respell_one_empty_raw_is_the_bare_no_operand_spelling(
         path, original, expected):
     # GNU grep -r with no path operand prints names relative to the cwd
     # with no ./ prefix; the synthetic operand carries raw_path "".
-    assert rebase_one(path, original, "") == expected
+    assert respell_one(path, original, "") == expected

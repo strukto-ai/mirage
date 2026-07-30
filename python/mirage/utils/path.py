@@ -185,24 +185,24 @@ def expand_tilde(word: str, home: str | None) -> str:
     return word
 
 
-def rebase_raw(paths: list[str], original: str, raw: str) -> list[str]:
+def respell_raw(paths: list[str], original: str, raw: str) -> list[str]:
     """Rewrite the base of walked output paths to the as-typed form.
 
     Used by walkers like ``find``/``grep -r``: results are absolute (start
     path plus subpath), but when the start path was typed relatively the
-    output should show it that way. Maps :func:`rebase_one` over ``paths``.
+    output should show it that way. Maps :func:`respell_one` over ``paths``.
 
-    Because :func:`rebase_one` only rewrites the leading base prefix, this
+    Because :func:`respell_one` only rewrites the leading base prefix, this
     also works on formatted lines whose path is the prefix, e.g. grep's
     ``path:line``.
 
     Example::
 
-        rebase_raw(["/data/sub/x", "/data/y"], "/data", ".")
+        respell_raw(["/data/sub/x", "/data/y"], "/data", ".")
             -> ["./sub/x", "./y"]
-        rebase_raw(["/data/sub/x:hit"], "/data/sub", "sub")
+        respell_raw(["/data/sub/x:hit"], "/data/sub", "sub")
             -> ["sub/x:hit"]
-        rebase_raw(["/data/x"], "/data", "/data")   # absolute arg
+        respell_raw(["/data/x"], "/data", "/data")   # absolute arg
             -> ["/data/x"]                          # unchanged
 
     Args:
@@ -219,10 +219,10 @@ def rebase_raw(paths: list[str], original: str, raw: str) -> list[str]:
     """
     if raw == original:
         return paths
-    return [rebase_one(p, original, raw) for p in paths]
+    return [respell_one(p, original, raw) for p in paths]
 
 
-def rebase_one(path: str, original: str, raw: str) -> str:
+def respell_one(path: str, original: str, raw: str) -> str:
     """Rewrite a single path's ``original`` base to the as-typed ``raw``.
 
     Only the leading ``original`` prefix is rewritten, so any suffix after
@@ -230,12 +230,12 @@ def rebase_one(path: str, original: str, raw: str) -> str:
 
     Example::
 
-        rebase_one("/data/sub/x", "/data", ".")      -> "./sub/x"
-        rebase_one("/data/sub", "/data/sub", "sub")  -> "sub"
-        rebase_one("/data/x:hit", "/data", ".")      -> "./x:hit"
-        rebase_one("/other/x", "/data", ".")         -> "/other/x"  # no match
-        rebase_one("/data/x", "/data", "/data")      -> "/data/x"   # absolute
-        rebase_one("/data/sub/x", "/data", "")       -> "sub/x"     # bare
+        respell_one("/data/sub/x", "/data", ".")      -> "./sub/x"
+        respell_one("/data/sub", "/data/sub", "sub")  -> "sub"
+        respell_one("/data/x:hit", "/data", ".")      -> "./x:hit"
+        respell_one("/other/x", "/data", ".")         -> "/other/x"  # no match
+        respell_one("/data/x", "/data", "/data")      -> "/data/x"   # absolute
+        respell_one("/data/sub/x", "/data", "")       -> "sub/x"     # bare
 
     Args:
         path (str): An absolute path at or under ``original`` (optionally with
@@ -264,7 +264,7 @@ def rebase_one(path: str, original: str, raw: str) -> str:
 def drop_trailing_segments(path: str, count: int) -> str:
     """The prefix of ``path`` with ``count`` trailing segments removed.
 
-    The ancestor counterpart of :func:`rebase_one`: it names a path above
+    The ancestor counterpart of :func:`respell_one`: it names a path above
     another one while keeping the original spelling, so a relative
     argument stays relative. ``count`` is clamped so the result never
     loses every segment, which would leave an empty string where a path

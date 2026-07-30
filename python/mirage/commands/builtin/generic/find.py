@@ -14,7 +14,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 
 def parse_find_args(
@@ -177,7 +177,7 @@ async def find(
                                            stat=stat,
                                            mount_prefix=root_prefix)
     results = apply_mount_prefix(results, root_prefix)
-    results = rebase_raw(results, search_path.virtual, search_path.raw_path)
+    results = respell_raw(results, search_path.virtual, search_path.raw_path)
     return format_records(results), IOResult()
 
 

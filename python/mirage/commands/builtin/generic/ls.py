@@ -9,7 +9,7 @@ from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
-from mirage.utils.path import rebase_one
+from mirage.utils.path import respell_one
 
 Readdir = Callable[[PathSpec, IndexCacheStore | None], Awaitable[list[str]]]
 Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
@@ -450,8 +450,8 @@ async def ls(
             if headed:
                 if printed:
                     results.append("")
-                header = rebase_one(dir_spec.virtual, operand.path.virtual,
-                                    operand.path.raw_path)
+                header = respell_one(dir_spec.virtual, operand.path.virtual,
+                                     operand.path.raw_path)
                 results.append(f"{header}:")
             _render_group(results,
                           entries,
