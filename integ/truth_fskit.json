@@ -5,9 +5,9 @@
   "size": 16,
   "read_bytes": 16,
   "write_in_place": "ok",
+  "create_file": "ok",
+  "mkdir": "ok",
+  "rename": "ok",
   "unlink": "ok",
-  "create_file": "ENOSYS",
-  "created_anyway": true,
-  "mkdir": "ENOSYS",
-  "rename": "ENOSYS"
+  "new_file_roundtrip": true
 }

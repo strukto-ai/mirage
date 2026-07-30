@@ -127,15 +127,20 @@ There is deliberately **no `auto`** value: auto-selecting FSKit would silently
 break every API-backed mount, and an option whose safe value is always the
 default is a trap. `MountBackend.FSKIT` is macOS-only and raises elsewhere.
 
+The full write surface works: create, mkdir, rename, in-place writes and
+unlink, pinned by `integ/truth_fskit.json`. This depends on
+`mirage/fuse/darwin.py`, which declares macFUSE's Darwin-only callbacks
+(`setattr_x`, `renamex`) that the FSKit shim uses to finalize new items and
+route renames; stock mfusepy leaves those slots NULL, which fails every
+create with ENOSYS after the file already landed.
+
 <Warning>
-  **FSKit mounts are read-mostly, and write failures are not clean.**
-  Measured on macFUSE 5.3.3 / macOS 26 (`integ/fskit.py`): reads, in-place
-  writes and `unlink` work; `create`, `mkdir` and `rename` return `ENOSYS`,
-  and a failed create **still applies** (the file exists despite the error).
-  Anything that creates files (`git clone`, `pip install`, an agent writing
-  output) will fail. Use `MountBackend.FUSE` for write workloads, and prefer
-  `MountMode.READ` on fskit mounts so the limit surfaces as a clean
-  permission error.
+  **Two upstream FSKit-shim caveats remain** (macFUSE 5.3.3):
+  [#1181](https://github.com/macfuse/macfuse/issues/1181), running a binary
+  off an fskit mount fails until the file has been read once; and
+  [#1165](https://github.com/macfuse/macfuse/issues/1165), new entries in
+  the volume root may not appear in a live mount because the root readdir
+  cache cannot be invalidated.
 </Warning>
 
 <Warning>

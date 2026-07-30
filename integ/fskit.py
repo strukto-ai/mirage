@@ -112,19 +112,25 @@ def main() -> None:
 
         with open(f"{mp}/api.json", "rb") as fh:
             body = fh.read()
+        stat_size = os.path.getsize(f"{mp}/api.json")
 
-        # macFUSE's FSKit shim serves a partial write surface: ops that
-        # modify an existing file work, ops that add a new name to a
-        # directory fail. Pinned rather than assumed, because a create that
-        # reports ENOSYS still lands in the store (see created_anyway).
+        # The full write surface works because mirage installs macFUSE's
+        # Darwin-only callbacks (mirage/fuse/darwin.py): the FSKit shim
+        # finalizes every created item through setattr_x and routes rename
+        # through renamex, both of which mfusepy leaves as NULL slots. With
+        # them missing, create/mkdir failed with ENOSYS after the op had
+        # already applied, and rename never reached userspace.
         in_place = attempt(
             lambda: open(f"{mp}/existing.txt", "ab").write(b"more\n"))
         create = attempt(lambda: open(f"{mp}/new.txt", "wb").close())
-        created_anyway = os.path.exists(f"{mp}/new.txt")
         make_dir = attempt(lambda: os.mkdir(f"{mp}/sub"))
         rename = attempt(
             lambda: os.rename(f"{mp}/api.json", f"{mp}/moved.json"))
         remove = attempt(lambda: os.unlink(f"{mp}/existing.txt"))
+        with open(f"{mp}/new.txt", "wb") as fh:
+            fh.write(b"fresh\n")
+        with open(f"{mp}/new.txt", "rb") as fh:
+            roundtrip = fh.read() == b"fresh\n"
 
         result = {
             # Volatile, reported but never asserted.
@@ -142,17 +148,14 @@ def main() -> None:
             # FSKit has no direct_io equivalent, so a read is driven entirely
             # by the size stat reports. These two agreeing is what the
             # SIZES_ALWAYS_KNOWN guard exists to guarantee.
-            "size": os.path.getsize(f"{mp}/api.json"),
+            "size": stat_size,
             "read_bytes": len(body),
             "write_in_place": in_place,
             "create_file": create,
-            # The dangerous part: the syscall reports failure and the file
-            # exists anyway, so a caller treating ENOSYS as "nothing
-            # happened" is wrong.
-            "created_anyway": created_anyway,
             "mkdir": make_dir,
             "rename": rename,
             "unlink": remove,
+            "new_file_roundtrip": roundtrip,
         }
         print(json.dumps(result))
 

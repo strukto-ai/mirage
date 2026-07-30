@@ -24,6 +24,7 @@ except ImportError:
     fuse = None
 
 from mirage.fuse.backend import MountBackend, prepare_backend
+from mirage.fuse.darwin import install_macfuse_extensions
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
 from mirage.workspace.session.session import Session
@@ -53,6 +54,11 @@ def _run_fuse(fs: MirageFS,
     # uid=-1/gid=-1 (win32): the WinFsp-FUSE builtin that presents all files
     # as owned by the mounting user; POSIX uid/gid values reported by getattr
     # have no meaningful SID mapping on Windows (see the WinFsp FAQ).
+    # macFUSE needs its Darwin-only callbacks (setattr_x, renamex) declared
+    # before the operations struct is built; without them the FSKit shim
+    # fails every create/mkdir with ENOSYS after the op already applied,
+    # and rename never reaches userspace. No-op off macOS.
+    install_macfuse_extensions()
     win_opts = {"uid": -1, "gid": -1} if sys.platform == "win32" else {}
     opts: dict[str, object] = {"attr_timeout": 0}
     if backend is MountBackend.FSKIT:

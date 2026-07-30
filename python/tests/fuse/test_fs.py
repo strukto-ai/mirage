@@ -245,6 +245,69 @@ async def test_utimens_does_not_raise(seed_ws):
 
 
 @pytest.mark.asyncio
+async def test_setattr_x_metadata_only_accepts(seed_ws):
+    # The FSKit shim finalizes every created item through setattr_x; a
+    # metadata-only payload must succeed for create/mkdir to work at all.
+    fs = MirageFS(seed_ws.ops)
+    assert fs.setattr_x("/a.txt", {"mode": 0o644, "uid": 501, "gid": 20}) == 0
+
+
+@pytest.mark.asyncio
+async def test_setattr_x_missing_path_is_enoent(seed_ws):
+    fs = MirageFS(seed_ws.ops)
+    with pytest.raises(OSError) as exc:
+        fs.setattr_x("/nope.txt", {"mode": 0o644})
+    assert exc.value.errno == errno.ENOENT
+
+
+@pytest.mark.asyncio
+async def test_setattr_x_size_truncates(rw_ws):
+    await rw_ws.execute("tee /t.txt", stdin=b"longcontent")
+    fs = MirageFS(rw_ws.ops)
+    assert fs.setattr_x("/t.txt", {"size": 4}) == 0
+    result = await rw_ws.execute("cat /t.txt")
+    assert result.stdout == b"long"
+
+
+@pytest.mark.asyncio
+async def test_fsetattr_x_routes_to_setattr_x(rw_ws):
+    await rw_ws.execute("tee /t2.txt", stdin=b"longcontent")
+    fs = MirageFS(rw_ws.ops)
+    assert fs.fsetattr_x("/t2.txt", {"size": 2}, fh=7) == 0
+    result = await rw_ws.execute("cat /t2.txt")
+    assert result.stdout == b"lo"
+
+
+@pytest.mark.asyncio
+async def test_renamex_plain(rw_ws):
+    await rw_ws.execute("tee /rx.txt", stdin=b"content")
+    fs = MirageFS(rw_ws.ops)
+    assert fs.renamex("/rx.txt", "/rx2.txt", 0) == 0
+    result = await rw_ws.execute("cat /rx2.txt")
+    assert result.stdout == b"content"
+
+
+@pytest.mark.asyncio
+async def test_renamex_excl_rejects_existing_target(rw_ws):
+    await rw_ws.execute("tee /src.txt", stdin=b"a")
+    await rw_ws.execute("tee /dst.txt", stdin=b"b")
+    fs = MirageFS(rw_ws.ops)
+    with pytest.raises(OSError) as exc:
+        fs.renamex("/src.txt", "/dst.txt", 0x4)
+    assert exc.value.errno == errno.EEXIST
+
+
+@pytest.mark.asyncio
+async def test_renamex_swap_is_enotsup(rw_ws):
+    await rw_ws.execute("tee /s1.txt", stdin=b"a")
+    await rw_ws.execute("tee /s2.txt", stdin=b"b")
+    fs = MirageFS(rw_ws.ops)
+    with pytest.raises(OSError) as exc:
+        fs.renamex("/s1.txt", "/s2.txt", 0x2)
+    assert exc.value.errno == errno.ENOTSUP
+
+
+@pytest.mark.asyncio
 async def test_access_does_not_raise(seed_ws):
     fs = MirageFS(seed_ws.ops)
     fs.access("/a.txt", os.R_OK)

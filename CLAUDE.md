@@ -71,12 +71,20 @@ Command history is a recording, not a command log. A hidden `Observer` records e
   `/Volumes` entry merely exists: macFUSE creates that directory while
   mounting and leaves it behind if the FSKit handoff fails, which reads as a
   live mount and then fails with ENOENT on the first read.
-  **FSKit mounts are read-mostly.** Reads, in-place writes and `unlink` work;
-  `create`, `mkdir` and `rename` return ENOSYS, and a failed `create` still
-  lands in the resource, so ENOSYS does not mean "nothing happened". Mirage's
-  own `create` succeeds and returns a handle before the shim fails the
-  syscall, so this cannot be reported more accurately from our side. Measured
-  on macFUSE 5.3.3 / macOS 26 and pinned in `integ/truth_fskit.json`.
+  **Python fskit mounts have the full write surface, and only because of
+  `fuse/darwin.py`.** The FSKit shim finalizes every created item through
+  macFUSE's Darwin-only `setattr_x` and routes rename through `renamex`;
+  mfusepy leaves those `fuse_operations` slots as reserved NULLs, so without
+  the extension module create/mkdir fail with ENOSYS *after* the op already
+  applied and rename never reaches userspace (verified by libfuse wire
+  trace: CREATE success, then SETATTR -78). Do not remove the
+  `install_macfuse_extensions()` call in `mount.py`, and keep the struct
+  tail in sync with macFUSE's fuse.h if mfusepy changes layout. Pinned in
+  `integ/truth_fskit.json` on macFUSE 5.3.3 / macOS 26.
+  TS fskit stays read-mostly: fuse-native's compiled op table cannot gain
+  new C callbacks from JS. Upstream shim caveats that remain for both:
+  exec-until-first-read fails (macfuse#1181) and root readdir cache cannot
+  be invalidated (macfuse#1165).
   `integ/fskit.py` is the only coverage of a real FSKit mount, and it only
   runs on a Mac with macFUSE 5.x: on the `integ-fskit-macos` job a hosted
   runner installs and enables everything but the mount request never reaches

@@ -28,7 +28,7 @@ flowchart LR
 ```
 
 Same upper half either way; only the kernel-to-userspace hop changes.
-Trade-off: fskit mounts live under `/Volumes`, need exact file sizes
-(no `direct_io`), and are read-mostly (`create`/`mkdir`/`rename` return
-ENOSYS). `fuse/fskit.py` demonstrates all of it; details in
-`docs/python/setup/fuse.mdx`.
+Trade-off: fskit mounts live under `/Volumes` and need exact file sizes
+(no `direct_io`), so API-backed resources are refused. The full write
+surface works (via `mirage/fuse/darwin.py`). `fuse/fskit.py` demonstrates
+all of it; details in `docs/python/setup/fuse.mdx`.

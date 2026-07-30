@@ -17,8 +17,11 @@ Needs macOS 15.4+ and macFUSE 5.x with its FSKit module enabled. Run it:
 
     ./python/.venv/bin/python examples/python/fuse/fskit.py
 
-It mounts, reads, then shows the two things that will bite you: the size
-guard that refuses API-backed resources, and the partial write surface.
+It mounts, exercises the full read and write surface, and shows the one
+guard that will bite you: FSKit refuses API-backed resources whose file
+sizes are unknown before a read. Writes work because mirage installs
+macFUSE's Darwin-only callbacks (mirage/fuse/darwin.py); without them the
+FSKit shim fails every create/mkdir/rename with ENOSYS.
 """
 
 import errno
@@ -105,27 +108,23 @@ def main() -> None:
         print(f"  bytes read    -> {len(body)}")
         print("  the two agree, which is the whole point of the guard\n")
 
-        print("=== writes: only part of the surface works ===")
+        print("=== writes: the full surface ===")
         print("  append to existing -> " +
               attempt(lambda: open(f"{mp}/existing.txt", "ab").write(b"x\n")))
         print("  unlink existing    -> " +
               attempt(lambda: os.unlink(f"{mp}/existing.txt")))
-        created = attempt(lambda: open(f"{mp}/new.txt", "wb").close())
-        print(f"  create new file    -> {created}")
+        print("  create new file    -> " +
+              attempt(lambda: open(f"{mp}/new.txt", "wb").close()))
         print("  mkdir              -> " +
               attempt(lambda: os.mkdir(f"{mp}/sub")))
         print("  rename             -> " +
               attempt(lambda: os.rename(f"{mp}/api.json", f"{mp}/moved.json")))
-        if created != "ok":
-            # The failure is not clean: the syscall reports ENOSYS and the
-            # file is there anyway, so "it failed" does not mean "nothing
-            # happened". Anything that creates files (git clone, pip
-            # install, a compiler) will not work on an FSKit mount.
-            print(f"\n  new.txt exists anyway: "
-                  f"{os.path.exists(f'{mp}/new.txt')}")
-            print("  a create that reports ENOSYS still applied, so do not")
-            print("  treat the error as 'nothing happened'. Use")
-            print("  MountBackend.FUSE for write workloads.")
+        payload = b"fresh\n"
+        with open(f"{mp}/new.txt", "wb") as out:
+            out.write(payload)
+        with open(f"{mp}/new.txt", "rb") as back:
+            echoed = back.read() == payload
+        print(f"  new-file roundtrip -> {'ok' if echoed else 'MISMATCH'}")
 
         print(f"\n>>> mounted at {mp}")
         print(">>> From another terminal try:")

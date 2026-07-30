@@ -115,9 +115,12 @@ async function main(): Promise<void> {
       "  rename          -> " +
         (await attempt("/bin/mv", [`${mp}/api.json`, `${mp}/moved.json`])),
     );
-    console.log("\n  Creating new names fails with ENOSYS on the FSKit shim,");
-    console.log("  and a failed create can still apply. Use backend 'fuse'");
-    console.log("  for write workloads; see docs/typescript/setup/fuse.mdx.");
+    console.log("\n  Creating new names fails with ENOSYS from TypeScript:");
+    console.log("  the FSKit shim finalizes new items via macFUSE's Darwin-only");
+    console.log("  setattr_x/renamex callbacks, which fuse-native's compiled op");
+    console.log("  table cannot gain from JS. Python declares them at runtime");
+    console.log("  (mirage/fuse/darwin.py) and has the full write surface; use");
+    console.log("  it, or backend 'fuse' here. See docs/typescript/setup/fuse.mdx.");
   } finally {
     await ws.close();
   }

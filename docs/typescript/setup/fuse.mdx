@@ -151,11 +151,16 @@ The same rules as Python apply, enforced at mount time: macOS-only, the
 mountpoint must be under `/Volumes` (named by mirage, created by the
 system), and every mounted resource must report exact sizes
 (`sizesAlwaysKnown`; the `checkSizes` guard refuses anything else by name).
-The FSKit shim's write surface is also partial: in-place writes and
+
+Unlike Python, **TS fskit mounts are read-mostly**: in-place writes and
 `unlink` work, while `create`, `mkdir` and `rename` return ENOSYS, and a
-failed create can still apply. See
+failed create can still apply. The FSKit shim finalizes new items through
+macFUSE's Darwin-only `setattr_x`/`renamex` callbacks; Python declares them
+at runtime (`mirage/fuse/darwin.py`), but `@zkochan/fuse-native`'s compiled
+op table cannot gain new C callbacks from JavaScript, so fixing this side
+needs a native-binding change. See
 [the Python page](/python/setup/fuse#mounting-without-the-kernel-extension-fskit)
-for the full measured matrix.
+for the working end state.
 
 <Warning>
   **A wedged FSKit mount blocks more than itself.** A TS mount is served by

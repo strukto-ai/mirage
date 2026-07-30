@@ -22,6 +22,7 @@ except ImportError:
     fuse = None
 
 from mirage.fuse.core import MountCore
+from mirage.fuse.darwin import rename_flags_check
 from mirage.fuse.errors import classify_error
 from mirage.ops import Ops
 from mirage.workspace.session.session import Session
@@ -119,6 +120,44 @@ class MirageFS(_FUSE_OPERATIONS):
 
     def rename(self, old: str, new: str, flags: int = 0) -> None:
         self._call(self.core.rename, old, new)
+
+    def renamex(self, old: str, new: str, flags: int = 0) -> int:
+        # macFUSE's Darwin-only rename entry point (fuse/darwin.py). The
+        # FSKit shim routes every rename here and never issues the plain
+        # RENAME op, so without this method mv fails with ENOSYS before
+        # reaching userspace.
+        try:
+            self.core.getattr(new)
+            new_exists = True
+        except (FileNotFoundError, ValueError):
+            new_exists = False
+        code = rename_flags_check(new_exists, flags)
+        if code is not None:
+            raise fuse.FuseOSError(code)
+        self._call(self.core.rename, old, new)
+        return 0
+
+    def setattr_x(self, path: str, changes: dict[str, object]) -> int:
+        # macFUSE prefers this single entry point over chmod/chown/
+        # truncate/utimens whenever it is implemented, and the FSKit shim
+        # depends on it: createItem/createDirectory finalize the new item
+        # with a SETATTR (mode|uid|gid|crtime|flags), which used to hit a
+        # NULL slot and fail the whole create with ENOSYS after the file
+        # had already landed. Size changes route to truncate; the other
+        # attributes follow the same accept-if-the-path-exists semantics
+        # as chmod/chown/utimens above.
+        size = changes.get("size")
+        if isinstance(size, int):
+            self._call(self.core.truncate, path, size)
+        else:
+            self._call(self.core.getattr, path)
+        return 0
+
+    def fsetattr_x(self,
+                   path: str,
+                   changes: dict[str, object],
+                   fh: int | None = None) -> int:
+        return self.setattr_x(path, changes)
 
     def rmdir(self, path: str) -> None:
         self._call(self.core.rmdir, path)
