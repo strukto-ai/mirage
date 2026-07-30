@@ -16,6 +16,7 @@ import { posix } from 'node:path'
 import {
   KERNEL_BACKENDS,
   MountBackend,
+  MountMode,
   rstripSlash,
   sizesAlwaysKnown,
   type Workspace,
@@ -128,6 +129,48 @@ export function checkSizes(backend: MountBackend, ws: Workspace, rootPrefix = ''
 }
 
 /**
+ * Mounts that accept writes, in mount resolution order. Mirrors Python's
+ * `Ops.writable_mounts`.
+ */
+export function writableMounts(ws: Workspace, rootPrefix = ''): [string, string][] {
+  const root = rstripSlash(rootPrefix)
+  const found: [string, string][] = []
+  for (const m of ws.mounts()) {
+    const bare = rstripSlash(m.prefix)
+    if (root !== '' && bare !== root && !m.prefix.startsWith(root + '/')) continue
+    if (m.mode !== MountMode.READ) found.push([m.prefix, m.resource.kind])
+  }
+  return found
+}
+
+/**
+ * Warn when an fskit mount accepts writes the shim may corrupt.
+ *
+ * Measured on live fskit mounts and pinned in `integ/truth_fskit.json`: the
+ * macFUSE FSKit shim flushes pages a file did not already have (a new file,
+ * an empty file, a truncate-then-write) as NUL bytes of the right length,
+ * and appended regions arrive intact or zeroed depending on cache state.
+ * Metadata ops (create, mkdir, rename, unlink) are reliable. The writer sees
+ * no error either way, so the corruption is silent; the mount proceeds with
+ * a warning naming the writable mounts.
+ */
+export function checkWrites(backend: MountBackend, ws: Workspace, rootPrefix = ''): void {
+  if (backend !== MountBackend.FSKIT) return
+  // /dev is mounted writable into every workspace, and a zeroed flush
+  // cannot corrupt a discard/byte-source device, so it never warns.
+  const offenders = writableMounts(ws, rootPrefix).filter(
+    ([prefix]) => rstripSlash(prefix) !== '/dev',
+  )
+  if (offenders.length === 0) return
+  const listed = offenders.map(([prefix, kind]) => `${prefix} (${kind})`).join(', ')
+  console.warn(
+    'mirage: file data written through an fskit mount may be flushed by the macFUSE FSKit ' +
+      `shim as zeroed pages (metadata ops are reliable; the writer sees no error): ${listed}. ` +
+      "Mount them read-only, or use backend 'fuse' for writes.",
+  )
+}
+
+/**
  * Resolve a backend for a kernel mount and run every guard it implies.
  *
  * One entry point, so a new mount path cannot pick up fskit support while
@@ -143,6 +186,9 @@ export function prepareBackend(
   requireKernelBackend(backend)
   checkPlatform(backend)
   if (mountpoint !== undefined) checkMountpoint(backend, mountpoint)
-  if (ws !== undefined) checkSizes(backend, ws, rootPrefix)
+  if (ws !== undefined) {
+    checkSizes(backend, ws, rootPrefix)
+    checkWrites(backend, ws, rootPrefix)
+  }
   return backend
 }

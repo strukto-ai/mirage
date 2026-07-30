@@ -16,8 +16,8 @@ import pytest
 
 from mirage.fuse.backend import (FSKIT_MOUNT_ROOT, MountBackend,
                                  check_mountpoint, check_platform, check_sizes,
-                                 prepare_backend, require_kernel_backend,
-                                 resolve_backend)
+                                 check_writes, prepare_backend,
+                                 require_kernel_backend, resolve_backend)
 from mirage.resource.ram import RAMResource
 from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.types import MountMode
@@ -129,6 +129,28 @@ def test_check_mountpoint_rejects_non_volumes(mountpoint):
 def test_check_mountpoint_ignores_fuse_backend():
     # The /Volumes rule is an FSKit constraint, not a mirage one.
     check_mountpoint(MountBackend.FUSE, "/tmp/mirage-abc")
+
+
+def test_check_writes_warns_for_writable_mount(caplog):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
+        check_writes(MountBackend.FSKIT, ws.ops, "")
+    assert "zeroed pages" in caplog.text
+    assert "/ (ram)" in caplog.text
+
+
+def test_check_writes_silent_for_read_mounts(caplog):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.READ)
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
+        check_writes(MountBackend.FSKIT, ws.ops, "")
+    assert caplog.text == ""
+
+
+def test_check_writes_ignores_other_backends(caplog):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
+        check_writes(MountBackend.FUSE, ws.ops, "")
+    assert caplog.text == ""
 
 
 def test_check_sizes_passes_for_byte_stores(caplog):

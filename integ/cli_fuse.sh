@@ -73,6 +73,34 @@ YML
     echo "collision_rejected=yes"
   fi
 
+  # fskit is macOS-only; off macOS the CLI must reject a backend: fskit
+  # workspace cleanly (non-zero exit, no partial workspace left behind),
+  # not silently fall back to fuse or vfs.
+  if [ "$(uname)" != "Darwin" ]; then
+    local yaml_fskit="/tmp/cli-fuse-$lang-fskit.yaml"
+    cat > "$yaml_fskit" <<YML
+mode: WRITE
+mounts:
+  /one:
+    resource: ram
+    backend: fskit
+YML
+    $cli workspace delete cff >/dev/null 2>&1 </dev/null || true
+    if $cli workspace create "$yaml_fskit" --id cff >/dev/null 2>&1 </dev/null; then
+      echo "fskit_offmac_rejected=no"
+      $cli workspace delete cff >/dev/null 2>&1 </dev/null || true
+    else
+      echo "fskit_offmac_rejected=yes"
+    fi
+    if $cli workspace get cff >/dev/null 2>&1 </dev/null; then
+      echo "fskit_offmac_no_leftover=no"
+      $cli workspace delete cff >/dev/null 2>&1 </dev/null || true
+    else
+      echo "fskit_offmac_no_leftover=yes"
+    fi
+    rm -f "$yaml_fskit"
+  fi
+
   $cli workspace delete cf >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$yaml" --id cf >/dev/null </dev/null
 
@@ -199,6 +227,10 @@ expect "logs_dir_survives" "yes"
 expect "gen_dir_removed" "yes"
 expect "collision_rejected" "yes"
 expect "reuse_after_recreate" "reused"
+if [ "$(uname)" != "Darwin" ]; then
+  expect "fskit_offmac_rejected" "yes"
+  expect "fskit_offmac_no_leftover" "yes"
+fi
 
 if [ "$fail" != "0" ]; then
   echo

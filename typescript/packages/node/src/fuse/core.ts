@@ -527,9 +527,15 @@ export class MountCore {
     return this.track(ctx)
   }
 
-  release(fd: number): void {
-    // Python does NOT flush on release — the kernel always issues flush first.
-    // Auto-flushing here would conflict on error paths and hide real failures.
+  async release(fd: number): Promise<void> {
+    const ctx = this.handles.get(fd)
+    if (ctx?.writeBuf !== undefined && ctx.writeBuf.length > 0) {
+      // The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH in
+      // between (the kext always flushes on close), so a handle can still
+      // hold buffered writes here. Dropping them would silently lose data
+      // written through an fskit mount.
+      await this.flush(ctx.path, fd)
+    }
     this.handles.delete(fd)
   }
 

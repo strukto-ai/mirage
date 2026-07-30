@@ -17,12 +17,16 @@ Needs macOS 15.4+ and macFUSE 5.x with its FSKit module enabled. Run it:
 
     ./python/.venv/bin/python examples/python/fuse/fskit.py
 
-It mounts, exercises the full read and write surface, and shows the one
-warning that will bite you: FSKit clamps reads to the size reported at
-lookup, so API-backed resources whose file sizes are unknown before a read
-mount with a warning and their files read as empty. Writes work because
-mirage installs macFUSE's Darwin-only callbacks (mirage/fuse/darwin.py);
-without them the FSKit shim fails every create/mkdir/rename with ENOSYS.
+It mounts, exercises reads and writes, and shows the two things that will
+bite you. Reads: FSKit clamps every read to the size reported at lookup, so
+API-backed resources whose file sizes are unknown before a read mount with
+a warning and their files read as empty. Writes: the metadata surface
+(create/mkdir/rename/unlink) works because mirage installs macFUSE's
+Darwin-only callbacks (mirage/fuse/darwin.py), and appends to existing
+bytes persist, but the shim flushes pages a file did not already have (a
+new file, or truncate-then-write) as NUL bytes of the right length; the
+kernel's own cache reads them back fine, which hides it. That last part is
+a macFUSE FSKit shim bug, pinned in integ/truth_fskit.json.
 """
 
 import errno
@@ -112,7 +116,7 @@ def main() -> None:
         print(f"  bytes read    -> {len(body)}")
         print("  the two agree, which is what fskit needs sizes for\n")
 
-        print("=== writes: the full surface ===")
+        print("=== writes: metadata plus appends ===")
         print("  append to existing -> " +
               attempt(lambda: open(f"{mp}/existing.txt", "ab").write(b"x\n")))
         print("  unlink existing    -> " +
@@ -129,6 +133,9 @@ def main() -> None:
         with open(f"{mp}/new.txt", "rb") as back:
             echoed = back.read() == payload
         print(f"  new-file roundtrip -> {'ok' if echoed else 'MISMATCH'}")
+        print("  caveat: that roundtrip is served by the kernel cache; the")
+        print("  shim flushes new-file pages to the store as NUL bytes")
+        print("  (macFUSE FSKit bug, pinned in integ/truth_fskit.json)")
 
         print(f"\n>>> mounted at {mp}")
         print(">>> From another terminal try:")

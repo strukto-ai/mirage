@@ -24,6 +24,7 @@ import errno
 import json
 import os
 import subprocess
+import time
 from typing import Callable
 
 from mirage import Mount, MountBackend, MountMode, Workspace
@@ -31,6 +32,27 @@ from mirage.resource.ram import RAMResource
 
 CONTENT = b'{"messages": 2}\n'
 EXISTING = b"old\n"
+
+
+def wait_store(resource: RAMResource, path: str, want: bytes) -> bool:
+    """Poll the backing store until it holds the expected bytes.
+
+    The FSKit shim flushes kernel writes lazily (WRITE arrives after close,
+    with no FLUSH), so the store lags the kernel view briefly.
+
+    Args:
+        resource (RAMResource): the mounted resource.
+        path (str): store path to watch.
+        want (bytes): expected content.
+
+    Returns:
+        bool: True when the store matched within the window.
+    """
+    for _ in range(50):
+        if resource._store.files.get(path) == want:
+            return True
+        time.sleep(0.2)
+    return False
 
 
 def mount_line(mountpoint: str) -> str:
@@ -96,6 +118,29 @@ def attempt(fn: Callable[[], object]) -> str:
         return errno.errorcode.get(err.errno or 0, str(err.errno))
 
 
+def sh(script: str) -> str:
+    """Run a shell one-liner against the mount from a child process.
+
+    Writes go through a child on purpose: they exercise the path a real
+    user takes, and the serving process's own I/O bypasses the kernel cache
+    over fskit, which behaves differently.
+
+    Args:
+        script (str): the shell command.
+
+    Returns:
+        str: "ok" on exit 0, else the first stderr line or the exit code.
+    """
+    proc = subprocess.run(["/bin/sh", "-c", script],
+                          capture_output=True,
+                          text=True,
+                          timeout=60)
+    if proc.returncode == 0:
+        return "ok"
+    detail = proc.stderr.strip().splitlines()
+    return detail[0] if detail else f"exit {proc.returncode}"
+
+
 def main() -> None:
     data = RAMResource()
     data._store.dirs.add("/")
@@ -114,23 +159,33 @@ def main() -> None:
             body = fh.read()
         stat_size = os.path.getsize(f"{mp}/api.json")
 
-        # The full write surface works because mirage installs macFUSE's
+        # The metadata write surface works because mirage installs macFUSE's
         # Darwin-only callbacks (mirage/fuse/darwin.py): the FSKit shim
         # finalizes every created item through setattr_x and routes rename
         # through renamex, both of which mfusepy leaves as NULL slots. With
         # them missing, create/mkdir failed with ENOSYS after the op had
         # already applied, and rename never reached userspace.
-        in_place = attempt(
-            lambda: open(f"{mp}/existing.txt", "ab").write(b"more\n"))
-        create = attempt(lambda: open(f"{mp}/new.txt", "wb").close())
-        make_dir = attempt(lambda: os.mkdir(f"{mp}/sub"))
-        rename = attempt(
-            lambda: os.rename(f"{mp}/api.json", f"{mp}/moved.json"))
-        remove = attempt(lambda: os.unlink(f"{mp}/existing.txt"))
-        with open(f"{mp}/new.txt", "wb") as fh:
-            fh.write(b"fresh\n")
-        with open(f"{mp}/new.txt", "rb") as fh:
-            roundtrip = fh.read() == b"fresh\n"
+        # The shim never flushes on close (the kext does): dirty pages sit in
+        # the kernel until something forces writeback, so the data writes
+        # below run `sync` to make the flush deterministic. Whether appended
+        # bytes survive is nondeterministic even then (measured: intact or
+        # zeroed depending on cache state), so only the op result is pinned;
+        # check_writes warns about exactly this at mount time.
+        in_place = sh(f"printf 'more\\n' >> {mp}/existing.txt && sync")
+        create = sh(f"touch {mp}/new.txt")
+        make_dir = sh(f"mkdir {mp}/sub")
+        rename = sh(f"mv {mp}/api.json {mp}/moved.json")
+        remove = sh(f"rm {mp}/existing.txt")
+        write_new = sh(f"printf 'fresh\\n' > {mp}/new.txt && sync")
+        # Measured macFUSE FSKit shim bug, pinned so a fix is noticed: pages
+        # for regions a file did NOT already have (a new file, an empty file,
+        # or a truncate-then-write) flush as NUL bytes of the right length.
+        # The writer sees no error, which is exactly why this went unnoticed.
+        # When a macFUSE release starts delivering real bytes, this turns
+        # False and the truth check flags it; flip the expectation and
+        # delete the caveat.
+        new_file_store_zeroed = wait_store(data, "/new.txt",
+                                           b"\x00" * len(b"fresh\n"))
 
         result = {
             # Volatile, reported but never asserted.
@@ -155,7 +210,8 @@ def main() -> None:
             "mkdir": make_dir,
             "rename": rename,
             "unlink": remove,
-            "new_file_roundtrip": roundtrip,
+            "new_file_write": write_new,
+            "new_file_store_zeroed": new_file_store_zeroed,
         }
         print(json.dumps(result))
 

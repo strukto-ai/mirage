@@ -9,5 +9,6 @@
   "mkdir": "ok",
   "rename": "ok",
   "unlink": "ok",
-  "new_file_roundtrip": true
+  "new_file_write": "ok",
+  "new_file_store_zeroed": true
 }

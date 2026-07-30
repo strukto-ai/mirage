@@ -108,6 +108,7 @@ jobs:
               - 'integ/fuse.py'
               - 'integ/fuse.ts'
               - 'integ/fskit.py'
+              - 'integ/cli_fskit.sh'
               - 'integ/check_json.py'
               - 'integ/truth_fuse.txt'
               - 'integ/truth_fskit.json'
@@ -856,6 +857,11 @@ jobs:
           fi
           ./python/.venv/bin/python integ/check_json.py \
             integ/truth_fskit.json < /tmp/fskit.out
+
+      - name: Run the CLI fskit battery (workspace YAML with an fskit mount)
+        # Same classification as above: the script itself reports SKIP with
+        # exit 0 when the daemon's mount never engages the FSKit module.
+        run: bash integ/cli_fskit.sh "python/.venv/bin/mirage"
 
       - name: Host state after the probe
         if: always()

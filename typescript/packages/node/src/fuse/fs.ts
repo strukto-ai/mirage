@@ -359,8 +359,14 @@ export class MirageFS {
   }
 
   private release(_path: string, fd: number, cb: (code: number) => void): void {
-    this.core.release(fd)
-    cb(0)
+    void this.core.release(fd).then(
+      () => {
+        cb(0)
+      },
+      (err: unknown) => {
+        cb(classifyError(err))
+      },
+    )
   }
 
   private flush(path: string, fd: number, cb: (code: number) => void): void {

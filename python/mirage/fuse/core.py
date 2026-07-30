@@ -635,6 +635,13 @@ class MountCore:
         return self._track(ctx)
 
     def release(self, fh: int) -> None:
+        ctx = self._handles.get(fh)
+        if ctx is not None and ctx.write_buf:
+            # The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH
+            # in between (the kext always flushes on close), so a handle can
+            # still hold buffered writes here. Dropping them would silently
+            # lose data written through an fskit mount.
+            self.flush(ctx.path, fh)
         self._handles.pop(fh, None)
 
     def truncate(self, path: str, length: int) -> None:

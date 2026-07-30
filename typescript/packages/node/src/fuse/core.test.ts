@@ -66,8 +66,23 @@ describe('MountCore', () => {
     const core = await mkCore()
     const fh = await core.open('/data/greeting.txt')
     expect(core.handles.has(fh)).toBe(true)
-    core.release(fh)
+    await core.release(fh)
     expect(core.handles.has(fh)).toBe(false)
+  })
+
+  it('flushes buffered writes on release when no flush arrived', async () => {
+    // The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH in
+    // between (the kext always flushes on close); dropping the buffer at
+    // release silently lost data written through an fskit mount.
+    const core = await mkCore()
+    const fh = await core.open('/data/greeting.txt')
+    const payload = new TextEncoder().encode('rewritten, longer than before\n')
+    await core.write('/data/greeting.txt', fh, payload, 0)
+    await core.release(fh)
+    const after = await core.open('/data/greeting.txt')
+    const body = await core.read('/data/greeting.txt', after, 0, 100)
+    await core.release(after)
+    expect(new TextDecoder().decode(body)).toBe('rewritten, longer than before\n')
   })
 
   it('throws EINVAL from readlink on a regular file', async () => {

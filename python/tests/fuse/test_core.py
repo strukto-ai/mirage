@@ -85,6 +85,17 @@ async def test_open_release_tracks_handles(seeded):
 
 
 @pytest.mark.asyncio
+async def test_release_flushes_buffered_writes(seeded):
+    # The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH in
+    # between (the kext always flushes on close); dropping the buffer at
+    # release silently lost data written through an fskit mount.
+    fh = seeded.open("/a.txt")
+    seeded.write("/a.txt", b"hello world, appended", 0, fh)
+    seeded.release(fh)
+    assert seeded.read("/a.txt", 100, 0, None) == b"hello world, appended"
+
+
+@pytest.mark.asyncio
 async def test_write_then_read(seeded):
     seeded.write("/new.txt", b"written", 0, None)
     assert seeded.read("/new.txt", 100, 0, None) == b"written"

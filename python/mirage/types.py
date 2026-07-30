@@ -195,8 +195,11 @@ class MountBackend(StrEnum):
     FSKIT is macOS 15.4+ only and needs no kernel extension. It has no
     ``direct_io`` equivalent, so it serves correct reads only for resources
     that set ``SIZES_ALWAYS_KNOWN``; ``mirage.fuse.backend`` warns at mount
-    time about resources whose size-unknown files will read as empty. There
-    is deliberately no ``auto``: auto-selecting FSKIT would silently
+    time about resources whose size-unknown files will read as empty. Writes
+    are also limited: appends and metadata ops persist, but the macFUSE
+    FSKit shim flushes pages a file did not already have (a new file, or
+    truncate-then-write) as NUL bytes (pinned in ``integ/truth_fskit.json``).
+    There is deliberately no ``auto``: auto-selecting FSKIT would silently
     degrade every API-backed mount.
     """
 

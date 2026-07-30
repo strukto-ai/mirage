@@ -124,8 +124,12 @@ async function main(): Promise<void> {
     console.log("  the FSKit shim finalizes new items via macFUSE's Darwin-only");
     console.log("  setattr_x/renamex callbacks, which fuse-native's compiled op");
     console.log("  table cannot gain from JS. Python declares them at runtime");
-    console.log("  (mirage/fuse/darwin.py) and has the full write surface; use");
-    console.log("  it, or backend 'fuse' here. See docs/typescript/setup/fuse.mdx.");
+    console.log("  (mirage/fuse/darwin.py) and has the metadata surface; but on");
+    console.log("  both languages the shim flushes pages a file did not already");
+    console.log("  have (new file, truncate-then-write) as NUL bytes, so only");
+    console.log("  appends to existing bytes persist real data (macFUSE FSKit");
+    console.log("  bug, pinned in integ/truth_fskit.json). Prefer backend");
+    console.log("  'fuse' for write-heavy mounts. See docs/typescript/setup/fuse.mdx.");
   } finally {
     await ws.close();
   }

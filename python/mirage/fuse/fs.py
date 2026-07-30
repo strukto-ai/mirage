@@ -206,7 +206,7 @@ class MirageFS(_FUSE_OPERATIONS):
         return self._call(self.core.open, path)
 
     def release(self, path: str, fh: int) -> int:
-        self.core.release(fh)
+        self._call(self.core.release, fh)
         return 0
 
     def truncate(self, path: str, length: int, fh: int | None = None) -> None:

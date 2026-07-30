@@ -148,6 +148,42 @@ def check_sizes(backend: MountBackend,
         "redis, s3, gridfs).", listed)
 
 
+def check_writes(backend: MountBackend,
+                 ops: Ops,
+                 root_prefix: str = "") -> None:
+    """Warn when an fskit mount accepts writes the shim may corrupt.
+
+    Measured on live fskit mounts and pinned in ``integ/truth_fskit.json``:
+    the macFUSE FSKit shim flushes pages a file did not already have (a new
+    file, an empty file, a truncate-then-write) as NUL bytes of the right
+    length, and appended regions arrive intact or zeroed depending on cache
+    state. Metadata ops (create, mkdir, rename, unlink) are reliable. The
+    writer sees no error either way, so the corruption is silent; the mount
+    proceeds with a warning naming the writable mounts.
+
+    Args:
+        backend (MountBackend): the requested backend.
+        ops (Ops): the op facade whose mounts are being served.
+        root_prefix (str): mount root, when the tree is scoped to one mount.
+    """
+    if backend is not MountBackend.FSKIT:
+        return
+    # /dev is mounted writable into every workspace, and a zeroed flush
+    # cannot corrupt a discard/byte-source device, so it never warns.
+    offenders = [(prefix, name)
+                 for prefix, name in ops.writable_mounts(root_prefix)
+                 if prefix.rstrip("/") != "/dev"]
+    if not offenders:
+        return
+    listed = ", ".join(f"{prefix} ({getattr(name, 'value', name)})"
+                       for prefix, name in offenders)
+    logger.warning(
+        "file data written through an fskit mount may be flushed by the "
+        "macFUSE FSKit shim as zeroed pages (metadata ops are reliable; "
+        "the writer sees no error): %s. Mount them read-only, or use "
+        "backend='fuse' for writes.", listed)
+
+
 def prepare_backend(value: "str | MountBackend | None",
                     ops: Ops | None = None,
                     mountpoint: str | None = None,
@@ -174,4 +210,5 @@ def prepare_backend(value: "str | MountBackend | None",
         check_mountpoint(backend, mountpoint)
     if ops is not None:
         check_sizes(backend, ops, root_prefix)
+        check_writes(backend, ops, root_prefix)
     return backend
