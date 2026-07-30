@@ -14,6 +14,7 @@
 
 import ctypes
 import errno
+import sys
 
 import mfusepy
 import pytest
@@ -21,8 +22,8 @@ import pytest
 from mirage.fuse import darwin
 from mirage.fuse.darwin import (RENAME_EXCL, RENAME_SWAP, SetattrX,
                                 changes_from_setattr,
-                                install_macfuse_extensions,
-                                rename_flags_check, timespec_to_float)
+                                install_macfuse_extensions, rename_flags_check,
+                                timespec_to_float)
 
 
 def make_attr(valid: int, **fields: int) -> SetattrX:
@@ -90,6 +91,10 @@ def test_rename_flags_swap_is_unsupported():
                               flags=RENAME_SWAP) == errno.ENOTSUP
 
 
+@pytest.mark.skipif(sys.platform != "darwin",
+                    reason="mfusepy builds fuse_operations per platform; the "
+                    "reserved tail the Apple fields replace only exists in "
+                    "the Darwin layout")
 def test_install_extends_struct_and_keeps_size(monkeypatch):
     monkeypatch.setattr(darwin, "_installed", False)
     monkeypatch.setattr(darwin.sys, "platform", "darwin")
