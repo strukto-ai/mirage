@@ -317,6 +317,147 @@
           }
         }
       ]
+    },
+    {
+      "id": "route_script_bad_name",
+      "world": {
+        "runtimes": [
+          "monty"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "route": "'nope'"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "throws_contains": "unknown runtime"
+          }
+        }
+      ]
+    },
+    {
+      "id": "captures_narrowed_entry",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "captures": [
+              "python3"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(40 + 2)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested_eval_inherits_routing",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "'magic' in ctx['line']"
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo $(python3 -c \"print(42)\") magic",
+          "expect": {
+            "exit": 0,
+            "stdout": "42 magic\n"
+          }
+        },
+        {
+          "command": "echo $(python3 -c \"print(42)\")",
+          "expect": {
+            "exit": 0,
+            "stdout": "\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "captures_narrowed_miss_py",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "captures": [
+              "python3"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python -c \"print(1)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "captures_narrowed_miss_ts",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "captures": [
+              "python3"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python -c \"print(1)\"",
+          "expect": {
+            "exit": 127,
+            "stderr_contains": "python runtime is not available"
+          }
+        }
+      ]
     }
   ]
 }
