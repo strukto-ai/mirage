@@ -15,8 +15,9 @@
 import pytest
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import (PolicyContext, PolicyDeny, ScriptSource,
-                                   command_facts, decide_line, evaluate_policy,
+from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyDeny,
+                                   RouteResult, ScriptSource, command_facts,
+                                   decide_line, evaluate_policy,
                                    evaluate_script, evaluator_of,
                                    parse_verdict)
 from mirage.runtime.python.monty import MontyRuntime
@@ -123,6 +124,18 @@ async def test_policy_deny_verdict_raises_with_reason():
             ScriptSource("{'deny': 'no python3'} "
                          "if ctx['command'] == 'python3' else None"),
             ctx_for("python3 x"), MontyRuntime())
+
+
+@pytest.mark.asyncio
+async def test_policy_result_arms_parse():
+    assert parse_verdict(RouteResult("beta")) == "beta"
+    with pytest.raises(PolicyDeny, match="not here"):
+        parse_verdict(DenyResult("not here"))
+    assert await evaluate_policy(lambda c: RouteResult("beta"), ctx_for("x"),
+                                 None) == "beta"
+    with pytest.raises(PolicyDeny, match="blocked"):
+        await evaluate_policy(lambda c: DenyResult("blocked"), ctx_for("x"),
+                              None)
 
 
 def test_parse_verdict_fails_loud_on_bad_dicts():

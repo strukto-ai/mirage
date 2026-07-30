@@ -19,6 +19,7 @@ from mirage import MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
 from mirage.runtime.base import Runtime
+from mirage.runtime.policy import DenyResult, RouteResult
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
@@ -337,6 +338,24 @@ async def test_policy_deny_folds_into_the_line_result():
         events = await ws.history()
         assert [e["command"] for e in events] == ["python3 -c 'x'", "echo ok"]
         assert events[0]["exit_code"] == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_policy_result_arms_route_and_deny():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(),
+                             BetaRuntime(), "vfs"],
+                   policy=lambda ctx: DenyResult("secrets stay put")
+                   if "secret" in ctx.line else RouteResult("beta"))
+    try:
+        io = await ws.execute("python3 -c 'x'")
+        assert await materialize(io.stdout) == b"ran-beta\n"
+        io = await ws.execute("python3 -c 'secret'")
+        assert io.exit_code == 126
+        assert io.stderr == b"python3: policy denied: secrets stay put\n"
     finally:
         await ws.close()
 

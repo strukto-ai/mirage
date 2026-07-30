@@ -16,7 +16,13 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
-import { parseVerdict, ScriptSource } from './executor/policy/index.ts'
+import {
+  DenyResult,
+  parseVerdict,
+  PolicyDeny,
+  RouteResult,
+  ScriptSource,
+} from './executor/policy/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -237,6 +243,33 @@ describe('routing ladder', () => {
     try {
       const io = await ws.execute('python3 -c "x"')
       expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('the typed arms parse like their wire dicts', async () => {
+    expect(parseVerdict(new RouteResult('beta'))).toBe('beta')
+    expect(() => parseVerdict(new DenyResult('not here'))).toThrow(PolicyDeny)
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'vfs'],
+        policy: (ctx) =>
+          ctx.line.includes('secret')
+            ? new DenyResult('secrets stay put')
+            : new RouteResult('beta'),
+      },
+    )
+    try {
+      const routed = await ws.execute('python3 -c "x"')
+      expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
+      const denied = await ws.execute('python3 -c "secret"')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('python3: policy denied: secrets stay put\n')
     } finally {
       await ws.close()
     }

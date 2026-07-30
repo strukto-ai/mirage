@@ -204,13 +204,51 @@ class PolicyContext:
 #         script: guard.py
 PolicyScript = Callable[[PolicyContext], bool | Awaitable[bool]] | ScriptSource
 
-# What the global policy may answer: a runtime name, None to pass, or
-# a verdict dict, the extensible spelling. Today's dict keys (mutually
-# exclusive): {"runtime": name} places the line, {"deny": reason}
-# refuses it before anything runs (exit 126, reason on stderr). New
-# powers grow as new dict keys, never as new return types. Mirrors the
-# TS PolicyVerdict.
-PolicyVerdict = str | Mapping[str, Any] | None
+
+class PolicyResult:
+    """The typed spelling of a policy verdict, one subclass per arm.
+
+    Code policies return an arm instance (or the plain-shape sugar
+    below); config scripts return the wire dict, since class instances
+    cannot cross the evaluator sandbox. Each arm serializes to one
+    wire key, and future powers grow as fields on the arm they ride
+    (attachments on RouteResult, kubernetes-admission style).
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class RouteResult(PolicyResult):
+    """The affirmative arm: this runtime serves the line.
+
+    Args:
+        runtime (str): name of the entry that serves every command it
+            captures on this line. Wire form: {"runtime": name}.
+    """
+
+    runtime: str
+
+
+@dataclass(frozen=True, slots=True)
+class DenyResult(PolicyResult):
+    """The negative arm: refuse the line before anything runs.
+
+    The line exits 126 with ``<command>: policy denied: <reason>`` on
+    stderr. Wire form: {"deny": reason}.
+
+    Args:
+        reason (str): why the line was denied, shown on stderr.
+    """
+
+    reason: str
+
+
+# What the global policy may answer: a PolicyResult arm, a runtime
+# name, None to pass, or the verdict dict (the wire spelling of the
+# arms, the only form a config script can return). Dict keys are
+# mutually exclusive: {"runtime": name} places the line, {"deny":
+# reason} refuses it. New powers grow as arm fields and dict keys,
+# never as new return types. Mirrors the TS PolicyVerdict.
+PolicyVerdict = PolicyResult | str | Mapping[str, Any] | None
 
 # The global policy, answering "who takes this line?". In code: a
 # callable (sync or async) on the PolicyContext returning a

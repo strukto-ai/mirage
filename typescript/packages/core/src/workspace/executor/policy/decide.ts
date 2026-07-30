@@ -18,6 +18,8 @@ import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
 import type { EvalValue } from '../runtime_types.ts'
 import { PolicyDeny, PolicyError } from './errors.ts'
 import {
+  DenyResult,
+  RouteResult,
   ScriptSource,
   policyContextPayload,
   type PolicyDecision,
@@ -111,6 +113,8 @@ async function evaluateScript(
 export function parseVerdict(verdict: unknown): string | null {
   if (verdict === null) return null
   if (typeof verdict === 'string') return verdict
+  if (verdict instanceof RouteResult) return verdict.runtime
+  if (verdict instanceof DenyResult) throw new PolicyDeny(verdict.reason)
   if (typeof verdict === 'object' && !Array.isArray(verdict) && !(verdict instanceof Uint8Array)) {
     const obj = verdict as Record<string, unknown>
     const unknown = Object.keys(obj)

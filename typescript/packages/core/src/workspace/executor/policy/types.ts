@@ -159,15 +159,41 @@ export class ScriptSource {
  */
 export type PolicyScript = ((ctx: PolicyContext) => boolean | Promise<boolean>) | ScriptSource
 
+/** The affirmative arm: this runtime serves the line. Wire form: `{runtime: name}`. */
+export class RouteResult {
+  constructor(readonly runtime: string) {}
+}
+
 /**
- * What the global policy may answer: a runtime name, null to pass, or
- * a verdict object, the extensible spelling. Today's keys (mutually
- * exclusive): `{runtime: name}` places the line, `{deny: reason}`
- * refuses it before anything runs (exit 126, reason on stderr). New
- * powers grow as new keys, never as new return types. Mirrors the
- * python PolicyVerdict.
+ * The negative arm: refuse the line before anything runs. The line
+ * exits 126 with `<command>: policy denied: <reason>` on stderr.
+ * Wire form: `{deny: reason}`.
  */
-export type PolicyVerdict = string | null | { runtime?: string; deny?: string }
+export class DenyResult {
+  constructor(readonly reason: string) {}
+}
+
+/**
+ * The typed spelling of a policy verdict, one class per arm.
+ *
+ * Code policies return an arm instance (or the plain-shape sugar in
+ * PolicyVerdict); config scripts return the wire dict, since class
+ * instances cannot cross the evaluator sandbox. Each arm serializes
+ * to one wire key, and future powers grow as fields on the arm they
+ * ride (attachments on RouteResult, kubernetes-admission style).
+ * Mirrors the python PolicyResult base class.
+ */
+export type PolicyResult = RouteResult | DenyResult
+
+/**
+ * What the global policy may answer: a PolicyResult arm, a runtime
+ * name, null to pass, or the verdict object (the wire spelling of the
+ * arms, the only form a config script can return). Object keys are
+ * mutually exclusive: `{runtime: name}` places the line, `{deny:
+ * reason}` refuses it. New powers grow as arm fields and wire keys,
+ * never as new return types. Mirrors the python PolicyVerdict.
+ */
+export type PolicyVerdict = PolicyResult | string | null | { runtime?: string; deny?: string }
 
 /**
  * The global policy, answering "who takes this line?". In code: a

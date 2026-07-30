@@ -20,8 +20,10 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.policy.errors import PolicyDeny
-from mirage.runtime.policy.types import (PolicyContext, PolicyDecision,
-                                         PolicyFn, PolicyScript, ScriptSource)
+from mirage.runtime.policy.types import (DenyResult, PolicyContext,
+                                         PolicyDecision, PolicyFn,
+                                         PolicyScript, RouteResult,
+                                         ScriptSource)
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 from mirage.runtime.types import EvalValue
 
@@ -106,19 +108,25 @@ async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
 def parse_verdict(verdict: Any) -> str | None:
     """Normalize a policy verdict to a runtime name or None to pass.
 
-    The dict form is the extensible spelling: {"runtime": name} places
-    the line, {"deny": reason} refuses it, and the keys are mutually
-    exclusive. Unknown keys fail loud so a typo never silently passes.
+    Accepts the typed arms (RouteResult/DenyResult), a bare name, None,
+    and the wire dict the arms serialize to: {"runtime": name} places
+    the line, {"deny": reason} refuses it, keys mutually exclusive.
+    Unknown keys fail loud so a typo never silently passes.
 
     Args:
         verdict (Any): whatever the policy returned.
 
     Raises:
-        PolicyDeny: the verdict is {"deny": reason}.
-        ValueError: the verdict is not a name, None, or a verdict dict.
+        PolicyDeny: the verdict is DenyResult or {"deny": reason}.
+        ValueError: the verdict is not a PolicyResult arm, a name,
+            None, or a verdict dict.
     """
     if verdict is None or isinstance(verdict, str):
         return verdict
+    if isinstance(verdict, RouteResult):
+        return verdict.runtime
+    if isinstance(verdict, DenyResult):
+        raise PolicyDeny(verdict.reason)
     if isinstance(verdict, Mapping):
         unknown = sorted(set(verdict) - {"runtime", "deny"})
         if unknown:

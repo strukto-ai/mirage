@@ -15,12 +15,19 @@
 export { decideLine, evaluatorOf, parseVerdict } from './decide.ts'
 export { PolicyDeny, PolicyError } from './errors.ts'
 export { commandFacts } from './facts.ts'
-export { ScriptSource, policyContextFromPayload, policyContextPayload } from './types.ts'
+export {
+  DenyResult,
+  RouteResult,
+  ScriptSource,
+  policyContextFromPayload,
+  policyContextPayload,
+} from './types.ts'
 export type {
   CommandFacts,
   PolicyDecision,
   PolicyContext,
   PolicyFn,
+  PolicyResult,
   PolicyScript,
   PolicyVerdict,
 } from './types.ts'
