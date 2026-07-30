@@ -42,6 +42,7 @@ import { LS_FAILURE } from '../../commands/builtin/generic/ls.ts'
 import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
 import { Strategy } from '../../commands/builtin/generic/crossmount/types.ts'
+import { classifyBarePath } from '../expand/classify/index.ts'
 import { resolveGlobs } from '../expand/globs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
@@ -73,6 +74,39 @@ interface RunOnMountCtx {
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RoutingDecision
+}
+
+// Commands whose recursive flag makes a bare invocation search the
+// working directory (GNU grep -r/-R with no path operand).
+const RECURSIVE_CWD_COMMANDS = new Set(['grep'])
+
+// The synthetic cwd operand for a recursive search typed bare. GNU grep
+// -r/-R with no path operand searches the working directory and ignores
+// stdin, printing results as bare relative names (a.txt:hit, not
+// ./a.txt:hit). The empty rawPath carries that spelling through rebaseRaw.
+function defaultRecursiveOperand(
+  parts: readonly (string | PathSpec)[],
+  cmdName: string,
+  registry: MountRegistry,
+  cwd: string,
+): PathSpec | null {
+  const spec = SPECS[cmdName]
+  if (spec === undefined) return null
+  const argv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
+  const parsed = parseCommand(spec, argv, cwd)
+  if (parsed.paths().length > 0) return null
+  const kwargs = parseToKwargs(parsed)
+  if (kwargs.r !== true && kwargs.R !== true) return null
+  const operand = classifyBarePath('.', registry, cwd)
+  if (typeof operand === 'string') return null
+  return new PathSpec({
+    virtual: operand.virtual,
+    directory: operand.directory,
+    resourcePath: operand.resourcePath,
+    pattern: operand.pattern,
+    resolved: operand.resolved,
+    rawPath: '',
+  })
 }
 
 function pathFlagScopes(cmdName: string, argv: string[], cwd: string): PathSpec[] {
@@ -383,6 +417,11 @@ export async function handleCommand(
       stdin,
       callStack,
     )
+  }
+
+  if (RECURSIVE_CWD_COMMANDS.has(cmdName)) {
+    const operand = defaultRecursiveOperand(parts, cmdName, registry, session.cwd)
+    if (operand !== null) parts = [...parts, operand]
   }
 
   const pathScopes: PathSpec[] = []

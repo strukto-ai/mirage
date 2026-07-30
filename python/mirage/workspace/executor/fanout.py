@@ -20,6 +20,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+from mirage.utils.path import rebase_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.types import ExecutionNode
@@ -281,11 +282,17 @@ async def _fan_out_traversal(
                 continue
             sub_flags = adjusted
             sub_texts = _adjust_depth_texts(texts, target_path, mount.prefix)
+            # The descendant operand keeps the traversal root's typed
+            # spelling (grep -r . -> ./ram/...; the synthetic bare
+            # no-operand form -> ram/...); an absolute root leaves it
+            # absolute, the pre-existing output shape.
             sub_paths = [
                 PathSpec(virtual=mount_root,
                          directory=mount_root,
                          resource_path="",
-                         resolved=True)
+                         resolved=True,
+                         raw_path=rebase_one(mount_root, target_path,
+                                             paths[0].raw_path))
             ]
         stdout, io = await mount.execute_cmd(cmd_name,
                                              sub_paths,

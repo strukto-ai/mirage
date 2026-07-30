@@ -235,13 +235,16 @@ def rebase_one(path: str, original: str, raw: str) -> str:
         rebase_one("/data/x:hit", "/data", ".")      -> "./x:hit"
         rebase_one("/other/x", "/data", ".")         -> "/other/x"  # no match
         rebase_one("/data/x", "/data", "/data")      -> "/data/x"   # absolute
+        rebase_one("/data/sub/x", "/data", "")       -> "sub/x"     # bare
 
     Args:
         path (str): An absolute path at or under ``original`` (optionally with
             a trailing ``:...`` suffix).
         original (str): The resolved absolute base (traversal root).
         raw (str): The as-typed base (``PathSpec.raw_path``); equal to
-            ``original`` leaves ``path`` unchanged.
+            ``original`` leaves ``path`` unchanged. The empty string is the
+            synthetic no-operand spelling (GNU ``grep -r`` with no path):
+            results render as bare names relative to the base.
 
     Returns:
         str: ``path`` with its ``original`` base replaced by ``raw``.
@@ -250,8 +253,10 @@ def rebase_one(path: str, original: str, raw: str) -> str:
         return path
     base = original.rstrip("/")
     if path == base:
-        return raw
+        return raw or "."
     if path.startswith(base + "/"):
+        if raw == "":
+            return path[len(base) + 1:]
         return raw.rstrip("/") + path[len(base):]
     return path
 

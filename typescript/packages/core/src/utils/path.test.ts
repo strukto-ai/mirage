@@ -19,6 +19,7 @@ import {
   expandTilde,
   globPrefixMatch,
   posixNormpath,
+  rebaseOne,
   resolvePath,
   resolveSymlinks,
   dropTrailingSegments,
@@ -166,5 +167,28 @@ describe('dropTrailingSegments', () => {
   it('is clamped so a path never becomes empty', () => {
     expect(dropTrailingSegments('/a', 1)).toBe('/a')
     expect(dropTrailingSegments('a/b', 5)).toBe('a/b')
+  })
+})
+
+describe('rebaseOne', () => {
+  it.each([
+    ['/data/sub/x', '/data', '.', './sub/x'],
+    ['/data/sub', '/data/sub', 'sub', 'sub'],
+    ['/data/x:hit', '/data', '.', './x:hit'],
+    ['/other/x', '/data', '.', '/other/x'],
+    ['/data/x', '/data', '/data', '/data/x'],
+  ])('respells %s under %s typed as %s', (path, original, raw, want) => {
+    expect(rebaseOne(path, original, raw)).toBe(want)
+  })
+
+  // GNU grep -r with no path operand prints names relative to the cwd
+  // with no ./ prefix; the synthetic operand carries rawPath ''.
+  it.each([
+    ['/data/sub/x', '/data', 'sub/x'],
+    ['/data/x:hit', '/data', 'x:hit'],
+    ['/ram/a.txt:hello', '/', 'ram/a.txt:hello'],
+    ['/data', '/data', '.'],
+  ])('empty raw renders %s under %s bare', (path, original, want) => {
+    expect(rebaseOne(path, original, '')).toBe(want)
   })
 })

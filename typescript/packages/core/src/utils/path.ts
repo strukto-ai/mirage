@@ -91,8 +91,13 @@ export function dropTrailingSegments(path: string, count: number): string {
 export function rebaseOne(path: string, virtual: string, raw: string): string {
   if (raw === virtual) return path
   const base = rstripSlash(virtual)
-  if (path === base) return raw
-  if (path.startsWith(base + '/')) return rstripSlash(raw) + path.slice(base.length)
+  if (path === base) return raw === '' ? '.' : raw
+  if (path.startsWith(base + '/')) {
+    // The empty raw is the synthetic no-operand spelling (GNU grep -r
+    // with no path): results render as bare names relative to the base.
+    if (raw === '') return path.slice(base.length + 1)
+    return rstripSlash(raw) + path.slice(base.length)
+  }
   return path
 }
 

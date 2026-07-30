@@ -21,6 +21,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { resolveAcrossMounts } from '../../commands/safeguard.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
+import { rebaseOne } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { keep } from '../../commands/builtin/findEval.ts'
 import {
@@ -213,11 +214,16 @@ export async function fanOutTraversal(
       subFlags = adjusted
       subTexts = adjustDepthTexts(texts, targetPath, mount.prefix)
       const mountRoot = rstripSlash(mount.prefix) || '/'
+      // The descendant operand keeps the traversal root's typed spelling
+      // (grep -r . -> ./ram/...; the synthetic bare no-operand form ->
+      // ram/...); an absolute root leaves it absolute, the pre-existing
+      // output shape.
       subPaths = [
         new PathSpec({
           virtual: mountRoot,
           directory: mountRoot,
           resourcePath: mountKey(mountRoot, rstripSlash(mount.prefix)),
+          rawPath: rebaseOne(mountRoot, targetPath, paths[0]?.rawPath ?? targetPath),
         }),
       ]
     }

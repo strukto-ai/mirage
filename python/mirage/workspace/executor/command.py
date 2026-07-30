@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import functools
 from collections.abc import Callable
 from typing import Any, NamedTuple
@@ -54,6 +55,7 @@ from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.jobs import (handle_fg, handle_jobs,
                                             handle_kill, handle_ps,
                                             handle_wait)
+from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -64,6 +66,42 @@ from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
+
+# Commands whose recursive flag makes a bare invocation search the
+# working directory (GNU grep -r/-R with no path operand).
+_RECURSIVE_CWD_COMMANDS = frozenset({"grep"})
+
+
+def _default_recursive_operand(parts: list[str | PathSpec], cmd_name: str,
+                               registry: MountRegistry,
+                               cwd: str) -> PathSpec | None:
+    """The synthetic cwd operand for a recursive search typed bare.
+
+    GNU grep ``-r``/``-R`` with no path operand searches the working
+    directory and ignores stdin, printing results as bare relative
+    names (``a.txt:hit``, not ``./a.txt:hit``). The empty ``raw_path``
+    carries that spelling through :func:`rebase_raw`.
+
+    Args:
+        parts (list[str | PathSpec]): classified command words.
+        cmd_name (str): command name (a _RECURSIVE_CWD_COMMANDS member).
+        registry (MountRegistry): mount registry resolving the cwd.
+        cwd (str): session working directory.
+    """
+    spec = SPECS.get(cmd_name)
+    if spec is None:
+        return None
+    argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
+    parsed = parse_command(spec, argv, cwd)
+    if parsed.paths():
+        return None
+    kwargs = parse_to_kwargs(parsed)
+    if kwargs.get("r") is not True and kwargs.get("R") is not True:
+        return None
+    operand = classify_bare_path(".", registry, cwd)
+    if not isinstance(operand, PathSpec):
+        return None
+    return dataclasses.replace(operand, raw_path="")
 
 
 def _path_flag_scopes(cmd_name: str, argv: list[str],
@@ -640,6 +678,12 @@ async def handle_command(
                     session.arrays[key] = old_arr
             session._local_vars = None
             session._local_arrays = None
+
+    if cmd_name in _RECURSIVE_CWD_COMMANDS:
+        operand = _default_recursive_operand(parts, cmd_name, registry,
+                                             session.cwd)
+        if operand is not None:
+            parts = [*parts, operand]
 
     # Cross-mount: paths span different mounts (e.g. cp /ram/a /disk/b).
     # Use dispatch to read/write across mounts directly.
