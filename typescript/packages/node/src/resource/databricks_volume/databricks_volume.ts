@@ -79,6 +79,10 @@ async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, str
 export class DatabricksVolumeResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.DATABRICKS_VOLUME
   readonly cachesReads: boolean = true
+  // The Files API lists DirectoryEntry.file_size and stat HEADs report
+  // Content-Length, both the exact byte count the download returns;
+  // readdir backfills any lister-omitted size with one HEAD.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = DATABRICKS_VOLUME_PROMPT
   readonly config: DatabricksVolumeConfig

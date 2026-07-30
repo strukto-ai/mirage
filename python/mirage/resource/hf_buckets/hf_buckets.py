@@ -61,6 +61,10 @@ class HfBucketsResource(BaseResource):
     accessor: HfBucketsAccessor
     name: str = ResourceName.HF_BUCKETS
     caches_reads: bool = True
+    # The Hub tree API reports each file's exact byte size (the LFS
+    # object size for LFS files); readdir backfills any lister-omitted
+    # size with one stat.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True

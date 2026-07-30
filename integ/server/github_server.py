@@ -50,6 +50,10 @@ def _tree_sha(path: str) -> str:
     return hashlib.sha1(f"tree\0{path}".encode()).hexdigest()
 
 
+def _commit_sha(path: str) -> str:
+    return hashlib.sha1(f"commit\0{path}".encode()).hexdigest()
+
+
 def _error(status: int, message: str) -> web.Response:
     return web.json_response(
         {
@@ -78,6 +82,7 @@ class FakeRepo:
         self.files: dict[str, bytes] = {}
         self.terms: dict[str, set[str]] = {}
         self.blobs: dict[str, bytes] = {}
+        self.submodules: set[str] = set()
 
     @property
     def full_name(self) -> str:
@@ -88,6 +93,11 @@ class FakeRepo:
         self.files[key] = data
         self.blobs[_blob_sha(data)] = data
         self._index(key, data)
+
+    def seed_submodule(self, path: str) -> None:
+        """Register a submodule gitlink: a tree entry of type "commit"
+        with a mode of 160000, no size, and no blob behind its sha."""
+        self.submodules.add(path.strip("/"))
 
     def _index(self, path: str, data: bytes) -> None:
         for term in self.terms.values():
@@ -139,6 +149,15 @@ class FakeRepo:
                 "type": "blob",
                 "sha": _blob_sha(data),
                 "size": len(data),
+            })
+        for path in sorted(self.submodules):
+            if not path.startswith(prefix):
+                continue
+            items.append({
+                "path": path[len(prefix):],
+                "mode": "160000",
+                "type": "commit",
+                "sha": _commit_sha(path),
             })
         items.sort(key=lambda it: str(it["path"]))
         return items
@@ -321,9 +340,17 @@ def seed_from_dir(state: FakeGitHub, full_name: str, source: Path) -> None:
     owner, _, name = full_name.partition("/")
     repo = state.repo(owner, name)
     for path in sorted(source.rglob("*")):
-        if path.is_file():
-            repo.seed_path(
-                path.relative_to(source).as_posix(), path.read_bytes())
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source).as_posix()
+        # A SUBMODULES file at the fixture root is a manifest of submodule
+        # gitlink paths (one per line), not repository content.
+        if relative == "SUBMODULES":
+            for line in path.read_text().splitlines():
+                if line.strip():
+                    repo.seed_submodule(line.strip())
+            continue
+        repo.seed_path(relative, path.read_bytes())
 
 
 async def _serve(port: int, repos: list[str]) -> None:

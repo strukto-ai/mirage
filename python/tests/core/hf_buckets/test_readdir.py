@@ -49,3 +49,30 @@ async def test_readdir_populates_index_cache(make_acc):
     assert lookup.entry is not None
     assert lookup.entry.size == 5
     assert lookup.entry.resource_type == "file"
+
+
+@pytest.mark.asyncio
+async def test_readdir_backfills_lister_omitted_size(make_acc):
+    # When the lister omits metadata, readdir does one stat per affected
+    # file instead of caching an unknown size.
+    acc = make_acc({"a.txt": b"hello", "b.txt": b"abc"})
+    fake = acc._fake
+    real_list = fake.list
+
+    async def _stripped_list(path, **kw):
+        entries = await real_list(path, **kw)
+
+        async def _iter():
+            async for entry in entries:
+                if entry.path == "a.txt":
+                    entry.metadata = None
+                yield entry
+
+        return _iter()
+
+    fake.list = _stripped_list
+    cache = RAMIndexCacheStore(ttl=60)
+    await readdir(acc, PathSpec.from_str_path("/"), cache)
+    entry = (await cache.get("/a.txt")).entry
+    assert entry is not None
+    assert entry.size == 5

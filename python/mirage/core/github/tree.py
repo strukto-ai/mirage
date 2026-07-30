@@ -34,6 +34,10 @@ def _parse_tree_response(
                     ref)
     result: dict[str, TreeEntry] = {}
     for item in data.get("tree", []):
+        # Submodule gitlinks (type "commit") have no size and no blob to
+        # read; exclude them from the tree entirely.
+        if item["type"] == "commit":
+            continue
         result[item["path"]] = TreeEntry(
             path=item["path"],
             type=item["type"],
@@ -81,6 +85,8 @@ async def fetch_dir_tree(
     )
     result: list[TreeEntry] = []
     for item in data.get("tree", []):
+        if item["type"] == "commit":
+            continue
         result.append(
             TreeEntry(
                 path=item["path"],

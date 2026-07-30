@@ -11,7 +11,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "stat -c %s /data/poem.txt",
       "expect": {
@@ -31,7 +33,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "cat /data/poem.txt | wc -c",
       "expect": {
@@ -51,7 +55,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "stat -c %s /data/empty.txt",
       "expect": {
@@ -71,7 +77,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "cat /data/empty.txt | wc -c",
       "expect": {
@@ -91,7 +99,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "stat -c %s /data/sub/nested.txt",
       "expect": {
@@ -163,13 +173,67 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "cat /data/sub/nested.txt | wc -c",
       "expect": {
         "exit": 0,
         "stdout": "15\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_stat_readme",
+      "seq": 680020,
+      "targets": [
+        "github"
+      ],
+      "command": "stat -c %s /repo/README.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_read_readme",
+      "seq": 680021,
+      "targets": [
+        "github"
+      ],
+      "command": "cat /repo/README.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_submodule_hidden_from_listing",
+      "seq": 680022,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo -name extern",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_submodule_stat_enoent",
+      "seq": 680023,
+      "targets": [
+        "github"
+      ],
+      "command": "stat /repo/extern",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /repo/extern: No such file or directory\n"
       }
     }
   ]

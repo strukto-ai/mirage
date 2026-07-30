@@ -56,6 +56,10 @@ class SharePointResource(BaseResource):
     accessor: SharePointAccessor
     name: str = ResourceName.SHAREPOINT
     caches_reads: bool = True
+    # Graph drive items carry an exact content-length size and the site
+    # and drive levels are plain directories; unlike onedrive there is
+    # no aggregate-size root item.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _SHAREPOINT_OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True

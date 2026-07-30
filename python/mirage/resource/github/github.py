@@ -36,6 +36,10 @@ class GitHubResource(BaseResource):
     accessor: GitHubAccessor
     name: str = ResourceName.GITHUB
     caches_reads: bool = True
+    # The git tree API reports the exact blob size for every file; the
+    # blob read returns those same bytes, and submodule gitlinks (which
+    # have no size and no blob) are excluded from the tree.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
 
     def __init__(

@@ -51,6 +51,10 @@ export interface GitHubResourceState {
 export class GitHubResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GITHUB
   readonly cachesReads: boolean = true
+  // The git tree API reports the exact blob size for every file; the
+  // blob read returns those same bytes, and submodule gitlinks (which
+  // have no size and no blob) are excluded from the tree.
+  readonly sizesAlwaysKnown: boolean = true
   // Blob shas are stable per-path markers, so cached reads can be
   // probe-verified under ALWAYS and snapshots carry drift fingerprints.
   readonly supportsSnapshot: boolean = true
