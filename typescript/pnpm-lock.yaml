@@ -255,6 +255,9 @@ importers:
       chromadb:
         specifier: ^3.4.3
         version: 3.4.3
+      e2b:
+        specifier: ^2.0.0
+        version: 2.36.0
       imapflow:
         specifier: ^1.3.2
         version: 1.3.2

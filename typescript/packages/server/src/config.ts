@@ -79,9 +79,9 @@ function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
     if (script !== undefined && typeof script !== 'string') {
       throw new Error('a runtime entry script must be a .py path string')
     }
-    const built = buildRuntime(name, options)
-    if (script !== undefined) built.script = loadScriptSource(script)
-    out.push(built)
+    const withScript: Record<string, unknown> =
+      script !== undefined ? { ...options, script: loadScriptSource(script) } : options
+    out.push(buildRuntime(name, withScript))
   }
   return out
 }
@@ -146,9 +146,19 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
     out.store = store
   }
   if (Array.isArray(out.runtimes)) {
-    out.runtimes = out.runtimes.map((entry): unknown =>
-      isPlainObject(entry) ? camelizeKeys(entry) : entry,
-    )
+    // A runtime entry's config block carries the runtime's own knobs
+    // (sandbox_id, api_key, home, ...), snake_case in yaml like every
+    // Python-shaped key; the TS runtime config classes are camelCase,
+    // so camelize the block's keys too. Only the keys: values such as
+    // the env map pass through untouched.
+    out.runtimes = out.runtimes.map((entry): unknown => {
+      if (!isPlainObject(entry)) return entry
+      const normalized = camelizeKeys(entry)
+      if (isPlainObject(normalized.config)) {
+        normalized.config = camelizeKeys(normalized.config)
+      }
+      return normalized
+    })
   }
   return out
 }

@@ -1,0 +1,117 @@
+{
+  "suite": "e2b",
+  "optional": true,
+  "requires": [
+    "env:E2B_API_KEY",
+    "env:MIRAGE_INTEG_E2B_SANDBOX_ID"
+  ],
+  "cases": [
+    {
+      "id": "echo",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX_ID}"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi-from-e2b",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi-from-e2b\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "exit_code",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX_ID}"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "sh -c 'exit 7'",
+          "expect": {
+            "exit": 7
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX_ID}"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "wc -l",
+          "stdin": "a\nb\nc\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "config_env",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX_ID}",
+              "env": {
+                "BOX_MARKER": "from-config"
+              }
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo $BOX_MARKER",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-config\n"
+          }
+        }
+      ]
+    }
+  ]
+}

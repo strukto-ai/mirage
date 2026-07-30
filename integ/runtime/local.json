@@ -1,0 +1,30 @@
+{
+  "suite": "local",
+  "cases": [
+    {
+      "id": "sys_argv",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "local"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print(sys.argv[1:])\" alpha beta",
+          "expect": {
+            "exit": 0,
+            "stdout": "['alpha', 'beta']\n"
+          }
+        }
+      ]
+    }
+  ]
+}

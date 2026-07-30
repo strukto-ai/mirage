@@ -777,57 +777,9 @@ jobs:
           cat /tmp/fuse-win.out
           bash integ/check_lines.sh integ/truth_fuse.txt < /tmp/fuse-win.out
 
-  runtime-py:
+  integ-runtime:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
-    runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      mongodb:
-        image: mongo:8
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      REDIS_URL: redis://localhost:6379/0
-      MONGODB_URI: mongodb://localhost:27017
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras --no-extra camel
-
-      - name: Run python3 across ram/redis/s3/mongodb mounts and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/runtime.py > /tmp/runtime_py.out
-          diff integ/truth_runtime_py.txt /tmp/runtime_py.out
-
-  runtime-ts:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
     services:
       redis:
@@ -854,8 +806,33 @@ jobs:
       S3_ENDPOINT: http://localhost:9000
       AWS_ACCESS_KEY_ID: minio
       AWS_SECRET_ACCESS_KEY: minio123
+      QUICKJS_BUILD: v0.15.1
+      WASI_BUILD: python-3.14.6-wasi_sdk-24
+      MIRAGE_QUICKJS_HOME: /tmp/quickjs
+      MIRAGE_WASI_HOME: /tmp/cpython-wasi
+      MIRAGE_INTEG_DOCKER_CONTAINER: mirage-integ-runtime-box
+      E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+      # Suites with unmet requirements fail instead of skipping, so a
+      # broken build download cannot silently drop wasi/quickjs/docker
+      # coverage. The e2b suite is declared optional in its case file
+      # and still skips cleanly when the secret is absent (forks).
+      INTEG_RUNTIME_STRICT: "1"
     steps:
       - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -867,17 +844,46 @@ jobs:
         with:
           version: 10.32.1
 
-      - name: Install dependencies
+      - name: Install TypeScript dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
 
-      - name: Build mirage-core
+      - name: Build TypeScript packages
         working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core build
+        run: pnpm -r build
 
-      - name: Build mirage-node
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-node build
+      - name: Cache the quickjs WASI build
+        id: quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
+
+      - name: Download the quickjs WASI build
+        if: steps.quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
+      - name: Cache the CPython WASI build
+        id: wasi-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/cpython-wasi
+          key: cpython-wasi-${{ env.WASI_BUILD }}
+
+      - name: Download the CPython WASI build
+        if: steps.wasi-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/cpython-wasi
+          gh release download v3.14.6 -R brettcannon/cpython-wasi-build \
+            -p "$WASI_BUILD.zip" -O /tmp/wasi-build.zip
+          unzip -q /tmp/wasi-build.zip -d /tmp/cpython-wasi
 
       - name: Start MinIO
         run: |
@@ -893,13 +899,31 @@ jobs:
             sleep 1
           done
 
-      - name: Run python3 across ram/redis/s3/mongodb mounts and check against truth
-        shell: bash
-        working-directory: integ
+      - name: Start the docker sandbox container (user-provisioned)
+        run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:stable-slim sleep infinity
+
+      - name: Create the e2b sandbox (user-provisioned)
+        if: env.E2B_API_KEY != ''
         run: |
-          set -o pipefail
-          pnpm exec tsx runtime.ts 2>&1 \
-            | bash check_lines.sh truth_runtime.txt
+          id="$(./python/.venv/bin/python integ/runtime/e2b_sandbox.py create)"
+          echo "MIRAGE_INTEG_E2B_SANDBOX_ID=$id" >> "$GITHUB_ENV"
+
+      - name: Run every runtime through the JSON suites (python)
+        run: ./python/.venv/bin/python integ/runtime/run.py
+
+      - name: Run every runtime through the JSON suites (typescript)
+        working-directory: integ
+        run: pnpm exec tsx runtime/run.ts
+
+      - name: Run every runtime through the CLI and both daemons
+        run: |
+          bash integ/runtime/cli.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      - name: Kill the e2b sandbox
+        if: always() && env.MIRAGE_INTEG_E2B_SANDBOX_ID != ''
+        run: ./python/.venv/bin/python integ/runtime/e2b_sandbox.py kill "$MIRAGE_INTEG_E2B_SANDBOX_ID"
 
   integ-observability:
     needs: changes
@@ -1119,7 +1143,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, integ-runtime]
     if: always()
     steps:
       - name: Check required jobs

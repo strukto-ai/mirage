@@ -8,7 +8,7 @@
     "fuse": "tsx fuse.ts",
     "notion:mcp-parity": "tsx notion_mcp_parity.ts",
     "safeguard": "tsx safeguard.ts",
-    "runtime": "tsx runtime.ts",
+    "runtime": "tsx runtime/run.ts",
     "slack:server": "tsx server/slack.ts",
     "slack:setup": "prisma generate --schema prisma/schema.prisma && prisma db push --schema prisma/schema.prisma --skip-generate"
   },
@@ -22,6 +22,7 @@
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
+    "e2b": "^2.0.0",
     "imapflow": "^1.3.2",
     "mongodb": "^6.0.0",
     "pg": "^8.0.0",

@@ -88,7 +88,7 @@ describe('configToWorkspaceArgs', () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
       runtimes: [
-        { name: 'pyodide', home: 'https://assets.example.com/pyodide/' },
+        { name: 'pyodide', config: { home: 'https://assets.example.com/pyodide/' } },
         'quickjs',
         'vfs',
       ],
@@ -100,6 +100,31 @@ describe('configToWorkspaceArgs', () => {
     expect((entries?.[0] as { name: string }).name).toBe('pyodide')
     expect((entries?.[1] as { name: string }).name).toBe('quickjs')
     expect((entries?.[2] as { name: string }).name).toBe('vfs')
+  })
+
+  it('camelizes the snake_case keys of a runtime entry config block', async () => {
+    // Yaml carries Python-shaped keys; the TS runtime config classes
+    // are camelCase, so the loader must translate the block's keys
+    // (values, like an env map, pass through untouched).
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtimes: [
+        { name: 'pyodide', config: { auto_load_from_imports: false, home: '/assets' } },
+        'vfs',
+      ],
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.runtimes).toHaveLength(2)
+  })
+
+  it('rejects a flat option on a runtime entry (knobs live in config)', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtimes: [{ name: 'pyodide', home: '/assets' }],
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
+      /unknown pyodide runtime option 'home'/,
+    )
   })
 
   it('rejects an unknown runtime entry name', async () => {

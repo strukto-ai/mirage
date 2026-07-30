@@ -1,0 +1,97 @@
+{
+  "suite": "quickjs",
+  "requires": {
+    "python": [
+      "env:MIRAGE_QUICKJS_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "eval",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "pipe_to_grep",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log('alpha'); console.log('beta')\" | grep beta",
+          "expect": {
+            "exit": 0,
+            "stdout": "beta\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "read_mount",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const f = std.open('/ram/data.txt', 'r'); console.log(f.readAsString().trim())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello from ram\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "write_mount",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const w = std.open('/ram/from-js.txt', 'w'); w.puts('js-wrote-this'); w.close()\" && cat /ram/from-js.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "js-wrote-this"
+          }
+        }
+      ]
+    }
+  ]
+}

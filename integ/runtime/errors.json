@@ -1,0 +1,107 @@
+{
+  "suite": "errors",
+  "cases": [
+    {
+      "id": "py_rejects_ts_only_name",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "TypeScript-only"
+      }
+    },
+    {
+      "id": "ts_rejects_py_only_name",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "Python-only"
+      }
+    },
+    {
+      "id": "unknown_name",
+      "world": {
+        "runtimes": [
+          "ghost",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "unknown runtime"
+      }
+    },
+    {
+      "id": "py_config_typo",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "wasi",
+            "config": {
+              "homee": "/x"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "homee"
+      }
+    },
+    {
+      "id": "ts_config_typo",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "pyodide",
+            "config": {
+              "homee": "/x"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "unknown runtime config key 'homee'"
+      }
+    },
+    {
+      "id": "wasi_bad_home",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "wasi",
+            "config": {
+              "home": "/nonexistent-wasi-build"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "cpython-wasi-build"
+      }
+    }
+  ]
+}

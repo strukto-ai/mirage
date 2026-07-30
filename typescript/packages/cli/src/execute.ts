@@ -26,6 +26,7 @@ export function registerExecuteCommand(program: Command): void {
     .requiredOption('-c, --command <command>', 'Shell command to execute')
     .option('-s, --session <id>', 'Session id')
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')
+    .option('--runtime <name>', "Workspace runtime entry to place this line's captured stages on")
     .option('--bg', 'Background; return job_id immediately')
     .action(
       async (opts: {
@@ -33,11 +34,13 @@ export function registerExecuteCommand(program: Command): void {
         command: string
         session?: string
         cwd?: string
+        runtime?: string
         bg?: boolean
       }) => {
         const body: Record<string, unknown> = { command: opts.command, provision: false }
         if (opts.session !== undefined) body.sessionId = opts.session
         if (opts.cwd !== undefined) body.cwd = opts.cwd
+        if (opts.runtime !== undefined) body.runtime = opts.runtime
         if (opts.bg !== true && !process.stdin.isTTY) {
           body.stdinBase64 = readFileSync(0).toString('base64')
         }

@@ -1,0 +1,183 @@
+{
+  "suite": "docker",
+  "requires": [
+    "env:MIRAGE_INTEG_DOCKER_CONTAINER"
+  ],
+  "cases": [
+    {
+      "id": "echo",
+      "world": {
+        "runtimes": [
+          {
+            "name": "docker",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi-from-container",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi-from-container\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "exit_code",
+      "world": {
+        "runtimes": [
+          {
+            "name": "docker",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "sh -c 'exit 7'",
+          "expect": {
+            "exit": 7
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin",
+      "world": {
+        "runtimes": [
+          {
+            "name": "docker",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "wc -l",
+          "stdin": "a\nb\nc\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "config_env",
+      "world": {
+        "runtimes": [
+          {
+            "name": "docker",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}",
+              "env": {
+                "BOX_MARKER": "from-config"
+              }
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo $BOX_MARKER",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-config\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "line_timeout",
+      "world": {
+        "runtimes": [
+          {
+            "name": "docker",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
+            }
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "safeguards": {
+              "sleep": {
+                "timeout_seconds": 1
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "sleep 5",
+          "expect": {
+            "exit": 124
+          }
+        }
+      ]
+    },
+    {
+      "id": "captured_only",
+      "world": {
+        "runtimes": [
+          {
+            "name": "docker",
+            "captures": [
+              "uname"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname",
+          "expect": {
+            "exit": 0,
+            "stdout": "Linux\n"
+          }
+        },
+        {
+          "command": "echo local-vfs",
+          "expect": {
+            "exit": 0,
+            "stdout": "local-vfs\n"
+          }
+        }
+      ]
+    }
+  ]
+}

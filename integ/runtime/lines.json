@@ -1,0 +1,73 @@
+{
+  "suite": "lines",
+  "cases": [
+    {
+      "id": "whole_line_capture",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nvidia-smi -L | grep GPU",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nvidia-smi -L | grep GPU\n"
+          }
+        },
+        {
+          "command": "echo still-the-workspace",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-the-workspace\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "whole_line_star",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "*"
+            ],
+            "script": "'keep-out' not in ctx['line']"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ls /ram && echo done",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:ls /ram && echo done\n"
+          }
+        },
+        {
+          "command": "echo keep-out",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep-out\n"
+          }
+        }
+      ]
+    }
+  ]
+}
