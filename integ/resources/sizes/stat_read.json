@@ -101,6 +101,58 @@
       }
     },
     {
+      "id": "sz_ssh_symlink_stat_follows_target",
+      "seq": 680010,
+      "targets": [
+        "ssh"
+      ],
+      "command": "stat -c %s /links/poem_link.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ssh_symlink_read",
+      "seq": 680011,
+      "targets": [
+        "ssh"
+      ],
+      "command": "cat /links/poem_link.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_box_weblink_hidden_from_listing",
+      "seq": 680012,
+      "targets": [
+        "box"
+      ],
+      "command": "find /data -name homepage",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_box_weblink_direct_stat_enoent",
+      "seq": 680013,
+      "targets": [
+        "box"
+      ],
+      "command": "stat /data/homepage",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /data/homepage: No such file or directory\n"
+      }
+    },
+    {
       "id": "sz_read_nested",
       "seq": 680006,
       "targets": [

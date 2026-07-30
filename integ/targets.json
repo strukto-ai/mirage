@@ -650,6 +650,12 @@
           "backend": "ssh",
           "root": "res",
           "fixture": "columnar/v1"
+        },
+        {
+          "path": "/links",
+          "resource": "ssh",
+          "backend": "ssh",
+          "root": "links"
         }
       ]
     },

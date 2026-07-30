@@ -71,17 +71,20 @@ async def readdir(accessor: SSHAccessor,
             )
         virtual_entries = sorted((prefix + e if prefix else e) for e in names)
         # SFTP readdir already returns each entry's attrs; keep type, size
-        # and mtime in the index instead of discarding them.
+        # and mtime in the index instead of discarding them. Readdir attrs
+        # are lstat-style, so only regular files get a size: a symlink's
+        # link-text length is not what stat (which follows) or read serve.
         index_entries = []
         for child, attrs in found:
             leaf = child.rsplit("/", 1)[-1]
             is_dir = attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
+            is_file = attrs.type == asyncssh.FILEXFER_TYPE_REGULAR
             index_entries.append(
                 (leaf,
                  IndexEntry(id=child,
                             name=leaf,
                             resource_type="folder" if is_dir else "file",
-                            size=None if is_dir else attrs.size,
+                            size=attrs.size if is_file else None,
                             remote_time=epoch_to_iso(attrs.mtime)
                             if attrs.mtime is not None else "")))
         await index.set_dir(virtual_key, index_entries)
