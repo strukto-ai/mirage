@@ -91,6 +91,11 @@ class MockSFTPClient:
             return MockSFTPAttrs(size=len(self.files[path]))
         raise asyncssh.SFTPNoSuchFile("not found")
 
+    async def lstat(self, path):
+        # No symlinks in the mock tree, so lstat and stat agree (rm uses
+        # lstat to avoid following links).
+        return await self.stat(path)
+
     async def readdir(self, path):
         if path not in self.dirs:
             raise asyncssh.SFTPNoSuchFile("not found")
