@@ -16,7 +16,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const CASE_DIRS = ['unix', 'bash', 'crossmount', 'runtime', 'resources', 'cli', 'session']
+// integ/runtime holds the runtime suite (its own schema and runners,
+// integ/runtime/run.{py,ts} + cli.sh), not battery cases; keep it out.
+const CASE_DIRS = ['unix', 'bash', 'crossmount', 'resources', 'cli', 'session']
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 

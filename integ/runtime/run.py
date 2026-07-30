@@ -237,15 +237,13 @@ def _check(case_id: str, label: str, expect: dict[str, Any], exit_code: int,
     if "stdout" in expect and stdout != expect["stdout"]:
         problems.append(f"stdout: expected {expect['stdout']!r}, "
                         f"got {stdout!r}")
-    if "stdout_contains" in expect and expect[
-            "stdout_contains"] not in stdout:
+    if "stdout_contains" in expect and expect["stdout_contains"] not in stdout:
         problems.append(f"stdout missing {expect['stdout_contains']!r}: "
                         f"got {stdout!r}")
     if "stderr" in expect and stderr != expect["stderr"]:
         problems.append(f"stderr: expected {expect['stderr']!r}, "
                         f"got {stderr!r}")
-    if "stderr_contains" in expect and expect[
-            "stderr_contains"] not in stderr:
+    if "stderr_contains" in expect and expect["stderr_contains"] not in stderr:
         problems.append(f"stderr missing {expect['stderr_contains']!r}: "
                         f"got {stderr!r}")
     return [f"{case_id} {label}: {p}" for p in problems]
@@ -274,8 +272,10 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
         except FileNotFoundError:
             errno_name = "ENOENT"
         if errno_name != expect.get("errno", "NONE"):
-            return [f"{case_id} {label}: rename errno {errno_name}, "
-                    f"expected {expect.get('errno')}"]
+            return [
+                f"{case_id} {label}: rename errno {errno_name}, "
+                f"expected {expect.get('errno')}"
+            ]
         return []
     command = step["command"]
     kwargs: dict[str, Any] = {}
@@ -289,8 +289,10 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
         except Exception as exc:
             if expect["throws_contains"] in str(exc):
                 return []
-            return [f"{case_id} {label}: raised {exc!r}, expected "
-                    f"{expect['throws_contains']!r} in the message"]
+            return [
+                f"{case_id} {label}: raised {exc!r}, expected "
+                f"{expect['throws_contains']!r} in the message"
+            ]
         return [f"{case_id} {label}: expected an error, none raised"]
     result = await ws.execute(command, **kwargs)
     stdout = await result.stdout_str()
@@ -308,8 +310,10 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
         except Exception as exc:
             if case["build_error"]["contains"] in str(exc):
                 return []
-            return [f"{case_id}: build raised {exc!r}, expected "
-                    f"{case['build_error']['contains']!r} in the message"]
+            return [
+                f"{case_id}: build raised {exc!r}, expected "
+                f"{case['build_error']['contains']!r} in the message"
+            ]
         await ws.close()
         return [f"{case_id}: expected the world build to fail"]
     ws = await _build_workspace(world, run_id)

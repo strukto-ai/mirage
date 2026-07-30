@@ -31,8 +31,8 @@ class RuntimeConfig:
     """
 
     @classmethod
-    def coerce(cls: type[T], value: "RuntimeConfig | dict[str, Any] | None"
-               ) -> T:
+    def coerce(cls: type[T],
+               value: "RuntimeConfig | dict[str, Any] | None") -> T:
         """A constructor's config argument as this runtime's config.
 
         Args:
