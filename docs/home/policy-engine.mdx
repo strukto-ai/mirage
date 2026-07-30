@@ -91,19 +91,10 @@ line? Unwilling entries step aside and the first willing capturer wins.
 
 ## What runs the scripts
 
-`route.py` is never imported or called as a module: the workspace hands
-its source text to the **policy engine**, the first runtime in the
-`runtimes` list with the evaluator capability (`monty` in both languages,
-`pyodide` in TypeScript). The engine evaluates it per line with `ctx`
-bound as a global, and the last expression comes back as the verdict. In
-the config above the engine is `monty`, the same entry that serves
-`python3`. If a config carries route scripts but no entry has the
-capability, the first decision fails with a `RoutingDecisionError` telling
-you to add one.
-
-(An entry can even be engine-only: `captures: []` keeps `monty` in the
-world to evaluate scripts without serving any command, for worlds where
-everything must run in the sandbox.)
+`route.py` is never imported: the workspace evaluates its source on the
+**policy engine**, the first entry in the `runtimes` list with the
+evaluator capability. In the config above that is `monty`. A config with
+route scripts but no evaluator entry fails at the first decision.
 
 When you build the workspace in code rather than from a config file,
 `route=` also accepts a plain function with the same decision contract,
