@@ -96,9 +96,10 @@ In code, the same two arms have a typed spelling, `RouteResult` and
 return from inside the evaluator sandbox:
 
 ```python
-from mirage.runtime.policy import DenyResult, RouteResult
+from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyResult,
+                                   RouteResult)
 
-def policy(ctx):
+def policy(ctx: PolicyContext) -> PolicyResult | None:
     if any(p.startswith("/prod/") for p in ctx.commands[0].paths):
         return DenyResult("writes under /prod are blocked")
     return RouteResult("docker") if "/jobs/" in ctx.line else None
