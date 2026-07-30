@@ -26,6 +26,19 @@ Run Python commands from `python/`, TypeScript commands from `typescript/`.
 - For major Python or TypeScript changes, consider adding or updating integration coverage under `integ/`.
 - **mirage ships no filetype renderers, and no factory for them.** Parquet, ORC, feather/arrow/ipc and hdf5/h5 rendering are gone, along with the `parquet`/`hdf5`/`pdf` extras, the `hyparquet`/`apache-arrow`/`h5wasm` dependencies, and the whole `commands/builtin/filetype_factory/` package in both languages (with its `filetype_read` / `filetypeRead` op knobs). A file with an unregistered extension is read as raw bytes. The one surviving extension point is registration on a mount: a command or op carrying a `filetype` resolves as `(name, filetype)` before `(name, resource)` before `(name,)`. `examples/{python,typescript}/filetype/` register a `.tally` renderer end to end and are gated in CI against `integ/truth/*/filetype.txt`; `tests/commands/custom/test_filetype_fns.py` and `test_unregister_removes_all_filetypes` cover the unit path.
 
+## Module Layout
+
+Packages split by role, one module per concern, the same way in both languages:
+
+- **`types.py`** — data shapes only: frozen dataclasses, type aliases, Literal unions (e.g. `runtime/types.py` holds `RunArgs`/`RunResult`/`EvalValue`/`EvalResult`/`ScriptSource`). No logic.
+- **`errors.py`** — the package's exception types (e.g. `runtime/errors.py` holds `EvalError`, `route/errors.py` holds `RoutingDecisionError`).
+- **`config.py`** — configuration knobs and their coercion (e.g. `runtime/config.py` holds `RuntimeConfig`, which fails loud on unknown fields).
+- **`mixin.py`** — opt-in capability mixins: stateless, no constructor, abstract methods only (e.g. `runtime/mixin.py` holds `EvaluatorMixin`). Capability is detected by type (`isinstance`), never by probing for a method.
+- **`base.py`** — the package's core ABC and nothing else (e.g. `runtime/base.py` is just `Runtime`).
+- **`table.py`** — name-to-class registries and resolution.
+
+`mirage/runtime/` and `mirage/runtime/route/` are the reference layouts. TypeScript mirrors the split with prefixed siblings when there is no package directory (`runtime_types.ts` / `runtime_errors.ts` / `runtime_mixin.ts` beside `runtime.ts`, following the `runtime_table.ts` precedent), and interfaces plus a type guard where python uses a mixin (`Evaluator` + `isEvaluator`). When a module grows past one concern, split it along these lines instead of letting a grab-bag `base.py` accumulate; move consumers to the canonical module, no re-export shims.
+
 ## History
 
 Command history is a recording, not a command log. A hidden `Observer` records every top-level command as timestamp-ordered events (`COMMAND`, `CLEAR`, `DELETE`, op events); the user-facing surfaces are just views of those events.
