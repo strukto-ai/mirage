@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     console.log("  both languages the shim flushes pages a file did not already");
     console.log("  have (new file, truncate-then-write) as NUL bytes, so only");
     console.log("  appends to existing bytes persist real data (macFUSE FSKit");
-    console.log("  bug, pinned in integ/truth_fskit.json). Prefer backend");
+    console.log("  bug, pinned in integ/fuse/truth_fskit.json). Prefer backend");
     console.log("  'fuse' for write-heavy mounts. See docs/typescript/setup/fuse.mdx.");
   } finally {
     await ws.close();

@@ -26,7 +26,7 @@ Darwin-only callbacks (mirage/fuse/darwin.py), and appends to existing
 bytes persist, but the shim flushes pages a file did not already have (a
 new file, or truncate-then-write) as NUL bytes of the right length; the
 kernel's own cache reads them back fine, which hides it. That last part is
-a macFUSE FSKit shim bug, pinned in integ/truth_fskit.json.
+a macFUSE FSKit shim bug, pinned in integ/fuse/truth_fskit.json.
 """
 
 import errno
@@ -135,7 +135,7 @@ def main() -> None:
         print(f"  new-file roundtrip -> {'ok' if echoed else 'MISMATCH'}")
         print("  caveat: that roundtrip is served by the kernel cache; the")
         print("  shim flushes new-file pages to the store as NUL bytes")
-        print("  (macFUSE FSKit bug, pinned in integ/truth_fskit.json)")
+        print("  (macFUSE FSKit bug, pinned in integ/fuse/truth_fskit.json)")
 
         print(f"\n>>> mounted at {mp}")
         print(">>> From another terminal try:")

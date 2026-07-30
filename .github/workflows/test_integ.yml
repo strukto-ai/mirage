@@ -105,13 +105,8 @@ jobs:
               - 'typescript/packages/node/src/resource/jaeger/**'
               - '.github/workflows/test_integ.yml'
             fuse:
-              - 'integ/fuse.py'
-              - 'integ/fuse.ts'
-              - 'integ/fskit.py'
-              - 'integ/cli_fskit.sh'
+              - 'integ/fuse/**'
               - 'integ/check_json.py'
-              - 'integ/truth_fuse.json'
-              - 'integ/truth_fskit.json'
               - 'integ/check_lines.sh'
               - 'integ/package.json'
               - 'python/mirage/fuse/**'
@@ -690,8 +685,8 @@ jobs:
 
       - name: Run Python FUSE mount and check (real libfuse)
         run: |
-          ./python/.venv/bin/python integ/fuse.py 2>&1 \
-            | ./python/.venv/bin/python integ/check_json.py integ/truth_fuse.json
+          ./python/.venv/bin/python integ/fuse/fuse.py 2>&1 \
+            | ./python/.venv/bin/python integ/check_json.py integ/fuse/truth_fuse.json
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -718,8 +713,8 @@ jobs:
       - name: Run TypeScript FUSE mount and check (real libfuse)
         working-directory: integ
         run: |
-          pnpm exec tsx fuse.ts 2>&1 \
-            | ../python/.venv/bin/python check_json.py truth_fuse.json
+          pnpm exec tsx fuse/fuse.ts 2>&1 \
+            | ../python/.venv/bin/python check_json.py fuse/truth_fuse.json
 
   integ-fuse-windows:
     needs: changes
@@ -777,9 +772,9 @@ jobs:
         # Dump the raw output before checking: on failure the traceback is
         # the whole point of this advisory job.
         run: |
-          ./python/.venv/Scripts/python integ/fuse.py > /tmp/fuse-win.out 2>&1 || true
+          ./python/.venv/Scripts/python integ/fuse/fuse.py > /tmp/fuse-win.out 2>&1 || true
           cat /tmp/fuse-win.out
-          ./python/.venv/Scripts/python integ/check_json.py integ/truth_fuse.json < /tmp/fuse-win.out
+          ./python/.venv/Scripts/python integ/check_json.py integ/fuse/truth_fuse.json < /tmp/fuse-win.out
 
   integ-fskit-macos:
     needs: changes
@@ -791,8 +786,8 @@ jobs:
     # Settings), so the known mount timeout is reported as a skip below.
     # Green = environment-limited or verified; red = something new broke
     # (a guard regression, a crash, or the runner starts mounting and the
-    # results diverge from integ/truth_fskit.json). Real verification runs
-    # on a Mac with macFUSE 5.x: integ/fskit.py | integ/check_json.py.
+    # results diverge from integ/fuse/truth_fskit.json). Real verification
+    # runs on a Mac with macFUSE 5.x: integ/fuse/fskit.py | integ/check_json.py.
     # Python only for now: TypeScript reaches fskit too (fuse.node links
     # the installed libfuse), but one leg is enough to probe the runner.
     steps:
@@ -848,7 +843,7 @@ jobs:
         # the readiness TimeoutError (the module never engages, libfuse
         # emits nothing). That case is a skip; any other failure is real.
         run: |
-          ./python/.venv/bin/python integ/fskit.py > /tmp/fskit.out 2>&1 || true
+          ./python/.venv/bin/python integ/fuse/fskit.py > /tmp/fskit.out 2>&1 || true
           cat /tmp/fskit.out
           if grep -q "did not become ready" /tmp/fskit.out; then
             echo "SKIP: this runner cannot engage the macFUSE FSKit module" \
@@ -856,12 +851,12 @@ jobs:
             exit 0
           fi
           ./python/.venv/bin/python integ/check_json.py \
-            integ/truth_fskit.json < /tmp/fskit.out
+            integ/fuse/truth_fskit.json < /tmp/fskit.out
 
       - name: Run the CLI fskit battery (workspace YAML with an fskit mount)
         # Same classification as above: the script itself reports SKIP with
         # exit 0 when the daemon's mount never engages the FSKit module.
-        run: bash integ/cli_fskit.sh "python/.venv/bin/mirage"
+        run: bash integ/fuse/cli_fskit.sh "python/.venv/bin/mirage"
 
       - name: Host state after the probe
         if: always()

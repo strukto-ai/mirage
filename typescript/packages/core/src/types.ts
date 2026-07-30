@@ -37,7 +37,7 @@ export type MountMode = (typeof MountMode)[keyof typeof MountMode]
  * size-unknown files will read as empty. Writes are also limited: appends and
  * metadata ops persist, but the macFUSE FSKit shim flushes pages a file did
  * not already have (a new file, or truncate-then-write) as NUL bytes (pinned
- * in `integ/truth_fskit.json`). There is deliberately no `auto`:
+ * in `integ/fuse/truth_fskit.json`). There is deliberately no `auto`:
  * auto-selecting fskit would silently degrade every API-backed mount.
  */
 export const MountBackend = Object.freeze({

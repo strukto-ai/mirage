@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 """Mount one RAM resource over macFUSE's FSKit backend and read it back.
 
-Separate from integ/fuse.py because neither scenario there can run here:
+Separate from integ/fuse/fuse.py because neither scenario there can run here:
 the sizeless probe is refused by the fskit size guard by design, and the
 multi-mount scenario needs two mounts in one process, which macOS forbids.
 

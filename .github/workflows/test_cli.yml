@@ -37,7 +37,7 @@ jobs:
               - 'integ/cross.sh'
               - 'integ/cross.yaml'
               - 'integ/parity.sh'
-              - 'integ/cli_fuse.sh'
+              - 'integ/fuse/cli_fuse.sh'
               - 'integ/cli_config.sh'
               - 'integ/cli_runtime.sh'
               - '.github/workflows/test_cli.yml'
@@ -766,7 +766,7 @@ jobs:
 
       - name: Run CLI end-to-end FUSE (two per-mount subtrees, real libfuse)
         run: |
-          bash integ/cli_fuse.sh \
+          bash integ/fuse/cli_fuse.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 

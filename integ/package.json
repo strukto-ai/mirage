@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "battery": "tsx runners/typescript/main.ts",
-    "fuse": "tsx fuse.ts",
+    "fuse": "tsx fuse/fuse.ts",
     "notion:mcp-parity": "tsx notion_mcp_parity.ts",
     "safeguard": "tsx safeguard.ts",
     "runtime": "tsx runtime.ts",

@@ -153,7 +153,7 @@ def check_writes(backend: MountBackend,
                  root_prefix: str = "") -> None:
     """Warn when an fskit mount accepts writes the shim may corrupt.
 
-    Measured on live fskit mounts and pinned in ``integ/truth_fskit.json``:
+    Measured on live fskit mounts, pinned in ``integ/fuse/truth_fskit.json``:
     the macFUSE FSKit shim flushes pages a file did not already have (a new
     file, an empty file, a truncate-then-write) as NUL bytes of the right
     length, and appended regions arrive intact or zeroed depending on cache
