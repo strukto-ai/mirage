@@ -22,7 +22,6 @@
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
-    "e2b": "^2.0.0",
     "imapflow": "^1.3.2",
     "mongodb": "^6.0.0",
     "pg": "^8.0.0",

@@ -811,11 +811,9 @@ jobs:
       MIRAGE_QUICKJS_HOME: /tmp/quickjs
       MIRAGE_WASI_HOME: /tmp/cpython-wasi
       MIRAGE_INTEG_DOCKER_CONTAINER: mirage-integ-runtime-box
-      E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
       # Suites with unmet requirements fail instead of skipping, so a
       # broken build download cannot silently drop wasi/quickjs/docker
-      # coverage. The e2b suite is declared optional in its case file
-      # and still skips cleanly when the secret is absent (forks).
+      # coverage.
       INTEG_RUNTIME_STRICT: "1"
     steps:
       - uses: actions/checkout@v7
@@ -902,12 +900,6 @@ jobs:
       - name: Start the docker sandbox container (user-provisioned)
         run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:stable-slim sleep infinity
 
-      - name: Create the e2b sandbox (user-provisioned)
-        if: env.E2B_API_KEY != ''
-        run: |
-          id="$(./python/.venv/bin/python integ/runtime/e2b_sandbox.py create)"
-          echo "MIRAGE_INTEG_E2B_SANDBOX_ID=$id" >> "$GITHUB_ENV"
-
       - name: Run every runtime through the JSON suites (python)
         run: ./python/.venv/bin/python integ/runtime/run.py
 
@@ -920,10 +912,6 @@ jobs:
           bash integ/runtime/cli.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
-
-      - name: Kill the e2b sandbox
-        if: always() && env.MIRAGE_INTEG_E2B_SANDBOX_ID != ''
-        run: ./python/.venv/bin/python integ/runtime/e2b_sandbox.py kill "$MIRAGE_INTEG_E2B_SANDBOX_ID"
 
   integ-observability:
     needs: changes
