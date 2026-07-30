@@ -42,7 +42,7 @@ function sftpStat(sftp: SFTPWrapper, remote: string, p: PathSpec): Promise<Stats
 function sftpChmod(sftp: SFTPWrapper, remote: string, mode: number): Promise<void> {
   return new Promise((resolveFn, rejectFn) => {
     sftp.chmod(remote, mode, (err) => {
-      if (err !== undefined) rejectFn(err)
+      if (err !== undefined && err !== null) rejectFn(err)
       else resolveFn()
     })
   })
@@ -56,7 +56,7 @@ function sftpUtimes(
 ): Promise<void> {
   return new Promise((resolveFn, rejectFn) => {
     sftp.utimes(remote, atime, mtime, (err) => {
-      if (err !== undefined) rejectFn(err)
+      if (err !== undefined && err !== null) rejectFn(err)
       else resolveFn()
     })
   })
