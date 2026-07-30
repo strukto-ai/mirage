@@ -611,7 +611,8 @@
           "path": "/data2",
           "resource": "onedrive",
           "backend": "onedrive",
-          "prefix": "xm2"
+          "prefix": "xm2",
+          "seed_root": true
         },
         {
           "path": "/res",
