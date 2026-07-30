@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.config import IndexEntry
+from mirage.core.box.read import read
+from mirage.core.box.readdir import readdir
 from mirage.core.box.stat import stat
 from mirage.types import FileType, PathSpec
 
@@ -117,3 +119,82 @@ async def test_stat_missing_raises(accessor, index):
                 PathSpec(resource_path="ghost",
                          virtual="/ghost",
                          directory="/"), index)
+
+
+@pytest.mark.asyncio
+async def test_stat_size_matches_read_for_every_file(accessor, index):
+    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat serves
+    # from the listing must equal the byte length a read delivers, 0-byte
+    # files included; weblinks never appear at all.
+    contents = {
+        "200": b"hello",
+        "201": b"",
+        "400": b"abc",
+    }
+    tree = {
+        "0": [
+            {
+                "id": "100",
+                "name": "docs",
+                "type": "folder",
+                "modified_at": "2026-04-01T00:00:00+00:00",
+            },
+            {
+                "id": "200",
+                "name": "a.txt",
+                "type": "file",
+                "size": 5,
+                "modified_at": "2026-04-01T00:00:00+00:00",
+            },
+            {
+                "id": "201",
+                "name": "empty.txt",
+                "type": "file",
+                "size": 0,
+                "modified_at": "2026-04-01T00:00:00+00:00",
+            },
+            {
+                "id": "300",
+                "name": "homepage",
+                "type": "web_link",
+                "modified_at": "2026-04-01T00:00:00+00:00",
+            },
+        ],
+        "100": [{
+            "id": "400",
+            "name": "b.bin",
+            "type": "file",
+            "size": 3,
+            "modified_at": "2026-04-01T00:00:00+00:00",
+        }],
+    }
+
+    async def _list(_tm, folder_id):
+        return tree[folder_id]
+
+    async def _download(_tm, file_id):
+        return contents[file_id]
+
+    files: list[str] = []
+    with patch("mirage.core.box.readdir.list_folder_items",
+               side_effect=_list), \
+         patch("mirage.core.box.read.download_file",
+               side_effect=_download):
+        stack = ["/"]
+        while stack:
+            current = stack.pop()
+            listing = await readdir(accessor, PathSpec.from_str_path(current),
+                                    index)
+            for child in listing:
+                trimmed = child.rstrip("/")
+                info = await stat(accessor, PathSpec.from_str_path(trimmed),
+                                  index)
+                if info.type == FileType.DIRECTORY:
+                    stack.append(trimmed)
+                    continue
+                assert info.size is not None, trimmed
+                body = await read(accessor, PathSpec.from_str_path(trimmed),
+                                  index)
+                assert info.size == len(body), trimmed
+                files.append(trimmed)
+    assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]

@@ -104,7 +104,7 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
 }
 
-function asNumber(value: unknown): number | null {
+export function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
@@ -114,7 +114,7 @@ function isFolder(item: Record<string, unknown>): boolean {
 
 // Graph returns the folder facet's childCount by default, so `-empty` needs
 // no extra request. Absent (a $select that dropped it) reads as unknown.
-function folderChildCount(item: Record<string, unknown>): number | null {
+export function folderChildCount(item: Record<string, unknown>): number | null {
   const facet = item.folder
   if (facet === null || typeof facet !== 'object' || Array.isArray(facet)) return null
   return asNumber((facet as Record<string, unknown>).childCount)

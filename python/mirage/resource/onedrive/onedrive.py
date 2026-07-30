@@ -70,6 +70,10 @@ class OneDriveResource(BaseResource):
     accessor: OneDriveAccessor
     name: str = ResourceName.ONEDRIVE
     caches_reads: bool = True
+    # Graph driveItems carry an exact byte `size` for every file in both
+    # listings and item gets; folders (including the root) report None
+    # with the aggregate storage number in extra.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _ONEDRIVE_OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True

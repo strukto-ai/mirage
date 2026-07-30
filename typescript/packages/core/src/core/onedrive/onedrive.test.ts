@@ -124,6 +124,29 @@ describe('OneDrive filesystem operations', () => {
     expect(info.extra).toMatchObject({ size_bytes: 4096, child_count: 2 })
   })
 
+  it('keeps the root aggregate size out of FileStat.size', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 'root',
+            name: 'root',
+            size: 123456,
+            lastModifiedDateTime: '2026-01-01T00:00:00Z',
+            folder: { childCount: 3 },
+          }),
+          { status: 200 },
+        ),
+      ),
+    )
+    const accessor = new OneDriveAccessor({ accessToken: 'token' })
+    const info = await stat(accessor, PathSpec.fromStrPath('/'))
+
+    expect(info.size).toBeNull()
+    expect(info.extra).toMatchObject({ size_bytes: 123456, child_count: 3 })
+  })
+
   it('matches -empty against a childless folder', async () => {
     const fetchMock = vi.fn((input: URL | RequestInfo) => {
       const url = requestUrl(input)

@@ -47,7 +47,7 @@ function statFromItem(item: BoxItem): FileStat {
       extra: { box_id: item.id },
     })
   }
-  const size = typeof item.size === 'number' && item.size > 0 ? item.size : null
+  const size = typeof item.size === 'number' ? item.size : null
   return new FileStat({
     name: vfsName,
     size,

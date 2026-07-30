@@ -50,6 +50,15 @@ async def readdir(accessor: NextcloudAccessor,
                 sizes[base] = meta.content_length if meta else None
     except NotFound as exc:
         raise enoent(path) from exc
+    # PROPFIND normally carries getcontentlength for every file; when the
+    # lister omits the metadata, one stat per affected file fills the gap
+    # so the index never caches an unknown size.
+    for base, size in sizes.items():
+        if size is None:
+            md = await op.stat(base.lstrip("/"))
+            sizes[base] = md.content_length
+            if md.last_modified and base not in times:
+                times[base] = md.last_modified.isoformat()
     # WebDAV PROPFIND on a file returns the file itself; POSIX readdir of a
     # non-directory raises ENOTDIR instead.
     target_key = "/" + target.strip("/")

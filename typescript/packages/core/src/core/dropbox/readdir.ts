@@ -71,7 +71,7 @@ export async function readdir(
       resourceType: resourceTypeFor(f),
       remoteTime: modified,
       vfsName: filename,
-      size: !isDir && size !== null && size > 0 ? size : null,
+      size: !isDir ? size : null,
     })
     entries.push({ name: filename, entry, isDir })
   }

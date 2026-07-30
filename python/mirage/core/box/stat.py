@@ -40,11 +40,10 @@ def _stat_from_item(item: dict[str, Any]) -> FileStat:
             modified=item.get("modified_at") or "",
             extra={"box_id": item["id"]},
         )
-    size = item.get("size")
     remote_time = item.get("modified_at") or ""
     return FileStat(
         name=vfs_name,
-        size=size if size else None,
+        size=item.get("size"),
         type=guess_type(vfs_name),
         modified=remote_time,
         fingerprint=remote_time or None,

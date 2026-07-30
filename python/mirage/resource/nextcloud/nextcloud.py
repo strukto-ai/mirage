@@ -36,6 +36,9 @@ class NextcloudResource(BaseResource):
     accessor: NextcloudAccessor
     name: str = ResourceName.NEXTCLOUD
     caches_reads: bool = True
+    # WebDAV PROPFIND carries getcontentlength for every file; readdir
+    # backfills any lister-omitted size with one stat per affected file.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _NEXTCLOUD_OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True

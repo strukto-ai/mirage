@@ -27,11 +27,13 @@ import { enoent } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { GraphError, graphDelete, graphGet, graphList } from '../msgraph/client.ts'
 import {
+  asNumber,
   copyTree,
   createChildFolder,
   duTreeEntries,
   duTreeTotal,
   findItems,
+  folderChildCount,
   readItem,
   readdirItems,
   renameReplace,
@@ -124,11 +126,14 @@ export async function stat(
   if (path.resourcePath === '') {
     try {
       const item = await graphGet(accessor.config, accessor.loc('').item())
+      // The root's `size` is Graph's aggregate subtree storage number, not
+      // rendered content length: expose it as extra, like every other
+      // folder (see entryStat).
       return new FileStat({
         name: '/',
         type: FileType.DIRECTORY,
-        size: typeof item.size === 'number' ? item.size : null,
         modified: typeof item.lastModifiedDateTime === 'string' ? item.lastModifiedDateTime : null,
+        extra: { size_bytes: asNumber(item.size), child_count: folderChildCount(item) },
       })
     } catch (error) {
       if (error instanceof GraphError && error.status === 404) throw enoent(path)

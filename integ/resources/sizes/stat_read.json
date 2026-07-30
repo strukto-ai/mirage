@@ -1,0 +1,124 @@
+{
+  "cases": [
+    {
+      "id": "sz_stat_poem",
+      "seq": 680001,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "stat -c %s /data/poem.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_read_poem",
+      "seq": 680002,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "cat /data/poem.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_stat_empty",
+      "seq": 680003,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "stat -c %s /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_read_empty",
+      "seq": 680004,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "cat /data/empty.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_stat_nested",
+      "seq": 680005,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "stat -c %s /data/sub/nested.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "15\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_read_nested",
+      "seq": 680006,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud"
+      ],
+      "command": "cat /data/sub/nested.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "15\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

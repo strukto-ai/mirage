@@ -72,6 +72,9 @@ class SSHResource(BaseResource):
     accessor: SSHAccessor
     name: str = ResourceName.SSH
     caches_reads: bool = True
+    # SFTP stat/readdir report the remote inode's exact byte size for
+    # every file; reads are the same raw bytes.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _SSH_OPS
     PROMPT: str = PROMPT
 

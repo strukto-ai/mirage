@@ -19,6 +19,8 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox._client import DropboxApiError, DropboxTokenManager
+from mirage.core.dropbox.read import read
+from mirage.core.dropbox.readdir import readdir
 from mirage.core.dropbox.stat import stat
 from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import FileType, PathSpec
@@ -77,3 +79,80 @@ async def test_stat_missing_maps_api_error_to_enoent(index):
                 PathSpec(resource_path="ghost/missing.txt",
                          virtual="/ghost/missing.txt",
                          directory="/ghost"), index)
+
+
+@pytest.mark.asyncio
+async def test_stat_size_matches_read_for_every_file(index):
+    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat serves
+    # from the listing must equal the byte length a read delivers, 0-byte
+    # files included.
+    contents = {
+        "/a.txt": b"hello",
+        "/empty.txt": b"",
+        "/docs/b.bin": b"abc",
+    }
+    tree = {
+        "": [
+            {
+                ".tag": "folder",
+                "id": "id:docs",
+                "name": "docs",
+                "path_display": "/docs",
+            },
+            {
+                ".tag": "file",
+                "id": "id:a",
+                "name": "a.txt",
+                "path_display": "/a.txt",
+                "size": 5,
+                "server_modified": "2026-04-01T00:00:00Z",
+            },
+            {
+                ".tag": "file",
+                "id": "id:empty",
+                "name": "empty.txt",
+                "path_display": "/empty.txt",
+                "size": 0,
+                "server_modified": "2026-04-01T00:00:00Z",
+            },
+        ],
+        "/docs": [{
+            ".tag": "file",
+            "id": "id:b",
+            "name": "b.bin",
+            "path_display": "/docs/b.bin",
+            "size": 3,
+            "server_modified": "2026-04-01T00:00:00Z",
+        }],
+    }
+
+    async def _list(_tm, path, **_kw):
+        return tree[path]
+
+    async def _download(_tm, path):
+        return contents[path]
+
+    accessor = make_accessor()
+    files: list[str] = []
+    with patch("mirage.core.dropbox.readdir.list_folder",
+               side_effect=_list), \
+         patch("mirage.core.dropbox.read.dropbox_download",
+               side_effect=_download):
+        stack = ["/"]
+        while stack:
+            current = stack.pop()
+            listing = await readdir(accessor, PathSpec.from_str_path(current),
+                                    index)
+            for child in listing:
+                trimmed = child.rstrip("/")
+                info = await stat(accessor, PathSpec.from_str_path(trimmed),
+                                  index)
+                if info.type == FileType.DIRECTORY:
+                    stack.append(trimmed)
+                    continue
+                assert info.size is not None, trimmed
+                body = await read(accessor, PathSpec.from_str_path(trimmed),
+                                  index)
+                assert info.size == len(body), trimmed
+                files.append(trimmed)
+    assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]

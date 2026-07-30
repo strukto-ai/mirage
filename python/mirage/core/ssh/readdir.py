@@ -20,6 +20,7 @@ from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.ssh._client import _abs
 from mirage.core.ssh.constants import SCOPE_ERROR
+from mirage.core.timeutil import epoch_to_iso
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -50,7 +51,7 @@ async def readdir(accessor: SSHAccessor,
         remote_path = _abs(config, path)
         entries = await sftp.readdir(remote_path)
         base = "/" + path.strip("/")
-        names: list[str] = []
+        found: list[tuple[str, asyncssh.SFTPAttrs]] = []
         for entry in entries:
             name = entry.filename
             if isinstance(name, bytes):
@@ -58,8 +59,9 @@ async def readdir(accessor: SSHAccessor,
             if name in (".", ".."):
                 continue
             child = base.rstrip("/") + "/" + name
-            names.append(child)
-        names = sorted(names)
+            found.append((child, entry.attrs))
+        found.sort(key=lambda pair: pair[0])
+        names = [child for child, _ in found]
         if len(names) > SCOPE_ERROR:
             logger.warning(
                 "ssh readdir: %s returned %d entries (limit %d)",
@@ -68,10 +70,20 @@ async def readdir(accessor: SSHAccessor,
                 SCOPE_ERROR,
             )
         virtual_entries = sorted((prefix + e if prefix else e) for e in names)
-        index_entries = [(e.rsplit("/", 1)[-1],
-                          IndexEntry(id=e,
-                                     name=e.rsplit("/", 1)[-1],
-                                     resource_type="file")) for e in names]
+        # SFTP readdir already returns each entry's attrs; keep type, size
+        # and mtime in the index instead of discarding them.
+        index_entries = []
+        for child, attrs in found:
+            leaf = child.rsplit("/", 1)[-1]
+            is_dir = attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
+            index_entries.append(
+                (leaf,
+                 IndexEntry(id=child,
+                            name=leaf,
+                            resource_type="folder" if is_dir else "file",
+                            size=None if is_dir else attrs.size,
+                            remote_time=epoch_to_iso(attrs.mtime)
+                            if attrs.mtime is not None else "")))
         await index.set_dir(virtual_key, index_entries)
         return virtual_entries
     except asyncssh.SFTPNoSuchFile:

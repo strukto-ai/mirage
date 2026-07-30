@@ -75,16 +75,20 @@ export async function readdir(
   const items = await listFolderItems(accessor.tokenManager, folderId)
   const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
   for (const it of items) {
+    if (it.type === 'web_link') {
+      // Weblinks are bookmarks: no content endpoint, no size. Hide them
+      // from listings instead of serving an unreadable entry.
+      continue
+    }
     const isDir = it.type === 'folder'
     const filename = it.name
-    const sizeNum = typeof it.size === 'number' ? it.size : null
     const entry = new IndexEntry({
       id: it.id,
       name: filename,
       resourceType: resourceTypeFor(it),
       remoteTime: it.modified_at ?? '',
       vfsName: filename,
-      size: !isDir && sizeNum !== null && sizeNum > 0 ? sizeNum : null,
+      size: isDir ? null : typeof it.size === 'number' ? it.size : null,
     })
     entries.push({ name: filename, entry, isDir })
   }

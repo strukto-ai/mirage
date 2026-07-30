@@ -19,6 +19,10 @@ const resolveGlob = makeResolveGlob(readdir)
 export class OneDriveResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.ONEDRIVE
   readonly cachesReads: boolean = true
+  // Graph driveItems carry an exact byte `size` for every file in both
+  // listings and item gets; folders (including the root) report null with
+  // the aggregate storage number in extra.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = ONEDRIVE_PROMPT

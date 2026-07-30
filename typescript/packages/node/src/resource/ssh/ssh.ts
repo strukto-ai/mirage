@@ -59,6 +59,9 @@ export interface SSHResourceState {
 export class SSHResource extends BaseResource implements Resource {
   readonly kind = ResourceName.SSH
   readonly cachesReads: boolean = true
+  // SFTP stat/readdir report the remote inode's exact byte size for every
+  // file; reads are the same raw bytes.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 60
   readonly prompt = SSH_PROMPT
   readonly config: SSHConfig

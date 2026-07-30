@@ -49,7 +49,7 @@ function statFromEntry(entry: DropboxEntry): FileStat {
   }
   return new FileStat({
     name: entry.name,
-    size: typeof entry.size === 'number' && entry.size > 0 ? entry.size : null,
+    size: typeof entry.size === 'number' ? entry.size : null,
     type: guessType(entry.name),
     modified,
     fingerprint: modified !== '' ? modified : null,

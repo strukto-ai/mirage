@@ -44,7 +44,7 @@ def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
     size = entry.get("size")
     return FileStat(
         name=name,
-        size=size if isinstance(size, int) and size > 0 else None,
+        size=size if isinstance(size, int) else None,
         type=guess_type(name),
         modified=modified,
         fingerprint=modified or None,
