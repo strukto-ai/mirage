@@ -206,7 +206,7 @@ async def test_all_capturers_refuse_is_admission_failure():
         io = await ws.execute("python3 -c 'x'")
         assert io.exit_code == 126
         err = await materialize(io.stderr)
-        assert err == b"mirage: python3: no runtime accepted this line\n"
+        assert err == b"python3: no runtime accepted this line\n"
         io = await ws.execute("echo vfs-still-open")
         assert await materialize(io.stdout) == b"vfs-still-open\n"
     finally:
@@ -240,7 +240,7 @@ async def test_vfs_explicit_captures_restrict_the_workspace():
         io = await ws.execute("ls /")
         assert io.exit_code == 126
         err = await materialize(io.stderr)
-        assert err == b"mirage: ls: no runtime accepted this line\n"
+        assert err == b"ls: no runtime accepted this line\n"
         io = await ws.execute("python3 -c 'x'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
     finally:
@@ -328,7 +328,7 @@ async def test_policy_deny_folds_into_the_line_result():
     try:
         io = await ws.execute("python3 -c 'x'")
         assert io.exit_code == 126
-        assert io.stderr == b"mirage: policy denied: python3 is blocked\n"
+        assert io.stderr == b"python3: policy denied: python3 is blocked\n"
         io = await ws.execute("echo ok")
         assert await materialize(io.stdout) == b"ok\n"
         assert io.exit_code == 0

@@ -1389,7 +1389,10 @@ class Workspace:
         except PolicyDeny as exc:
             # A deny is a policy outcome, not a mistake: it folds into
             # the line's result the way a timeout does, never a raise.
-            msg = f"mirage: policy denied: {exc.reason}\n".encode()
+            # The denied party is the command, so the message carries
+            # its name like every per-command error.
+            cmd_name = command.split()[0] if command.split() else command
+            msg = f"{cmd_name}: policy denied: {exc.reason}\n".encode()
             io = IOResult(exit_code=126, stderr=msg)
             session.last_exit_code = 126
             return io

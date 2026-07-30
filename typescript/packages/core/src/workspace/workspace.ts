@@ -1157,8 +1157,11 @@ export class Workspace {
         // A deny is a policy outcome, not a mistake: it folds into the
         // line's result the way a timeout does, never a throw. The
         // typed line still records and the session still flushes,
-        // mirroring Python's finally path.
-        const msg = new TextEncoder().encode(`mirage: policy denied: ${caught.reason}\n`)
+        // mirroring Python's finally path. The denied party is the
+        // command, so the message carries its name like every
+        // per-command error.
+        const cmdName = command.trim().split(/\s+/)[0] ?? command
+        const msg = new TextEncoder().encode(`${cmdName}: policy denied: ${caught.reason}\n`)
         const deniedSessionId = options.sessionId ?? this.sessionManager.defaultId
         const deniedSession = this.sessionManager.get(deniedSessionId)
         deniedSession.lastExitCode = 126

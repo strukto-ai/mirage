@@ -101,7 +101,7 @@
           "command": "python3 -c \"x\"",
           "expect": {
             "exit": 126,
-            "stderr": "mirage: python3: no runtime accepted this line\n"
+            "stderr": "python3: no runtime accepted this line\n"
           }
         },
         {
@@ -445,7 +445,7 @@
           "command": "python3 -c \"print(1)\"",
           "expect": {
             "exit": 126,
-            "stderr": "mirage: policy denied: python3 is blocked here\n"
+            "stderr": "python3: policy denied: python3 is blocked here\n"
           }
         },
         {

@@ -146,7 +146,7 @@ describe('routing ladder', () => {
     try {
       const denied = await ws.execute('python3 -c "x"')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('mirage: python3: no runtime accepted this line\n')
+      expect(DEC.decode(denied.stderr)).toBe('python3: no runtime accepted this line\n')
       const open = await ws.execute('echo vfs-still-open')
       expect(DEC.decode(open.stdout)).toBe('vfs-still-open\n')
     } finally {
@@ -209,7 +209,7 @@ describe('routing ladder', () => {
     try {
       const denied = await ws.execute('python3 -c "x"')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('mirage: policy denied: python3 is blocked\n')
+      expect(DEC.decode(denied.stderr)).toBe('python3: policy denied: python3 is blocked\n')
       const ok = await ws.execute('echo ok')
       expect(DEC.decode(ok.stdout)).toBe('ok\n')
       expect(ok.exitCode).toBe(0)
@@ -328,7 +328,7 @@ describe('vfs runtime overrides', () => {
       expect(DEC.decode(ok.stdout)).toBe('listed\n')
       const denied = await ws.execute('ls /')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('mirage: ls: no runtime accepted this line\n')
+      expect(DEC.decode(denied.stderr)).toBe('ls: no runtime accepted this line\n')
       const py = await ws.execute('python3 -c "x"')
       expect(DEC.decode(py.stdout)).toBe('ran-alpha\n')
     } finally {

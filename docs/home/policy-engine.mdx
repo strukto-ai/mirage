@@ -84,7 +84,7 @@ can store one and replay a decision in tests.
 - **`None`**: no opinion; the first capturer in the `runtimes` list order
   serves each command (here, `monty`).
 - **`{"deny": reason}`**: the line is refused before anything runs. It
-  exits 126 with `mirage: policy denied: <reason>` on stderr.
+  exits 126 with `<command>: policy denied: <reason>` on stderr.
 - Anything else is a routing error; the line fails rather than guessing.
 
 `{"runtime": "docker"}` is the dict spelling of a name, and the dict is

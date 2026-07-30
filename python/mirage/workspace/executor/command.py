@@ -243,7 +243,7 @@ def _admission_denial(cmd_name: str) -> IOResult:
     Args:
         cmd_name (str): the refused command.
     """
-    msg = f"mirage: {cmd_name}: no runtime accepted this line\n"
+    msg = f"{cmd_name}: no runtime accepted this line\n"
     return IOResult(exit_code=126, stderr=msg.encode())
 
 
