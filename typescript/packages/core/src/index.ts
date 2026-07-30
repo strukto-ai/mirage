@@ -145,7 +145,7 @@ export {
   FALLBACK_SAFEGUARD,
   resolveAcrossMounts,
   resolveSafeguard,
-} from './commands/safeguard.ts'
+} from './workspace/executor/policy/safeguard.ts'
 export { CommandTimeoutError, SafeguardExceededError } from './commands/builtin/utils/safeguard.ts'
 export { GENERAL_COMMANDS } from './commands/builtin/general/index.ts'
 export { GENERAL_BC } from './commands/builtin/general/bc.ts'

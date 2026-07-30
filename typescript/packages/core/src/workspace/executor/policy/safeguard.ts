@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandSafeguard } from '../types.ts'
+import { CommandSafeguard } from '../../../types.ts'
 
 const DEFAULT_MAX_LINES = 2000
 const DEFAULT_TIMEOUT_SECONDS = 600

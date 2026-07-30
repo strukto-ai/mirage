@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CommandSafeguard, OnExceed } from '../types.ts'
+import { CommandSafeguard, OnExceed } from '../../../types.ts'
 import {
   DEFAULT_COMMAND_SAFEGUARDS,
   FALLBACK_SAFEGUARD,

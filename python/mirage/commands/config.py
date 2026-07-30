@@ -16,12 +16,12 @@ import functools
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
-from mirage.commands.safeguard import CommandSafeguard
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.types import OperandKind, Option
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult
+from mirage.types import CommandSafeguard
 from mirage.version import __version__
 
 _HELP_OPTION = Option(

@@ -25,7 +25,7 @@ import type { StatOverlay } from '../../ops/config.ts'
 
 const NOOP_ACCESSOR = new NOOPAccessor()
 import { getExtension } from '../../commands/resolve.ts'
-import { resolveSafeguard } from '../../commands/safeguard.ts'
+import { resolveSafeguard } from '../executor/policy/safeguard.ts'
 import { applyOpSafeguard, runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import type { CommandSpec } from '../../commands/spec/types.ts'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'

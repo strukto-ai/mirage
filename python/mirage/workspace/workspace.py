@@ -30,7 +30,6 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      guard_output,
                                                      run_with_timeout)
 from mirage.commands.errors import FindParseError, UsageError
-from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import RecordingScope
@@ -48,6 +47,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyDeny,
                                    PolicyError, PolicyFn, command_facts,
                                    decide_line)
+from mirage.runtime.policy.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   bind_commands, build_runtime, catch_all,
                                   runtime_bindings_for, whole_line_runtime)

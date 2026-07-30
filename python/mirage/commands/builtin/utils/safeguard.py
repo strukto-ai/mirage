@@ -17,9 +17,8 @@ import logging
 import time
 from collections.abc import AsyncIterator
 
-from mirage.commands.safeguard import CommandSafeguard
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.types import OnExceed
+from mirage.types import CommandSafeguard, OnExceed
 from mirage.utils.stream import ensure_stream
 
 logger = logging.getLogger(__name__)

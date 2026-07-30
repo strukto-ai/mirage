@@ -16,10 +16,10 @@ import asyncio
 from typing import Any
 
 from mirage.commands.builtin.utils.safeguard import run_with_timeout
-from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command

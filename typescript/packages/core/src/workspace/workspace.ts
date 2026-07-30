@@ -34,7 +34,7 @@ import {
   CommandTimeoutError,
   runWithTimeout,
 } from '../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../commands/safeguard.ts'
+import { resolveSafeguard } from './executor/policy/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
 import { UsageError } from '../commands/errors.ts'

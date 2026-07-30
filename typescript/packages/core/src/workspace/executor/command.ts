@@ -55,7 +55,7 @@ import {
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
 import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../../commands/safeguard.ts'
+import { resolveSafeguard } from './policy/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { UsageError } from '../../commands/errors.ts'

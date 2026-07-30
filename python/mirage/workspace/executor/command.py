@@ -28,7 +28,6 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      maybe_with_timeout)
 from mirage.commands.config import version_request
 from mirage.commands.errors import UsageError
-from mirage.commands.safeguard import resolve_safeguard
 from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
                                   flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
@@ -39,6 +38,7 @@ from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.runtime.table import VfsRuntime
 from mirage.shell.array import ShellArray
 from mirage.shell.barrier import BarrierPolicy, apply_barrier

@@ -23,7 +23,6 @@ from mirage.commands.builtin.utils.safeguard import (apply_op_safeguard,
                                                      run_with_timeout)
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
-from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.commands.spec import CommandSpec
 from mirage.context import effective_mount_mode
 from mirage.io.cachable_iterator import CachableAsyncIterator
@@ -35,6 +34,7 @@ from mirage.ops.config import StatOverlay
 from mirage.ops.registry import RegisteredOp
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
+from mirage.runtime.policy.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.utils.errors import enotsup
 from mirage.utils.key_prefix import mount_key
