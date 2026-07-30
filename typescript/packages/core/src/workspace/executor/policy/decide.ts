@@ -16,20 +16,20 @@ import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../run
 import { EvalError } from '../runtime_errors.ts'
 import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
 import type { EvalValue } from '../runtime_types.ts'
-import { RoutingDecisionError } from './errors.ts'
+import { PolicyError } from './errors.ts'
 import {
   ScriptSource,
-  routeContextPayload,
-  type RoutingDecision,
-  type RouteContext,
-  type RouteFn,
-  type RouteScript,
+  policyContextPayload,
+  type PolicyDecision,
+  type PolicyContext,
+  type PolicyFn,
+  type PolicyScript,
 } from './types.ts'
 
 /**
  * The world's policy engine: its first evaluator-capable entry.
  *
- * Config-borne route scripts run on it; any runtime implementing
+ * Config-borne policy scripts run on it; any runtime implementing
  * Evaluator qualifies (monty/pyodide in the default worlds, or a user
  * runtime in any language). Null when the world has no evaluator,
  * which only matters once a ScriptSource actually needs one.
@@ -52,8 +52,8 @@ async function evalSource(
   evaluator: Evaluator | null,
 ): Promise<EvalValue> {
   if (evaluator === null) {
-    throw new RoutingDecisionError(
-      'route scripts need an evaluator runtime in the workspace ' +
+    throw new PolicyError(
+      'policy scripts need an evaluator runtime in the workspace ' +
         '(the default python runtime, or use a function instead)',
     )
   }
@@ -62,10 +62,10 @@ async function evalSource(
     return result.value
   } catch (caught) {
     if (caught instanceof EvalError) {
-      const prefix = caught.syntax ? 'route script syntax error: ' : 'route script failed: '
-      throw new RoutingDecisionError(prefix + caught.message, { cause: caught })
+      const prefix = caught.syntax ? 'policy script syntax error: ' : 'policy script failed: '
+      throw new PolicyError(prefix + caught.message, { cause: caught })
     }
-    throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
+    throw new PolicyError(caught instanceof Error ? caught.message : String(caught), {
       cause: caught,
     })
   }
@@ -78,7 +78,7 @@ async function evalSource(
  * captured stage on the line (including the catch-all vfs) keeps the
  * line's first stage.
  */
-function ctxForRuntime(ctx: RouteContext, runtime: Runtime): RouteContext {
+function ctxForRuntime(ctx: PolicyContext, runtime: Runtime): PolicyContext {
   for (const fact of ctx.commands) {
     if (runtime.captures.includes(fact.command)) {
       return { ...ctx, command: fact.command, builtin: fact.builtin }
@@ -89,41 +89,39 @@ function ctxForRuntime(ctx: RouteContext, runtime: Runtime): RouteContext {
 
 /** Ask one runtime's script whether it wants the line. */
 async function evaluateScript(
-  script: RouteScript,
-  ctx: RouteContext,
+  script: PolicyScript,
+  ctx: PolicyContext,
   runtime: Runtime,
   evaluator: Evaluator | null,
 ): Promise<boolean> {
   const view = ctxForRuntime(ctx, runtime)
   if (script instanceof ScriptSource) {
-    return Boolean(await evalSource(script.source, routeContextPayload(view, runtime), evaluator))
+    return Boolean(await evalSource(script.source, policyContextPayload(view, runtime), evaluator))
   }
   return await script(view)
 }
 
-/** Run the global route, returning a runtime name or null to pass. */
-async function evaluateRoute(
-  route: RouteFn,
-  ctx: RouteContext,
+/** Run the global policy, returning a runtime name or null to pass. */
+async function evaluatePolicy(
+  policy: PolicyFn,
+  ctx: PolicyContext,
   evaluator: Evaluator | null,
 ): Promise<string | null> {
-  // An untyped JS route can return undefined for "pass"; `?? null`
+  // An untyped JS policy can return undefined for "pass"; `?? null`
   // folds it into python's None instead of erroring.
   const verdict =
-    route instanceof ScriptSource
-      ? await evalSource(route.source, routeContextPayload(ctx), evaluator)
-      : ((await route(ctx)) ?? null)
+    policy instanceof ScriptSource
+      ? await evalSource(policy.source, policyContextPayload(ctx), evaluator)
+      : ((await policy(ctx)) ?? null)
   if (verdict === null) return null
   if (typeof verdict === 'string') return verdict
-  throw new RoutingDecisionError(
-    `route must return a runtime name or null, got ${JSON.stringify(verdict)}`,
-  )
+  throw new PolicyError(`policy must return a runtime name or null, got ${JSON.stringify(verdict)}`)
 }
 
 /**
- * Resolve the routing ladder for one line: route, then scripts.
+ * Resolve the policy ladder for one line: policy, then scripts.
  *
- * A route verdict overlays the named runtime's captures on the static
+ * A policy verdict overlays the named runtime's captures on the static
  * bindings (an affirmative choice, never a refusal). With no verdict,
  * per-runtime scripts filter the entry list: an entry with no script
  * is always willing, and the willing entries re-bind in list order.
@@ -134,19 +132,19 @@ async function evaluateRoute(
  */
 export async function decideLine(
   entries: readonly Runtime[],
-  route: RouteFn | null,
-  ctx: RouteContext,
+  policy: PolicyFn | null,
+  ctx: PolicyContext,
   staticBindings: Record<string, Runtime>,
-): Promise<RoutingDecision> {
+): Promise<PolicyDecision> {
   const evaluator = evaluatorOf(entries)
-  if (route !== null) {
-    const name = await evaluateRoute(route, ctx, evaluator)
+  if (policy !== null) {
+    const name = await evaluatePolicy(policy, ctx, evaluator)
     if (name !== null) {
       let overlay: Record<string, Runtime>
       try {
         overlay = runtimeBindingsFor(entries, name)
       } catch (caught) {
-        throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
+        throw new PolicyError(caught instanceof Error ? caught.message : String(caught), {
           cause: caught,
         })
       }

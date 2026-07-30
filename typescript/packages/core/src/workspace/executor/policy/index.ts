@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { decideLine, evaluatorOf } from './decide.ts'
-export { RoutingDecisionError } from './errors.ts'
+export { PolicyError } from './errors.ts'
 export { commandFacts } from './facts.ts'
-export { ScriptSource, routeContextFromPayload, routeContextPayload } from './types.ts'
-export type { CommandFacts, RoutingDecision, RouteContext, RouteFn, RouteScript } from './types.ts'
+export { ScriptSource, policyContextFromPayload, policyContextPayload } from './types.ts'
+export type {
+  CommandFacts,
+  PolicyDecision,
+  PolicyContext,
+  PolicyFn,
+  PolicyScript,
+} from './types.ts'

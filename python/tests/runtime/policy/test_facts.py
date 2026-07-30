@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime.policy import command_facts
+from mirage.workspace.workspace import parse
 
-class RoutingDecisionError(ValueError):
-    """The runtime argument, route, or a script could not decide the line.
 
-    Raised for caller-fixable routing mistakes (unknown runtime name, a
-    script that does not parse, a missing monty extra) so execute()
-    propagates them loud instead of folding them into the line's
-    IOResult like a command failure.
-    """
+def test_command_facts_parse_pipes_and_lists():
+    facts = command_facts(parse("cat /a/big.csv | python3 /r/x.py 1 && nope"))
+    assert [f.command for f in facts] == ["cat", "python3", "nope"]
+    assert facts[0].paths == ("/a/big.csv", )
+    assert facts[1].words == ("python3", "/r/x.py", "1")
+    assert facts[0].builtin and facts[1].builtin
+    assert not facts[2].builtin
+
+
+def test_command_facts_empty_on_unparsable():
+    assert command_facts(parse("")) == ()

@@ -12,25 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.route.decide import (decide_line, evaluate_route,
-                                         evaluate_script, evaluator_of)
-from mirage.runtime.route.errors import RoutingDecisionError
-from mirage.runtime.route.facts import command_facts
-from mirage.runtime.route.types import (CommandFacts, RouteContext, RouteFn,
-                                        RouteScript, RoutingDecision,
-                                        ScriptSource)
+from mirage.runtime.policy.decide import (decide_line, evaluate_policy,
+                                          evaluate_script, evaluator_of)
+from mirage.runtime.policy.errors import PolicyError
+from mirage.runtime.policy.facts import command_facts
+from mirage.runtime.policy.types import (CommandFacts, PolicyContext,
+                                         PolicyDecision, PolicyFn,
+                                         PolicyScript, ScriptSource)
 
 __all__ = [
     "CommandFacts",
     "ScriptSource",
-    "RoutingDecision",
-    "RouteContext",
-    "RouteFn",
-    "RouteScript",
-    "RoutingDecisionError",
+    "PolicyDecision",
+    "PolicyContext",
+    "PolicyFn",
+    "PolicyScript",
+    "PolicyError",
     "command_facts",
     "decide_line",
-    "evaluate_route",
+    "evaluate_policy",
     "evaluate_script",
     "evaluator_of",
 ]

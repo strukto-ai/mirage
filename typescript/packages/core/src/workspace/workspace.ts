@@ -67,11 +67,11 @@ import { MontyUnavailableError } from './executor/python/runtimes/monty.ts'
 import {
   commandFacts,
   decideLine,
-  RoutingDecisionError,
-  type RoutingDecision,
-  type RouteContext,
-  type RouteFn,
-} from './executor/route/index.ts'
+  PolicyError,
+  type PolicyDecision,
+  type PolicyContext,
+  type PolicyFn,
+} from './executor/policy/index.ts'
 import {
   bindCommands,
   catchAll,
@@ -159,13 +159,13 @@ export interface WorkspaceOptions {
    */
   runtimes?: RuntimeEntry[]
   /**
-   * Global route script for the routing ladder: a function taking the
-   * RouteContext (or a config-borne ScriptSource) naming the runtime
+   * Global policy script for the policy ladder: a function taking the
+   * PolicyContext (or a config-borne ScriptSource) naming the runtime
    * for a line, or null to fall to the entries' own scripts. Ladder:
-   * the runtime argument > route > scripts by list order > admission
+   * the runtime argument > policy > scripts by list order > admission
    * failure (exit 126).
    */
-  route?: RouteFn
+  policy?: PolicyFn
 }
 
 export class ExecuteResult {
@@ -239,7 +239,7 @@ export interface ExecuteOptions {
    * @internal The typed line's routing decision, forwarded to nested
    * evals so inner lines never re-route.
    */
-  routingDecision?: RoutingDecision
+  routingDecision?: PolicyDecision
 }
 
 export class Workspace {
@@ -270,7 +270,7 @@ export class Workspace {
   private watchRuntime: WatchRuntime | null = null
   private readonly runtimeEntries: Runtime[]
   private runtimeBindings: Record<string, Runtime>
-  private readonly route: RouteFn | null
+  private readonly policy: PolicyFn | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -368,8 +368,8 @@ export class Workspace {
       this.closers.push(() => entry.close())
     }
     this.runtimeBindings = bindCommands(this.runtimeEntries)
-    if (typeof options.route === 'string') throw scriptStringError('route')
-    this.route = options.route ?? null
+    if (typeof options.policy === 'string') throw scriptStringError('policy')
+    this.policy = options.policy ?? null
     this.observer = new Observer(observeStore)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
@@ -474,7 +474,7 @@ export class Workspace {
   }
 
   /**
-   * The routing ladder for one typed line: runtime, route, scripts.
+   * The policy ladder for one typed line: runtime, policy, scripts.
    * Returns null when nothing decides (no runtime argument, no policy
    * configured)
    * so dispatch falls to the static bindings; a nested eval inherits
@@ -490,7 +490,7 @@ export class Workspace {
    */
   private wholeLineRuntimeFor(
     rootNode: TSNodeLike,
-    decision: RoutingDecision | null,
+    decision: PolicyDecision | null,
   ): Runtime | null {
     const candidates = this.runtimeEntries.some(
       (entry) => entry.runsLines && !(entry instanceof VfsRuntime),
@@ -520,18 +520,18 @@ export class Workspace {
     }
   }
 
-  private async resolveRoutingDecision(
+  private async resolvePolicyDecision(
     root: TSNodeLike,
     command: string,
     options: ExecuteOptions,
-  ): Promise<RoutingDecision | null> {
+  ): Promise<PolicyDecision | null> {
     if (options.routingDecision !== undefined) return options.routingDecision
     if (options.runtime !== undefined) {
       let overlay: Record<string, Runtime>
       try {
         overlay = runtimeBindingsFor(this.runtimeEntries, options.runtime)
       } catch (caught) {
-        throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
+        throw new PolicyError(caught instanceof Error ? caught.message : String(caught), {
           cause: caught,
         })
       }
@@ -541,11 +541,11 @@ export class Workspace {
       }
     }
     const hasScripts = this.runtimeEntries.some((entry) => entry.script !== undefined)
-    if (this.route === null && !hasScripts) return null
+    if (this.policy === null && !hasScripts) return null
     const facts = commandFacts(root)
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
     const session = this.sessionManager.get(sessionId)
-    const ctx: RouteContext = {
+    const ctx: PolicyContext = {
       line: command,
       commands: facts,
       command: facts[0]?.command ?? '',
@@ -556,7 +556,7 @@ export class Workspace {
       agentId: options.agentId ?? this.agentId ?? '',
       mounts: this.sandboxVisibleMounts(),
     }
-    return decideLine(this.runtimeEntries, this.route, ctx, this.runtimeBindings)
+    return decideLine(this.runtimeEntries, this.policy, ctx, this.runtimeBindings)
   }
 
   /**
@@ -1148,7 +1148,7 @@ export class Workspace {
       return new ExecuteResult(new Uint8Array(), err, 2)
     }
     const rootNode = root as unknown as TSNodeLike
-    const routingDecision = await this.resolveRoutingDecision(rootNode, command, options)
+    const routingDecision = await this.resolvePolicyDecision(rootNode, command, options)
 
     const dispatch: DispatchFn = this.dispatcher.dispatch
 
@@ -1160,7 +1160,7 @@ export class Workspace {
       const innerOpts: ExecuteOptions & { provision?: false } = { record: false }
       if (options.signal !== undefined) innerOpts.signal = options.signal
       // Nested lines never re-route: the evaluator's inner lines keep
-      // the typed line's decision (runtime argument, route, or scripts).
+      // the typed line's decision (runtime argument, policy, or scripts).
       if (routingDecision !== null) innerOpts.routingDecision = routingDecision
       // `command NAME` re-runs the inner line and must forward the pipe
       // stdin so `... | command cat` filters the upstream output; the same

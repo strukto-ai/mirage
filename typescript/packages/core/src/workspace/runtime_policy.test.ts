@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
-import { ScriptSource } from './executor/route/index.ts'
+import { ScriptSource } from './executor/policy/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -174,7 +174,7 @@ describe('routing ladder', () => {
     }
   })
 
-  it('the global route names the runtime', async () => {
+  it('the global policy names the runtime', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMResource() },
@@ -182,7 +182,7 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'vfs'],
-        route: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
+        policy: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
       },
     )
     try {

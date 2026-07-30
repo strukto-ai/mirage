@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RouteScript } from './route/types.ts'
+import type { PolicyScript } from './policy/types.ts'
 
 /** One interpreter execution request, language-agnostic. */
 export interface RunArgs {
@@ -98,9 +98,9 @@ export interface RuntimeOptions<C extends object = Record<string, unknown>> {
   config?: C
   /**
    * Per-line admission script for the routing ladder, answering "do I
-   * want this line": a function taking a RouteContext, or a
+   * want this line": a function taking a PolicyContext, or a
    * config-borne ScriptSource. Absent = always willing. Policy, not
    * capability: it can only refuse lines the captures already allow.
    */
-  script?: RouteScript
+  script?: PolicyScript
 }

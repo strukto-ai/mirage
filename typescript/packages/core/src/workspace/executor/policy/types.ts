@@ -24,10 +24,10 @@ export interface CommandFacts {
 }
 
 /**
- * Facts about the line being routed, parse-before-route. `command` /
+ * Facts about the line being routed, parse-before-policy. `command` /
  * `builtin` name the stage addressed to the consulted party: an entry
  * script sees its runtime's first captured stage (see ctxForRuntime),
- * the global route sees the line's first command.
+ * the global policy sees the line's first command.
  *
  * For `cat /data/logs.txt | python3 process.py` typed in `/data`, the
  * python runtime's script (it captures `python3`) is consulted with:
@@ -45,13 +45,13 @@ export interface CommandFacts {
  * ctx.cwd      === '/data'
  * ```
  *
- * The global route script sees the same context with
+ * The global policy script sees the same context with
  * `ctx.command === 'cat'`, the line's first stage. A monty-source
  * script gets this as the `ctx` dict (snake_case `session_id` /
  * `agent_id`, matching Python), with `ctx['runtime']` naming the
  * runtime being asked.
  */
-export interface RouteContext {
+export interface PolicyContext {
   line: string
   commands: readonly CommandFacts[]
   command: string
@@ -66,18 +66,18 @@ export interface RouteContext {
 /**
  * The ctx payload as any evaluator's script sees it.
  *
- * This is the route context WIRE SCHEMA, a public contract:
+ * This is the policy context WIRE SCHEMA, a public contract:
  * JSON-shaped (strings, bools, lists, dicts), snake_case keys,
  * identical in both languages, so a script in any evaluator's
  * language (and any transport, in-process or remote) receives the
  * same structure. Keys: line, commands (command/words/builtin/paths
  * per stage), command, builtin, cwd, env, session_id, agent_id,
  * mounts, plus runtime (name/captures) for per-runtime scripts.
- * routeContextFromPayload is the inverse, so a payload can be stored
+ * policyContextFromPayload is the inverse, so a payload can be stored
  * as JSON and replayed.
  */
-export function routeContextPayload(
-  ctx: RouteContext,
+export function policyContextPayload(
+  ctx: PolicyContext,
   runtime?: Runtime,
 ): Record<string, EvalValue> {
   const payload: Record<string, EvalValue> = {
@@ -104,12 +104,12 @@ export function routeContextPayload(
 
 /**
  * Rebuild a context from its wire-schema payload: the inverse of
- * routeContextPayload for the context's own fields (the payload's
+ * policyContextPayload for the context's own fields (the payload's
  * `runtime` block is per-consultation decoration and is ignored), so
  * a stored JSON payload replays through scripts and routes in tests
  * or debugging.
  */
-export function routeContextFromPayload(payload: Record<string, unknown>): RouteContext {
+export function policyContextFromPayload(payload: Record<string, unknown>): PolicyContext {
   const commands = (payload.commands as Record<string, unknown>[]).map((c) => ({
     command: String(c.command),
     words: (c.words as string[]).slice(),
@@ -132,10 +132,10 @@ export function routeContextFromPayload(payload: Record<string, unknown>): Route
 /**
  * Script source arriving from a workspace config, not from code.
  *
- * The programmatic API takes functions; a yaml `script:`/`route:`
+ * The programmatic API takes functions; a yaml `script:`/`policy:`
  * value references a `.py` file whose content is embedded here at
  * load. The source sees ctx as a dict and its LAST EXPRESSION is the
- * verdict. It runs on the routing interpreter (monty today; a sandbox
+ * verdict. It runs on the policy engine (monty today; a sandbox
  * runtime is a candidate door later).
  */
 export class ScriptSource {
@@ -144,7 +144,7 @@ export class ScriptSource {
 
 /**
  * A per-runtime willingness script, answering "do I want this line?".
- * In code: a function (sync or async) on the RouteContext returning a
+ * In code: a function (sync or async) on the PolicyContext returning a
  * truthy verdict. From config: a `.py` file reference, loaded as
  * ScriptSource (its last expression is the verdict).
  *
@@ -157,23 +157,25 @@ export class ScriptSource {
  * //     script: guard.py
  * ```
  */
-export type RouteScript = ((ctx: RouteContext) => boolean | Promise<boolean>) | ScriptSource
+export type PolicyScript = ((ctx: PolicyContext) => boolean | Promise<boolean>) | ScriptSource
 
 /**
- * The global route, answering "who takes this line?". In code: a
- * function (sync or async) on the RouteContext returning a runtime
+ * The global policy, answering "who takes this line?". In code: a
+ * function (sync or async) on the PolicyContext returning a runtime
  * name, or null to pass down the ladder. From config: a `.py` file
  * reference, loaded as ScriptSource (its last expression is that name
  * or None).
  *
  * ```
- * route: (ctx) => (ctx.command === 'python3' ? 'monty' : null)
+ * policy: (ctx) => (ctx.command === 'python3' ? 'monty' : null)
  *
- * // workspace yaml: route.py next to the config file
- * // route: route.py
+ * // workspace yaml: policy.py next to the config file
+ * // policy: policy.py
  * ```
  */
-export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | null>) | ScriptSource
+export type PolicyFn =
+  | ((ctx: PolicyContext) => string | null | Promise<string | null>)
+  | ScriptSource
 
 /**
  * The one-line placement decision the dispatcher consults.
@@ -182,7 +184,7 @@ export type RouteFn = ((ctx: RouteContext) => string | null | Promise<string | n
  * command". The vfs runtime is a legal value in either; a command
  * placed on it is served by the workspace executor itself.
  */
-export interface RoutingDecision {
+export interface PolicyDecision {
   /**
    * Every command some entry captures, resolved for this line: the
    * runtime it runs on, or null when its capturers all refused

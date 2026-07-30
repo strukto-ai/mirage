@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
-import { ScriptSource, type RouteScript } from './route/types.ts'
+import { ScriptSource, type PolicyScript } from './policy/types.ts'
 import type { RunArgs, RunResult, RuntimeOptions } from './runtime_types.ts'
 
 /**
@@ -62,7 +62,7 @@ export abstract class Runtime {
   readonly runsLines: boolean = false
   /** The runtime's coerced implementation knobs. */
   config: object
-  script?: RouteScript
+  script?: PolicyScript
 
   constructor(
     options: RuntimeOptions<object> = {},
@@ -117,8 +117,8 @@ export type RuntimeEntry = Runtime | string
 /** The code API takes functions; script source belongs to config. */
 export function scriptStringError(kind = 'a script'): Error {
   return new Error(
-    `${kind} in code must be a function taking the RouteContext; config ` +
-      `scripts reference a .py file (script:/route: in the workspace yaml)`,
+    `${kind} in code must be a function taking the PolicyContext; config ` +
+      `scripts reference a .py file (script:/policy: in the workspace yaml)`,
   )
 }
 

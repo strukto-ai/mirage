@@ -308,7 +308,7 @@ async def test_global_route_names_the_runtime():
                    mode=MountMode.EXEC,
                    runtimes=[AlphaRuntime(),
                              BetaRuntime(), "vfs"],
-                   route=lambda ctx: "beta" if "heavy" in ctx.line else None)
+                   policy=lambda ctx: "beta" if "heavy" in ctx.line else None)
     try:
         io = await ws.execute("python3 -c 'heavy'")
         assert await materialize(io.stdout) == b"ran-beta\n"
@@ -360,7 +360,7 @@ def test_config_inline_script_is_rejected():
 
 
 def test_config_script_path_form_embeds_content(tmp_path):
-    script = tmp_path / "route.py"
+    script = tmp_path / "policy.py"
     script.write_text("ctx['command'] == 'python3'")
     entries = _build_runtime_entries([{
         "name": "local",
@@ -384,7 +384,7 @@ def test_code_string_script_is_rejected():
 @pytest.mark.asyncio
 async def test_code_string_route_is_rejected():
     with pytest.raises(TypeError, match="reference a .py file"):
-        Workspace({"/ram": RAMResource()}, route="'local'")
+        Workspace({"/ram": RAMResource()}, policy="'local'")
 
 
 def test_config_script_path_form_missing_file_fails_loud(tmp_path):

@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.route.types import RouteScript
+from mirage.runtime.policy.types import PolicyScript
 from mirage.runtime.sandbox.config import SandboxConfig
 from mirage.runtime.types import RunArgs, RunResult
 
@@ -47,7 +47,7 @@ class RemoteSandbox(Runtime):
     def __init__(self,
                  captures: Sequence[str] | None = None,
                  config: SandboxConfig | dict[str, Any] | None = None,
-                 script: RouteScript | None = None) -> None:
+                 script: PolicyScript | None = None) -> None:
         super().__init__(captures, config, script)
         # Connect-once latch: the first captured line connects; later
         # lines just execute. A failed connect leaves it unset so the

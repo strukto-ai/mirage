@@ -1,5 +1,5 @@
 {
-  "suite": "routing",
+  "suite": "policy",
   "cases": [
     {
       "id": "runtime_arg_per_line",
@@ -129,7 +129,7 @@
             "resource": "ram"
           }
         },
-        "route": "'local' if 'go-local' in ctx['line'] else None"
+        "policy": "'local' if 'go-local' in ctx['line'] else None"
       },
       "steps": [
         {
@@ -329,7 +329,7 @@
             "resource": "ram"
           }
         },
-        "route": "'nope'"
+        "policy": "'nope'"
       },
       "steps": [
         {

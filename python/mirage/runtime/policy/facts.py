@@ -15,7 +15,7 @@
 import tree_sitter
 
 from mirage.commands.spec import SPECS
-from mirage.runtime.route.types import CommandFacts
+from mirage.runtime.policy.types import CommandFacts
 from mirage.shell.types import NodeType
 
 _WORD_TYPES = (NodeType.COMMAND_NAME, NodeType.WORD, NodeType.STRING,

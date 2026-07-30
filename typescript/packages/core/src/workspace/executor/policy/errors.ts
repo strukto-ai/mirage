@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * The runtime argument, route, or a script could not decide the line.
+ * The runtime argument, policy, or a script could not decide the line.
  * Caller-fixable routing mistakes (unknown runtime name, a script that does not parse, a
  * missing monty package) propagate loud instead of folding into the
  * line's IOResult like a command failure.
  */
-export class RoutingDecisionError extends Error {
+export class PolicyError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options)
-    this.name = 'RoutingDecisionError'
+    this.name = 'PolicyError'
   }
 }

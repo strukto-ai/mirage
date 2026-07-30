@@ -34,7 +34,7 @@ import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import { VfsRuntime, type Runtime } from './runtime.ts'
-import type { RoutingDecision } from './route/index.ts'
+import type { PolicyDecision } from './policy/index.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -73,7 +73,7 @@ interface RunOnMountCtx {
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RoutingDecision
+  routingDecision?: PolicyDecision
 }
 
 // Commands a bare invocation points at the working directory, mapped to
@@ -172,7 +172,7 @@ function lineRuntimeFor(
   cmdName: string,
   runtimeBindings: Record<string, Runtime> | undefined,
   vfs: Runtime | null,
-  routingDecision: RoutingDecision | undefined,
+  routingDecision: PolicyDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
   if (routingDecision === undefined) {
     const restricted = vfs instanceof VfsRuntime && vfs.restricted
@@ -401,7 +401,7 @@ export async function handleCommand(
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]

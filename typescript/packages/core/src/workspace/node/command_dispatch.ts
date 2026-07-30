@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../executor/runtime.ts'
-import type { RoutingDecision } from '../executor/route/index.ts'
+import type { PolicyDecision } from '../executor/policy/index.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -158,7 +158,7 @@ export async function executeCommand(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -255,7 +255,7 @@ async function runCommandBody(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
@@ -385,7 +385,7 @@ async function runArgv(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
