@@ -128,4 +128,4 @@ async def test_run_source_unbound_refuses_without_hint():
     prepared = Source(code="hi")
     stdout, io = await run_code("python3", prepared, None, {}, None, None)
     assert io.exit_code == 127
-    assert io.stderr == b"python3: no runtime captures this command\n"
+    assert io.stderr == b"python3: command not found\n"

@@ -152,7 +152,10 @@ async def run_code(
             None when nothing captures it at all.
     """
     if runtime is None:
-        hint = unavailable or "no runtime captures this command"
+        # GNU wording (bash prints `bash: python3: command not found`;
+        # the shell prefix is dropped workspace-wide), unless the
+        # default world recorded why the entry failed to build.
+        hint = unavailable or "command not found"
         return None, IOResult(exit_code=127,
                               stderr=f"{label}: {hint}\n".encode())
     result = await runtime.run(
