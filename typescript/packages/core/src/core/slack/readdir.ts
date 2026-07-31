@@ -303,9 +303,8 @@ async function fetchDay(
   for (const msg of messages) {
     const files = (msg.files as { id?: string }[] | undefined) ?? []
     for (const fmeta of files) {
-      if (fmeta.id === undefined || fmeta.id === '') continue
       const meta = fmeta as {
-        id: string
+        id?: string
         name?: string
         title?: string
         size?: number
@@ -314,13 +313,19 @@ async function fetchDay(
         url_private_download?: string
         timestamp?: number | string
       }
+      // Tombstoned (deleted) and access-restricted file payloads carry an
+      // id but no download URL and no byte size; read() ENOENTs on them, so
+      // listing them would both surface phantom files and break the
+      // sizesAlwaysKnown contract.
+      if (meta.id === undefined || meta.id === '') continue
+      if (meta.size === undefined || !meta.url_private_download) continue
       const blob = fileBlobName(meta)
       const entry = new IndexEntry({
         id: meta.id,
         name: meta.title ?? meta.name ?? '',
         resourceType: 'slack/file',
         vfsName: blob,
-        size: meta.size ?? null,
+        size: meta.size,
         remoteTime: String(meta.timestamp ?? ''),
         extra: {
           mimetype: meta.mimetype ?? '',

@@ -353,7 +353,12 @@ async def _fetch_day(
     file_entries: list[tuple[str, IndexEntry]] = []
     for msg in messages:
         for fmeta in msg.get("files", []) or []:
-            if not fmeta.get("id"):
+            # Tombstoned (deleted) and access-restricted file payloads carry
+            # an id but no download URL and no byte size; read() ENOENTs on
+            # them, so listing them would both surface phantom files and
+            # break the SIZES_ALWAYS_KNOWN contract.
+            if (not fmeta.get("id") or not fmeta.get("url_private_download")
+                    or fmeta.get("size") is None):
                 continue
             blob_name = file_blob_name(fmeta)
             file_entries.append(
@@ -363,7 +368,7 @@ async def _fetch_day(
                      name=fmeta.get("title") or fmeta.get("name") or "",
                      resource_type="slack/file",
                      vfs_name=blob_name,
-                     size=fmeta.get("size"),
+                     size=fmeta["size"],
                      remote_time=str(fmeta.get("timestamp", "")),
                      extra={
                          "mimetype":
