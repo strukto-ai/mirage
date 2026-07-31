@@ -1140,7 +1140,7 @@ export class Workspace {
     const root = parser.parse(command)
     const offending = findSyntaxError(root)
     if (offending !== null) {
-      const snippet = offending.trim().slice(0, 40)
+      const snippet = offending.trim()
       const errMsg =
         snippet.length > 0
           ? `mirage: syntax error near '${snippet}'\n`

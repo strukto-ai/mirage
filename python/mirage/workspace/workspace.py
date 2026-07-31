@@ -1312,7 +1312,7 @@ class Workspace:
             # consulted about it.
             offending = find_syntax_error(ast)
             if offending is not None:
-                snippet = offending.strip()[:40]
+                snippet = offending.strip()
                 err = (f"mirage: syntax error near {snippet!r}\n".encode()
                        if snippet else b"mirage: syntax error in command\n")
                 io = IOResult(exit_code=2, stderr=err)
