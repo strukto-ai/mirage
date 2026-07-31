@@ -24,7 +24,7 @@ from mirage.shell.array import (array_append, array_extent, array_get,
                                 array_set, make_array)
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError, ExitSignal
+from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -88,6 +88,9 @@ async def _eval_cfor_expr(
     Raises:
         ArithError: re-raised with the expression text prepended, so
             the loop can print bash's `((: expr: reason` diagnostic.
+        ReadonlyError: the expression assigns to a readonly variable,
+            which aborts the loop the same way an invalid expression
+            does.
     """
     if expr is None:
         return default
@@ -96,6 +99,9 @@ async def _eval_cfor_expr(
         value, updates = evaluate_arith(text, session.env)
     except ArithError as exc:
         raise ArithError(f"{text}: {exc}") from exc
+    for name in updates:
+        if name in session.readonly_vars:
+            raise ReadonlyError(name)
     session.env.update(updates)
     return int(value)
 

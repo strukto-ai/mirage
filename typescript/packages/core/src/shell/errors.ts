@@ -16,6 +16,18 @@
 // mirage.shell.errors.ArithError.
 export class ArithError extends Error {}
 
+// An arithmetic assignment to a readonly shell variable. Mirrors
+// Python's mirage.shell.errors.ReadonlyError.
+export class ReadonlyError extends Error {
+  readonly varName: string
+
+  constructor(name: string) {
+    super(`${name}: readonly variable`)
+    this.name = 'ReadonlyError'
+    this.varName = name
+  }
+}
+
 // A fatal shell exit request unwinding the current execution. Raised by
 // the `exit` builtin and by fatal expansion errors (`${var:?msg}`), which
 // bash treats as an implicit `exit 1` in a non-interactive shell.

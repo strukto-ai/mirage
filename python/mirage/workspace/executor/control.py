@@ -23,7 +23,7 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError
+from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
@@ -296,7 +296,8 @@ async def handle_cfor(
         eval_expr (Callable): async evaluator taking (expr, default)
             and returning the expression's integer value, or the
             default when the slot is empty; raises ArithError with the
-            offending expression text on an invalid expression.
+            offending expression text on an invalid expression, or
+            ReadonlyError when it assigns to a readonly variable.
         session (Session): shell session.
         stdin (ByteSource | None): input stream, line-buffered across
             iterations like for/while.
@@ -343,10 +344,13 @@ async def handle_cfor(
                 merged_io = await merged_io.merge(io)
                 all_stdout.append(stdout)
                 await eval_expr(exprs[2], 0)
-        except ArithError as exc:
+        except (ArithError, ReadonlyError) as exc:
             # bash: the loop aborts with status 1, keeping the output
             # of iterations that already ran.
-            err = f"bash: ((: {exc}\n".encode()
+            if isinstance(exc, ReadonlyError):
+                err = f"bash: {exc}\n".encode()
+            else:
+                err = f"bash: ((: {exc}\n".encode()
             merged_io = await merged_io.merge(IOResult(exit_code=1,
                                                        stderr=err))
             merged_io.exit_code = 1

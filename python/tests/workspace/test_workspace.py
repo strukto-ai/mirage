@@ -452,6 +452,23 @@ def test_c_style_for_arith_error_aborts_with_1():
     assert _stdout(io) == b"c=1\n"
 
 
+def test_c_style_for_readonly_aborts_with_1():
+    """A slot assigning to a readonly variable aborts the loop with 1,
+    keeping the output of iterations that already ran (bash 5.2)."""
+    ws = _ws()
+    io = _exec(
+        ws, "readonly i=5; for ((i=0;i<2;i++)); do echo x; done; "
+        "echo c=$?")
+    assert _stdout(io) == b"c=1\n"
+    assert b"bash: i: readonly variable\n" in (io.stderr or b"")
+
+    ws = _ws()
+    io = _exec(
+        ws, "readonly i=5; for ((;i<10;i++)); do echo hi; done; "
+        "echo c=$?; echo i=$i")
+    assert _stdout(io) == b"hi\nc=1\ni=5\n"
+
+
 def test_find_mtime_observed_write_fallback():
     """A write through mirage stamps an observed mtime that find sees
     even when the backend reports none; touch still overrides."""

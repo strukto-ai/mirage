@@ -52,7 +52,7 @@ import {
   arraySet,
   makeArray,
 } from '../../shell/array.ts'
-import { ArithError, ExitSignal } from '../../shell/errors.ts'
+import { ArithError, ExitSignal, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
 import { wordText } from '../../types.ts'
@@ -103,7 +103,8 @@ type Recurse = (
  * or the default for an empty slot (1 for the condition so `for
  * ((;;))` loops, 0 for init/update). Re-raises ArithError with the
  * expression text prepended so the loop can print bash's
- * `((: expr: reason` diagnostic.
+ * `((: expr: reason` diagnostic, and throws ReadonlyError when the
+ * expression assigns to a readonly variable.
  */
 async function evalCforExpr(
   expr: TSNodeLike | null,
@@ -121,6 +122,9 @@ async function evalCforExpr(
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
     throw new ArithError(`${text}: ${err.message}`)
+  }
+  for (const name of Object.keys(updates)) {
+    if (session.readonlyVars.has(name)) throw new ReadonlyError(name)
   }
   Object.assign(session.env, updates)
   return Number(value)

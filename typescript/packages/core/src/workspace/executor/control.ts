@@ -17,7 +17,7 @@ import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import { ArithError } from '../../shell/errors.ts'
+import { ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { finishStatement } from './statement.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
@@ -295,9 +295,10 @@ export type CforEval = (expr: TSNodeLike | null, dflt: number) => Promise<number
  *
  * `evalExpr` evaluates one expression slot to its integer value (the
  * default when the slot is empty) and throws ArithError with the
- * offending expression text on an invalid expression; bash aborts the
- * loop with status 1, keeping the output of iterations that ran. The
- * update expression still runs after `continue`, per bash.
+ * offending expression text on an invalid expression, or ReadonlyError
+ * when it assigns to a readonly variable; bash aborts the loop with
+ * status 1, keeping the output of iterations that ran. The update
+ * expression still runs after `continue`, per bash.
  */
 export async function handleCfor(
   executeNode: ExecuteNodeFn,
@@ -350,8 +351,9 @@ export async function handleCfor(
         await evalExpr(exprs[2] ?? null, 0)
       }
     } catch (err) {
-      if (!(err instanceof ArithError)) throw err
-      const errBytes = new TextEncoder().encode(`bash: ((: ${err.message}\n`)
+      if (!(err instanceof ArithError) && !(err instanceof ReadonlyError)) throw err
+      const prefix = err instanceof ReadonlyError ? 'bash: ' : 'bash: ((: '
+      const errBytes = new TextEncoder().encode(`${prefix}${err.message}\n`)
       mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
       mergedIo.exitCode = 1
       return collectLoopResult(allStdout, mergedIo, 'for')

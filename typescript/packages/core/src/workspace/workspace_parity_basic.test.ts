@@ -357,6 +357,23 @@ describe('workspace: C-style for', () => {
     expect(stdoutStr(io)).toBe('c=1\n')
     await ws.close()
   })
+
+  it('aborts with status 1 when a slot assigns to a readonly variable', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('readonly i=5; for ((i=0;i<2;i++)); do echo x; done; echo c=$?')
+    expect(stdoutStr(io)).toBe('c=1\n')
+    expect(new TextDecoder().decode(io.stderr)).toBe('bash: i: readonly variable\n')
+    await ws.close()
+  })
+
+  it('keeps the output of iterations that ran before a readonly update', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      'readonly i=5; for ((;i<10;i++)); do echo hi; done; echo c=$?; echo i=$i',
+    )
+    expect(stdoutStr(io)).toBe('hi\nc=1\ni=5\n')
+    await ws.close()
+  })
 })
 
 describe('workspace: variable expansion', () => {
