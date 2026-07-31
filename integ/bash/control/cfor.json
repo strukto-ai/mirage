@@ -305,6 +305,40 @@
         "stdout": "s=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cfor_readonly_aborts",
+      "seq": 502169,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readonly i=5; for ((;i<10;i++)); do echo hi; done; echo c=$?; echo i=$i",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nc=1\ni=5\n",
+        "stderr": "bash: i: readonly variable\n"
+      }
     }
   ]
 }
