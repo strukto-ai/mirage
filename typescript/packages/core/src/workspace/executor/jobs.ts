@@ -18,6 +18,7 @@ import { CommandTimeoutError } from '../../commands/builtin/utils/safeguard.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
+import { mergeSignals } from '../abort.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { ExecutionNode } from '../types.ts'
@@ -44,6 +45,10 @@ export async function handleBackground(
   const bgSession = session.fork()
 
   const abort = new AbortController()
+  // `kill %n` aborts this controller; the signal rides the forked
+  // session so the job's whole subtree (builtins, mounts, runtimes)
+  // observes the kill, merged with any enclosing job's channel.
+  bgSession.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
   const cmdStrInner = left.text
   const task: Promise<[ByteSource | null, IOResult, ExecutionNode]> = (async () => {
     let stdout: ByteSource | null

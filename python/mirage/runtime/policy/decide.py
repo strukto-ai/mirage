@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import inspect
 from collections.abc import Mapping
 from typing import Any
@@ -27,22 +28,34 @@ from mirage.runtime.policy.types import (DenyResult, PolicyContext,
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 from mirage.runtime.types import EvalValue
 
+POLICY_EVAL_TIMEOUT_SECONDS = 10.0
 
-def evaluator_of(entries: list[Runtime]) -> EvaluatorMixin | None:
-    """The world's policy engine: its first evaluator-capable entry.
+
+def evaluator_of(entries: list[Runtime],
+                 language: str | None = None) -> EvaluatorMixin | None:
+    """The world's policy engine for a script.
 
     Config-borne policy scripts run on it; any runtime inheriting
     EvaluatorMixin qualifies (monty in the default world, or a user
-    runtime in any language). None when the world has no evaluator,
-    which only matters once a ScriptSource actually needs one.
+    runtime in any language). The first evaluator whose eval_language
+    matches the script's language wins, so a .js policy runs on
+    quickjs even when a python evaluator sits earlier in the world;
+    with no language (or no match) the first evaluator serves. None
+    when the world has no evaluator, which only matters once a
+    ScriptSource actually needs one.
 
     Args:
         entries (list[Runtime]): the workspace's ordered world.
+        language (str | None): the script's language, if known.
     """
+    first: EvaluatorMixin | None = None
     for entry in entries:
         if isinstance(entry, EvaluatorMixin):
-            return entry
-    return None
+            if first is None:
+                first = entry
+            if language is not None and entry.eval_language == language:
+                return entry
+    return first
 
 
 async def _eval_source(source: str, ctx_payload: dict[str, EvalValue],
@@ -68,7 +81,12 @@ async def _eval_source(source: str, ctx_payload: dict[str, EvalValue],
             "(install with: pip install mirage-ai[monty], or use a "
             "Python callable instead)")
     try:
-        result = await evaluator.eval(source, inputs={"ctx": ctx_payload})
+        result = await asyncio.wait_for(evaluator.eval(
+            source, inputs={"ctx": ctx_payload}),
+                                        timeout=POLICY_EVAL_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        raise PolicyError(f"policy script timed out after "
+                          f"{POLICY_EVAL_TIMEOUT_SECONDS:g}s") from exc
     except EvalError as exc:
         prefix = ("policy script syntax error: "
                   if exc.syntax else "policy script failed: ")
@@ -77,8 +95,7 @@ async def _eval_source(source: str, ctx_payload: dict[str, EvalValue],
 
 
 async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
-                          runtime: Runtime,
-                          evaluator: EvaluatorMixin | None) -> bool:
+                          runtime: Runtime, entries: list[Runtime]) -> bool:
     """Ask one runtime's script whether it wants the line.
 
     The script sees the runtime's own view of the context
@@ -90,8 +107,8 @@ async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
             a config-borne ScriptSource.
         ctx (PolicyContext): facts about the line.
         runtime (Runtime): the runtime being asked (ctx.runtime).
-        evaluator (EvaluatorMixin | None): the world's policy engine,
-            consulted only for ScriptSource scripts.
+        entries (list[Runtime]): the workspace's ordered world; a
+            ScriptSource selects its evaluator from it by language.
 
     Raises:
         PolicyError: the script answered with a policy verdict shape
@@ -103,7 +120,7 @@ async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
     verdict: Any
     if isinstance(script, ScriptSource):
         verdict = await _eval_source(script.source, view.to_dict(runtime),
-                                     evaluator)
+                                     evaluator_of(entries, script.language))
     else:
         verdict = script(view)
         if inspect.isawaitable(verdict):
@@ -155,15 +172,15 @@ def parse_verdict(verdict: Any) -> str | None:
 
 
 async def evaluate_policy(policy: PolicyFn, ctx: PolicyContext,
-                          evaluator: EvaluatorMixin | None) -> str | None:
+                          entries: list[Runtime]) -> str | None:
     """Run the global policy, returning a runtime name or None to pass.
 
     Args:
         policy (PolicyFn): a callable taking the PolicyContext, or a
             config-borne ScriptSource (last expression = the verdict).
         ctx (PolicyContext): facts about the line.
-        evaluator (EvaluatorMixin | None): the world's policy engine,
-            consulted only for ScriptSource policies.
+        entries (list[Runtime]): the workspace's ordered world; a
+            ScriptSource selects its evaluator from it by language.
 
     Raises:
         PolicyDeny: the policy refused the line.
@@ -172,7 +189,8 @@ async def evaluate_policy(policy: PolicyFn, ctx: PolicyContext,
     """
     verdict: Any
     if isinstance(policy, ScriptSource):
-        verdict = await _eval_source(policy.source, ctx.to_dict(), evaluator)
+        verdict = await _eval_source(policy.source, ctx.to_dict(),
+                                     evaluator_of(entries, policy.language))
     else:
         verdict = policy(ctx)
         if inspect.isawaitable(verdict):
@@ -201,9 +219,8 @@ async def decide_line(entries: list[Runtime], policy: PolicyFn | None,
         static_bindings (dict[str, Runtime]): the workspace's static
             command bindings.
     """
-    evaluator = evaluator_of(entries)
     if policy is not None:
-        name = await evaluate_policy(policy, ctx, evaluator)
+        name = await evaluate_policy(policy, ctx, entries)
         if name is not None:
             overlay = runtime_bindings_for(entries, name)
             return PolicyDecision(bindings={
@@ -214,7 +231,7 @@ async def decide_line(entries: list[Runtime], policy: PolicyFn | None,
     willing: list[Runtime] = []
     for entry in entries:
         wants = (True if entry.script is None else await evaluate_script(
-            entry.script, ctx, entry, evaluator))
+            entry.script, ctx, entry, entries))
         if wants:
             willing.append(entry)
     # Every captured command resolves: to its first willing capturer,

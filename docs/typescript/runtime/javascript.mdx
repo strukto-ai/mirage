@@ -38,7 +38,7 @@ Three input forms, mirroring `python3`:
 `std.in.readAsString()` reads piped stdin, and `std.open`/`os.readdir`
 reach workspace mounts (see [Isolation](#isolation)). Output follows the
 real engine: `console.log` and the `print` global append a newline,
-`std.out.puts`/`std.err.puts` write raw, and there is no `console.error`
+`std.out.puts`/`std.err.puts` write raw, `std.out.printf`/`std.err.printf` C-format and return the characters written, and there is no `console.error`
 (write stderr with `std.err.puts`). These match the Python `quickjs`
 runtime, so a script behaves the same in both languages.
 
@@ -58,7 +58,7 @@ The engine runs under WebAssembly capability isolation: it sees only what
 the run passes it. Host files and the network are invisible.
 
 Workspace mounts are visible with no setup: `std.open('/data/f.txt', 'r')`
-reads the mount and `os.readdir('/data')` lists it, bridged through the
+reads the mount, `os.readdir('/data')` lists it, and `os.stat`/`os.mkdir`/`os.rename`/`os.remove` stat and mutate it (0 or -errno in WASI numbering, like the real engine), bridged through the
 workspace dispatch so the code sees exactly what `cat` sees, with the same
 cache and write modes. Writes are visible to every command once the file is
 closed, and a read-only mount (or a session narrowed to read) fails the

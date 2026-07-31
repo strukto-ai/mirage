@@ -54,16 +54,19 @@ function isScriptPath(value: string): boolean {
 }
 
 // Config carries a reference, the wire carries content (the docker
-// build-context model): the value must be a path to a .py file, read
-// at load time. In code, scripts are functions; config is the only
-// door for script source.
+// build-context model): the value must be a path to a .py/.js file,
+// read at load time. In code, scripts are functions; config is the
+// only door for script source. The extension stamps the script's
+// language so the policy engine can pick a matching evaluator.
 function loadScriptSource(value: string): ScriptSource {
   if (!isScriptPath(value)) {
     throw new Error(
       `a config script must reference a .py/.js file (e.g. script: guard.py), got '${value}'`,
     )
   }
-  return new ScriptSource(readFileSync(value.trim(), 'utf-8'))
+  const path = value.trim()
+  const language = path.endsWith('.js') || path.endsWith('.mjs') ? 'js' : 'python'
+  return new ScriptSource(readFileSync(path, 'utf-8'), language)
 }
 
 function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {

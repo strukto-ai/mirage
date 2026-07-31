@@ -33,6 +33,12 @@ export interface RunArgs {
    * and the runtime cleans up in its CancelledError handler.
    */
   signal?: AbortSignal
+  /**
+   * The safeguard timeout, for engines that execute on the event loop
+   * (quickjs) and must interrupt themselves in-VM: a guest that blocks
+   * the loop also blocks the timer that would abort `signal`.
+   */
+  timeoutSeconds?: number
 }
 
 /** Outcome of one interpreter execution. */

@@ -139,7 +139,15 @@ export function policyContextFromPayload(payload: Record<string, unknown>): Poli
  * runtime is a candidate door later).
  */
 export class ScriptSource {
-  constructor(readonly source: string) {}
+  /**
+   * `language` names the script's language ("python" or "js"), stamped
+   * from the file extension at config load; the programmatic default
+   * is "python". The policy engine prefers a matching evaluator.
+   */
+  constructor(
+    readonly source: string,
+    readonly language = 'python',
+  ) {}
 }
 
 /**

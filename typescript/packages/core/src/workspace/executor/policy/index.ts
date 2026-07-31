@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { decideLine, evaluatorOf, parseVerdict } from './decide.ts'
+export { decideLine, evaluatorOf, parseVerdict, POLICY_EVAL_TIMEOUT } from './decide.ts'
 export { PolicyDeny, PolicyError } from './errors.ts'
 export { commandFacts } from './facts.ts'
 export {

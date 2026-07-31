@@ -14,6 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
+import { EVALUATOR, type Evaluator } from './executor/runtime_mixin.ts'
+import type { EvalResult } from './executor/runtime_types.ts'
+import { POLICY_EVAL_TIMEOUT, evaluatorOf } from './executor/policy/index.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
 import { QuickJsRuntime } from './executor/js/quickjs.ts'
@@ -31,6 +34,51 @@ import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+class HangingEvaluator extends Runtime implements Evaluator {
+  readonly [EVALUATOR] = true as const
+  readonly evalLanguage = 'python' as const
+  readonly name = 'hang-eval'
+
+  constructor() {
+    super({ captures: ['python3'] })
+  }
+
+  run(): Promise<{ stdout: Uint8Array; stderr: null; exitCode: number }> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+
+  eval(): Promise<EvalResult> {
+    return new Promise(() => undefined)
+  }
+}
+
+class NamedEvaluator extends Runtime implements Evaluator {
+  readonly [EVALUATOR] = true as const
+  readonly evalLanguage: 'python' | 'js'
+
+  constructor(
+    readonly name: string,
+    evalLanguage: 'python' | 'js',
+  ) {
+    super({ captures: [] })
+    this.evalLanguage = evalLanguage
+  }
+
+  run(): Promise<{ stdout: Uint8Array; stderr: null; exitCode: number }> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+
+  eval(): Promise<EvalResult> {
+    return Promise.resolve({
+      value: null,
+      stdout: new Uint8Array(),
+      stderr: null,
+      exitCode: 0,
+      status: 'complete',
+    })
+  }
+}
 
 class NamedFakeRuntime extends Runtime {
   constructor(readonly name: string) {
@@ -200,6 +248,62 @@ describe('routing ladder', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  it('a hung policy script times out with a policy error', async () => {
+    const parser = await getTestParser()
+    const saved = POLICY_EVAL_TIMEOUT.seconds
+    POLICY_EVAL_TIMEOUT.seconds = 0.1
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new HangingEvaluator(), 'vfs'],
+        policy: new ScriptSource('1'),
+      },
+    )
+    try {
+      await expect(ws.execute('echo hi')).rejects.toThrow(/policy script timed out after 0.1s/)
+    } finally {
+      POLICY_EVAL_TIMEOUT.seconds = saved
+      await ws.close()
+    }
+  })
+
+  it('a JS policy script selects the JS evaluator over an earlier python one', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new MontyRuntime(), new QuickJsRuntime(), 'vfs'],
+        policy: new ScriptSource(
+          "ctx.command === 'node' ? {deny: 'js-engine-picked'} : null",
+          'js',
+        ),
+      },
+    )
+    try {
+      const denied = await ws.execute('node -e "1"')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('node: policy denied: js-engine-picked\n')
+      const ok = await ws.execute('echo fine')
+      expect(ok.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('evaluatorOf prefers a language match and falls back to the first', () => {
+    const py = new NamedEvaluator('py-eval', 'python')
+    const js = new NamedEvaluator('js-eval', 'js')
+    expect(evaluatorOf([py, js], 'js')).toBe(js)
+    expect(evaluatorOf([py, js], 'python')).toBe(py)
+    expect(evaluatorOf([py, js])).toBe(py)
+    expect(evaluatorOf([py], 'js')).toBe(py)
+    expect(evaluatorOf([])).toBeNull()
   })
 
   it('a JS policy script reads mounted content through the fs bridge', async () => {

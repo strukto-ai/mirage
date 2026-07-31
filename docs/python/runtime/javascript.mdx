@@ -38,7 +38,7 @@ Three input forms, mirroring `python3`:
 `std.in.readAsString()` reads piped stdin (the quickjs-ng `std`/`os`
 globals are exposed). Output follows the real engine: `console.log` and
 the `print` global append a newline, `std.out.puts`/`std.err.puts`
-write raw, and there is no `console.error` (write stderr with
+write raw, `std.out.printf`/`std.err.printf` C-format and return the characters written, and there is no `console.error` (write stderr with
 `std.err.puts`). These match the TypeScript `quickjs` runtime, so a
 script behaves the same in both languages.
 
@@ -58,7 +58,7 @@ The engine runs under WebAssembly capability isolation: it sees only what
 the run passes it. Host files and the network are invisible. Workspace
 mounts are visible with no setup: mirage intercepts the sandbox's
 filesystem calls and bridges them through the workspace dispatch, so
-`std.open('/data/f.txt', 'r')` reads the mount live — RAM, Redis, S3, or
+`std.open('/data/f.txt', 'r')` reads the mount live, and `os.stat`/`os.mkdir`/`os.rename`/`os.remove` stat and mutate it (0 or -errno in WASI numbering, like the real engine) — RAM, Redis, S3, or
 a virtual backend — and writes are immediately visible to every command,
 with the same cache, write modes, and per-session mount narrowing as
 `cat`. A read-only mount (or a session narrowed to read) fails the open,

@@ -326,6 +326,7 @@ async function runOnMount(
       execAllowed: registry.isExecAllowed(),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
+      ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       safeguardOverride,
     })
     let stdout = initialStdout

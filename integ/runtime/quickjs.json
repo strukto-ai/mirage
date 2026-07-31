@@ -113,6 +113,81 @@
       ]
     },
     {
+      "id": "os_surface",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(os.mkdir('/ram/d'), os.mkdir('/ram/d'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 -20\n"
+          }
+        },
+        {
+          "command": "echo xy > /ram/d/a.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "node -e \"console.log(os.rename('/ram/d/a.txt', '/ram/d/b.txt'), os.rename('/ram/zz', '/ram/yy'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 -44\n"
+          }
+        },
+        {
+          "command": "node -e \"const [st, e] = os.stat('/ram/d/b.txt'); console.log(e, st.size, (st.mode & os.S_IFMT) === os.S_IFREG, JSON.stringify(os.stat('/ram/nope')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 3 true [null,44]\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log(os.remove('/ram/d/b.txt'), os.remove('/ram/d/b.txt'), os.remove('/ram/d'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 -44 0\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log(JSON.stringify(os.readdir('/ram/nope')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[[],44]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "printf",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"const n = std.out.printf('[%s|%05d|%.2f|%x|%c|%%]', 'ab', 42, 3.14159, 255, 65); std.out.puts('\\n' + n)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[ab|00042|3.14|ff|A|%]\n22"
+          }
+        }
+      ]
+    },
+    {
       "id": "js_policy_reads_file",
       "world": {
         "runtimes": [

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../../commands/builtin/utils/safeguard.ts'
 import { Runtime } from '../runtime.ts'
 import { EvalError } from '../runtime_errors.ts'
 import { EVALUATOR, type Evaluator } from '../runtime_mixin.ts'
@@ -39,22 +40,63 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 const MEMORY_LIMIT = 64 * 1024 * 1024
 const STACK_SIZE = 1024 * 1024
 
+// One-shot evals (the policy engine, console evals) are bounded by the
+// VM interrupt because a busy loop blocks the host timer (matches the
+// policy evaluation timeout in decide.ts).
+const EVAL_INTERRUPT_SECONDS = 10
+
 // Assembles the std/console/scriptArgs surface from injected primitives.
 // Kept identical to the quickjs-ng `--std` globals the Python runtime
 // exposes, so a script runs the same on both (pinned against the real
 // engine): only `console.log` exists (no .error/.warn), `print` is a
 // global, both ToString their args (`[object Object]`, not JSON) and
-// append a newline, while `std.out.puts`/`std.err.puts` write raw.
+// append a newline, while `std.out.puts`/`std.err.puts` write raw and
+// `printf` C-formats (subset: [-0][width][.prec][sdiufxXoc%]) and
+// returns the characters written.
 // `std.open`/`os.readdir` are added afterward by MIRAGE_FS_BOOTSTRAP
 // when a workspace bridge is wired.
 const BOOTSTRAP = `
 const __join = (a) => a.map(String).join(' ');
+const __pad = (s, flags, width) => {
+  if (s.length >= width) return s;
+  if (flags.includes('-')) return s + ' '.repeat(width - s.length);
+  const fill = flags.includes('0') ? '0' : ' ';
+  if (fill === '0' && (s[0] === '-' || s[0] === '+'))
+    return s[0] + '0'.repeat(width - s.length) + s.slice(1);
+  return fill.repeat(width - s.length) + s;
+};
+const __sprintf = (fmt, args) => {
+  let i = 0;
+  return String(fmt).replace(
+    /%([-0]*)(\\d*)(?:\\.(\\d+))?([sdiufxXoc%])/g,
+    (m, flags, w, prec, conv) => {
+      if (conv === '%') return '%';
+      const arg = args[i++];
+      const width = w === '' ? 0 : parseInt(w, 10);
+      let s;
+      if (conv === 's') s = prec === undefined ? String(arg) : String(arg).slice(0, parseInt(prec, 10));
+      else if (conv === 'd' || conv === 'i') s = String(Math.trunc(Number(arg)));
+      else if (conv === 'u') s = String(Math.trunc(Number(arg)) >>> 0);
+      else if (conv === 'f') s = Number(arg).toFixed(prec === undefined ? 6 : parseInt(prec, 10));
+      else if (conv === 'x') s = (Math.trunc(Number(arg)) >>> 0).toString(16);
+      else if (conv === 'X') s = (Math.trunc(Number(arg)) >>> 0).toString(16).toUpperCase();
+      else if (conv === 'o') s = (Math.trunc(Number(arg)) >>> 0).toString(8);
+      else s = typeof arg === 'number' ? String.fromCharCode(arg) : String(arg)[0] || '';
+      return __pad(s, flags, width);
+    });
+};
 globalThis.console = { log: (...a) => __mirage_log(__join(a) + '\\n') };
 globalThis.print = (...a) => __mirage_log(__join(a) + '\\n');
 globalThis.std = {
   in: { readAsString: () => __mirage_stdin },
-  out: { puts: (s) => __mirage_log(String(s)) },
-  err: { puts: (s) => __mirage_error(String(s)) },
+  out: {
+    puts: (s) => __mirage_log(String(s)),
+    printf: (fmt, ...a) => { const s = __sprintf(fmt, a); __mirage_log(s); return s.length; },
+  },
+  err: {
+    puts: (s) => __mirage_error(String(s)),
+    printf: (fmt, ...a) => { const s = __sprintf(fmt, a); __mirage_error(s); return s.length; },
+  },
   exit: (n) => { __mirage_setExit(n | 0); throw new Error('__mirage_exit'); },
   getenv: (k) => __mirage_env[k],
 };
@@ -71,6 +113,7 @@ const QUICKJS_CONFIG_KEYS: readonly string[] = ['home']
 export class QuickJsRuntime extends Runtime implements Evaluator {
   readonly name = QUICKJS_RUNTIME
   readonly [EVALUATOR] = true as const
+  readonly evalLanguage = 'js' as const
   static readonly commands: readonly string[] = ['node', 'js'] as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null
@@ -97,6 +140,10 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
     const out: string[] = []
     const err: string[] = []
     const exit = { code: 0, called: false }
+    // The guest executes on this event loop, so a busy loop blocks the
+    // safeguard timer itself: the VM's interrupt hook is the only thing
+    // that can still fire (python's epoch interruption on a thread).
+    const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
       this.installGlobals(ctx, args, out, err, exit)
       const bridge: MirageBridge | null =
@@ -121,6 +168,10 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
       )
       let exitCode = 0
       if (result.error) {
+        if (timedOut.value && args.timeoutSeconds !== undefined) {
+          result.error.dispose()
+          throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+        }
         if (exit.called) {
           exitCode = exit.code
         } else {
@@ -170,6 +221,9 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
     const ctx = runtime.newContext()
     const out: string[] = []
     const err: string[] = []
+    // Bounded like a policy evaluation must be: a looping script would
+    // otherwise block the event loop with no timer able to fire.
+    const timedOut = this.installInterrupt(runtime, undefined, EVAL_INTERRUPT_SECONDS)
     try {
       this.installGlobals(ctx, { code, args: [], env: {}, stdin: null, flags: {} }, out, err, {
         code: 0,
@@ -203,6 +257,9 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
       if (result.error) {
         const message = this.formatError(ctx, result.error)
         result.error.dispose()
+        if (timedOut.value) {
+          throw new EvalError(`quickjs eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
+        }
         throw new EvalError(message, { syntax: message.startsWith('SyntaxError') })
       }
       const dumped: unknown = ctx.dump(result.value)
@@ -227,6 +284,30 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
   override close(): Promise<void> {
     // Each run disposes its own runtime/context; nothing persists.
     return Promise.resolve()
+  }
+
+  /**
+   * Arm the VM's interrupt hook: the only cancellation that works when
+   * the guest blocks the event loop. Trips on the safeguard deadline
+   * (recorded in the returned cell) or on an aborted signal.
+   */
+  private installInterrupt(
+    runtime: QuickJSAsyncRuntime,
+    signal: AbortSignal | undefined,
+    timeoutSeconds: number | undefined,
+  ): { value: boolean } {
+    const timedOut = { value: false }
+    const deadline =
+      timeoutSeconds !== undefined && timeoutSeconds > 0 ? Date.now() + timeoutSeconds * 1000 : null
+    if (signal === undefined && deadline === null) return timedOut
+    runtime.setInterruptHandler(() => {
+      if (deadline !== null && Date.now() > deadline) {
+        timedOut.value = true
+        return true
+      }
+      return signal?.aborted === true
+    })
+    return timedOut
   }
 
   private installGlobals(

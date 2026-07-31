@@ -116,6 +116,16 @@ describe('node/js: quickjs runtime', () => {
     await ws.close()
   }, 60_000)
 
+  it('std.out.printf C-formats and returns the characters written', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      "js -e \"const n = std.out.printf('[%s|%05d|%.2f|%x|%c|%%]', 'ab', 42, 3.14159, 255, 65); std.out.puts('\\n' + n)\"",
+    )
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('[ab|00042|3.14|ff|A|%]\n22')
+    await ws.close()
+  }, 60_000)
+
   it('no input → exit 1', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('js')

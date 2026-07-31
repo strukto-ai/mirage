@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import ABC, abstractmethod
+from typing import ClassVar
 
 from mirage.runtime.types import EvalResult, EvalValue
 
@@ -28,7 +29,13 @@ class EvaluatorMixin(ABC):
     returned value stay within EvalValue so any transport can carry
     them, and errors surface as the evaluator's own diagnostics
     wrapped in EvalError.
+
+    ``eval_language`` names the language ``eval`` speaks ("python" or
+    "js"); the policy engine matches it against a config script's
+    extension so a .js policy lands on a JS evaluator.
     """
+
+    eval_language: ClassVar[str] = "python"
 
     @abstractmethod
     async def eval(self,

@@ -14,6 +14,7 @@
 
 import type { Runtime } from '../executor/runtime.ts'
 import type { PolicyDecision } from '../executor/policy/index.ts'
+import { mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -256,9 +257,12 @@ async function runCommandBody(
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: PolicyDecision,
-  signal?: AbortSignal,
+  signalIn?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
+  // A background job's kill channel rides the session; fold it in so
+  // builtins (sleep) and the mount layer observe the kill.
+  const signal = mergeSignals(signalIn, session.abortSignal)
 
   if (node.parent?.type !== NT.REDIRECTED_STATEMENT) {
     for (const child of node.namedChildren) {

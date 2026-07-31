@@ -204,4 +204,65 @@ describe('python3 command timeout', () => {
       await ws.close()
     }
   }, 60_000)
+
+  it('a busy JS loop trips the safeguard instead of wedging the event loop', async () => {
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.EXEC,
+        ops: registry,
+        shellParser: parser,
+        runtimes: ['quickjs', 'vfs'],
+        commandSafeguards: {
+          '/data': { node: new CommandSafeguard({ timeoutSeconds: 0.3 }) },
+        },
+      },
+    )
+    try {
+      const started = Date.now()
+      const r = await ws.execute('cd /data && node -e "while (true) {}"')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('timed out')
+      expect(Date.now() - started).toBeLessThan(30_000)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+})
+
+describe('background job kill', () => {
+  it('kill %1 aborts the runtime run of a background job', async () => {
+    const probe = new SignalProbeRuntime()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.EXEC, ops: registry, shellParser: parser, runtimes: [probe, 'vfs'] },
+    )
+    try {
+      await ws.execute('python3 -c "hang" &')
+      await ws.execute('kill %1')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(probe.aborted).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('kill %1 interrupts a sleeping job promptly', async () => {
+    const ws = buildWs()
+    try {
+      const started = Date.now()
+      await ws.execute('sleep 60 &')
+      await ws.execute('kill %1')
+      await ws.execute('wait %1')
+      expect(Date.now() - started).toBeLessThan(10_000)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
 })
