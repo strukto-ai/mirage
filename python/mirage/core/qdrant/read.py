@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import base64
 from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.qdrant.query import row_record
-from mirage.core.qdrant.render import render_json, render_text
+from mirage.core.qdrant.render import blob_bytes, render_json, render_text
 from mirage.core.qdrant.scope import QdrantRowScope, detect_scope
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -31,14 +30,6 @@ async def _resolve_row(accessor: QdrantAccessor, scope, config,
     if row is None:
         raise enoent(virtual)
     return row
-
-
-def _blob_bytes(value: object) -> bytes:
-    if isinstance(value, bytes):
-        return value
-    if isinstance(value, str):
-        return base64.b64decode(value)
-    raise ValueError("blob column is not bytes or base64 str")
 
 
 async def read(
@@ -57,7 +48,7 @@ async def read(
         value = row.get(config.blob_field)
         if value is None:
             raise enoent(path)
-        return _blob_bytes(value)
+        return blob_bytes(value)
     if scope.kind == "txt":
         if not config.text_field or row.get(config.text_field) is None:
             raise enoent(path)

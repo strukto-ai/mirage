@@ -54,6 +54,12 @@ async def distinct_values(accessor: LanceDBAccessor, table: str, column: str,
     return sorted(values)
 
 
+async def table_columns(accessor: LanceDBAccessor, table: str) -> list[str]:
+    tbl = await accessor.table(table)
+    schema = await tbl.schema()
+    return list(schema.names)
+
+
 async def rows_matching(accessor: LanceDBAccessor, table: str,
                         filters: dict[str, str], columns: list[str],
                         limit: int) -> list[dict[str, Any]]:

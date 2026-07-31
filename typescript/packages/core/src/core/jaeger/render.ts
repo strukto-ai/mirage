@@ -12,24 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export type LanceRow = Record<string, unknown>
+const ENC = new TextEncoder()
 
-export interface LanceDriver {
-  listTables(): Promise<string[]>
-  tableColumns(table: string): Promise<string[]>
-  distinct(
-    table: string,
-    column: string,
-    filters: Record<string, string>,
-    limit: number,
-  ): Promise<string[]>
-  rowsMatching(
-    table: string,
-    filters: Record<string, string>,
-    columns: string[],
-    limit: number,
-  ): Promise<LanceRow[]>
-  rowRecord(table: string, idColumn: string, rowId: string): Promise<LanceRow | null>
-  search(table: string, query: string, limit: number): Promise<LanceRow[]>
-  close(): Promise<void>
+// Single renderer for trace and operations files: read() and the
+// readdir-time sizing must produce the same bytes for the same payload,
+// so the advertised size is exact by construction.
+export function jaegerJsonBytes(data: unknown): Uint8Array {
+  return ENC.encode(JSON.stringify(data, null, 2))
 }

@@ -53,9 +53,17 @@ async def stat(
 
     if not isinstance(scope, LanceDBRowScope):
         raise FileNotFoundError(path.virtual)
-    data = await read(accessor, path, index)
     if scope.blob:
         file_type = _IMAGE_TYPES.get(config.blob_ext, FileType.BINARY)
     else:
         file_type = FileType.TEXT
+    # The row-dir readdir seeds exact card sizes; blob entries and a cold
+    # index fall back to rendering the row, so the size is exact either way.
+    if index is not None:
+        lookup = await index.get(path.virtual.rstrip("/"))
+        if lookup.entry is not None and lookup.entry.size is not None:
+            return FileStat(name=_name_of(path),
+                            size=lookup.entry.size,
+                            type=file_type)
+    data = await read(accessor, path, index)
     return FileStat(name=_name_of(path), size=len(data), type=file_type)

@@ -52,8 +52,16 @@ export async function stat(
     return new FileStat({ name: nameOf(spec), type: FileType.DIRECTORY })
   }
 
-  const data = await read(accessor, spec, index)
   const fileType =
     scope.kind === 'blob' ? (IMAGE_TYPES[config.blobExt] ?? FileType.BINARY) : FileType.TEXT
+  // The row-dir readdir seeds exact rendered sizes; a cold index falls back
+  // to rendering the row, so the size is exact either way.
+  if (index !== undefined) {
+    const lookup = await index.get(rstripSlash(spec.virtual))
+    if (lookup.entry !== undefined && lookup.entry !== null && lookup.entry.size !== null) {
+      return new FileStat({ name: nameOf(spec), size: lookup.entry.size, type: fileType })
+    }
+  }
+  const data = await read(accessor, spec, index)
   return new FileStat({ name: nameOf(spec), size: data.length, type: fileType })
 }

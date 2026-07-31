@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
+import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { QdrantRow } from './_client.ts'
 import { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { blobBytes, renderJson, renderText } from './render.ts'
 import { ScopeLevel, detectScope } from './scope.ts'
 
 function rowFiles(rows: QdrantRow[], config: QdrantAccessor['config']): string[] {
@@ -41,10 +43,75 @@ function rowFiles(rows: QdrantRow[], config: QdrantAccessor['config']): string[]
   return names
 }
 
+function blobSize(value: unknown): number | null {
+  // A payload whose blob column holds something undecodable must not take
+  // the whole listing down with it: leave the size unknown and let read()
+  // throw the same error it always did.
+  try {
+    return blobBytes(value).byteLength
+  } catch {
+    return null
+  }
+}
+
+function rowEntries(rows: QdrantRow[], config: QdrantAccessor['config']): [string, IndexEntry][] {
+  // The scroll already carries every payload, so each file's exact rendered
+  // size is free here; stat serves it from the index instead of refetching
+  // one row per file.
+  const entries: [string, IndexEntry][] = []
+  for (const row of rows) {
+    const id = String(row[config.idField])
+    entries.push([
+      `${id}.json`,
+      new IndexEntry({
+        id,
+        name: `${id}.json`,
+        resourceType: 'qdrant/row_json',
+        vfsName: `${id}.json`,
+        size: renderJson(row, config).byteLength,
+      }),
+    ])
+    if (
+      config.textField !== null &&
+      row[config.textField] !== null &&
+      row[config.textField] !== undefined
+    ) {
+      entries.push([
+        `${id}.txt`,
+        new IndexEntry({
+          id,
+          name: `${id}.txt`,
+          resourceType: 'qdrant/row_text',
+          vfsName: `${id}.txt`,
+          size: renderText(row, config).byteLength,
+        }),
+      ])
+    }
+    if (
+      config.blobField !== null &&
+      row[config.blobField] !== null &&
+      row[config.blobField] !== undefined
+    ) {
+      const blobName = `${id}.${config.blobExt}`
+      entries.push([
+        blobName,
+        new IndexEntry({
+          id,
+          name: blobName,
+          resourceType: 'qdrant/row_blob',
+          vfsName: blobName,
+          size: blobSize(row[config.blobField]),
+        }),
+      ])
+    }
+  }
+  return entries
+}
+
 export async function readdir(
   accessor: QdrantAccessor,
   path: PathSpec | string,
-  _index?: IndexCacheStore,
+  index?: IndexCacheStore,
 ): Promise<string[]> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const config = accessor.config
@@ -75,6 +142,7 @@ export async function readdir(
         config.maxRows,
       )
       names = rowFiles(rows, config)
+      if (index !== undefined) await index.setDir(base, rowEntries(rows, config))
     }
     return names.map((name) => `${base}/${name}`)
   }

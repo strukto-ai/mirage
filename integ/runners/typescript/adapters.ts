@@ -753,7 +753,7 @@ async function openQdrant(target: Target): Promise<Open> {
     points: QDRANT_ROWS.map(([id, label, kind, name]) => ({
       id,
       vector: Array<number>(QDRANT_EMBED_DIM).fill(0.1),
-      payload: { label, kind, name },
+      payload: { label, kind, name, image_bytes: btoa(`PNG-${String(id)}`) },
     })),
   })
   for (const field of ['label', 'kind']) {
@@ -769,6 +769,8 @@ async function openQdrant(target: Target): Promise<Open> {
       groupBy: ['label', 'kind'],
       idField: 'id',
       textField: 'name',
+      blobField: 'image_bytes',
+      blobExt: 'png',
     })
     mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
   }

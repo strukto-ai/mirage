@@ -49,6 +49,7 @@ function spec(virtual: string): PathSpec {
 }
 
 import { readdir } from './readdir.ts'
+import { jaegerJsonBytes } from './render.ts'
 
 const SERVICES = { '/api/services': { data: ['checkout', 'search'] } }
 
@@ -80,6 +81,32 @@ describe('jaeger readdir', () => {
     expect(out).toEqual(['/services/checkout/operations.json', '/services/checkout/traces'])
   })
 
+  it('stores the rendered operations size on the service listing', async () => {
+    const operations = [
+      { name: 'POST /checkout', spanKind: 'server' },
+      { name: 'charge-card', spanKind: 'server' },
+    ]
+    const transport = new RecordingTransport({
+      ...SERVICES,
+      '/api/operations': { data: operations },
+    })
+    const idx = new RAMIndexCacheStore()
+    await readdir(accessor(transport), spec('/services/checkout'), idx)
+    const lookup = await idx.get('/services/checkout/operations.json')
+    expect(lookup.entry?.size).toBe(jaegerJsonBytes(operations).byteLength)
+  })
+
+  it('fetches operations once per service directory', async () => {
+    const transport = new RecordingTransport({
+      ...SERVICES,
+      '/api/operations': { data: [{ name: 'POST /checkout' }] },
+    })
+    const idx = new RAMIndexCacheStore()
+    await readdir(accessor(transport), spec('/services/checkout'), idx)
+    await readdir(accessor(transport), spec('/services/checkout'), idx)
+    expect(transport.calls.filter((c) => c.path === '/api/operations')).toHaveLength(1)
+  })
+
   it('raises ENOENT for an unknown service', async () => {
     // The operations endpoint answers 200 with an empty list for a service
     // that was never seen, so existence must come from the service list.
@@ -106,6 +133,19 @@ describe('jaeger readdir', () => {
       `/services/checkout/traces/${TRACE_A}.json`,
       `/services/checkout/traces/${TRACE_B}.json`,
     ])
+  })
+
+  it('stores the rendered trace size on each listing entry', async () => {
+    const trace = {
+      traceID: TRACE_A,
+      spans: [{ spanID: 's1', operationName: 'GET /pay' }],
+      processes: { p1: { serviceName: 'checkout' } },
+    }
+    const transport = new RecordingTransport({ ...SERVICES, '/api/traces': { data: [trace] } })
+    const idx = new RAMIndexCacheStore()
+    await readdir(accessor(transport), spec('/services/checkout/traces'), idx)
+    const lookup = await idx.get(`/services/checkout/traces/${TRACE_A}.json`)
+    expect(lookup.entry?.size).toBe(jaegerJsonBytes(trace).byteLength)
   })
 
   it('skips malformed trace ids', async () => {

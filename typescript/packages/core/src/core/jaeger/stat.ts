@@ -90,17 +90,36 @@ export async function stat(
   }
 
   if (scope.level === 'operations') {
-    await assertService(accessor, scope.service ?? '', path)
-    return new FileStat({ name: JAEGER_OPERATIONS_FILE, type: FileType.JSON })
+    // The service readdir stores the rendered document's byte length, so the
+    // listing that just proved existence also carries the size.
+    await assertListed(accessor, path, prefix, index)
+    let size: number | null = null
+    if (index !== undefined) {
+      const lookup = await index.get(rstripSlash(path.virtual))
+      size = lookup.entry?.size ?? null
+    }
+    return new FileStat({
+      name: JAEGER_OPERATIONS_FILE,
+      ...(size !== null ? { size } : {}),
+      type: FileType.JSON,
+    })
   }
 
   if (scope.level === 'trace') {
     const traceId = scope.traceId ?? ''
     if (!isTraceId(traceId)) throw enoent(path)
     await assertListed(accessor, path, prefix, index)
+    // The traces readdir stores the rendered document's byte length, so the
+    // listing that just proved existence also carries the size.
+    let size: number | null = null
+    if (index !== undefined) {
+      const lookup = await index.get(rstripSlash(path.virtual))
+      size = lookup.entry?.size ?? null
+    }
     return new FileStat({
       name: `${traceId}.json`,
       type: FileType.JSON,
+      size,
       extra: { trace_id: traceId },
     })
   }

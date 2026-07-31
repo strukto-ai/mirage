@@ -108,17 +108,28 @@ async def stat(
 
     if scope.level == "operations":
         assert scope.service is not None
-        await assert_service(accessor, scope.service, virtual)
-        return FileStat(name=OPERATIONS_FILE, type=FileType.JSON)
+        # The service readdir stores the rendered document's byte length, so
+        # the listing that just proved existence also carries the size.
+        await _assert_listed(accessor, path, index)
+        lookup = await index.get(path.virtual.rstrip("/"))
+        return FileStat(
+            name=OPERATIONS_FILE,
+            type=FileType.JSON,
+            size=lookup.entry.size if lookup.entry is not None else None,
+        )
 
     if scope.level == "trace":
         assert scope.trace_id is not None
         if not is_trace_id(scope.trace_id):
             raise enoent(virtual)
         await _assert_listed(accessor, path, index)
+        # The traces readdir stores the rendered document's byte length, so
+        # the listing that just proved existence also carries the size.
+        lookup = await index.get(path.virtual.rstrip("/"))
         return FileStat(
             name=f"{scope.trace_id}.json",
             type=FileType.JSON,
+            size=lookup.entry.size if lookup.entry is not None else None,
             extra={"trace_id": scope.trace_id},
         )
 

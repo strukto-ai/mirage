@@ -31,6 +31,9 @@ class LanceDBResource(BaseResource):
 
     accessor: LanceDBAccessor
     name: str = ResourceName.LANCEDB
+    # readdir seeds exact card sizes from the widened select and stat falls
+    # back to rendering the row itself, so sizes are exact either way.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
 
     def __init__(self, config: LanceDBConfig) -> None:

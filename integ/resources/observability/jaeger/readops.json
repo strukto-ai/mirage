@@ -373,7 +373,7 @@
       "command": "du -sh /j/services/checkout-api/traces",
       "expect": {
         "exit": 0,
-        "stdout": "0B\t/j/services/checkout-api/traces\n",
+        "stdout": "1.5K\t/j/services/checkout-api/traces\n",
         "stderr": ""
       }
     },

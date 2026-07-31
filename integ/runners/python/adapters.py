@@ -1276,18 +1276,23 @@ class QdrantService:
                 collection,
                 vectors_config=models.VectorParams(
                     size=QDRANT_EMBED_DIM, distance=models.Distance.COSINE))
-            await client.upsert(collection,
-                                points=[
-                                    models.PointStruct(id=i,
-                                                       vector=[0.1] *
-                                                       QDRANT_EMBED_DIM,
-                                                       payload={
-                                                           "label": label,
-                                                           "kind": kind,
-                                                           "name": name
-                                                       })
-                                    for i, label, kind, name in QDRANT_ROWS
-                                ])
+            await client.upsert(
+                collection,
+                points=[
+                    models.PointStruct(
+                        id=i,
+                        vector=[0.1] * QDRANT_EMBED_DIM,
+                        payload={
+                            "label":
+                            label,
+                            "kind":
+                            kind,
+                            "name":
+                            name,
+                            "image_bytes":
+                            base64.b64encode(f"PNG-{i}".encode()).decode(),
+                        }) for i, label, kind, name in QDRANT_ROWS
+                ])
             for field in ("label", "kind"):
                 await client.create_payload_index(
                     collection,
@@ -1305,7 +1310,9 @@ class QdrantService:
                          collection=self.collection,
                          group_by=["label", "kind"],
                          id_field="id",
-                         text_field="name"))
+                         text_field="name",
+                         blob_field="image_bytes",
+                         blob_ext="png"))
 
     async def teardown(self) -> None:
         client = AsyncQdrantClient(host=self.host, port=self.port)

@@ -35,7 +35,7 @@
       "command": "ls /db/cat/big",
       "expect": {
         "exit": 0,
-        "stdout": "1.json\n1.txt\n",
+        "stdout": "1.json\n1.png\n1.txt\n",
         "stderr": ""
       }
     },
@@ -308,7 +308,7 @@
       "command": "du /db/cat/big",
       "expect": {
         "exit": 0,
-        "stdout": "79\t/db/cat/big\n",
+        "stdout": "84\t/db/cat/big\n",
         "stderr": ""
       }
     },
@@ -321,7 +321,7 @@
       "command": "du /db/cat",
       "expect": {
         "exit": 0,
-        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n",
+        "stdout": "84\t/db/cat/big\n86\t/db/cat/small\n170\t/db/cat\n",
         "stderr": ""
       }
     },
@@ -334,7 +334,7 @@
       "command": "du /db/",
       "expect": {
         "exit": 0,
-        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n77\t/db/dog/big\n83\t/db/dog/small\n160\t/db/dog\n320\t/db\n",
+        "stdout": "84\t/db/cat/big\n86\t/db/cat/small\n170\t/db/cat\n82\t/db/dog/big\n88\t/db/dog/small\n170\t/db/dog\n340\t/db\n",
         "stderr": ""
       }
     },
@@ -347,7 +347,7 @@
       "command": "du -c /db/cat /db/dog",
       "expect": {
         "exit": 0,
-        "stdout": "79\t/db/cat/big\n81\t/db/cat/small\n160\t/db/cat\n77\t/db/dog/big\n83\t/db/dog/small\n160\t/db/dog\n320\ttotal\n",
+        "stdout": "84\t/db/cat/big\n86\t/db/cat/small\n170\t/db/cat\n82\t/db/dog/big\n88\t/db/dog/small\n170\t/db/dog\n340\ttotal\n",
         "stderr": ""
       }
     },

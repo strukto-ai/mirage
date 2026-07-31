@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.jaeger import JaegerAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.jaeger.render import jaeger_json_bytes
 from mirage.core.jaeger.stat import stat
 from mirage.resource.jaeger.config import JaegerConfig
 from mirage.types import FileType, PathSpec
@@ -45,6 +46,12 @@ def known_service():
     return patch("mirage.core.jaeger.readdir.fetch_services",
                  new_callable=AsyncMock,
                  return_value=["checkout"])
+
+
+def listed_operations(names):
+    return patch("mirage.core.jaeger.readdir.fetch_operations",
+                 new_callable=AsyncMock,
+                 return_value=names)
 
 
 def listed_traces(ids):
@@ -85,10 +92,15 @@ async def test_stat_unknown_service_raises(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_operations_file(accessor, index):
+    operations = ["GET /cart"]
     with known_service():
-        result = await stat(accessor,
-                            spec("services/checkout/operations.json"), index)
+        with listed_operations(operations):
+            result = await stat(accessor,
+                                spec("services/checkout/operations.json"),
+                                index)
     assert result.type == FileType.JSON
+    # The service listing sized it, so stat agrees with what read returns.
+    assert result.size == len(jaeger_json_bytes(operations))
 
 
 @pytest.mark.asyncio
@@ -100,6 +112,8 @@ async def test_stat_listed_trace(accessor, index):
                 index)
     assert result.type == FileType.JSON
     assert result.extra["trace_id"] == TRACE_A
+    # The listing that proved existence also seeded the rendered size.
+    assert result.size == len(jaeger_json_bytes({"traceID": TRACE_A}))
 
 
 @pytest.mark.asyncio

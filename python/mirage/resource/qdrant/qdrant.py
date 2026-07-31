@@ -30,6 +30,9 @@ class QdrantResource(BaseResource):
     accessor: QdrantAccessor
     name: str = ResourceName.QDRANT
     is_remote: bool = True
+    # readdir seeds exact rendered sizes from the scroll payloads and stat
+    # falls back to rendering the row itself, so sizes are exact either way.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = False
 

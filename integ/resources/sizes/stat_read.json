@@ -111,6 +111,28 @@
       }
     },
     {
+      "id": "sz_read_nested",
+      "seq": 680006,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "hf",
+        "databricks"
+      ],
+      "command": "cat /data/sub/nested.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "15\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "sz_ssh_symlink_stat_follows_target",
       "seq": 680010,
       "targets": [
@@ -160,28 +182,6 @@
         "exit": 1,
         "stdout": "",
         "stderr": "stat: /data/homepage: No such file or directory\n"
-      }
-    },
-    {
-      "id": "sz_read_nested",
-      "seq": 680006,
-      "targets": [
-        "s3",
-        "box",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "ssh",
-        "nextcloud",
-        "hf",
-        "databricks"
-      ],
-      "command": "cat /data/sub/nested.txt | wc -c",
-      "expect": {
-        "exit": 0,
-        "stdout": "15\n",
-        "stderr": ""
       }
     },
     {
@@ -805,6 +805,240 @@
       "expect": {
         "exit": 0,
         "stdout": "105\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_json_stat",
+      "seq": 680088,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "stat -c %s /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_json_read",
+      "seq": 680089,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_txt_stat",
+      "seq": 680090,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "stat -c %s /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "17\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_txt_read",
+      "seq": 680091,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "17\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_lancedb_card_stat",
+      "seq": 680092,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "stat -c %s /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "70\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_lancedb_card_read",
+      "seq": 680093,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "cat /db/animals/cat/big/1.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "70\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_stat",
+      "seq": 680094,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1530\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_read",
+      "seq": 680095,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "1530\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_small_stat",
+      "seq": 680096,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/search-api/traces/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "721\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_small_read",
+      "seq": 680097,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/search-api/traces/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "721\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_multi_service_stat",
+      "seq": 680098,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2505\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_multi_service_read",
+      "seq": 680099,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "2505\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_blob_stat",
+      "seq": 680100,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "stat -c %s /db/cat/big/1.png",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_blob_read",
+      "seq": 680101,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.png | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_stat",
+      "seq": 680102,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/checkout-api/operations.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_read",
+      "seq": 680103,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/checkout-api/operations.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_single_stat",
+      "seq": 680104,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/search-api/operations.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "63\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_single_read",
+      "seq": 680105,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/search-api/operations.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "63\n",
         "stderr": ""
       }
     }

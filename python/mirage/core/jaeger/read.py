@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from typing import Any
 
 from mirage.accessor.jaeger import JaegerAccessor
@@ -20,13 +19,10 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.jaeger._client import (JaegerApiError, fetch_operations,
                                         fetch_trace, is_trace_id)
 from mirage.core.jaeger.readdir import assert_service
+from mirage.core.jaeger.render import jaeger_json_bytes
 from mirage.core.jaeger.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
-
-
-def _json_bytes(data: Any) -> bytes:
-    return json.dumps(data, ensure_ascii=False, indent=2).encode()
 
 
 def _has_service(trace: dict[str, Any], service: str) -> bool:
@@ -82,7 +78,7 @@ async def read(
         assert scope.service is not None
         await assert_service(accessor, scope.service, virtual)
         operations = await fetch_operations(accessor, scope.service)
-        return _json_bytes(operations)
+        return jaeger_json_bytes(operations)
 
     if scope.level == "trace":
         assert scope.service is not None
@@ -102,6 +98,6 @@ async def read(
         # directory, contradicting stat and ls for the same path.
         if not _has_service(trace, scope.service):
             raise enoent(virtual)
-        return _json_bytes(trace)
+        return jaeger_json_bytes(trace)
 
     raise enoent(virtual)

@@ -19,7 +19,8 @@ import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { fetchServices, fetchTraces, isTraceId } from './_client.ts'
+import { fetchOperations, fetchServices, fetchTraces, isTraceId } from './_client.ts'
+import { jaegerJsonBytes } from './render.ts'
 import { JAEGER_OPERATIONS_FILE, JAEGER_TOP_LEVEL_DIRS, detectScope } from './scope.ts'
 
 function makeVirtualKey(prefix: string, key: string): string {
@@ -41,6 +42,46 @@ export async function assertService(
 ): Promise<void> {
   const services = await fetchServices(accessor.transport)
   if (!services.includes(service)) throw enoent(path)
+}
+
+async function readdirService(
+  accessor: JaegerAccessor,
+  service: string,
+  virtualKey: string,
+  index: IndexCacheStore | undefined,
+  prefix: string,
+): Promise<string[]> {
+  if (index !== undefined) {
+    const listing = await index.listDir(virtualKey)
+    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
+  }
+  // One operations call per service directory actually entered: nothing in
+  // the services listing carries operation names, so operations.json can only
+  // be sized here, and only for services the caller opens.
+  const operations = await fetchOperations(accessor.transport, service)
+  const entries: [string, IndexEntry][] = [
+    [
+      JAEGER_OPERATIONS_FILE,
+      new IndexEntry({
+        id: `${service}/operations`,
+        name: JAEGER_OPERATIONS_FILE,
+        resourceType: 'jaeger/operations',
+        vfsName: JAEGER_OPERATIONS_FILE,
+        size: jaegerJsonBytes(operations).byteLength,
+      }),
+    ],
+    [
+      'traces',
+      new IndexEntry({
+        id: `${service}/traces`,
+        name: 'traces',
+        resourceType: 'jaeger/traces_dir',
+        vfsName: 'traces',
+      }),
+    ],
+  ]
+  if (index !== undefined) await index.setDir(virtualKey, entries)
+  return entries.map(([name]) => `${prefix}/services/${service}/${name}`)
 }
 
 async function readdirServices(
@@ -97,6 +138,9 @@ async function readdirTraces(
     const traceId = typeof trace.traceID === 'string' ? trace.traceID : ''
     if (!isTraceId(traceId)) continue
     const filename = `${traceId}.json`
+    // The search endpoint returns complete trace documents, so the rendered
+    // size is free here. Span order may differ from the by-id fetch, but
+    // reordering the same spans leaves the byte length equal.
     entries.push([
       filename,
       new IndexEntry({
@@ -104,6 +148,7 @@ async function readdirTraces(
         name: traceId,
         resourceType: 'jaeger/trace',
         vfsName: filename,
+        size: jaegerJsonBytes(trace).byteLength,
       }),
     ])
     names.push(`${prefix}/services/${service}/traces/${filename}`)
@@ -135,10 +180,7 @@ export async function readdir(
   if (scope.level === 'service') {
     const service = scope.service ?? ''
     await assertService(accessor, service, pathSpec)
-    return [
-      `${prefix}/services/${service}/${JAEGER_OPERATIONS_FILE}`,
-      `${prefix}/services/${service}/traces`,
-    ]
+    return readdirService(accessor, service, virtualKey, index, prefix)
   }
 
   if (scope.level === 'traces') {

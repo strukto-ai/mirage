@@ -14,8 +14,9 @@
 
 from mirage.accessor.jaeger import JaegerAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.core.jaeger._client import (fetch_services, fetch_traces,
-                                        is_trace_id)
+from mirage.core.jaeger._client import (fetch_operations, fetch_services,
+                                        fetch_traces, is_trace_id)
+from mirage.core.jaeger.render import jaeger_json_bytes
 from mirage.core.jaeger.scope import (OPERATIONS_FILE, TOP_LEVEL_DIRS,
                                       detect_scope)
 from mirage.types import PathSpec
@@ -61,10 +62,8 @@ async def readdir(
     if scope.level == "service":
         assert scope.service is not None
         await assert_service(accessor, scope.service, virtual)
-        return [
-            f"{prefix}/services/{scope.service}/{OPERATIONS_FILE}",
-            f"{prefix}/services/{scope.service}/traces",
-        ]
+        return await _readdir_service(accessor, scope.service, virtual_key,
+                                      index, prefix)
 
     if scope.level == "traces":
         assert scope.service is not None
@@ -94,6 +93,41 @@ async def assert_service(accessor: JaegerAccessor, service: str,
     services = await fetch_services(accessor)
     if service not in services:
         raise enoent(virtual)
+
+
+async def _readdir_service(
+    accessor: JaegerAccessor,
+    service: str,
+    virtual_key: str,
+    index: IndexCacheStore,
+    prefix: str,
+) -> list[str]:
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
+    # One operations call per service directory actually entered: nothing in
+    # the services listing carries operation names, so operations.json can
+    # only be sized here, and only for services the caller opens.
+    operations = await fetch_operations(accessor, service)
+    entries = [
+        (OPERATIONS_FILE,
+         IndexEntry(
+             id=f"{service}/operations",
+             name=OPERATIONS_FILE,
+             resource_type="jaeger/operations",
+             vfs_name=OPERATIONS_FILE,
+             size=len(jaeger_json_bytes(operations)),
+         )),
+        ("traces",
+         IndexEntry(
+             id=f"{service}/traces",
+             name="traces",
+             resource_type="jaeger/traces_dir",
+             vfs_name="traces",
+         )),
+    ]
+    await index.set_dir(virtual_key, entries)
+    return [f"{prefix}/services/{service}/{name}" for name, _ in entries]
 
 
 async def _readdir_services(
@@ -145,11 +179,15 @@ async def _readdir_traces(
         if not is_trace_id(trace_id):
             continue
         filename = f"{trace_id}.json"
+        # The search endpoint returns complete trace documents, so the
+        # rendered size is free here. Span order may differ from the by-id
+        # fetch, but reordering the same spans leaves the byte length equal.
         entry = IndexEntry(
             id=trace_id,
             name=trace_id,
             resource_type="jaeger/trace",
             vfs_name=filename,
+            size=len(jaeger_json_bytes(trace)),
         )
         entries.append((filename, entry))
         names.append(f"{prefix}/services/{service}/traces/{filename}")

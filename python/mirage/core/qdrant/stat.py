@@ -53,9 +53,17 @@ async def stat(
 
     if not isinstance(scope, QdrantRowScope):
         raise FileNotFoundError(path.virtual)
-    data = await read(accessor, path, index)
     if scope.kind == "blob":
         file_type = _IMAGE_TYPES.get(config.blob_ext, FileType.BINARY)
     else:
         file_type = FileType.TEXT
+    # The row-dir readdir seeds exact rendered sizes; a cold index falls
+    # back to rendering the row, so the size is exact either way.
+    if index is not None:
+        lookup = await index.get(path.virtual.rstrip("/"))
+        if lookup.entry is not None and lookup.entry.size is not None:
+            return FileStat(name=_name_of(path),
+                            size=lookup.entry.size,
+                            type=file_type)
+    data = await read(accessor, path, index)
     return FileStat(name=_name_of(path), size=len(data), type=file_type)

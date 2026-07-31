@@ -18,13 +18,8 @@ import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { JaegerApiError, fetchOperations, fetchTrace, isTraceId } from './_client.ts'
 import { assertService } from './readdir.ts'
+import { jaegerJsonBytes } from './render.ts'
 import { detectScope } from './scope.ts'
-
-const ENC = new TextEncoder()
-
-function toJsonBytes(data: unknown): Uint8Array {
-  return ENC.encode(JSON.stringify(data, null, 2))
-}
 
 // Whether any span in the trace was emitted by the service. A trace is fetched
 // by id from the global endpoint, so the id alone does not place it under the
@@ -57,7 +52,7 @@ export async function read(
     const service = scope.service ?? ''
     await assertService(accessor, service, path)
     const operations = await fetchOperations(accessor.transport, service)
-    return toJsonBytes(operations)
+    return jaegerJsonBytes(operations)
   }
 
   if (scope.level === 'trace') {
@@ -77,7 +72,7 @@ export async function read(
     // Reading by id would otherwise serve any trace through any service
     // directory, contradicting stat and ls for the same path.
     if (!hasService(trace, service)) throw enoent(path)
-    return toJsonBytes(trace)
+    return jaegerJsonBytes(trace)
   }
 
   throw enoent(path)

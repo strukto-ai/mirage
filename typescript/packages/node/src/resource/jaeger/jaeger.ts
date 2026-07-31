@@ -44,6 +44,10 @@ export interface JaegerResourceState {
 export class JaegerResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.JAEGER
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: a trace is rendered at readdir
+  // from the search payload the listing already fetched, and operations.json
+  // is sized by one call per service directory the caller opens.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = JAEGER_PROMPT
   readonly config: JaegerConfig
