@@ -104,6 +104,9 @@ async function splitAndCreate(
 
 export class OPFSResource implements Resource {
   readonly kind = ResourceName.OPFS
+  // OPFS is a real filesystem: getFile().size is the exact byte count a
+  // read returns.
+  readonly sizesAlwaysKnown: boolean = true
   readonly prompt = OPFS_PROMPT
   readonly rootName: string
   readonly accessor: OPFSAccessor

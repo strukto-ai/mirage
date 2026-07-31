@@ -16,12 +16,10 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GmailAccessor } from '../../accessor/gmail.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { getAttachment, getMessageProcessed } from './messages.ts'
+import { getAttachment, getMessageRaw, messageJsonBytes } from './messages.ts'
 import { readdir } from './readdir.ts'
 import { gnuDirname } from '../../utils/path.ts'
 import { enoent } from '../../utils/errors.ts'
-
-const ENC = new TextEncoder()
 
 function eisdir(p: string): Error {
   const e = new Error(`EISDIR: ${p}`) as Error & { code: string }
@@ -64,6 +62,6 @@ export async function read(
     }
     return getAttachment(accessor.tokenManager, parentResult.entry.id, result.entry.id)
   }
-  const processed = await getMessageProcessed(accessor.tokenManager, result.entry.id)
-  return ENC.encode(JSON.stringify(processed))
+  const raw = await getMessageRaw(accessor.tokenManager, result.entry.id)
+  return messageJsonBytes(raw)
 }

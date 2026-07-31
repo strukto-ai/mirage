@@ -18,10 +18,8 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { getHistoryJsonl } from './history.ts'
-import { getUserProfile } from './users.ts'
+import { getUserProfile, userJsonBytes } from './users.ts'
 import { stripSlash } from '../../utils/slash.ts'
-
-const encoder = new TextEncoder()
 
 export async function read(
   accessor: SlackAccessor,
@@ -75,7 +73,7 @@ export async function read(
       throw enoent(path)
     }
     const user = await getUserProfile(accessor, lookup.entry.id)
-    return encoder.encode(JSON.stringify(user))
+    return userJsonBytes(user)
   }
 
   throw enoent(path)

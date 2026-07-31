@@ -190,14 +190,44 @@ describe('stat date directory', () => {
 })
 
 describe('stat chat.jsonl and files dir', () => {
-  it('returns TEXT chat.jsonl for <chan>/<date>/chat.jsonl', async () => {
+  it('serves chat.jsonl size from the index', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/slack/channels/general__C1/2026-04-24', [
+      [
+        'chat.jsonl',
+        new IndexEntry({
+          id: 'C1:2026-04-24:chat',
+          name: 'chat.jsonl',
+          resourceType: 'slack/chat_jsonl',
+          vfsName: 'chat.jsonl',
+          size: 42,
+        }),
+      ],
+    ])
     const out = await stat(
       new SlackAccessor(t),
       spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
+      idx,
     )
     expect(out.type).toBe(FileType.TEXT)
     expect(out.name).toBe('chat.jsonl')
+    expect(out.size).toBe(42)
+  })
+
+  it('rejects chat.jsonl absent from an empty day', async () => {
+    // A denied or empty day lists no chat.jsonl; stat must not fabricate
+    // a sizeless file for it.
+    const t = new FakeTransport(() => ({ ok: true }))
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/slack/channels/general__C1/2026-04-24', [])
+    await expect(
+      stat(
+        new SlackAccessor(t),
+        spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
+        idx,
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('returns DIRECTORY files for <chan>/<date>/files', async () => {

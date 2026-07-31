@@ -19,9 +19,9 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { listChannels, listDms } from './channels.ts'
 import { channelDirname, dmDirname, fileBlobName, userFilename } from './formatters.ts'
-import { fetchMessagesForDay, type SlackMessage } from './history.ts'
+import { fetchMessagesForDay, messagesToJsonl, type SlackMessage } from './history.ts'
 import { detectScope } from './scope.ts'
-import { listUsers } from './users.ts'
+import { listUsers, userJsonBytes } from './users.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -201,6 +201,7 @@ async function readdirUsers(
       name: u.name ?? '',
       resourceType: 'slack/user',
       vfsName: filename,
+      size: userJsonBytes(u).byteLength,
     })
     entries.push([filename, entry])
     names.push(`${prefix}/users/${filename}`)
@@ -286,6 +287,7 @@ async function fetchDay(
     name: 'chat.jsonl',
     resourceType: 'slack/chat_jsonl',
     vfsName: 'chat.jsonl',
+    size: messagesToJsonl(messages).byteLength,
   })
   const filesEntry = new IndexEntry({
     id: `${channelId}:${dateStr}:files`,

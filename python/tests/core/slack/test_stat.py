@@ -101,6 +101,16 @@ async def test_stat_user(accessor, index):
 @pytest.mark.asyncio
 async def test_stat_jsonl(accessor, index):
     await _populate_index(index)
+    await index.set_dir("/channels/general__C001/2023-11-14", [
+        ("chat.jsonl",
+         IndexEntry(
+             id="C001:2023-11-14:chat",
+             name="chat.jsonl",
+             resource_type="slack/chat_jsonl",
+             vfs_name="chat.jsonl",
+             size=42,
+         )),
+    ])
     result = await stat(
         accessor,
         PathSpec(resource_path="channels/general__C001/2023-11-14/chat.jsonl",
@@ -109,6 +119,7 @@ async def test_stat_jsonl(accessor, index):
         index=index)
     assert result.type == FileType.TEXT
     assert result.name == "chat.jsonl"
+    assert result.size == 42
 
 
 @pytest.mark.asyncio
@@ -149,14 +160,18 @@ async def test_stat_non_date_dir_not_found(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_chat_jsonl(accessor, index):
-    s = await stat(
-        accessor,
-        PathSpec(resource_path="channels/general__C001/2026-04-10/chat.jsonl",
-                 virtual="/channels/general__C001/2026-04-10/chat.jsonl",
-                 directory="/channels/general__C001/2026-04-10/chat.jsonl"),
-        index=index)
-    assert s.type == FileType.TEXT
+async def test_stat_chat_jsonl_absent_from_day_is_enoent(accessor, index):
+    # A denied or empty day lists no chat.jsonl; stat must not fabricate
+    # a sizeless file for it.
+    await index.set_dir("/channels/general__C001/2026-04-10", [])
+    with pytest.raises(FileNotFoundError):
+        await stat(
+            accessor,
+            PathSpec(
+                resource_path="channels/general__C001/2026-04-10/chat.jsonl",
+                virtual="/channels/general__C001/2026-04-10/chat.jsonl",
+                directory="/channels/general__C001/2026-04-10/chat.jsonl"),
+            index=index)
 
 
 @pytest.mark.asyncio

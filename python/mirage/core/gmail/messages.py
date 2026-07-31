@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+import json
 from typing import Any
 
 from mirage.core.google._client import TokenManager, gmail_base, google_get
@@ -170,6 +171,35 @@ async def get_message_processed(
         dict: processed message with decoded body text.
     """
     raw = await get_message_raw(token_manager, message_id)
+    return process_message(raw)
+
+
+def message_json_bytes(raw: dict[str, Any]) -> bytes:
+    """Render a raw message as its .gmail.json byte content.
+
+    The single renderer behind both read and the readdir-time size, so
+    stat().size == len(read()) by construction.
+
+    Args:
+        raw (dict): full message from messages.get format=full.
+
+    Returns:
+        bytes: compact JSON encoding of the processed message.
+    """
+    return json.dumps(process_message(raw),
+                      ensure_ascii=False,
+                      separators=(",", ":")).encode()
+
+
+def process_message(raw: dict[str, Any]) -> dict[str, Any]:
+    """Shape a raw messages.get payload into the rendered message dict.
+
+    Args:
+        raw (dict): full message from messages.get format=full.
+
+    Returns:
+        dict: processed message with decoded body text.
+    """
     headers = raw.get("payload", {}).get("headers", [])
     body_text = _decode_body(raw.get("payload", {}))
     raw_atts = _extract_attachments(raw.get("payload", {}))

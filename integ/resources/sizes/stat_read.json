@@ -300,6 +300,97 @@
         "stdout": "",
         "stderr": "stat: /trunc/docs/vendored: No such file or directory\n"
       }
+    },
+    {
+      "id": "sz_mem0_stat_matches_wc",
+      "seq": 680040,
+      "targets": [
+        "mem0"
+      ],
+      "command": "stat -c %s /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "193\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_chat_stat",
+      "seq": 680050,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/general__C1/2025-12-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "366\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_chat_read",
+      "seq": 680051,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-19/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "366\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_user_stat",
+      "seq": 680052,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/users/priya__U7.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "178\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_user_read",
+      "seq": 680053,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/users/priya__U7.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "178\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_message_stat",
+      "seq": 680054,
+      "targets": [
+        "gmail"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "624\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_message_read",
+      "seq": 680055,
+      "targets": [
+        "gmail"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "624\n",
+        "stderr": ""
+      }
     }
   ]
 }
