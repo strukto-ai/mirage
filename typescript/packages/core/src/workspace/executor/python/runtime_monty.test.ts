@@ -300,7 +300,7 @@ describe('buildRuntime', () => {
     expect(() => buildRuntime('docker')).toThrow(/unknown runtime/)
   })
 
-  it("hints that 'local' is Python-only", () => {
-    expect(() => buildRuntime('local')).toThrow(/Python-only/)
+  it("hints that 'local' lives in the node package", () => {
+    expect(() => buildRuntime('local')).toThrow(/mirage-node/)
   })
 })

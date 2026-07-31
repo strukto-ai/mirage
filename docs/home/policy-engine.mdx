@@ -116,6 +116,11 @@ line? Unwilling entries step aside and the first willing capturer wins.
 evaluator capability. In the config above that is `monty`. A config with
 policy scripts but no evaluator entry fails at the first decision.
 
+The engine's language is the script's language: `policy: ./policy.py`
+needs a python evaluator (monty, or pyodide in TypeScript), while
+`policy: ./policy.js` runs on `quickjs`, so a JS-only world scripts its
+policy in JavaScript with the same ctx and verdict contract.
+
 When you build the workspace in code rather than from a config file,
 `policy=` also accepts a plain function with the same decision contract,
 sync or async. It is called directly, so no evaluator is involved:

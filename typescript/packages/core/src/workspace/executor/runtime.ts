@@ -213,9 +213,10 @@ export const PYTHON_ONLY_HINTS: Record<string, string> = {
     "supports 'pyodide' (WASM CPython, default), 'monty' (sandboxed), " +
     "and 'quickjs' (sandboxed JavaScript)",
   local:
-    "runtime 'local' is Python-only (the host CPython); TypeScript " +
-    "supports 'pyodide' (WASM CPython, default), 'monty' (sandboxed), " +
-    "and 'quickjs' (sandboxed JavaScript)",
+    "runtime 'local' (the host python3) lives in @struktoai/mirage-node; " +
+    'import that package to register it. Browser worlds support ' +
+    "'pyodide' (WASM CPython, default), 'monty' (sandboxed), and " +
+    "'quickjs' (sandboxed JavaScript)",
 }
 
 /**

@@ -3,9 +3,6 @@
   "cases": [
     {
       "id": "runtime_arg_per_line",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           "monty",
@@ -45,9 +42,6 @@
     },
     {
       "id": "entry_script_fallthrough",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           {
@@ -115,9 +109,6 @@
     },
     {
       "id": "global_policy",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           "monty",
@@ -150,9 +141,6 @@
     },
     {
       "id": "add_runtime_local",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           "monty",
