@@ -47,6 +47,10 @@ export abstract class HfResource extends BaseResource implements Resource {
   abstract readonly prompt: string
   abstract readonly accessor: HfAccessor
   readonly cachesReads: boolean = true
+  // The Hub tree API reports each file's exact byte size (the LFS
+  // object size for LFS files); readdir backfills any lister-omitted
+  // size with one stat.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = true
   readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,

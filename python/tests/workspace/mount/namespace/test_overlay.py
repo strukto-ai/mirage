@@ -47,3 +47,23 @@ def test_link_mtime_does_not_touch_modified():
     meta = NodeMeta(target="/other", mtime=1767312000.0)
     merged = merge_overlay_stat(meta, BASE)
     assert merged.modified == "2026-01-01T00:00:00Z"
+
+
+def test_observed_mtime_defers_to_backend():
+    meta = NodeMeta(observed_mtime=1767312000.0)
+    merged = merge_overlay_stat(meta, BASE)
+    assert merged.modified == "2026-01-01T00:00:00Z"
+
+
+def test_observed_mtime_fills_missing_backend_mtime():
+    meta = NodeMeta(observed_mtime=1767312000.0)
+    bare = FileStat(name="f.txt", size=3)
+    merged = merge_overlay_stat(meta, bare)
+    assert merged.modified == "2026-01-02T00:00:00Z"
+
+
+def test_explicit_mtime_beats_observed():
+    meta = NodeMeta(mtime=1767312000.0, observed_mtime=1767398400.0)
+    bare = FileStat(name="f.txt", size=3)
+    merged = merge_overlay_stat(meta, bare)
+    assert merged.modified == "2026-01-02T00:00:00Z"

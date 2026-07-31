@@ -16,10 +16,10 @@ import asyncio
 from typing import Any
 
 from mirage.commands.builtin.utils.safeguard import run_with_timeout
-from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.runtime.route import RoutingDecision
+from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command
@@ -113,7 +113,7 @@ async def execute_command(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Dispatch a command node by name."""
     name = get_command_name(node)
@@ -183,7 +183,7 @@ async def _dispatch_command_body(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     parent = node.parent
     if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
@@ -255,7 +255,7 @@ async def _run_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler."""
     name = argv.name

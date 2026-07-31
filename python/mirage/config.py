@@ -244,16 +244,20 @@ class MountBlock(BaseModel):
 
 
 def _is_script_path(value: str) -> bool:
-    """True for the docker-style single-line ``.py`` path form.
+    """True for the docker-style single-line script path form.
+
+    ``.py`` runs on a python evaluator (monty), ``.js``/``.mjs`` on a
+    JS one (quickjs); the script's language must match the world's
+    policy engine.
 
     Args:
-        value (str): a yaml ``script``/``route`` value.
+        value (str): a yaml ``script``/``policy`` value.
     """
-    return "\n" not in value and value.strip().endswith(".py")
+    return "\n" not in value and value.strip().endswith((".py", ".js", ".mjs"))
 
 
 def _load_script_source(value: str) -> ScriptSource:
-    """Embed the referenced ``.py`` file as script source.
+    """Embed the referenced script file as source.
 
     Config carries a reference, the wire carries content (the docker
     build-context model): the value must be a path to a ``.py`` file,
@@ -261,22 +265,24 @@ def _load_script_source(value: str) -> ScriptSource:
     only door for script source.
 
     Args:
-        value (str): the yaml ``script``/``route`` value.
+        value (str): the yaml ``script``/``policy`` value.
 
     Raises:
-        ValueError: the value is not a ``.py`` path.
+        ValueError: the value is not a script path.
         FileNotFoundError: the referenced file does not exist.
     """
     if not _is_script_path(value):
-        raise ValueError("a config script must reference a .py file "
+        raise ValueError("a config script must reference a .py/.js file "
                          f"(e.g. script: guard.py), got {value!r}")
-    return ScriptSource(Path(value.strip()).read_text())
+    path = Path(value.strip())
+    language = "js" if path.suffix in (".js", ".mjs") else "python"
+    return ScriptSource(path.read_text(), language=language)
 
 
 def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
     """Resolve relative script paths against the config file's dir.
 
-    A path-form ``script``/``route`` in a config file means "next to
+    A path-form ``script``/``policy`` in a config file means "next to
     the file" (the docker build-context model), never "wherever the
     server happens to run". Mutates the parsed mapping in place;
     in-memory dict configs are untouched by the loader.
@@ -285,10 +291,10 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
         raw (dict[str, Any]): the parsed config mapping.
         base (Path): directory containing the config file.
     """
-    route = raw.get("route")
-    if isinstance(route, str) and _is_script_path(route) \
-            and not Path(route.strip()).is_absolute():
-        raw["route"] = str(base / route.strip())
+    policy = raw.get("policy")
+    if isinstance(policy, str) and _is_script_path(policy) \
+            and not Path(policy.strip()).is_absolute():
+        raw["policy"] = str(base / policy.strip())
     runtimes = raw.get("runtimes")
     if not isinstance(runtimes, list):
         return
@@ -340,10 +346,10 @@ class WorkspaceConfig(BaseModel):
     # with a name plus the uniform runtime options ({name: wasi,
     # config: {home: /opt/...}}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
-    # Global route script: a .py path whose content is embedded at
+    # Global policy script: a .py path whose content is embedded at
     # load. Its last expression names the runtime for the line, or
     # None to fall to entry scripts.
-    route: str | None = None
+    policy: str | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
     default_session_id: str | None = None
@@ -398,8 +404,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["owns_store"] = True
         if self.runtimes is not None:
             kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
-        if self.route is not None:
-            kwargs["route"] = _load_script_source(self.route)
+        if self.policy is not None:
+            kwargs["policy"] = _load_script_source(self.policy)
         return kwargs
 
     def kernel_mounts(self) -> dict[str, tuple[MountBackend, str | None]]:

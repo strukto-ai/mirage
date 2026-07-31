@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from mirage.commands.builtin.utils.safeguard import guard_output
 from mirage.io import IOResult
-from mirage.runtime.route import RoutingDecision
+from mirage.runtime.policy import PolicyDecision
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.workspace.mount import MountRegistry
@@ -38,7 +38,7 @@ async def run_command_tree(
     session: Session,
     stdin: Any,
     cancel: asyncio.Event | None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[IOResult, ExecutionNode]:
     """Run a parsed command tree and finalize its output stream.
 
@@ -62,7 +62,7 @@ async def run_command_tree(
         session (Session): shell session state.
         stdin (Any): input stream.
         cancel (asyncio.Event | None): event used to abort mid-flight.
-        routing_decision (RoutingDecision | None): the typed line's routing
+        routing_decision (PolicyDecision | None): the typed line's routing
             decision, threaded to every command dispatch; None runs on
             the static bindings.
 

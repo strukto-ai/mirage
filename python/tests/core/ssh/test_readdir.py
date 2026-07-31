@@ -68,10 +68,14 @@ class _FakeSFTP:
         if path in self.dirs:
             return SimpleNamespace(type=asyncssh.FILEXFER_TYPE_DIRECTORY,
                                    size=4096,
-                                   mtime=_MTIME)
+                                   mtime=_MTIME,
+                                   permissions=None,
+                                   atime=None)
         return SimpleNamespace(type=asyncssh.FILEXFER_TYPE_REGULAR,
                                size=len(self.files[path]),
-                               mtime=_MTIME)
+                               mtime=_MTIME,
+                               permissions=None,
+                               atime=None)
 
     async def readdir(self, path: str):
         base = path.rstrip("/") or "/"

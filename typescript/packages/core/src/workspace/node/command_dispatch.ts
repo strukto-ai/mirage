@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../executor/runtime.ts'
-import type { RoutingDecision } from '../executor/route/index.ts'
+import type { PolicyDecision } from '../executor/policy/index.ts'
+import { mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -36,7 +37,7 @@ import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { handleCommand } from '../executor/command.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../../commands/safeguard.ts'
+import { resolveSafeguard } from '../executor/policy/safeguard.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
@@ -158,7 +159,7 @@ export async function executeCommand(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -255,10 +256,13 @@ async function runCommandBody(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
-  signal?: AbortSignal,
+  routingDecision?: PolicyDecision,
+  signalIn?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
+  // A background job's kill channel rides the session; fold it in so
+  // builtins (sleep) and the mount layer observe the kill.
+  const signal = mergeSignals(signalIn, session.abortSignal)
 
   if (node.parent?.type !== NT.REDIRECTED_STATEMENT) {
     for (const child of node.namedChildren) {
@@ -385,7 +389,7 @@ async function runArgv(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name

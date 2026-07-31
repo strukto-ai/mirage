@@ -15,12 +15,32 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { DEFAULT_COMMAND_SAFEGUARDS } from '../commands/safeguard.ts'
+import { DEFAULT_COMMAND_SAFEGUARDS } from './executor/policy/safeguard.ts'
+import { Runtime } from './executor/runtime.ts'
+import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
 import { CommandSafeguard, MountMode } from '../types.ts'
 import { Workspace } from './workspace.ts'
+
+class SignalProbeRuntime extends Runtime {
+  readonly name = 'probe'
+  aborted = false
+
+  constructor() {
+    super({ captures: ['python3', 'python'] })
+  }
+
+  run(args: RunArgs): Promise<RunResult> {
+    return new Promise((resolve) => {
+      args.signal?.addEventListener('abort', () => {
+        this.aborted = true
+        resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 1 })
+      })
+    })
+  }
+}
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -154,6 +174,93 @@ describe('python3 command timeout', () => {
       const r = await ws.execute('python3 /data/slow.py')
       expect(r.exitCode).toBe(124)
       expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('the timeout aborts the run signal so a runtime can reclaim what it spawned', async () => {
+    const probe = new SignalProbeRuntime()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.EXEC,
+        ops: registry,
+        shellParser: parser,
+        runtimes: [probe, 'vfs'],
+        commandSafeguards: {
+          '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.1 }) },
+        },
+      },
+    )
+    try {
+      const r = await ws.execute('cd /data && python3 -c "hang"')
+      expect(r.exitCode).toBe(124)
+      expect(probe.aborted).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('a busy JS loop trips the safeguard instead of wedging the event loop', async () => {
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.EXEC,
+        ops: registry,
+        shellParser: parser,
+        runtimes: ['quickjs', 'vfs'],
+        commandSafeguards: {
+          '/data': { node: new CommandSafeguard({ timeoutSeconds: 0.3 }) },
+        },
+      },
+    )
+    try {
+      const started = Date.now()
+      const r = await ws.execute('cd /data && node -e "while (true) {}"')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('timed out')
+      expect(Date.now() - started).toBeLessThan(30_000)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+})
+
+describe('background job kill', () => {
+  it('kill %1 aborts the runtime run of a background job', async () => {
+    const probe = new SignalProbeRuntime()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.EXEC, ops: registry, shellParser: parser, runtimes: [probe, 'vfs'] },
+    )
+    try {
+      await ws.execute('python3 -c "hang" &')
+      await ws.execute('kill %1')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(probe.aborted).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('kill %1 interrupts a sleeping job promptly', async () => {
+    const ws = buildWs()
+    try {
+      const started = Date.now()
+      await ws.execute('sleep 60 &')
+      await ws.execute('kill %1')
+      await ws.execute('wait %1')
+      expect(Date.now() - started).toBeLessThan(10_000)
     } finally {
       await ws.close()
     }

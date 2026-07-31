@@ -18,13 +18,13 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
-from mirage.runtime.route import RoutingDecision
+from mirage.runtime.policy import PolicyDecision
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (array_append, array_extent, array_get,
                                 array_set, make_array)
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError, ExitSignal
+from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -33,12 +33,15 @@ from mirage.shell.types import Redirect, RedirectKind
 from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
 from mirage.workspace.abort import MirageAbortError
-from mirage.workspace.executor.control import (handle_case, handle_for,
-                                               handle_if, handle_select,
-                                               handle_until, handle_while)
+from mirage.workspace.executor.control import (handle_case, handle_cfor,
+                                               handle_for, handle_if,
+                                               handle_select, handle_until,
+                                               handle_while)
 from mirage.workspace.executor.pipes import (handle_connection, handle_pipe,
                                              handle_subshell)
 from mirage.workspace.executor.redirect import handle_redirect
+from mirage.workspace.executor.statement import (assignment_status,
+                                                 finish_statement)
 from mirage.workspace.expand import (expand_and_classify, expand_node,
                                      expand_redirects)
 from mirage.workspace.expand.globs import resolve_globs
@@ -54,13 +57,53 @@ from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
-    get_case_items, get_case_word, get_declaration_keyword, get_for_parts,
-    get_function_body, get_function_name, get_if_branches, get_list_parts,
-    get_negated_command, get_pipeline_commands, get_redirects, get_text,
-    get_unset_args, get_while_parts)
+    get_case_items, get_case_word, get_cfor_parts, get_declaration_keyword,
+    get_for_parts, get_function_body, get_function_name, get_if_branches,
+    get_list_parts, get_negated_command, get_pipeline_commands, get_redirects,
+    get_text, get_unset_args, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_local, handle_readonly, handle_test, handle_unset,
     note_local_array)
+
+
+async def _eval_cfor_expr(
+    expr: Any,
+    default: int,
+    session: Session,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack | None,
+) -> int:
+    """Evaluate one C-style for expression slot.
+
+    Args:
+        expr (Any): the slot's tree-sitter expression node, or None
+            for an empty slot.
+        default (int): value an empty slot yields (1 for the condition
+            so `for ((;;))` loops, 0 for init/update).
+        session (Session): shell session; arithmetic assignments land
+            in its env.
+        execute_fn (Callable): recursive execute for substitutions.
+        call_stack (CallStack | None): function-call scope, if any.
+
+    Raises:
+        ArithError: re-raised with the expression text prepended, so
+            the loop can print bash's `((: expr: reason` diagnostic.
+        ReadonlyError: the expression assigns to a readonly variable,
+            which aborts the loop the same way an invalid expression
+            does.
+    """
+    if expr is None:
+        return default
+    text = await expand_arith(expr, session, execute_fn, call_stack)
+    try:
+        value, updates = evaluate_arith(text, session.env)
+    except ArithError as exc:
+        raise ArithError(f"{text}: {exc}") from exc
+    for name in updates:
+        if name in session.readonly_vars:
+            raise ReadonlyError(name)
+    session.env.update(updates)
+    return int(value)
 
 
 async def _expand_array_items(
@@ -181,7 +224,7 @@ async def execute_node(
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
@@ -364,14 +407,10 @@ async def execute_node(
             if child.type == NT.COMMENT:
                 continue
             stdout, io, last_exec = await recurse(child, session, stdin, cs)
-            # Barrier before seeding $?: lazy exit codes (exit_on_empty
-            # in grep) finalize only once stdout is consumed (same as
-            # program / subshell).
-            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+            stdout = await finish_statement(stdout, io, session)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
-            session.last_exit_code = io.exit_code
             if (io.exit_code != 0 and session.shell_options.get("errexit")
                     and child.type not in ERREXIT_EXEMPT_TYPES
                     and not session.errexit_immune):
@@ -387,6 +426,16 @@ async def execute_node(
         branches, else_body = get_if_branches(node)
         return await handle_if(recurse, branches, else_body, session, stdin,
                                cs)
+
+    # ── C-style for (for ((init;cond;update))) ──
+    if kind == NodeKind.CFOR:
+        exprs, body = get_cfor_parts(node)
+        eval_expr = partial(_eval_cfor_expr,
+                            session=session,
+                            execute_fn=execute_fn,
+                            call_stack=cs)
+        return await handle_cfor(recurse, exprs, body, eval_expr, session,
+                                 stdin, cs)
 
     # ── for / select ────────────────────────────
     if kind in (NodeKind.FOR, NodeKind.SELECT):
@@ -540,6 +589,9 @@ async def execute_node(
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
         stdout, io, exec_node = await recurse(inner, session, stdin, cs)
+        # Lazy exit codes (exit_on_empty in grep) must be final before
+        # inverting, or `! grep miss f` negates the provisional 0.
+        stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
         io = IOResult(
             exit_code=0 if io.exit_code != 0 else 1,
             stderr=io.stderr,
@@ -556,6 +608,7 @@ async def execute_node(
         text = get_text(node)
         if "=" not in text:
             return None, IOResult(), ExecutionNode(command=text, exit_code=0)
+        sub_seq = session._cmdsub_seq
         subscript_node = next(
             (c for c in node.named_children if c.type == "subscript"), None)
         name_source = subscript_node if subscript_node is not None else node
@@ -590,7 +643,9 @@ async def execute_node(
             else:
                 session.arrays[key] = make_array(items)
                 session.env.pop(key, None)
-            return None, IOResult(), ExecutionNode(command=text, exit_code=0)
+            code = assignment_status(session, sub_seq)
+            return None, IOResult(exit_code=code), ExecutionNode(
+                command=text, exit_code=code)
         if val_nodes:
             val = await expand_node(val_nodes[0], session, execute_fn, cs)
         else:
@@ -618,7 +673,9 @@ async def execute_node(
                                  contained_code=1)
             array_set(arr, idx, array_get(arr, idx) + val if append else val)
             session.arrays[key] = arr
-            return None, IOResult(), ExecutionNode(command=text, exit_code=0)
+            code = assignment_status(session, sub_seq)
+            return None, IOResult(exit_code=code), ExecutionNode(
+                command=text, exit_code=code)
         if append:
             arr = session.arrays.get(key)
             if arr is not None:
@@ -632,14 +689,32 @@ async def execute_node(
         # getopts scan, matching bash's internal char pointer.
         if key == "OPTIND":
             session._getopts_optind = None
-        io = IOResult()
+        code = assignment_status(session, sub_seq)
+        io = IOResult(exit_code=code)
         if session.shell_options.get("xtrace"):
             io.stderr = trace_assignment(key, val, append)
-        return None, io, ExecutionNode(command=text, exit_code=0)
+        return None, io, ExecutionNode(command=text, exit_code=code)
 
-    # Constructs the parser accepts but the executor cannot honor (e.g.
-    # C-style `for ((;;))`). Mirrors the unsupported-builtin diagnostic
-    # so agents see a capability gap, not a crash.
+    # ── assignment-only statement (a=1 b=2) ─────
+    if kind == NodeKind.VAR_ASSIGNS:
+        sub_seq = session._cmdsub_seq
+        merged_io = IOResult()
+        for child in node.named_children:
+            if child.type != NT.VARIABLE_ASSIGNMENT:
+                continue
+            _, io, _ = await recurse(child, session, stdin, cs)
+            merged_io = await merged_io.merge(io)
+        # The statement's status follows the last command substitution
+        # performed across ALL its assignments, not the last child's.
+        code = assignment_status(session, sub_seq)
+        merged_io.exit_code = code
+        return None, merged_io, ExecutionNode(command=get_text(node),
+                                              exit_code=code)
+
+    # Constructs the parser accepts but the executor cannot honor
+    # (tree-sitter ERROR nodes, future grammar additions). Mirrors the
+    # unsupported-builtin diagnostic so agents see a capability gap,
+    # not a crash.
     err = f"mirage: unsupported shell construct: {node.type}\n".encode()
     return None, IOResult(exit_code=2,
                           stderr=err), ExecutionNode(command=get_text(node),

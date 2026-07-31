@@ -25,7 +25,7 @@ import { runWithMountPrefix, runWithRevisions } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
-import { NO_FOLLOW_OPS } from '../ops/config.ts'
+import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../ops/config.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
@@ -155,7 +155,8 @@ export class Dispatcher {
     }
     result = await applyOpSafeguard(result, opOverride)
     if (DISPATCH_WRITE_OPS.has(opName)) {
-      await this.invalidateAfterWriteByPath(p.virtual)
+      const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
+      await this.invalidateAfterWriteByPath(p.virtual, observed)
       if (renameDst !== null) {
         await this.invalidateAfterWriteByPath(renameDst.virtual)
       }
@@ -171,7 +172,7 @@ export class Dispatcher {
     await this.cache.clear()
   }
 
-  async invalidateAfterWriteByPath(rawPath: string): Promise<void> {
+  async invalidateAfterWriteByPath(rawPath: string, observed: number | null = null): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
     // invalidate the written directory itself instead of its parent
@@ -179,7 +180,7 @@ export class Dispatcher {
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.mountFor(path)
     if (mount === null) return
-    await this.namespace.clearTimes(path)
+    await this.namespace.clearTimes(path, observed)
     if (cachesReads(mount.resource)) {
       await this.cache.remove(path)
     }

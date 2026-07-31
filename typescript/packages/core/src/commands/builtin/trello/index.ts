@@ -15,7 +15,7 @@
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
-import { fileReadProvision, metadataProvision } from './_provision.ts'
+import { fileReadProvision } from './_provision.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { TRELLO_IO } from './io.ts'
 import { TRELLO_CARD_ASSIGN } from './trello_card_assign.ts'
@@ -36,7 +36,6 @@ export const TRELLO_COMMANDS: readonly RegisteredCommand[] = [
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
     },
   }),
   ...TRELLO_CARD_ASSIGN,

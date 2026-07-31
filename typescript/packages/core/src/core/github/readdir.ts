@@ -77,8 +77,10 @@ async function fallbackReaddir(
   for (const e of entries) {
     const childKey = `${key === '/' ? '' : key}/${e.path}`
     childKeys.push(childKey)
+    // setDir composes the child key as parent + '/' + name, so the tuple
+    // carries the bare entry name, not the full path (mirrors python).
     childEntries.push([
-      childKey,
+      e.path,
       new IndexEntry({
         id: e.sha,
         name: e.path,

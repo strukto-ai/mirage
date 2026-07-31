@@ -58,6 +58,14 @@ class Session:
     # which restarts the scan, matching bash's internal char pointer.
     _getopts_pos: int = field(default=1, repr=False)
     _getopts_optind: int | None = field(default=None, repr=False)
+    # Command-substitution tracking for assignment statements: how many
+    # substitutions have run in this session, and the status of the
+    # most recent one. An assignment statement snapshots the count
+    # before expanding its value and, when it grew, reports the last
+    # substitution's status as its own (bash: `x=$(false)` exits 1,
+    # `x=abc` exits 0).
+    _cmdsub_seq: int = field(default=0, repr=False)
+    _cmdsub_status: int = field(default=0, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         data = {

@@ -21,8 +21,8 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      apply_safeguard,
                                                      maybe_with_timeout,
                                                      run_with_timeout)
-from mirage.commands.safeguard import CommandSafeguard
 from mirage.io.types import materialize
+from mirage.runtime.policy.safeguard import CommandSafeguard
 from mirage.types import OnExceed
 
 _TEN = b"".join(f"line{i}\n".encode() for i in range(10))

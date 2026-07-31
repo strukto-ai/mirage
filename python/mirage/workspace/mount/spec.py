@@ -14,8 +14,8 @@
 
 from dataclasses import dataclass, field
 
-from mirage.commands.safeguard import CommandSafeguard
 from mirage.resource.base import BaseResource
+from mirage.runtime.policy.safeguard import CommandSafeguard
 from mirage.types import MountBackend, MountMode
 
 

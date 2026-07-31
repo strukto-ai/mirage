@@ -17,6 +17,18 @@ class ArithError(ValueError):
     """A bash arithmetic syntax or evaluation error."""
 
 
+class ReadonlyError(ValueError):
+    """An arithmetic assignment to a readonly shell variable.
+
+    Args:
+        name (str): variable that was assigned to.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"{name}: readonly variable")
+
+
 class ExitSignal(Exception):
     """A fatal shell exit request unwinding the current execution.
 

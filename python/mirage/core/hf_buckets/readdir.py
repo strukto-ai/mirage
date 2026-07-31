@@ -60,6 +60,14 @@ async def readdir(accessor: HfBucketsAccessor,
                 sizes[base] = meta.content_length if meta else None
     except NotFound as exc:
         raise enoent(path) from exc
+    # The Hub tree API carries a size for every file (for LFS files it is
+    # the object size, not the pointer's); when the lister omits the
+    # metadata, one stat per affected file fills the gap so the index
+    # never caches an unknown size.
+    for base, size in sizes.items():
+        if size is None:
+            md = await op.stat(base.lstrip("/"))
+            sizes[base] = md.content_length
     names = sorted(names)
     if len(names) > SCOPE_ERROR:
         logger.warning(

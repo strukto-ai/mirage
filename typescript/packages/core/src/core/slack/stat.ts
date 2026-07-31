@@ -106,6 +106,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.JSON,
+      size: lookup.entry.size,
       extra: { user_id: lookup.entry.id },
     })
   }
@@ -120,7 +121,15 @@ export async function stat(
     DATE_RE.test(part2) &&
     part3 === 'chat.jsonl'
   ) {
-    return new FileStat({ name: 'chat.jsonl', type: FileType.TEXT })
+    // The day's readdir renders the messages it fetched and stores the
+    // byte length, so stat serves it from the index instead of answering
+    // blind.
+    if (index === undefined) throw enoent(path)
+    const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
+    if (lookup.entry === undefined || lookup.entry === null) {
+      throw enoent(path)
+    }
+    return new FileStat({ name: 'chat.jsonl', type: FileType.TEXT, size: lookup.entry.size })
   }
 
   if (

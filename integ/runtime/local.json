@@ -3,9 +3,6 @@
   "cases": [
     {
       "id": "sys_argv",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           "local"

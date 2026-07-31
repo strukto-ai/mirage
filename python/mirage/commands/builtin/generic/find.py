@@ -153,6 +153,11 @@ async def find(
     # prefix onto Path nodes before the backend walks mount-relative
     # keys (#396).
     args.tree = prefix_path_nodes(args_to_tree(args), root_prefix)
+    # With a stat wired, the mtime window is applied by the overlay-
+    # aware post-filter below, not pushed into the core: backend cores
+    # only see native times and would drop files whose mtime lives in
+    # the namespace (touch results, observed writes).
+    push_mtime = stat is None
     results = await find_core(
         search_path,
         name=args.name,
@@ -163,8 +168,8 @@ async def find(
         mindepth=args.mindepth,
         name_exclude=args.name_exclude,
         or_names=args.or_names,
-        mtime_min=args.mtime_min,
-        mtime_max=args.mtime_max,
+        mtime_min=args.mtime_min if push_mtime else None,
+        mtime_max=args.mtime_max if push_mtime else None,
         iname=args.iname,
         path_pattern=args.path_pattern,
         empty=args.empty,

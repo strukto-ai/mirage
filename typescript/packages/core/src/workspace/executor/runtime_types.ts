@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RouteScript } from './route/types.ts'
+import type { PolicyScript } from './policy/types.ts'
 
 /** One interpreter execution request, language-agnostic. */
 export interface RunArgs {
@@ -26,6 +26,19 @@ export interface RunArgs {
    * rest.
    */
   flags?: Record<string, unknown>
+  /**
+   * Aborted when the command's safeguard timeout trips, so a runtime
+   * holding external resources (the local subprocess) can reclaim
+   * them. Python needs no equivalent: asyncio cancels the run task
+   * and the runtime cleans up in its CancelledError handler.
+   */
+  signal?: AbortSignal
+  /**
+   * The safeguard timeout, for engines that execute on the event loop
+   * (quickjs) and must interrupt themselves in-VM: a guest that blocks
+   * the loop also blocks the timer that would abort `signal`.
+   */
+  timeoutSeconds?: number
 }
 
 /** Outcome of one interpreter execution. */
@@ -98,9 +111,9 @@ export interface RuntimeOptions<C extends object = Record<string, unknown>> {
   config?: C
   /**
    * Per-line admission script for the routing ladder, answering "do I
-   * want this line": a function taking a RouteContext, or a
+   * want this line": a function taking a PolicyContext, or a
    * config-borne ScriptSource. Absent = always willing. Policy, not
    * capability: it can only refuse lines the captures already allow.
    */
-  script?: RouteScript
+  script?: PolicyScript
 }

@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slack import files as slack_files
 from mirage.core.slack.history import get_history_jsonl
-from mirage.core.slack.users import get_user_profile
+from mirage.core.slack.users import get_user_profile, user_json_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -66,7 +64,6 @@ async def read(
         if lookup.entry is None:
             raise enoent(virtual)
         user = await get_user_profile(accessor.config, lookup.entry.id)
-        return json.dumps(user, ensure_ascii=False,
-                          separators=(",", ":")).encode()
+        return user_json_bytes(user)
 
     raise enoent(virtual)

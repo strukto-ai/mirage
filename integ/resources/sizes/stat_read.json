@@ -11,7 +11,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "stat -c %s /data/poem.txt",
       "expect": {
@@ -31,7 +33,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "cat /data/poem.txt | wc -c",
       "expect": {
@@ -51,7 +55,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "stat -c %s /data/empty.txt",
       "expect": {
@@ -71,7 +77,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "cat /data/empty.txt | wc -c",
       "expect": {
@@ -91,7 +99,9 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "stat -c %s /data/sub/nested.txt",
       "expect": {
@@ -163,12 +173,326 @@
         "onedrive",
         "sharepoint",
         "ssh",
-        "nextcloud"
+        "nextcloud",
+        "hf",
+        "databricks"
       ],
       "command": "cat /data/sub/nested.txt | wc -c",
       "expect": {
         "exit": 0,
         "stdout": "15\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_stat_readme",
+      "seq": 680020,
+      "targets": [
+        "github"
+      ],
+      "command": "stat -c %s /repo/README.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_read_readme",
+      "seq": 680021,
+      "targets": [
+        "github"
+      ],
+      "command": "cat /repo/README.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_submodule_hidden_from_listing",
+      "seq": 680022,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo -name extern",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_submodule_stat_enoent",
+      "seq": 680023,
+      "targets": [
+        "github"
+      ],
+      "command": "stat /repo/extern",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /repo/extern: No such file or directory\n"
+      }
+    },
+    {
+      "id": "sz_github_trunc_ls_root",
+      "seq": 680030,
+      "targets": [
+        "github"
+      ],
+      "command": "ls /trunc",
+      "expect": {
+        "exit": 0,
+        "stdout": "README.md\ndocs\npyproject.toml\nsrc\ntests\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_ls_docs",
+      "seq": 680031,
+      "targets": [
+        "github"
+      ],
+      "command": "ls /trunc/docs",
+      "expect": {
+        "exit": 0,
+        "stdout": "architecture.md\ncontributing.md\nrelease.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_stat_doc",
+      "seq": 680032,
+      "targets": [
+        "github"
+      ],
+      "command": "stat -c %s /trunc/docs/architecture.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "77\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_read_doc",
+      "seq": 680033,
+      "targets": [
+        "github"
+      ],
+      "command": "cat /trunc/docs/architecture.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "77\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_submodule_stat_enoent",
+      "seq": 680034,
+      "targets": [
+        "github"
+      ],
+      "command": "stat /trunc/docs/vendored",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /trunc/docs/vendored: No such file or directory\n"
+      }
+    },
+    {
+      "id": "sz_mem0_stat_matches_wc",
+      "seq": 680040,
+      "targets": [
+        "mem0"
+      ],
+      "command": "stat -c %s /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "193\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_chat_stat",
+      "seq": 680050,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/general__C1/2025-12-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "366\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_chat_read",
+      "seq": 680051,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-19/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "366\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_user_stat",
+      "seq": 680052,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/users/priya__U7.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "178\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_user_read",
+      "seq": 680053,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/users/priya__U7.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "178\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_message_stat",
+      "seq": 680054,
+      "targets": [
+        "gmail"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "624\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_message_read",
+      "seq": 680055,
+      "targets": [
+        "gmail"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "624\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_file_stat",
+      "seq": 680056,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "104\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_file_read",
+      "seq": 680057,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "104\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_dm_chat_stat",
+      "seq": 680058,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/dms/dave__D7/2026-03-10/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "92\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_dm_chat_read",
+      "seq": 680059,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/dms/dave__D7/2026-03-10/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "92\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_empty_chat_stat",
+      "seq": 680060,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/general__C1/2025-12-14/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_empty_chat_read",
+      "seq": 680061,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-14/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_attachment_stat",
+      "seq": 680062,
+      "targets": [
+        "gmail"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "36\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_attachment_read",
+      "seq": 680063,
+      "targets": [
+        "gmail"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "36\n",
         "stderr": ""
       }
     }

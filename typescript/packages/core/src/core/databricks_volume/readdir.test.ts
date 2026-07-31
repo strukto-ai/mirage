@@ -46,10 +46,10 @@ describe('readdir', () => {
   it('follows next_page_token pagination', async () => {
     const { fetch, calls } = routedFetch((call) => {
       if (call.url.includes('page_token=next')) {
-        return jsonResponse({ contents: [{ path: `${TEST_ROOT}/b.txt` }] })
+        return jsonResponse({ contents: [{ path: `${TEST_ROOT}/b.txt`, file_size: 1 }] })
       }
       return jsonResponse({
-        contents: [{ path: `${TEST_ROOT}/a.txt` }],
+        contents: [{ path: `${TEST_ROOT}/a.txt`, file_size: 1 }],
         next_page_token: 'next',
       })
     })
@@ -86,6 +86,25 @@ describe('readdir', () => {
     expect(file.entry?.remoteTime).toBe('2023-11-14T22:13:20.000Z')
     const dir = await index.get('/volume/d')
     expect(dir.entry?.resourceType).toBe('folder')
+  })
+
+  it('backfills a lister-omitted size with one HEAD', async () => {
+    const { fetch, calls } = routedFetch((call) => {
+      if (call.method === 'HEAD') {
+        return new Response(null, { status: 200, headers: { 'content-length': '7' } })
+      }
+      return jsonResponse({
+        contents: [{ path: `${TEST_ROOT}/a.txt` }, { path: `${TEST_ROOT}/b.txt`, file_size: 3 }],
+      })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const index = new RAMIndexCacheStore()
+    await readdir(makeAccessor(), spec('/volume/'), index)
+    const backfilled = await index.get('/volume/a.txt')
+    expect(backfilled.entry?.size).toBe(7)
+    const listed = await index.get('/volume/b.txt')
+    expect(listed.entry?.size).toBe(3)
+    expect(calls.filter((c) => c.method === 'HEAD')).toHaveLength(1)
   })
 
   it('serves and fills the index cache', async () => {

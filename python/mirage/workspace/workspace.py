@@ -30,7 +30,6 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      guard_output,
                                                      run_with_timeout)
 from mirage.commands.errors import FindParseError, UsageError
-from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import RecordingScope
@@ -45,9 +44,10 @@ from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
-from mirage.runtime.route import (RouteContext, RouteFn, RoutingDecision,
-                                  RoutingDecisionError, command_facts,
-                                  decide_line)
+from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyDeny,
+                                   PolicyError, PolicyFn, command_facts,
+                                   decide_line)
+from mirage.runtime.policy.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   bind_commands, build_runtime, catch_all,
                                   runtime_bindings_for, whole_line_runtime)
@@ -101,9 +101,9 @@ ResourceMount: TypeAlias = (BaseResource | Mount
 def _reject_config_script(kind: str, value: object) -> None:
     """Guard the code API: script source strings belong to config.
 
-    In code, scripts and routes are callables; a plain string is
+    In code, scripts and policies are callables; a plain string is
     almost always a script that should live next to the workspace
-    yaml and be referenced there (``script:`` on an entry, ``route:``
+    yaml and be referenced there (``script:`` on an entry, ``policy:``
     on the workspace), where the loader wraps it as ScriptSource.
 
     Args:
@@ -115,8 +115,8 @@ def _reject_config_script(kind: str, value: object) -> None:
     """
     if isinstance(value, str):
         raise TypeError(
-            f"{kind} must be a callable taking the RouteContext; config "
-            f"scripts reference a .py file (script:/route: in the "
+            f"{kind} must be a callable taking the PolicyContext; config "
+            f"scripts reference a .py file (script:/policy: in the "
             f"workspace yaml)")
 
 
@@ -163,7 +163,7 @@ class Workspace:
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
         runtimes: list[Runtime | str] | None = None,
-        route: RouteFn | None = None,
+        policy: PolicyFn | None = None,
     ) -> None:
         self._registry = MountRegistry()
         # One provider scopes every control-plane store by workspace id;
@@ -299,8 +299,8 @@ class Workspace:
         if isinstance(self._registry.vfs_runtime, VfsRuntime):
             self._registry.vfs_runtime.bind_line_executor(
                 self._execute_line_for_vfs)
-        _reject_config_script("route", route)
-        self._route = route
+        _reject_config_script("policy", policy)
+        self._policy = policy
 
         for prefix, target_backend, target_point in mount_targets:
             self.add_fuse_mount(prefix, target_point, backend=target_backend)
@@ -522,9 +522,8 @@ class Workspace:
         self._registry.runtime_bindings = bindings
         return entry
 
-    def _whole_line_runtime(
-            self, ast: Any,
-            decision: RoutingDecision | None) -> Runtime | None:
+    def _whole_line_runtime(self, ast: Any,
+                            decision: PolicyDecision | None) -> Runtime | None:
         """The runtime taking this whole line, None for the executor.
 
         A runtime with ``runs_lines`` takes the raw line when the
@@ -534,7 +533,7 @@ class Workspace:
 
         Args:
             ast: the parsed tree-sitter root node.
-            decision (RoutingDecision | None): the line's decision,
+            decision (PolicyDecision | None): the line's decision,
                 None when only static bindings apply.
         """
         if not any(entry.runs_lines and not isinstance(entry, VfsRuntime)
@@ -551,6 +550,10 @@ class Workspace:
                                               str], cwd: str) -> RunResult:
         """The workspace executor as the vfs runtime's run_line.
 
+        No core path reaches this for a typed line (whole_line_runtime
+        never selects vfs); a caller that invokes it for one records a
+        second history entry and re-resolves the policy.
+
         Args:
             line (str): the raw command line.
             stdin (bytes | None): bytes piped into the line.
@@ -564,11 +567,11 @@ class Workspace:
                   if io.stderr is not None else None)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=io.exit_code)
 
-    async def _resolve_routing_decision(
+    async def _resolve_policy_decision(
             self, ast: Any, command: str, runtime: str | None, provision: bool,
             session: Session, session_id: str,
-            inherited: RoutingDecision | None) -> RoutingDecision | None:
-        """The routing ladder for one typed line: runtime, route, scripts.
+            inherited: PolicyDecision | None) -> PolicyDecision | None:
+        """The routing ladder for one typed line: runtime, policy, scripts.
 
         Returns None when nothing decides (no runtime argument, no
         policy configured) so dispatch falls to the static bindings. A
@@ -591,20 +594,20 @@ class Workspace:
             try:
                 overlay = runtime_bindings_for(self._runtime_entries, runtime)
             except ValueError as exc:
-                raise RoutingDecisionError(str(exc)) from exc
-            return RoutingDecision(bindings={
+                raise PolicyError(str(exc)) from exc
+            return PolicyDecision(bindings={
                 **self._registry.runtime_bindings,
                 **overlay
             },
-                                   fallback=catch_all(self._runtime_entries))
+                                  fallback=catch_all(self._runtime_entries))
         if provision:
             return None
         has_scripts = any(entry.script is not None
                           for entry in self._runtime_entries)
-        if self._route is None and not has_scripts:
+        if self._policy is None and not has_scripts:
             return None
         facts = command_facts(ast)
-        ctx = RouteContext(
+        ctx = PolicyContext(
             line=command,
             commands=facts,
             command=facts[0].command if facts else "",
@@ -616,12 +619,12 @@ class Workspace:
             mounts=tuple(self._runtime_mount_prefixes()),
         )
         try:
-            return await decide_line(self._runtime_entries, self._route, ctx,
+            return await decide_line(self._runtime_entries, self._policy, ctx,
                                      self._registry.runtime_bindings)
-        except RoutingDecisionError:
+        except PolicyError:
             raise
         except (ValueError, ImportError) as exc:
-            raise RoutingDecisionError(str(exc)) from exc
+            raise PolicyError(str(exc)) from exc
 
     @property
     def _cwd(self) -> str:
@@ -1153,8 +1156,12 @@ class Workspace:
                        records: list[OpRecord] | None = None) -> None:
         await self._dispatcher.apply_io(io, records=records)
 
-    async def _invalidate_after_write_by_path(self, path: str) -> None:
-        await self._dispatcher.invalidate_after_write_by_path(path)
+    async def _invalidate_after_write_by_path(self,
+                                              path: str,
+                                              observed: float | None = None
+                                              ) -> None:
+        await self._dispatcher.invalidate_after_write_by_path(
+            path, observed=observed)
 
     def _session_cwd(self, session_id: str) -> str | None:
         try:
@@ -1173,7 +1180,7 @@ class Workspace:
         return IOResult()
 
     async def _exec_recursion(self, cancel: asyncio.Event | None,
-                              routing_decision: "RoutingDecision | None",
+                              routing_decision: "PolicyDecision | None",
                               cmd: str, **opts: Any) -> Any:
         # The executor's internal eval ($(), source, eval, xargs, ...):
         # never a typed line, so it must not record a history entry or
@@ -1200,7 +1207,7 @@ class Workspace:
             cancel: asyncio.Event | None = ...,
             record: bool = ...,
             runtime: str | None = ...,
-            routing_decision: "RoutingDecision | None" = ...) -> IOResult:
+            routing_decision: "PolicyDecision | None" = ...) -> IOResult:
         ...
 
     @overload
@@ -1217,7 +1224,7 @@ class Workspace:
             cancel: asyncio.Event | None = ...,
             record: bool = ...,
             runtime: str | None = ...,
-            routing_decision: "RoutingDecision | None" = ...
+            routing_decision: "PolicyDecision | None" = ...
     ) -> ProvisionResult:
         ...
 
@@ -1233,7 +1240,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RoutingDecision | None = None,
+        routing_decision: PolicyDecision | None = None,
     ) -> IOResult | ProvisionResult:
         """Execute a shell command in the workspace.
 
@@ -1308,17 +1315,20 @@ class Workspace:
         session_token = set_current_session(effective_session)
         try:
             ast = parse(command)
-            decision = await self._resolve_routing_decision(
-                ast, command, runtime, provision, effective_session,
-                session_id, routing_decision)
-            exec_recursion = partial(self._exec_recursion, cancel, decision)
+            # Syntax gates before policy, mirroring the TS order and
+            # bash: an unparsable line exits 2 and the policy is never
+            # consulted about it.
             offending = find_syntax_error(ast)
             if offending is not None:
-                snippet = offending.strip()[:40]
+                snippet = offending.strip()
                 err = (f"mirage: syntax error near {snippet!r}\n".encode()
                        if snippet else b"mirage: syntax error in command\n")
                 io = IOResult(exit_code=2, stderr=err)
                 return io
+            decision = await self._resolve_policy_decision(
+                ast, command, runtime, provision, effective_session,
+                session_id, routing_decision)
+            exec_recursion = partial(self._exec_recursion, cancel, decision)
             if provision:
                 prov_name = command.strip().split()[0] if command.strip(
                 ) else None
@@ -1387,7 +1397,17 @@ class Workspace:
             io = IOResult(exit_code=124, stderr=msg)
             session.last_exit_code = 124
             return io
-        except (MirageAbortError, ContentDriftError, RoutingDecisionError):
+        except PolicyDeny as exc:
+            # A deny is a policy outcome, not a mistake: it folds into
+            # the line's result the way a timeout does, never a raise.
+            # The denied party is the command, so the message carries
+            # its name like every per-command error.
+            cmd_name = command.split()[0] if command.split() else command
+            msg = f"{cmd_name}: policy denied: {exc.reason}\n".encode()
+            io = IOResult(exit_code=126, stderr=msg)
+            session.last_exit_code = 126
+            return io
+        except (MirageAbortError, ContentDriftError, PolicyError):
             raise
         except FindParseError as exc:
             msg = f"{exc}\n".encode()

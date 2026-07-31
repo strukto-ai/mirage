@@ -14,6 +14,9 @@
 
 import pytest
 
+from mirage.cache.index import RAMIndexCacheStore
+from mirage.core.hf_buckets.read import read_bytes
+from mirage.core.hf_buckets.readdir import readdir
 from mirage.core.hf_buckets.stat import stat
 from mirage.types import FileType, PathSpec
 
@@ -48,3 +51,24 @@ async def test_stat_root_is_directory(make_acc):
     acc = make_acc({})
     s = await stat(acc, PathSpec.from_str_path("/"))
     assert s.type == FileType.DIRECTORY
+
+
+@pytest.mark.asyncio
+async def test_stat_size_matches_read_for_every_file(make_acc):
+    acc = make_acc({
+        "poem.txt": b"a rose is a rose",
+        "empty.txt": b"",
+        "data/sub/nested.txt": b"deep",
+    })
+    index = RAMIndexCacheStore(ttl=60)
+    pending = ["/"]
+    while pending:
+        directory = pending.pop()
+        for child in await readdir(acc, PathSpec.from_str_path(directory),
+                                   index):
+            st = await stat(acc, PathSpec.from_str_path(child), index)
+            if st.type == FileType.DIRECTORY:
+                pending.append(child)
+                continue
+            data = await read_bytes(acc, PathSpec.from_str_path(child))
+            assert st.size == len(data)

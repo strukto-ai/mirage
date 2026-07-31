@@ -63,6 +63,10 @@ class DatabricksVolumeResource(BaseResource):
     accessor: DatabricksVolumeAccessor
     name: str = ResourceName.DATABRICKS_VOLUME
     caches_reads: bool = True
+    # The Files API lists DirectoryEntry.file_size and stat HEADs report
+    # Content-Length, both the exact byte count the download returns;
+    # readdir backfills any lister-omitted size with one HEAD.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _DATABRICKS_VOLUME_OPS
     PROMPT: str = PROMPT
 

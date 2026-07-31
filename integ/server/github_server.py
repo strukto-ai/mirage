@@ -50,6 +50,10 @@ def _tree_sha(path: str) -> str:
     return hashlib.sha1(f"tree\0{path}".encode()).hexdigest()
 
 
+def _commit_sha(path: str) -> str:
+    return hashlib.sha1(f"commit\0{path}".encode()).hexdigest()
+
+
 def _error(status: int, message: str) -> web.Response:
     return web.json_response(
         {
@@ -78,6 +82,8 @@ class FakeRepo:
         self.files: dict[str, bytes] = {}
         self.terms: dict[str, set[str]] = {}
         self.blobs: dict[str, bytes] = {}
+        self.submodules: set[str] = set()
+        self.truncated = False
 
     @property
     def full_name(self) -> str:
@@ -88,6 +94,11 @@ class FakeRepo:
         self.files[key] = data
         self.blobs[_blob_sha(data)] = data
         self._index(key, data)
+
+    def seed_submodule(self, path: str) -> None:
+        """Register a submodule gitlink: a tree entry of type "commit"
+        with a mode of 160000, no size, and no blob behind its sha."""
+        self.submodules.add(path.strip("/"))
 
     def _index(self, path: str, data: bytes) -> None:
         for term in self.terms.values():
@@ -139,6 +150,15 @@ class FakeRepo:
                 "type": "blob",
                 "sha": _blob_sha(data),
                 "size": len(data),
+            })
+        for path in sorted(self.submodules):
+            if not path.startswith(prefix):
+                continue
+            items.append({
+                "path": path[len(prefix):],
+                "mode": "160000",
+                "type": "commit",
+                "sha": _commit_sha(path),
             })
         items.sort(key=lambda it: str(it["path"]))
         return items
@@ -223,10 +243,25 @@ class GitHubServer:
             if not matches:
                 return _error(404, "Not Found")
             scope = matches[0]
+            # A per-sha tree GET is one level deep in git; only the
+            # ref-name request carries recursive=1.
+            items = [
+                it for it in repo.tree_items(scope) if "/" not in it["path"]
+            ]
+            return web.json_response({
+                "sha": _tree_sha(scope),
+                "tree": items,
+                "truncated": False,
+            })
+        items = repo.tree_items(scope)
+        if repo.truncated:
+            # A truncated recursive tree keeps only the top-level entries,
+            # like git dropping deep paths past its entry cap.
+            items = [it for it in items if "/" not in it["path"]]
         return web.json_response({
             "sha": _tree_sha(scope),
-            "tree": repo.tree_items(scope),
-            "truncated": False,
+            "tree": items,
+            "truncated": repo.truncated,
         })
 
     async def blob(self, request: web.Request) -> web.Response:
@@ -321,9 +356,17 @@ def seed_from_dir(state: FakeGitHub, full_name: str, source: Path) -> None:
     owner, _, name = full_name.partition("/")
     repo = state.repo(owner, name)
     for path in sorted(source.rglob("*")):
-        if path.is_file():
-            repo.seed_path(
-                path.relative_to(source).as_posix(), path.read_bytes())
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source).as_posix()
+        # A SUBMODULES file at the fixture root is a manifest of submodule
+        # gitlink paths (one per line), not repository content.
+        if relative == "SUBMODULES":
+            for line in path.read_text().splitlines():
+                if line.strip():
+                    repo.seed_submodule(line.strip())
+            continue
+        repo.seed_path(relative, path.read_bytes())
 
 
 async def _serve(port: int, repos: list[str]) -> None:
@@ -331,7 +374,10 @@ async def _serve(port: int, repos: list[str]) -> None:
     fixtures = Path(__file__).resolve().parents[1] / "fixtures"
     for spec in repos:
         full_name, _, fixture = spec.partition("=")
+        fixture, _, flag = fixture.partition(":")
         seed_from_dir(state, full_name, fixtures / fixture)
+        if flag == "truncated":
+            state.repos[full_name].truncated = True
     server = GitHubServer(state)
     runner = web.AppRunner(build_app(server))
     await runner.setup()
@@ -349,7 +395,8 @@ def main() -> None:
         "--repo",
         action="append",
         default=[],
-        help="owner/name=<fixture dir under integ/fixtures>, repeatable")
+        help="owner/name=<fixture dir under integ/fixtures>[:truncated], "
+        "repeatable")
     args = parser.parse_args()
     asyncio.run(_serve(args.port, args.repo))
 

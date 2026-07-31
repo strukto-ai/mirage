@@ -30,6 +30,11 @@ class SlackResource(BaseResource):
     accessor: SlackAccessor
     name: str = ResourceName.SLACK
     caches_reads: bool = True
+    # Every listed file carries an exact size: chat.jsonl and users/*.json
+    # are rendered at readdir from payloads the listing already fetched
+    # (users.list is payload-identical to users.info, verified live), and
+    # file blobs carry Slack's upload byte count.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 

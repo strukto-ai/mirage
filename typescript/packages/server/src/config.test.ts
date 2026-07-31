@@ -153,11 +153,23 @@ describe('configToWorkspaceArgs', () => {
 
   it('resolves script paths against the config file dir', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
-    writeFileSync(join(dir, 'route.py'), "'quickjs'")
-    writeFileSync(join(dir, 'ws.yaml'), 'mounts:\n  /data:\n    resource: ram\nroute: route.py\n')
+    writeFileSync(join(dir, 'policy.py'), "'quickjs'")
+    writeFileSync(join(dir, 'ws.yaml'), 'mounts:\n  /data:\n    resource: ram\npolicy: policy.py\n')
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.route).toEqual(new ScriptSource("'quickjs'"))
+    expect(args.options.policy).toEqual(new ScriptSource("'quickjs'"))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('a .js policy path stamps the script language', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'policy.js'), 'null')
+    writeFileSync(join(dir, 'ws.yaml'), 'mounts:\n  /data:\n    resource: ram\npolicy: policy.js\n')
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    // toEqual compares fields, so a python-tagged source would fail.
+    expect(args.options.policy).toEqual(new ScriptSource('null', 'js'))
+    expect(args.options.policy).not.toEqual(new ScriptSource('null'))
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -171,18 +183,18 @@ describe('configToWorkspaceArgs', () => {
     expect([...entry.captures]).toEqual(['grep', 'cat'])
   })
 
-  it('carries entry scripts and the global route through', async () => {
+  it('carries entry scripts and the global policy through', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
     writeFileSync(join(dir, 'entry.py'), "ctx['command'] == 'node'")
     writeFileSync(join(dir, 'vfs.py'), 'True')
-    writeFileSync(join(dir, 'route.py'), "'quickjs'")
+    writeFileSync(join(dir, 'policy.py'), "'quickjs'")
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
       runtimes: [
         { name: 'quickjs', script: join(dir, 'entry.py') },
         { name: 'vfs', script: join(dir, 'vfs.py') },
       ],
-      route: join(dir, 'route.py'),
+      policy: join(dir, 'policy.py'),
     })
     const args = await configToWorkspaceArgs(cfg)
     const entries = args.options.runtimes
@@ -191,16 +203,16 @@ describe('configToWorkspaceArgs', () => {
     )
     expect((entries?.[1] as { name: string }).name).toBe('vfs')
     expect((entries?.[1] as { script?: ScriptSource }).script).toEqual(new ScriptSource('True'))
-    expect(args.options.route).toEqual(new ScriptSource("'quickjs'"))
+    expect(args.options.policy).toEqual(new ScriptSource("'quickjs'"))
     rmSync(dir, { recursive: true, force: true })
   })
 
   it('rejects inline monty source in config', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      route: "'quickjs'",
+      policy: "'quickjs'",
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reference a \.py file/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reference a \.py\/\.js file/)
   })
 
   it('builds a redis index config from an index block', async () => {

@@ -3,6 +3,7 @@ from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.core.mem0.read import read
 from mirage.core.mem0.readdir import readdir
 from mirage.core.mem0.stat import stat
 from mirage.resource.mem0.config import Mem0Config
@@ -109,3 +110,20 @@ async def test_stat_invalid_enoent():
         await stat(
             _accessor(),
             PathSpec(virtual="/mem/.x", directory="/mem", resource_path=".x"))
+
+
+@pytest.mark.asyncio
+async def test_stat_size_matches_read_for_every_file():
+    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat reports
+    # from the listing must equal the byte length a read delivers.
+    acc = _accessor()
+    index = RAMIndexCacheStore()
+    root = PathSpec(virtual="/mem", directory="/mem", resource_path="")
+    for child in await readdir(acc, root, index):
+        name = child.rsplit("/", 1)[-1]
+        fpath = PathSpec(virtual=child, directory="/mem", resource_path=name)
+        info = await stat(acc, fpath, index)
+        if info.type == FileType.DIRECTORY:
+            continue
+        body = await read(acc, fpath, index)
+        assert info.size == len(body), child

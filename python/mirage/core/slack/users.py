@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -65,6 +66,22 @@ async def list_users(
     async for page in list_users_stream(config, limit=limit):
         out.extend(page)
     return out
+
+
+def user_json_bytes(user: dict[str, Any]) -> bytes:
+    """Render one user object as its .json byte content.
+
+    The single renderer behind both read and the readdir-time size.
+    users.list members are payload-identical to users.info responses
+    (verified live), so sizing from the listing is exact.
+
+    Args:
+        user (dict): user object from users.list or users.info.
+
+    Returns:
+        bytes: compact JSON encoding.
+    """
+    return json.dumps(user, ensure_ascii=False, separators=(",", ":")).encode()
 
 
 async def get_user_profile(

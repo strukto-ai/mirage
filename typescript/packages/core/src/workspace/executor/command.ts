@@ -23,7 +23,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
 import type { ShellArray } from '../../shell/array.ts'
-import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { finishStatement } from './statement.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
@@ -34,7 +34,7 @@ import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import { VfsRuntime, type Runtime } from './runtime.ts'
-import type { RoutingDecision } from './route/index.ts'
+import type { PolicyDecision } from './policy/index.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -55,7 +55,7 @@ import {
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
 import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../../commands/safeguard.ts'
+import { resolveSafeguard } from './policy/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { UsageError } from '../../commands/errors.ts'
@@ -73,7 +73,7 @@ interface RunOnMountCtx {
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RoutingDecision
+  routingDecision?: PolicyDecision
 }
 
 // Commands a bare invocation points at the working directory, mapped to
@@ -155,7 +155,7 @@ function mergeScopes(positional: PathSpec[], flagScopes: PathSpec[]): PathSpec[]
 
 /** The 126 result for a command no runtime accepted. */
 function admissionDenial(cmdName: string): IOResult {
-  const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
+  const msg = `${cmdName}: no runtime accepted this line\n`
   return new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })
 }
 
@@ -172,7 +172,7 @@ function lineRuntimeFor(
   cmdName: string,
   runtimeBindings: Record<string, Runtime> | undefined,
   vfs: Runtime | null,
-  routingDecision: RoutingDecision | undefined,
+  routingDecision: PolicyDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
   if (routingDecision === undefined) {
     const restricted = vfs instanceof VfsRuntime && vfs.restricted
@@ -301,9 +301,14 @@ async function runOnMount(
   // ls/stat render stat rows from the backend's own stat, which never sees
   // namespace attr overlays (chmod/chown/touch on overlay backends) or the
   // default owner; inject the merge so ls -l and stat -c agree.
-  // cp/mv -u freshness checks compare the same merged mtimes.
+  // cp/mv -u freshness checks compare the same merged mtimes, and
+  // find -mtime filters on them (touch results, observed writes).
   const statOverlay =
-    (cmdName === 'ls' || cmdName === 'stat' || cmdName === 'cp' || cmdName === 'mv') &&
+    (cmdName === 'ls' ||
+      cmdName === 'stat' ||
+      cmdName === 'cp' ||
+      cmdName === 'mv' ||
+      cmdName === 'find') &&
     namespace !== undefined
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
       : null
@@ -326,6 +331,7 @@ async function runOnMount(
       execAllowed: registry.isExecAllowed(),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
+      ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       safeguardOverride,
     })
     let stdout = initialStdout
@@ -401,7 +407,7 @@ export async function handleCommand(
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -1017,15 +1023,12 @@ async function executeShellFunction(
       try {
         const cmdNode = cmd as Parameters<ExecuteNodeFn>[0]
         const [rawStdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
-        // Barrier before seeding $?: lazy exit codes (exitOnEmpty in
-        // grep) finalize only once stdout is consumed.
-        const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
+        // $? tracks each statement inside the body, so a bare `return`
+        // (and mid-function $?) sees the last command.
+        const stdout = await finishStatement(rawStdout, io, session)
         if (stdout !== null) allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
         lastExec = execNode
-        // $? tracks each statement inside the body, so a bare `return`
-        // (and mid-function $?) sees the last command.
-        session.lastExitCode = io.exitCode
         if (
           io.exitCode !== 0 &&
           session.shellOptions.errexit === true &&

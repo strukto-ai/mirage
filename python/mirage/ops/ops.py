@@ -23,8 +23,8 @@ from mirage.commands.resolve import COMPOUND_EXTENSIONS
 from mirage.context import assert_mount_allowed, effective_mount_mode
 from mirage.observe import OpRecord
 from mirage.observe.context import push_mount_prefix
-from mirage.ops.config import (NO_FOLLOW_OPS, NamespaceLinks, OpsMount,
-                               StatOverlay)
+from mirage.ops.config import (NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks,
+                               OpsMount, StatOverlay)
 from mirage.ops.registry import OpsRegistry, RegisteredOp
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -34,7 +34,8 @@ class Ops:
 
     def __init__(self,
                  mounts: list[OpsMount],
-                 on_write: Callable[[str], Awaitable[None]] | None = None,
+                 on_write: Callable[[str, float | None], Awaitable[None]]
+                 | None = None,
                  observer: Any | None = None,
                  agent_id: str = "default",
                  session_id: str = "default",
@@ -185,9 +186,11 @@ class Ops:
                 return m.prefix.rstrip("/")
         return ""
 
-    async def _invalidate(self, path: str) -> None:
+    async def _invalidate(self,
+                          path: str,
+                          observed: float | None = None) -> None:
         if self._on_write is not None:
-            await self._on_write(path)
+            await self._on_write(path, observed)
 
     async def _call(self,
                     op: str,
@@ -229,7 +232,8 @@ class Ops:
                 (len(a) for a in args if isinstance(a, (bytes, bytearray))), 0)
         self._record(op, path, resource_type, nbytes, start)
         if write:
-            await self._invalidate(path)
+            observed = time.time() if op in STAMP_WRITE_OPS else None
+            await self._invalidate(path, observed)
         if (op == "stat" and self._stat_overlay is not None
                 and isinstance(result, FileStat)):
             return self._stat_overlay(path, result)

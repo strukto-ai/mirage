@@ -93,7 +93,13 @@ export async function fetchTree(
   const data = (await transport.get(`/repos/${owner}/${repo}/git/trees/${ref}`, {
     recursive: '1',
   })) as { tree?: GitHubTreeItem[]; truncated?: boolean }
-  return { tree: data.tree ?? [], truncated: data.truncated === true }
+  return { tree: dropSubmodules(data.tree ?? []), truncated: data.truncated === true }
+}
+
+// Submodule gitlinks (type "commit") have no size and no blob to read;
+// exclude them from the tree entirely.
+function dropSubmodules(tree: GitHubTreeItem[]): GitHubTreeItem[] {
+  return tree.filter((item) => item.type !== 'commit')
 }
 
 export async function fetchDirTree(
@@ -105,7 +111,7 @@ export async function fetchDirTree(
   const data = (await transport.get(`/repos/${owner}/${repo}/git/trees/${treeSha}`)) as {
     tree?: GitHubTreeItem[]
   }
-  return data.tree ?? []
+  return dropSubmodules(data.tree ?? [])
 }
 
 export async function fetchBlob(

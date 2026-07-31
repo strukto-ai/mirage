@@ -92,6 +92,229 @@
           }
         }
       ]
+    },
+    {
+      "id": "puts_print_raw",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"std.out.puts('a'); std.out.puts('b'); print('c'); console.log({k: 1}, [1, 2])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "abc\n[object Object] 1,2\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "os_surface",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          },
+          "/other": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(os.mkdir('/ram/d'), os.mkdir('/ram/d'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 -20\n"
+          }
+        },
+        {
+          "command": "echo xy > /ram/d/a.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "node -e \"console.log(os.rename('/ram/d/a.txt', '/ram/d/b.txt'), os.rename('/ram/zz', '/ram/yy'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 -44\n"
+          }
+        },
+        {
+          "command": "echo keep > /ram/cross.txt && node -e \"console.log(os.rename('/ram/cross.txt', '/other/cross.txt'))\" && cat /ram/cross.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "-44\nkeep\n"
+          }
+        },
+        {
+          "command": "node -e \"const [st, e] = os.stat('/ram/d/b.txt'); console.log(e, st.size, (st.mode & os.S_IFMT) === os.S_IFREG, JSON.stringify(os.stat('/ram/nope')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 3 true [null,44]\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log(os.remove('/ram/d/b.txt'), os.remove('/ram/d/b.txt'), os.remove('/ram/d'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 -44 0\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log(JSON.stringify(os.readdir('/ram/nope')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[[],44]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "printf",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"const n = std.out.printf('[%s|%05d|%.2f|%x|%c|%%]', 'ab', 42, 3.14159, 255, 65); std.out.puts('\\n' + n)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[ab|00042|3.14|ff|A|%]\n22"
+          }
+        },
+        {
+          "command": "node -e \"std.out.printf('e[%e]g[%g]plus[%+d]hash[%#x]prec[%.3d]sp[% d]', 1234.5678, 1234.5678, 42, 255, 7, 9); std.out.puts('\\n')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "e[1.234568e+03]g[1234.57]plus[+42]hash[0xff]prec[007]sp[ 9]\n"
+          }
+        },
+        {
+          "command": "node -e \"std.out.printf('star[%*d]prec[%.*f]', 6, 42, 2, 3.14159); std.out.puts('\\n')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "star[    42]prec[3.14]\n"
+          }
+        },
+        {
+          "command": "node -e \"std.out.printf('%q', 1)\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "TypeError: invalid conversion specifier in format string"
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_policy_reads_file",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "deny.txt": "node\n"
+            }
+          }
+        },
+        "policy": "const f = std.open('/ram/deny.txt', 'r'); const blocked = f !== null && f.readAsString().includes(ctx.command); if (f !== null) f.close(); blocked ? {deny: 'listed in /ram/deny.txt'} : null"
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: policy denied: listed in /ram/deny.txt\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_policy_deny",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "ctx.command === 'node' ? {deny: 'no js here'} : null"
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: policy denied: no js here\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_entry_script",
+      "world": {
+        "runtimes": [
+          {
+            "name": "quickjs",
+            "script": "!ctx.line.includes('keep-out')"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log('served')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "served\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log('keep-out')\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: no runtime accepted this line\n"
+          }
+        }
+      ]
     }
   ]
 }

@@ -238,6 +238,10 @@ export async function getMessageProcessed(
   messageId: string,
 ): Promise<GmailMessageProcessed> {
   const raw = await getMessageRaw(tokenManager, messageId)
+  return processMessage(raw)
+}
+
+function processMessage(raw: GmailMessageRaw): GmailMessageProcessed {
   const headers = raw.payload?.headers ?? []
   const bodyText = decodeBody(raw.payload)
   return {
@@ -253,4 +257,10 @@ export async function getMessageProcessed(
     labels: raw.labelIds ?? [],
     attachments: extractProcessedAttachments(raw.payload),
   }
+}
+
+// The single renderer behind both read and the readdir-time size, so
+// stat().size == len(read()) by construction.
+export function messageJsonBytes(raw: GmailMessageRaw): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(processMessage(raw)))
 }

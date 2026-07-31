@@ -319,4 +319,62 @@ describe('readdir channel/<id> (history dates)', () => {
     )
     expect(out).toEqual([])
   })
+
+  it('skips tombstoned and access-restricted file payloads', async () => {
+    // Such payloads carry an id but no download URL and no size; listing
+    // them would surface phantom files and break sizesAlwaysKnown.
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/slack/channels', [
+      [
+        'general__C1',
+        new IndexEntry({
+          id: 'C1',
+          name: 'general',
+          resourceType: 'slack/channel',
+          vfsName: 'general__C1',
+          remoteTime: '1700000000',
+        }),
+      ],
+    ])
+    await idx.setDir('/mnt/slack/channels/general__C1', [
+      [
+        '2026-04-10',
+        new IndexEntry({
+          id: 'C1:2026-04-10',
+          name: '2026-04-10',
+          resourceType: 'slack/date_dir',
+          vfsName: '2026-04-10',
+        }),
+      ],
+    ])
+    const t = new FakeTransport(() => ({
+      ok: true,
+      messages: [
+        {
+          ts: '1775000000.000100',
+          files: [
+            {
+              id: 'F1',
+              name: 'report.pdf',
+              size: 12,
+              url_private_download: 'https://files.slack.test/F1',
+            },
+            { id: 'F2', mode: 'tombstone' },
+            { id: 'F3', name: 'restricted.docx', file_access: 'check_file_info' },
+          ],
+        },
+      ],
+    }))
+    await readdir(
+      new SlackAccessor(t),
+      spec('/mnt/slack/channels/general__C1/2026-04-10', '/mnt/slack'),
+      idx,
+    )
+    const listing = await idx.listDir('/mnt/slack/channels/general__C1/2026-04-10/files')
+    expect(listing.entries).toEqual([
+      '/mnt/slack/channels/general__C1/2026-04-10/files/report__F1.pdf',
+    ])
+    const lookup = await idx.get('/mnt/slack/channels/general__C1/2026-04-10/files/report__F1.pdf')
+    expect(lookup.entry?.size).toBe(12)
+  })
 })

@@ -13,20 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+from pydantic import SecretStr
 
 from mirage.fuse.backend import (FSKIT_MOUNT_ROOT, MountBackend,
                                  check_mountpoint, check_platform, check_sizes,
                                  check_writes, prepare_backend,
                                  require_kernel_backend, resolve_backend)
+from mirage.resource.notion import NotionConfig, NotionResource
 from mirage.resource.ram import RAMResource
-from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.mount.spec import Mount
 
 
-def _slack():
-    return SlackResource(config=SlackConfig(token="test-token"))
+def _notion():
+    # Notion page.json is class N in the size rollout (a per-file block
+    # fetch would be needed), so it stays size-unknown permanently and is
+    # the stable guinea pig for the fskit size guard.
+    return NotionResource(config=NotionConfig(api_key=SecretStr("k")))
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -81,7 +85,7 @@ def test_prepare_backend_asserts_macos_for_fskit(monkeypatch):
 
 def test_prepare_backend_runs_every_fskit_guard(monkeypatch, caplog):
     monkeypatch.setattr("mirage.fuse.backend.sys.platform", "darwin")
-    ws = Workspace({"/slack/": _slack()}, mode=MountMode.READ)
+    ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
     # mountpoint guard
     with pytest.raises(ValueError, match="only mounts under /Volumes"):
         prepare_backend("fskit", mountpoint="/tmp/x")
@@ -162,7 +166,7 @@ def test_check_sizes_passes_for_byte_stores(caplog):
 
 
 def test_check_sizes_warns_for_size_unknown_resource(caplog):
-    ws = Workspace({"/slack/": _slack()}, mode=MountMode.READ)
+    ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
         check_sizes(MountBackend.FSKIT, ws.ops, "")
     assert "will read as empty" in caplog.text
@@ -171,19 +175,19 @@ def test_check_sizes_warns_for_size_unknown_resource(caplog):
 def test_check_sizes_names_the_offending_mount(caplog):
     ws = Workspace({
         "/ram/": RAMResource(),
-        "/slack/": _slack()
+        "/notion/": _notion()
     },
                    mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
         check_sizes(MountBackend.FSKIT, ws.ops, "")
-    assert "/slack/ (slack)" in caplog.text
+    assert "/notion/ (notion)" in caplog.text
     assert "/ram/" not in caplog.text
 
 
 def test_check_sizes_respects_the_root_prefix(caplog):
     ws = Workspace({
         "/ram/": RAMResource(),
-        "/slack/": _slack()
+        "/notion/": _notion()
     },
                    mode=MountMode.READ)
     # Scoping the mount to the byte-store subtree keeps the warning quiet
@@ -194,7 +198,7 @@ def test_check_sizes_respects_the_root_prefix(caplog):
 
 
 def test_check_sizes_ignores_fuse_backend():
-    ws = Workspace({"/slack/": _slack()}, mode=MountMode.READ)
+    ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
     check_sizes(MountBackend.FUSE, ws.ops, "")
 
 

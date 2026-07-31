@@ -115,6 +115,7 @@ const PYODIDE_CONFIG_KEYS: readonly string[] = [
 export class PyodideRuntime extends Runtime implements Evaluator {
   readonly name = PYODIDE_RUNTIME
   readonly [EVALUATOR] = true as const
+  readonly evalLanguage = 'python' as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null

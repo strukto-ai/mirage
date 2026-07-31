@@ -117,7 +117,7 @@
       "expect": {
         "exit": 0,
         "stdout": "bg=1\n",
-        "stderr": "[1]\n"
+        "stderr": ""
       }
     }
   ]

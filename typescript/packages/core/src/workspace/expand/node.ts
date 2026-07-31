@@ -205,7 +205,14 @@ export async function expandNode(
     if (innerCmds.length === 0) return ''
     const inner = innerCmds[0]?.text ?? ''
     const io = await executeFn(inner, { sessionId: session.sessionId })
-    return (await io.stdoutStr()).replace(/\n+$/, '')
+    const text = (await io.stdoutStr()).replace(/\n+$/, '')
+    // Record the substitution's status: an assignment-only statement
+    // whose value ran substitutions reports the last one's status as
+    // its own (see assignmentStatus).
+    io.syncExitCode()
+    session.cmdsubSeq += 1
+    session.cmdsubStatus = io.exitCode
+    return text
   }
 
   if (ntype === NT.ARITHMETIC_EXPANSION) {

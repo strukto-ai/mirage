@@ -18,6 +18,7 @@ import { CommandTimeoutError } from '../../commands/builtin/utils/safeguard.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
+import { mergeSignals } from '../abort.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { ExecutionNode } from '../types.ts'
@@ -44,6 +45,10 @@ export async function handleBackground(
   const bgSession = session.fork()
 
   const abort = new AbortController()
+  // `kill %n` aborts this controller; the signal rides the forked
+  // session so the job's whole subtree (builtins, mounts, runtimes)
+  // observes the kill, merged with any enclosing job's channel.
+  bgSession.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
   const cmdStrInner = left.text
   const task: Promise<[ByteSource | null, IOResult, ExecutionNode]> = (async () => {
     let stdout: ByteSource | null
@@ -83,7 +88,8 @@ export async function handleBackground(
   })
 
   const cmdStr = left.text
-  let jobLine: Uint8Array
+  // Non-interactive bash announces nothing on launch ("[1] <pid>" is
+  // interactive-only); the job stays discoverable via $! and `jobs`.
   if (jobTable !== null) {
     const job = jobTable.submit({
       command: cmdStr,
@@ -94,24 +100,18 @@ export async function handleBackground(
       sessionId: session.sessionId,
     })
     session.lastBgJobId = job.id
-    jobLine = new TextEncoder().encode(`[${job.id.toString()}]\n`)
-  } else {
-    jobLine = new TextEncoder().encode('[bg]\n')
   }
 
   if (right === null) {
-    const io = new IOResult({ stderr: jobLine })
     const tree = new ExecutionNode({
       op: '&',
       exitCode: 0,
       children: [new ExecutionNode({ command: cmdStr, exitCode: 0 })],
     })
-    return [null, io, tree]
+    return [null, new IOResult(), tree]
   }
 
   const [rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
-  const leftStderr = await materialize(rightIo.stderr)
-  rightIo.stderr = leftStderr.byteLength > 0 ? concat([jobLine, leftStderr]) : jobLine
   const children = [new ExecutionNode({ command: cmdStr, exitCode: 0 }), rightExec]
   const tree = new ExecutionNode({
     op: '&',
@@ -250,16 +250,4 @@ export function handlePs(jobTable: JobTable, parts: string[]): JobHandlerResult 
   const out =
     lines.length > 0 ? new TextEncoder().encode(`${lines.join('\n')}\n`) : new Uint8Array()
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
-}
-
-function concat(chunks: Uint8Array[]): Uint8Array {
-  let total = 0
-  for (const c of chunks) total += c.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) {
-    out.set(c, offset)
-    offset += c.byteLength
-  }
-  return out
 }

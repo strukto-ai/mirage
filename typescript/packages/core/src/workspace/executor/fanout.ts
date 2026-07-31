@@ -19,7 +19,7 @@ import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
-import { resolveAcrossMounts } from '../../commands/safeguard.ts'
+import { resolveAcrossMounts } from './policy/safeguard.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -238,25 +238,17 @@ export async function fanOutTraversal(
         }),
       ]
     }
+    // Errors propagate, mirroring python: a mount that cannot open or
+    // whose command raises is a real failure, never a silently missing
+    // slice of the aggregate. Unserved commands return 127 (below).
     if (ensureOpen !== undefined) {
-      try {
-        await ensureOpen(mount.resource)
-      } catch {
-        continue
-      }
+      await ensureOpen(mount.resource)
     }
-    let stdout: ByteSource | null
-    let io: IOResult
-    try {
-      const result = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
-        stdin,
-        cwd,
-      })
-      stdout = result[0]
-      io = result[1]
-    } catch {
-      continue
-    }
+    const [stdout0, io] = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
+      stdin,
+      cwd,
+    })
+    let stdout: ByteSource | null = stdout0
     if (mount !== primaryMount && io.exitCode === 127) {
       // A descendant that does not serve this command contributes
       // nothing to the aggregate walk instead of failing it (du across

@@ -21,14 +21,12 @@ from mirage.agents.io_text import decode, io_to_str
 from mirage.workspace.workspace import Workspace
 
 
-def _parse_job_id(stderr: str) -> int | None:
-    line = stderr.strip()
-    if line.startswith("[") and "]" in line:
-        try:
-            return int(line[1:line.index("]")])
-        except ValueError:
-            return None
-    return None
+def _parse_job_id(stdout: str) -> int | None:
+    lines = stdout.strip().splitlines()
+    if not lines:
+        return None
+    line = lines[-1].strip()
+    return int(line) if line.isdigit() else None
 
 
 class MirageTerminalToolkit(BaseToolkit):
@@ -67,11 +65,15 @@ class MirageTerminalToolkit(BaseToolkit):
         if block:
             io = self._runner.run(self._ws.execute(command))
             return io_to_str(io)
-        bg_cmd = f"{command} &"
+        # Launches are silent (non-interactive bash), so the job id
+        # comes from $! rather than a stderr announcement.
+        bg_cmd = f"{command} & echo $!"
         io = self._runner.run(self._ws.execute(bg_cmd))
-        stderr = decode(io.stderr if isinstance(io.stderr, bytes) else None)
-        job_id = _parse_job_id(stderr)
+        stdout = decode(io.stdout if isinstance(io.stdout, bytes) else None)
+        job_id = _parse_job_id(stdout)
         if job_id is None:
+            stderr = decode(
+                io.stderr if isinstance(io.stderr, bytes) else None)
             return f"Failed to launch background job: {stderr}"
         self._sessions[id] = job_id
         return f"Started session '{id}' as Mirage job [{job_id}]"

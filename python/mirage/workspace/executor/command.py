@@ -28,7 +28,6 @@ from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
                                                      maybe_with_timeout)
 from mirage.commands.config import version_request
 from mirage.commands.errors import UsageError
-from mirage.commands.safeguard import resolve_safeguard
 from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
                                   flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
@@ -38,10 +37,10 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
-from mirage.runtime.route import RoutingDecision
+from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.runtime.table import VfsRuntime
 from mirage.shell.array import ShellArray
-from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -55,6 +54,7 @@ from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.jobs import (handle_fg, handle_jobs,
                                             handle_kill, handle_ps,
                                             handle_wait)
+from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
@@ -243,12 +243,12 @@ def _admission_denial(cmd_name: str) -> IOResult:
     Args:
         cmd_name (str): the refused command.
     """
-    msg = f"mirage: {cmd_name}: no runtime accepted this line\n"
+    msg = f"{cmd_name}: no runtime accepted this line\n"
     return IOResult(exit_code=126, stderr=msg.encode())
 
 
 def _line_runtime(
-        cmd_name: str, registry: MountRegistry, routing: RoutingDecision | None
+        cmd_name: str, registry: MountRegistry, routing: PolicyDecision | None
 ) -> tuple[Runtime | None, IOResult | None]:
     """Resolve a command against the line's routing decision.
 
@@ -263,7 +263,7 @@ def _line_runtime(
         cmd_name (str): the command being dispatched.
         registry (MountRegistry): registry holding static bindings and
             the world's vfs runtime.
-        routing (RoutingDecision | None): the typed line's decision.
+        routing (PolicyDecision | None): the typed line's decision.
     """
     if routing is None:
         vfs = registry.vfs_runtime
@@ -330,7 +330,7 @@ async def run_on_mount(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
@@ -382,9 +382,10 @@ async def run_on_mount(
     # ls/stat render stat rows from the backend's own stat, which never
     # sees namespace attr overlays (chmod/chown/touch on overlay backends)
     # or the default owner; inject the merge so ls -l and stat -c agree.
-    # cp/mv -u freshness checks compare the same merged mtimes.
+    # cp/mv -u freshness checks compare the same merged mtimes, and
+    # find -mtime filters on them (touch results, observed writes).
     stat_overlay = (functools.partial(_namespace_stat_overlay, namespace)
-                    if cmd_name in ("ls", "stat", "cp", "mv")
+                    if cmd_name in ("ls", "stat", "cp", "mv", "find")
                     and namespace is not None else None)
 
     line_runtime, denial = _line_runtime(cmd_name, registry, routing_decision)
@@ -607,7 +608,7 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
@@ -662,16 +663,12 @@ async def handle_command(
                             IOResult(stderr=sig.stderr))
                     merged_io.exit_code = sig.exit_code
                     break
-                # Barrier before seeding $?: lazy exit codes
-                # (exit_on_empty in grep) finalize only once stdout is
-                # consumed.
-                stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+                # $? tracks each statement inside the body, so a bare
+                # `return` (and mid-function $?) sees the last command.
+                stdout = await finish_statement(stdout, io, session)
                 if stdout is not None:
                     all_stdout.append(stdout)
                 merged_io = await merged_io.merge(io)
-                # $? tracks each statement inside the body, so a bare
-                # `return` (and mid-function $?) sees the last command.
-                session.last_exit_code = io.exit_code
                 if (io.exit_code != 0 and session.shell_options.get("errexit")
                         and cmd.type not in ERREXIT_EXEMPT_TYPES
                         and not session.errexit_immune):

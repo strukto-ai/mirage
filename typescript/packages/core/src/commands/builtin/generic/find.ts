@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isEnoent } from '../../../core/generic/find.ts'
+import { isEnoent, modifiedTs } from '../../../core/generic/find.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression, parseSize } from '../findParse.ts'
-import { PathSpec } from '../../../types.ts'
+import { PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { respellRaw } from '../../../utils/path.ts'
-import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { optionsTree, prefixPathNodes } from '../findEval.ts'
 
 const ENC = new TextEncoder()
@@ -45,6 +45,38 @@ function parseMtime(spec: string): [number | null, number | null] {
 }
 
 const nan = (v: number | null): boolean => v !== null && Number.isNaN(v)
+
+async function applyMtimeFilter(
+  results: string[],
+  mtimeMin: number | null,
+  mtimeMax: number | null,
+  stat: (spec: PathSpec) => Promise<FileStat>,
+  mountPrefix: string,
+): Promise<string[]> {
+  if (mtimeMin === null && mtimeMax === null) return results
+  const filtered: string[] = []
+  for (const r of results) {
+    const spec = new PathSpec({
+      virtual: r,
+      directory: r,
+      resolved: false,
+      resourcePath: mountKey(r, mountPrefix),
+    })
+    let st: FileStat
+    try {
+      st = await stat(spec)
+    } catch (err) {
+      if (isEnoent(err)) continue
+      throw err
+    }
+    const mt = modifiedTs(st.modified)
+    if (mt === null) continue
+    if (mtimeMin !== null && mt < mtimeMin) continue
+    if (mtimeMax !== null && mt > mtimeMax) continue
+    filtered.push(r)
+  }
+  return filtered
+}
 
 // Reject malformed -size/-mtime on backends that do not implement those
 // predicates, so a typo errors instead of being silently ignored. Returns the
@@ -96,6 +128,7 @@ export async function findGeneric(
   texts: string[],
   opts: CommandOpts,
   find: (root: PathSpec, options: FindOptions) => Promise<string[]>,
+  stat?: (spec: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
   const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
   const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
@@ -133,6 +166,13 @@ export async function findGeneric(
   const orNames = extractOrNames(nameFlag, texts)
   const emptyFlag = opts.flags.empty === true
   const expr = texts.length > 0 ? parseFindExpression(texts) : null
+  // With a stat wired, the mtime window is applied by the overlay-
+  // aware post-filter below, not pushed into the core: backend cores
+  // only see native times and would drop files whose mtime lives in
+  // the namespace (touch results, observed writes).
+  const pushMtime = stat === undefined
+  const effMtimeMin = expr !== null ? expr.mtimeMin : mtimeMin
+  const effMtimeMax = expr !== null ? expr.mtimeMax : mtimeMax
   const options: FindOptions =
     expr !== null
       ? {
@@ -141,8 +181,8 @@ export async function findGeneric(
           ...(expr.minDepth !== null ? { minDepth: expr.minDepth } : {}),
           ...(expr.minSize !== null ? { minSize: expr.minSize } : {}),
           ...(expr.maxSize !== null ? { maxSize: expr.maxSize } : {}),
-          ...(expr.mtimeMin !== null ? { mtimeMin: expr.mtimeMin } : {}),
-          ...(expr.mtimeMax !== null ? { mtimeMax: expr.mtimeMax } : {}),
+          ...(pushMtime && expr.mtimeMin !== null ? { mtimeMin: expr.mtimeMin } : {}),
+          ...(pushMtime && expr.mtimeMax !== null ? { mtimeMax: expr.mtimeMax } : {}),
           ...(expr.usesEmpty ? { empty: true } : {}),
         }
       : {
@@ -153,8 +193,8 @@ export async function findGeneric(
           ...(minDepth !== null ? { minDepth } : {}),
           ...(minSize !== null ? { minSize } : {}),
           ...(maxSize !== null ? { maxSize } : {}),
-          ...(mtimeMin !== null ? { mtimeMin } : {}),
-          ...(mtimeMax !== null ? { mtimeMax } : {}),
+          ...(pushMtime && mtimeMin !== null ? { mtimeMin } : {}),
+          ...(pushMtime && mtimeMax !== null ? { mtimeMax } : {}),
           ...(nameExclude !== null ? { nameExclude } : {}),
           ...(pathFlag !== null ? { pathPattern: pathFlag } : {}),
           ...(orNames.length > 1 ? { orNames } : {}),
@@ -190,7 +230,11 @@ export async function findGeneric(
             : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       rootMatches.push(displayPath)
     }
-    matches.push(...respellRaw(rootMatches, root.virtual, root.rawPath))
+    const filtered =
+      stat !== undefined
+        ? await applyMtimeFilter(rootMatches, effMtimeMin, effMtimeMax, stat, prefix)
+        : rootMatches
+    matches.push(...respellRaw(filtered, root.virtual, root.rawPath))
   }
   matches.sort()
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')

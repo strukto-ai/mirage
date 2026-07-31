@@ -35,6 +35,7 @@ export const NodeKind = Object.freeze({
   COMPOUND: 'compound',
   IF: 'if',
   FOR: 'for',
+  CFOR: 'cfor',
   SELECT: 'select',
   WHILE: 'while',
   UNTIL: 'until',
@@ -45,6 +46,7 @@ export const NodeKind = Object.freeze({
   TEST: 'test',
   NEGATED: 'negated',
   VAR_ASSIGN: 'var_assign',
+  VAR_ASSIGNS: 'var_assigns',
   UNSUPPORTED: 'unsupported',
 } as const)
 export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind]
@@ -66,6 +68,8 @@ const SIMPLE_KINDS: Readonly<Record<string, NodeKind>> = Object.freeze({
   [NT.TEST_COMMAND]: NodeKind.TEST,
   [NT.NEGATED_COMMAND]: NodeKind.NEGATED,
   [NT.VARIABLE_ASSIGNMENT]: NodeKind.VAR_ASSIGN,
+  [NT.VARIABLE_ASSIGNMENTS]: NodeKind.VAR_ASSIGNS,
+  [NT.C_STYLE_FOR_STATEMENT]: NodeKind.CFOR,
 })
 
 interface KindNodeLike {
@@ -75,8 +79,8 @@ interface KindNodeLike {
 
 /**
  * Classify a tree-sitter node into the shared statement kind, or
- * UNSUPPORTED for node types neither walker implements (c-style for,
- * arithmetic, ...).
+ * UNSUPPORTED for node types neither walker implements (tree-sitter
+ * ERROR nodes, future grammar additions).
  */
 export function nodeKind(node: KindNodeLike): NodeKind {
   const ntype = node.type

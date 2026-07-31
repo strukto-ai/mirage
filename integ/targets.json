@@ -947,6 +947,13 @@
           "backend": "github",
           "repo": "integ/repo-v1",
           "mode": "read"
+        },
+        {
+          "path": "/trunc",
+          "resource": "github",
+          "backend": "github",
+          "repo": "integ/repo-trunc",
+          "mode": "read"
         }
       ]
     },

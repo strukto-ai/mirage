@@ -107,6 +107,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['readdir', 'ssh', '', false],
     ['rename', 'ssh', '', true],
     ['rmdir', 'ssh', '', true],
+    ['setattr', 'ssh', '', true],
     ['stat', 'ssh', '', false],
     ['truncate', 'ssh', '', true],
     ['unlink', 'ssh', '', true],

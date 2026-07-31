@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "gdocs_prov_ls",
+      "seq": 930020,
+      "targets": [
+        "gapps"
+      ],
+      "command": "ls /docs/owned",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gsheets_prov_ls",
+      "seq": 930021,
+      "targets": [
+        "gapps"
+      ],
+      "command": "ls /sheets/owned",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gslides_prov_ls",
+      "seq": 930022,
+      "targets": [
+        "gapps"
+      ],
+      "command": "ls /slides/owned",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gdocs_prov_cat",
+      "seq": 930023,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /docs/owned/2026-01-01_Q1_Plan__doc0001.gdoc.json",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=1 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gdocs_prov_grep",
+      "seq": 930024,
+      "targets": [
+        "gapps"
+      ],
+      "command": "grep -r plan /docs/owned",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

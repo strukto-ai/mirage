@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "trello_prov_ls",
+      "seq": 930030,
+      "targets": [
+        "trello"
+      ],
+      "command": "ls /board",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -38,6 +38,13 @@ export interface Evaluator {
   readonly [EVALUATOR]: true
 
   /**
+   * The language `eval` speaks ("python" or "js"); the policy engine
+   * matches it against a config script's extension so a .js policy
+   * lands on a JS evaluator.
+   */
+  readonly evalLanguage: 'python' | 'js'
+
+  /**
    * Evaluate one program and return its last expression. `inputs`
    * bind as globals in the evaluator's own idiom; a `session` id
    * keeps state alive per id (console semantics), absent evaluates

@@ -405,6 +405,86 @@ def test_status_updates_in_all_construct_bodies():
         assert _stdout(io) == b"s=1\n", cmd
 
 
+def test_status_negation_background_and_assignments():
+    """$? parity for `!`, background launches, and assignment statements."""
+    ws = _ws()
+    for cmd, want in [
+        ("! grep missing /ram/notes.txt; echo s=$?", b"s=0\n"),
+        ("false; true & echo s=$?; wait", b"s=0\n"),
+        ("x=$(false); echo s=$?", b"s=1\n"),
+        ("x=$(exit 42); echo s=$?", b"s=42\n"),
+        ("x=$(true) y=$(false); echo s=$?", b"s=1\n"),
+        ("x=$(false) y=$(true); echo s=$?", b"s=0\n"),
+        ("x=1 y=2; echo s=$? x=$x y=$y", b"s=0 x=1 y=2\n"),
+        ("export e=$(false); echo s=$?", b"s=0\n"),
+        ("arr=($(false)); echo s=$?", b"s=1\n"),
+        ("x=$(false) && echo yes; echo s=$?", b"s=1\n"),
+        ("g() { local lx=$(false); echo s=$?; }; g", b"s=0\n"),
+    ]:
+        io = _exec(ws, cmd)
+        assert _stdout(io) == want, cmd
+
+
+def test_c_style_for():
+    """C-style for matches bash: init/cond/update, break/continue, $?."""
+    ws = _ws()
+    for cmd, want in [
+        ("for ((i=0;i<3;i++)); do echo $i; done", b"0\n1\n2\n"),
+        ("for ((i=0;i<3;i++)); do false; done; echo code=$?", b"code=1\n"),
+        ("for ((i=5;i<3;i++)); do echo x; done; echo code=$?", b"code=0\n"),
+        ("x=0; for ((i=0;i<4;i++)); do x=$((x+i)); done; echo $x", b"6\n"),
+        ("for ((i=0;i<5;i++)); do if ((i==2)); then continue; fi; "
+         "echo $i; done", b"0\n1\n3\n4\n"),
+        ("for ((i=0;i<5;i++)); do if ((i==2)); then break; fi; "
+         "echo $i; done", b"0\n1\n"),
+        ("for ((;;)); do break; done; echo code=$?", b"code=0\n"),
+        ("n=2; for ((i=n;i<4;i++)); do echo $i; done", b"2\n3\n"),
+        ("for ((i=0;i<2;i++)); do echo a; done; echo i=$i", b"a\na\ni=2\n"),
+        ("for ((i=0;i<1;i++)); do false; echo s=$?; done", b"s=1\n"),
+    ]:
+        io = _exec(ws, cmd)
+        assert _stdout(io) == want, cmd
+
+
+def test_c_style_for_arith_error_aborts_with_1():
+    ws = _ws()
+    io = _exec(ws, "for ((i=@;i<1;i++)); do echo x; done; echo c=$?")
+    assert _stdout(io) == b"c=1\n"
+
+
+def test_c_style_for_readonly_aborts_with_1():
+    """A slot assigning to a readonly variable aborts the loop with 1,
+    keeping the output of iterations that already ran (bash 5.2)."""
+    ws = _ws()
+    io = _exec(
+        ws, "readonly i=5; for ((i=0;i<2;i++)); do echo x; done; "
+        "echo c=$?")
+    assert _stdout(io) == b"c=1\n"
+    assert b"bash: i: readonly variable\n" in (io.stderr or b"")
+
+    ws = _ws()
+    io = _exec(
+        ws, "readonly i=5; for ((;i<10;i++)); do echo hi; done; "
+        "echo c=$?; echo i=$i")
+    assert _stdout(io) == b"hi\nc=1\ni=5\n"
+
+
+def test_find_mtime_observed_write_fallback():
+    """A write through mirage stamps an observed mtime that find sees
+    even when the backend reports none; touch still overrides."""
+    ram = RAMResource()
+    ws = Workspace(resources={"/ram/": (ram, MountMode.EXEC)})
+    _exec(ws, "echo hi > /ram/probe.txt")
+    ram._store.modified.clear()
+    io = _exec(ws, "find /ram -name probe.txt -mtime -1")
+    assert _stdout(io) == b"/ram/probe.txt\n"
+    io = _exec(ws, "find /ram -name probe.txt -mtime +5")
+    assert _stdout(io) == b""
+    _exec(ws, "touch -d 2020-01-01 /ram/probe.txt")
+    io = _exec(ws, "find /ram -name probe.txt -mtime +5")
+    assert _stdout(io) == b"/ram/probe.txt\n"
+
+
 # ── variable expansion ─────────────────────────
 
 

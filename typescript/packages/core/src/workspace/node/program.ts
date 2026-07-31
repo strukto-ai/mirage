@@ -86,6 +86,9 @@ export async function executeProgram(
       stdout = bgStdout
       io = bgIo
       lastExec = bgExec
+      // Launching a job is itself a statement: bash sets $? to 0
+      // (the launch status), so `false; cmd & echo $?` prints 0.
+      session.lastExitCode = bgIo.exitCode
       i += 2
     } else {
       let s: ByteSource | null

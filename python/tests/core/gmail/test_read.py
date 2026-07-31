@@ -45,11 +45,21 @@ async def test_read_message(accessor, index):
              vfs_name="Test_Email__msg1.gmail.json",
          )),
     ])
-    processed = {"id": "msg1", "subject": "Test Email", "body_text": "Hello!"}
+    raw_msg = {
+        "id": "msg1",
+        "threadId": "t1",
+        "snippet": "Hello!",
+        "payload": {
+            "headers": [{
+                "name": "Subject",
+                "value": "Test Email"
+            }],
+        },
+    }
     with patch(
-            "mirage.core.gmail.read.get_message_processed",
+            "mirage.core.gmail.read.get_message_raw",
             new_callable=AsyncMock,
-            return_value=processed,
+            return_value=raw_msg,
     ):
         result = await read(
             accessor,
@@ -119,7 +129,6 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             }],
         },
     }
-    processed = {"id": "msg-1", "subject": "Hello World", "body_text": "hi"}
     with (
             patch(
                 "mirage.core.gmail.readdir.list_labels",
@@ -144,9 +153,9 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
                 return_value=raw_msg,
             ),
             patch(
-                "mirage.core.gmail.read.get_message_processed",
+                "mirage.core.gmail.read.get_message_raw",
                 new_callable=AsyncMock,
-                return_value=processed,
+                return_value=raw_msg,
             ),
     ):
         result = await read(

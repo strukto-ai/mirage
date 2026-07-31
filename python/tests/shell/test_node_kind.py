@@ -41,7 +41,9 @@ SNIPPETS = {
     NodeKind.TEST: "[[ -n x ]]",
     NodeKind.NEGATED: "! true",
     NodeKind.VAR_ASSIGN: "FOO=1",
-    NodeKind.UNSUPPORTED: "for ((i=0;i<2;i++)); do true; done",
+    NodeKind.VAR_ASSIGNS: "FOO=1 BAR=2",
+    NodeKind.CFOR: "for ((i=0;i<2;i++)); do true; done",
+    NodeKind.UNSUPPORTED: "case x",
 }
 
 

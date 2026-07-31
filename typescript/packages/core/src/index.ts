@@ -145,7 +145,7 @@ export {
   FALLBACK_SAFEGUARD,
   resolveAcrossMounts,
   resolveSafeguard,
-} from './commands/safeguard.ts'
+} from './workspace/executor/policy/safeguard.ts'
 export { CommandTimeoutError, SafeguardExceededError } from './commands/builtin/utils/safeguard.ts'
 export { GENERAL_COMMANDS } from './commands/builtin/general/index.ts'
 export { GENERAL_BC } from './commands/builtin/general/bc.ts'
@@ -504,16 +504,22 @@ export {
   commandFacts,
   decideLine,
   evaluatorOf,
-  routeContextFromPayload,
-  routeContextPayload,
+  policyContextFromPayload,
+  policyContextPayload,
   ScriptSource,
-  RoutingDecisionError,
+  parseVerdict,
+  DenyResult,
+  PolicyDeny,
+  PolicyError,
+  RouteResult,
+  type PolicyResult,
   type CommandFacts,
-  type RoutingDecision,
-  type RouteContext,
-  type RouteFn,
-  type RouteScript,
-} from './workspace/executor/route/index.ts'
+  type PolicyDecision,
+  type PolicyContext,
+  type PolicyFn,
+  type PolicyScript,
+  type PolicyVerdict,
+} from './workspace/executor/policy/index.ts'
 export {
   buildRuntime,
   candidates,

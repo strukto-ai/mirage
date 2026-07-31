@@ -4,6 +4,7 @@ from aioresponses import aioresponses
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.sharepoint._resolver import _drive_cache, _site_cache
+from mirage.core.sharepoint.read import read_bytes
 from mirage.core.sharepoint.readdir import readdir
 from mirage.core.sharepoint.stat import stat
 from mirage.types import FileType, PathSpec
@@ -16,6 +17,12 @@ _DRIVE_ID = "b!driveXYZ"
 
 def _accessor() -> SharePointAccessor:
     return SharePointAccessor(SharePointConfig(access_token="tok"))
+
+
+def _ps(virtual: str) -> PathSpec:
+    return PathSpec(resource_path=mount_key(virtual, "/sp"),
+                    virtual=virtual,
+                    directory=virtual)
 
 
 def _seed_caches():
@@ -196,3 +203,75 @@ async def test_stat_site_and_drive_have_no_metadata():
     result = await stat(_accessor(), drive_path)
     assert result.size is None
     assert result.modified is None
+
+
+@pytest.mark.asyncio
+async def test_stat_size_matches_read_for_every_file():
+    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat reports
+    # from the listing must equal the byte length a read delivers, for
+    # every file in the tree, 0-byte files included.
+    _seed_caches()
+    contents = {
+        "/notes.txt": b"hello sharepoint",
+        "/Docs/empty.bin": b"",
+        "/Docs/report.docx": b"docx bytes",
+    }
+    drive = f"{_BASE}/drives/{_DRIVE_ID}"
+    index = RAMIndexCacheStore()
+    accessor = _accessor()
+    with aioresponses() as m:
+        m.get(drive + "/root/children",
+              payload={
+                  "value": [
+                      {
+                          "id": "1",
+                          "name": "notes.txt",
+                          "size": len(contents["/notes.txt"]),
+                          "file": {},
+                          "lastModifiedDateTime": "2026-06-19T09:28:00Z",
+                      },
+                      {
+                          "id": "2",
+                          "name": "Docs",
+                          "size": 9000,
+                          "folder": {
+                              "childCount": 2
+                          },
+                          "lastModifiedDateTime": "2026-06-19T09:28:00Z",
+                      },
+                  ]
+              })
+        m.get(drive + "/root:/Docs:/children",
+              payload={
+                  "value": [{
+                      "id": "3",
+                      "name": "empty.bin",
+                      "size": 0,
+                      "file": {},
+                      "lastModifiedDateTime": "2026-06-19T09:28:00Z",
+                  }, {
+                      "id": "4",
+                      "name": "report.docx",
+                      "size": len(contents["/Docs/report.docx"]),
+                      "file": {},
+                      "lastModifiedDateTime": "2026-06-19T09:28:00Z",
+                  }]
+              })
+        for path, body in contents.items():
+            m.get(drive + f"/root:{path}:/content", body=body)
+        files: list[str] = []
+        stack = ["/sp/Engineering/Documents"]
+        while stack:
+            current = stack.pop()
+            listing = await readdir(accessor, _ps(current), index)
+            for child in listing:
+                info = await stat(accessor, _ps(child), index)
+                if info.type == FileType.DIRECTORY:
+                    stack.append(child)
+                else:
+                    assert info.size is not None, child
+                    files.append(child)
+                    body = await read_bytes(accessor, _ps(child))
+                    assert info.size == len(body), child
+    expected = sorted("/sp/Engineering/Documents" + p for p in contents)
+    assert sorted(files) == expected

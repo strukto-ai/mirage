@@ -38,12 +38,22 @@ async def stat(accessor: SSHAccessor,
         mod_str = ""
         if attrs.mtime is not None:
             mod_str = epoch_to_iso(attrs.mtime)
+        # Fields setattr applies natively (mode, times) read from the
+        # remote inode, so external chmod/utime stays visible, mirroring
+        # disk. Ownership can never be applied natively (chown over SFTP
+        # needs privileges), so it lives wholly in the namespace overlay;
+        # server-side uid/gid numbers would also be machine-dependent
+        # noise.
         return FileStat(
             name=name,
             size=attrs.size or 0,
             modified=mod_str,
             fingerprint=mod_str or None,
             type=FileType.DIRECTORY if is_dir else guess_type(path),
+            mode=(attrs.permissions
+                  & 0o7777 if attrs.permissions is not None else None),
+            atime=(epoch_to_iso(attrs.atime)
+                   if attrs.atime is not None else None),
         )
     except asyncssh.SFTPNoSuchFile:
         raise enoent(virtual)

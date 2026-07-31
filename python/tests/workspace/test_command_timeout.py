@@ -19,8 +19,8 @@ import time
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands import safeguard as sg
 from mirage.resource.ram import RAMResource
+from mirage.runtime.policy import safeguard as sg
 from mirage.runtime.python import LocalRuntime
 from mirage.types import CommandSafeguard, OnExceed
 
@@ -105,7 +105,7 @@ async def test_mount_override_beats_command_default():
     overrides = {"cat": CommandSafeguard(timeout_seconds=999.0)}
     ws = _ws(safeguards=overrides)
     mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
-    from mirage.commands.safeguard import resolve_safeguard
+    from mirage.runtime.policy.safeguard import resolve_safeguard
     resolved = resolve_safeguard(
         "cat", mount_override=mount.command_safeguards.get("cat"))
     assert resolved.timeout_seconds == 999.0

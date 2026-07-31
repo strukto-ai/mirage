@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, command, findGeneric, specOf } from '@struktoai/mirage-core'
+import { ResourceName, command, findGeneric, overlaidStat, specOf } from '@struktoai/mirage-core'
 import { find as opfsFind } from '../../../core/opfs/find.ts'
+import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
 export const OPFS_FIND = command({
@@ -21,5 +22,13 @@ export const OPFS_FIND = command({
   resource: ResourceName.OPFS,
   spec: specOf('find'),
   fn: (accessor: OPFSAccessor, paths, texts, opts) =>
-    findGeneric(paths, texts, opts, (root, options) => opfsFind(accessor, root, options)),
+    findGeneric(
+      paths,
+      texts,
+      opts,
+      (root, options) => opfsFind(accessor, root, options),
+      // -mtime must see namespace times (touch results, observed
+      // writes), same as ls.
+      overlaidStat((p) => opfsStat(accessor, p), opts.statOverlay),
+    ),
 })

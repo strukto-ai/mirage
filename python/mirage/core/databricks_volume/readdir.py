@@ -72,15 +72,23 @@ async def readdir(
     index_entries = []
     for full_path, entry in pairs:
         name = full_path.rstrip("/").rsplit("/", 1)[-1]
-        resource_type = "folder" if getattr(entry, "is_directory",
-                                            False) else "file"
+        is_dir = bool(getattr(entry, "is_directory", False))
+        resource_type = "folder" if is_dir else "file"
         remote_time = modified_to_iso(getattr(entry, "last_modified", None))
+        size = getattr(entry, "file_size", None)
+        if not is_dir and size is None:
+            # DirectoryEntry normally carries file_size; when the lister
+            # omits it, one HEAD per affected file fills the gap so the
+            # index never caches an unknown size.
+            metadata = await asyncio.to_thread(accessor.files.get_metadata,
+                                               entry.path)
+            size = getattr(metadata, "content_length", None)
         index_entries.append((name,
                               IndexEntry(
                                   id=full_path,
                                   name=name,
                                   resource_type=resource_type,
-                                  size=getattr(entry, "file_size", None),
+                                  size=size,
                                   remote_time=remote_time or "",
                               )))
     await index.set_dir(virtual_key, index_entries)

@@ -56,7 +56,7 @@ cli_expressible() {
 # inline script sources into .py files under $2.
 write_world_yaml() {
   local world_json="$1" work="$2"
-  local n i src route
+  local n i src policy
   n=$(jq '(.runtimes // []) | length' <<<"$world_json")
   for i in $(seq 0 $((n - 1))); do
     src=$(jq -r ".runtimes[$i] | if type == \"object\" then .script // empty else empty end" <<<"$world_json")
@@ -65,17 +65,17 @@ write_world_yaml() {
       world_json=$(jq --arg p "$work/script_$i.py" ".runtimes[$i].script = \$p" <<<"$world_json")
     fi
   done
-  route=$(jq -r '.route // empty' <<<"$world_json")
-  if [ -n "$route" ]; then
-    printf '%s' "$route" > "$work/route.py"
-    world_json=$(jq --arg p "$work/route.py" '.route = $p' <<<"$world_json")
+  policy=$(jq -r '.policy // empty' <<<"$world_json")
+  if [ -n "$policy" ]; then
+    printf '%s' "$policy" > "$work/policy.py"
+    world_json=$(jq --arg p "$work/policy.py" '.policy = $p' <<<"$world_json")
   fi
   jq '{mode: "EXEC",
        mounts: ((.mounts // {"/ram": {"resource": "ram"}})
          | map_values({resource: .resource}
              + (if .safeguards then {command_safeguards: .safeguards} else {} end)))}
       + (if .runtimes then {runtimes: .runtimes} else {} end)
-      + (if .route then {route: .route} else {} end)' \
+      + (if .policy then {policy: .policy} else {} end)' \
     <<<"$world_json" > "$work/ws.yaml"
 }
 

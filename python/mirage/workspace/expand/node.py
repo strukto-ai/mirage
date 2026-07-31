@@ -175,7 +175,14 @@ async def expand_node(
             return ""
         inner = get_text(inner_cmds[0])
         io = await execute_fn(inner, session_id=session.session_id)
-        return (await io.stdout_str()).rstrip("\n")
+        text = (await io.stdout_str()).rstrip("\n")
+        # Record the substitution's status: an assignment-only
+        # statement whose value ran substitutions reports the last
+        # one's status as its own (see assignment_status).
+        io.sync_exit_code()
+        session._cmdsub_seq += 1
+        session._cmdsub_status = io.exit_code
+        return text
 
     if ntype == NT.ARITHMETIC_EXPANSION:
         expr = await expand_arith(ts_node, session, execute_fn, call_stack)
