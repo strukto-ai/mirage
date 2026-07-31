@@ -51,6 +51,53 @@ describe('LocalRuntime', () => {
     ).rejects.toThrow(/local python interpreter not found/)
   })
 
+  it('an aborted signal kills the interpreter (safeguard timeout path)', async () => {
+    const rt = new LocalRuntime()
+    const ctl = new AbortController()
+    const started = Date.now()
+    const pending = rt.run({
+      code: 'import time; time.sleep(60)',
+      args: [],
+      stdin: null,
+      env: {},
+      flags: {},
+      signal: ctl.signal,
+    })
+    setTimeout(() => {
+      ctl.abort()
+    }, 100)
+    const result = await pending
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(result.exitCode).not.toBe(0)
+  })
+
+  it('stdin larger than the pipe buffer to an early-exiting program is not an error', async () => {
+    const rt = new LocalRuntime()
+    const result = await rt.run({
+      code: 'pass',
+      args: [],
+      stdin: new Uint8Array(4 * 1024 * 1024),
+      env: {},
+      flags: {},
+    })
+    expect(result.exitCode).toBe(0)
+  })
+
+  it('close() kills any child still running', async () => {
+    const rt = new LocalRuntime()
+    const pending = rt.run({
+      code: 'import time; time.sleep(60)',
+      args: [],
+      stdin: null,
+      env: {},
+      flags: {},
+    })
+    await new Promise((r) => setTimeout(r, 100))
+    await rt.close()
+    const result = await pending
+    expect(result.exitCode).not.toBe(0)
+  })
+
   it('registers under the local name', () => {
     expect(buildRuntime('local')).toBeInstanceOf(LocalRuntime)
   })

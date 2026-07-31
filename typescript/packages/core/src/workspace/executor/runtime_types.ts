@@ -26,6 +26,13 @@ export interface RunArgs {
    * rest.
    */
   flags?: Record<string, unknown>
+  /**
+   * Aborted when the command's safeguard timeout trips, so a runtime
+   * holding external resources (the local subprocess) can reclaim
+   * them. Python needs no equivalent: asyncio cancels the run task
+   * and the runtime cleans up in its CancelledError handler.
+   */
+  signal?: AbortSignal
 }
 
 /** Outcome of one interpreter execution. */

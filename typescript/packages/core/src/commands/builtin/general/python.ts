@@ -94,6 +94,7 @@ async function pythonCommand(
       stdin: stdinForRuntime,
       env: opts.env ?? {},
       code: resolvedCode,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     },
     { runtime: opts.runtime },
   )

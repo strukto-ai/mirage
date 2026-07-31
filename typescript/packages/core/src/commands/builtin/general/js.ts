@@ -96,6 +96,7 @@ async function jsCommand(
       env: opts.env ?? {},
       code: resolvedCode,
       module,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     },
     { runtime: opts.runtime },
   )

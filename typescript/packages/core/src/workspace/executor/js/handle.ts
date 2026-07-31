@@ -52,6 +52,7 @@ export async function handleJs(
     env: Record<string, string>
     code: string | null
     module: boolean
+    signal?: AbortSignal
   },
   deps: HandleJsDeps,
 ): Promise<Result> {
@@ -95,6 +96,7 @@ export async function handleJs(
       env: opts.env,
       stdin: stdinBytes,
       flags: { module },
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     })
     return [
       result.stdout.length > 0 ? result.stdout : null,

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { spawn } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
 import {
   registerRuntime,
   Runtime,
@@ -39,6 +39,7 @@ export class LocalRuntime extends Runtime {
   readonly name = 'local'
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private readonly python: string
+  private readonly children = new Set<ChildProcess>()
 
   constructor(options: RuntimeOptions = {}) {
     super(options, LocalRuntime.commands, LOCAL_CONFIG_KEYS)
@@ -49,15 +50,22 @@ export class LocalRuntime extends Runtime {
 
   run(args: RunArgs): Promise<RunResult> {
     return new Promise((resolve, reject) => {
+      // The signal aborts when the command's safeguard timeout trips:
+      // spawn then SIGKILLs the child (matching the python runtime's
+      // proc.kill() on cancellation) and 'close' settles the promise.
       const child = spawn(this.python, ['-c', args.code, ...args.args], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...args.env },
+        ...(args.signal !== undefined ? { signal: args.signal, killSignal: 'SIGKILL' } : {}),
       })
+      this.children.add(child)
       const out: Buffer[] = []
       const err: Buffer[] = []
       child.stdout.on('data', (chunk: Buffer) => out.push(chunk))
       child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
       child.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.name === 'AbortError') return
+        this.children.delete(child)
         reject(
           error.code === 'ENOENT'
             ? new Error(
@@ -68,6 +76,7 @@ export class LocalRuntime extends Runtime {
         )
       })
       child.on('close', (code) => {
+        this.children.delete(child)
         const stderr = Buffer.concat(err)
         resolve({
           stdout: new Uint8Array(Buffer.concat(out)),
@@ -75,9 +84,21 @@ export class LocalRuntime extends Runtime {
           exitCode: code ?? 1,
         })
       })
+      // EPIPE means the program exited without draining its stdin
+      // (`head`-like); python's communicate() suppresses the matching
+      // BrokenPipeError, so it is not an error here either.
+      child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EPIPE') reject(error)
+      })
       if (args.stdin !== null) child.stdin.write(args.stdin)
       child.stdin.end()
     })
+  }
+
+  override close(): Promise<void> {
+    for (const child of this.children) child.kill('SIGKILL')
+    this.children.clear()
+    return Promise.resolve()
   }
 }
 
