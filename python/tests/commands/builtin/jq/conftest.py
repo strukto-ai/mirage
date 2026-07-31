@@ -30,10 +30,32 @@ def write_to_backend(backend, path, data):
     store.files[_norm(path)] = data
 
 
-def jq(backend, path, expression):
+def eval_one(obj: object, expr: str) -> object:
+    """Evaluate expr and return its single output.
+
+    jq_eval is arity-preserving, so a program that emits one value still
+    comes back as a one-element list. Tests of single-valued programs go
+    through here, which asserts the arity instead of assuming it.
+
+    Args:
+        obj (object): JSON-like input value.
+        expr (str): jq program text.
+    """
+    outputs = jq_eval(obj, expr.strip())
+    assert len(outputs) == 1
+    return outputs[0]
+
+
+def jq_all(backend, path, expression):
     store = backend.accessor.store
     data = parse_json_path(store.files[_norm(path)], path)
     return jq_eval(data, expression.strip())
+
+
+def jq(backend, path, expression):
+    outputs = jq_all(backend, path, expression)
+    assert len(outputs) == 1
+    return outputs[0]
 
 
 def mem_ws(files: dict[str, bytes] | None = None) -> Workspace:

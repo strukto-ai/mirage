@@ -14,45 +14,58 @@
 
 import { describe, expect, it } from 'vitest'
 import { jqEval } from './eval.ts'
-import { JQ_EMPTY, concatBytes, formatJqOutput } from './format.ts'
+import { concatBytes, formatJqOutput } from './format.ts'
 
 const DEC = new TextDecoder()
 
 describe('formatJqOutput', () => {
-  it('returns empty bytes for JQ_EMPTY sentinel', () => {
-    expect(formatJqOutput(JQ_EMPTY, false, false, false)).toEqual(new Uint8Array(0))
-    expect(formatJqOutput(JQ_EMPTY, true, true, true)).toEqual(new Uint8Array(0))
+  it('returns empty bytes when there are no outputs', () => {
+    expect(formatJqOutput([], false, false)).toEqual(new Uint8Array(0))
+    expect(formatJqOutput([], true, true)).toEqual(new Uint8Array(0))
   })
 
   it('serializes a single value compactly', () => {
-    expect(DEC.decode(formatJqOutput({ a: 1 }, false, true, false))).toBe('{"a":1}\n')
+    expect(DEC.decode(formatJqOutput([{ a: 1 }], false, true))).toBe('{"a":1}\n')
+  })
+
+  it('indents a single value by default', () => {
+    expect(DEC.decode(formatJqOutput([{ a: 1 }], false, false))).toBe('{\n  "a": 1\n}\n')
   })
 
   it('emits raw strings without JSON quoting when raw=true', () => {
-    expect(DEC.decode(formatJqOutput('hello', true, true, false))).toBe('hello\n')
+    expect(DEC.decode(formatJqOutput(['hello'], true, true))).toBe('hello\n')
   })
 
-  it('spreads top-level arrays into one line per item', () => {
-    expect(DEC.decode(formatJqOutput([1, 2, 3], false, true, true))).toBe('1\n2\n3\n')
+  it('leaves non-strings as JSON when raw=true', () => {
+    expect(DEC.decode(formatJqOutput(['a', 1], true, true))).toBe('a\n1\n')
   })
 
-  it('keeps array as one value when spread is false', () => {
-    expect(DEC.decode(formatJqOutput([1, 2, 3], false, true, false))).toBe('[1,2,3]\n')
+  it('prints one line per output', () => {
+    expect(DEC.decode(formatJqOutput([1, 2, 3], false, true))).toBe('1\n2\n3\n')
+  })
+
+  it('keeps a single array output on one line', () => {
+    expect(DEC.decode(formatJqOutput([[1, 2, 3]], false, true))).toBe('[1,2,3]\n')
+  })
+
+  it('prints one line per output of a comma program', async () => {
+    const outputs = await jqEval({ a: 'alice', b: 30 }, '.a, .b')
+    expect(DEC.decode(formatJqOutput(outputs, true, true))).toBe('alice\n30\n')
   })
 })
 
 describe('jq DropItem regression', () => {
-  it('zero-output expression returns JQ_EMPTY, not a thrown error', async () => {
+  it('zero-output expression yields no outputs, not a thrown error', async () => {
     const msg = { id: 'x', subject: 'hi', body_text: '...' }
-    const result = await jqEval(msg, '.attachments[]?')
-    expect(result).toBe(JQ_EMPTY)
-    expect(formatJqOutput(result, true, true, true)).toEqual(new Uint8Array(0))
+    const outputs = await jqEval(msg, '.attachments[]?')
+    expect(outputs).toEqual([])
+    expect(formatJqOutput(outputs, true, true)).toEqual(new Uint8Array(0))
   })
 
-  it('select with no match returns JQ_EMPTY', async () => {
-    const result = await jqEval({ x: 1 }, 'select(.x > 100)')
-    expect(result).toBe(JQ_EMPTY)
-    expect(formatJqOutput(result, false, true, false)).toEqual(new Uint8Array(0))
+  it('select with no match yields no outputs', async () => {
+    const outputs = await jqEval({ x: 1 }, 'select(.x > 100)')
+    expect(outputs).toEqual([])
+    expect(formatJqOutput(outputs, false, true)).toEqual(new Uint8Array(0))
   })
 })
 

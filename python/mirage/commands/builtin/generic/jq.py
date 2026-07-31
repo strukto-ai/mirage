@@ -1,7 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from mirage.core.jq import (eval_jsonl_stream, format_jq_output,
-                            has_top_level_spread, is_jsonl_path,
+from mirage.core.jq import (eval_jsonl_stream, format_jq_output, is_jsonl_path,
                             is_streamable_jsonl_expr, jq_eval, parse_json_docs)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -30,10 +29,6 @@ async def jq(
 ) -> tuple[ByteSource | None, IOResult]:
     # GNU jq defaults the filter to "." when no expression is given
     expression = texts[0] if texts else "."
-    # Must match the arity rule jq_eval used: a nested `[]` inside a
-    # collector still yields one output, so a substring test would
-    # explode a single array one element per line.
-    spread = has_top_level_spread(expression)
     if paths:
         if is_jsonl_path(
                 paths[0].virtual) and is_streamable_jsonl_expr(expression):
@@ -43,15 +38,15 @@ async def jq(
         for p in paths:
             docs = parse_json_docs(await read_bytes(p))
             if s:
-                result = jq_eval(docs, expression.strip())
-                outputs.append(format_jq_output(result, r, c, spread))
+                values = jq_eval(docs, expression.strip())
+                outputs.append(format_jq_output(values, r, c))
                 continue
             # jq applies the program to every document in the stream, so
             # a multi-value file evaluates per document whatever it is
             # named; only slurp collapses the stream into one array.
             for doc in docs:
-                result = jq_eval(doc, expression.strip())
-                outputs.append(format_jq_output(result, r, c, spread))
+                values = jq_eval(doc, expression.strip())
+                outputs.append(format_jq_output(values, r, c))
         return b"".join(outputs), IOResult()
     if stdin is None:
         # GNU jq: empty input -> no output, exit 0 (jq . </dev/null)
@@ -59,14 +54,14 @@ async def jq(
     raw_bytes = await _read_stdin_bytes(stdin)
     docs = parse_json_docs(raw_bytes)
     if s:
-        result = jq_eval(docs, expression.strip())
-        return format_jq_output(result, r, c, spread), IOResult()
+        values = jq_eval(docs, expression.strip())
+        return format_jq_output(values, r, c), IOResult()
     # Same stream rule as the path branch: piped input is a stream of
     # values, so each document is evaluated on its own.
     stdin_out: list[bytes] = []
     for doc in docs:
-        result = jq_eval(doc, expression.strip())
-        stdin_out.append(format_jq_output(result, r, c, spread))
+        values = jq_eval(doc, expression.strip())
+        stdin_out.append(format_jq_output(values, r, c))
     return b"".join(stdin_out), IOResult()
 
 

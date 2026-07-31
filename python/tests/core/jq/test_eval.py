@@ -12,38 +12,51 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.jq.eval import has_top_level_spread, jq_eval
+from mirage.core.jq.eval import jq_eval
 
 
-def test_top_level_spread_is_detected():
-    assert has_top_level_spread(".a[]")
-    assert has_top_level_spread(".[] | .name")
-
-
-def test_spread_inside_a_collector_is_not_top_level():
-    # `[.a[] | .t]` emits ONE array, so the caller must print one line.
-    assert not has_top_level_spread("[.a[] | .t]")
-    assert not has_top_level_spread('[["H"]] + [.[] | [.]]')
-
-
-def test_spread_inside_parens_is_not_top_level():
-    assert not has_top_level_spread("([.a[]] | length)")
-
-
-def test_bracket_pair_in_a_string_literal_is_not_a_spread():
-    assert not has_top_level_spread('.a | test("[]")')
-
-
-def test_index_and_slice_are_not_spreads():
-    assert not has_top_level_spread(".values[1:]")
-    assert not has_top_level_spread(".a[0]")
+def test_single_output_is_a_one_element_list():
+    assert jq_eval({"a": 1}, ".a") == [1]
 
 
 def test_collector_program_evaluates_to_a_single_value():
-    result = jq_eval({"a": [{"t": "x"}, {"t": "y"}]}, "[.a[] | .t]")
-    assert result == ["x", "y"]
+    # `[.a[] | .t]` emits ONE array, so the caller prints one line.
+    assert jq_eval({"a": [{
+        "t": "x"
+    }, {
+        "t": "y"
+    }]}, "[.a[] | .t]") == [["x", "y"]]
 
 
-def test_spread_program_evaluates_to_the_output_list():
-    result = jq_eval({"a": [1, 2, 3]}, ".a[]")
-    assert result == [1, 2, 3]
+def test_spread_program_evaluates_to_one_output_per_element():
+    assert jq_eval({"a": [1, 2, 3]}, ".a[]") == [1, 2, 3]
+
+
+def test_comma_is_two_outputs_not_one_array():
+    assert jq_eval({"a": 1, "b": 2}, ".a, .b") == [1, 2]
+
+
+def test_comma_over_arrays_keeps_each_array_whole():
+    assert jq_eval({"a": 1, "b": 2}, "[.a], [.b]") == [[1], [2]]
+
+
+def test_multi_output_without_a_bracket_pair():
+    # `range` and `..` spread with no `[]` anywhere in the program.
+    assert jq_eval(None, "range(3)") == [0, 1, 2]
+    assert jq_eval({"a": 1}, "..") == [{"a": 1}, 1]
+
+
+def test_bracket_pair_inside_a_string_literal_is_one_output():
+    assert jq_eval({"a": "x[]y"}, '.a | contains("[]")') == [True]
+
+
+def test_zero_outputs_is_an_empty_list():
+    assert jq_eval({"x": 1}, "select(.x > 100)") == []
+    assert jq_eval({}, "empty") == []
+
+
+def test_optional_spread_over_a_missing_field_is_empty():
+    """Reproducer for the 'jq: DropItem' regression: an `[]?` over a
+    missing field used to leak the internal sentinel exception."""
+    msg = {"id": "x", "subject": "hi", "body_text": "..."}
+    assert jq_eval(msg, ".attachments[]?") == []

@@ -16,7 +16,6 @@ import {
   concatBytes,
   evalJsonlStream,
   formatJqOutput,
-  hasTopLevelSpread,
   isJsonlPath,
   isStreamableJsonlExpr,
   jqEval,
@@ -40,10 +39,6 @@ export async function jqGeneric(
   const raw = opts.flags.r === true
   const compact = opts.flags.c === true
   const slurp = opts.flags.s === true
-  // Must match the arity rule jqEval used: a nested `[]` inside a
-  // collector still yields one output, so a substring test would
-  // explode a single array one element per line.
-  const spread = hasTopLevelSpread(expression)
 
   if (paths.length > 0) {
     const first = paths[0]
@@ -56,16 +51,16 @@ export async function jqGeneric(
       const bytes = await materialize(stream(p))
       const docs = parseJsonDocs(bytes)
       if (slurp) {
-        const result = await jqEval(docs, expression.trim())
-        outputs.push(formatJqOutput(result, raw, compact, spread))
+        const values = await jqEval(docs, expression.trim())
+        outputs.push(formatJqOutput(values, raw, compact))
         continue
       }
       // jq applies the program to every document in the stream, so a
       // multi-value file evaluates per document whatever it is named;
       // only slurp collapses the stream into one array.
       for (const doc of docs) {
-        const result = await jqEval(doc, expression.trim())
-        outputs.push(formatJqOutput(result, raw, compact, spread))
+        const values = await jqEval(doc, expression.trim())
+        outputs.push(formatJqOutput(values, raw, compact))
       }
     }
     const out: ByteSource = concatBytes(outputs)
@@ -77,14 +72,14 @@ export async function jqGeneric(
   const stdinDocs = parseJsonDocs(stdinBytes)
   if (slurp) {
     const slurped = await jqEval(stdinDocs, expression.trim())
-    return [formatJqOutput(slurped, raw, compact, spread), new IOResult()]
+    return [formatJqOutput(slurped, raw, compact), new IOResult()]
   }
   // Same stream rule as the path branch: piped input is a stream of
   // values, so each document is evaluated on its own.
   const stdinOut: Uint8Array[] = []
   for (const doc of stdinDocs) {
-    const result = await jqEval(doc, expression.trim())
-    stdinOut.push(formatJqOutput(result, raw, compact, spread))
+    const values = await jqEval(doc, expression.trim())
+    stdinOut.push(formatJqOutput(values, raw, compact))
   }
   return [concatBytes(stdinOut), new IOResult()]
 }

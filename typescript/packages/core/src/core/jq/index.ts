@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { hasTopLevelSpread, jqEval } from './eval.ts'
+export { jqEval } from './eval.ts'
 export { concatBytes, formatJqOutput } from './format.ts'
 export {
   evalJsonlStream,

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
-import { JQ_EMPTY } from './format.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 const WHITESPACE = /\s/
@@ -142,9 +141,9 @@ export async function* evalJsonlStream(
     const text = DEC.decode(lineBytes).trim()
     if (text === '') continue
     const obj: unknown = JSON.parse(text)
-    const result = await jqEval(obj, perItem)
-    if (result === JQ_EMPTY) continue
-    const line = raw && typeof result === 'string' ? result : JSON.stringify(result)
-    yield ENC.encode(line + '\n')
+    for (const value of await jqEval(obj, perItem)) {
+      const line = raw && typeof value === 'string' ? value : JSON.stringify(value)
+      yield ENC.encode(line + '\n')
+    }
   }
 }

@@ -14,8 +14,6 @@
 
 import orjson
 
-JQ_EMPTY: object = object()
-
 
 def _format_one(value: object, raw: bool, compact: bool) -> bytes:
     if raw and isinstance(value, str):
@@ -26,16 +24,18 @@ def _format_one(value: object, raw: bool, compact: bool) -> bytes:
 
 
 def format_jq_output(
-    result: object,
+    outputs: list[object],
     raw: bool,
     compact: bool,
-    spread: bool,
 ) -> bytes:
-    if result is JQ_EMPTY:
-        return b""
-    if spread and isinstance(result, list):
-        parts: list[bytes] = []
-        for item in result:
-            parts.append(_format_one(item, raw, compact))
-        return b"".join(parts)
-    return _format_one(result, raw, compact)
+    """Render every output of a jq program, one per line.
+
+    Args:
+        outputs (list[object]): values the program emitted, in order.
+        raw (bool): -r, print string outputs unquoted.
+        compact (bool): -c, print one line of JSON instead of indenting.
+    """
+    parts: list[bytes] = []
+    for value in outputs:
+        parts.append(_format_one(value, raw, compact))
+    return b"".join(parts)

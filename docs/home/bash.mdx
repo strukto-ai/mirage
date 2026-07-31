@@ -134,9 +134,19 @@ Because evaluation is per document, commands that emit newline-delimited
 JSON (such as [paginated `gws` list calls](/python/resource/gdrive#pagination))
 pipe straight into `jq` with no reshaping.
 
-Output arity follows the program, not the input: a program that collects
-into an array (`[.a[] | .t]`) prints one array, and only a top-level
-iterator (`.a[]`) prints one line per element.
+Output arity follows the program, not the input. A jq program emits a
+stream of values and each one prints on its own line, so `.a[]`, `.a, .b`
+and `range(3)` all print several lines, while a program that collects
+into an array (`[.a[] | .t]`) emits one value and prints one line.
+
+```bash
+jq -c '.name, .age' /data/user.json
+"alice"
+30
+
+jq -c '[.name, .age]' /data/user.json
+["alice",30]
+```
 
 ## Supported bash syntax
 

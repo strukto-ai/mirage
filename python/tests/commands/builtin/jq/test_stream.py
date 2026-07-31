@@ -25,7 +25,7 @@ from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
-from .conftest import (SAMPLE_JSONL, collect, jq, mem_ws, run_raw,
+from .conftest import (SAMPLE_JSONL, collect, jq, jq_all, mem_ws, run_raw,
                        write_to_backend)
 
 
@@ -45,7 +45,7 @@ class TestJqJsonl:
 
     def test_jsonl_file_select(self, backend):
         write_to_backend(backend, "/tmp/data.jsonl", SAMPLE_JSONL)
-        result = jq(backend, "/tmp/data.jsonl", ".[] | select(.age > 28)")
+        result = jq_all(backend, "/tmp/data.jsonl", ".[] | select(.age > 28)")
         assert len(result) == 2
         assert result[0]["name"] == "alice"
         assert result[1]["name"] == "carol"
@@ -57,7 +57,7 @@ class TestJqJsonl:
 
     def test_jsonl_file_iteration(self, backend):
         write_to_backend(backend, "/tmp/data.jsonl", SAMPLE_JSONL)
-        result = jq(backend, "/tmp/data.jsonl", ".[] | .name")
+        result = jq_all(backend, "/tmp/data.jsonl", ".[] | .name")
         assert result == ["alice", "bob", "carol"]
 
     def test_ndjson_extension(self, backend):

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const JQ_EMPTY: unique symbol = Symbol('JQ_EMPTY')
-
 const ENC = new TextEncoder()
 
 function formatOne(value: unknown, raw: boolean, compact: boolean): Uint8Array {
@@ -34,17 +32,13 @@ export function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   return out
 }
 
+/** Render every output of a jq program, one per line. */
 export function formatJqOutput(
-  result: unknown,
+  outputs: readonly unknown[],
   raw: boolean,
   compact: boolean,
-  spread: boolean,
 ): Uint8Array {
-  if (result === JQ_EMPTY) return new Uint8Array(0)
-  if (spread && Array.isArray(result)) {
-    const parts: Uint8Array[] = []
-    for (const item of result) parts.push(formatOne(item, raw, compact))
-    return concatBytes(parts)
-  }
-  return formatOne(result, raw, compact)
+  const parts: Uint8Array[] = []
+  for (const value of outputs) parts.push(formatOne(value, raw, compact))
+  return concatBytes(parts)
 }

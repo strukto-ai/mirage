@@ -90,3 +90,17 @@ async def test_eval_jsonl_stream_raw_unquotes_strings():
     source = _lines(b'{"msg":"hello"}\n', b'{"msg":"world"}\n')
     out = await _collect(eval_jsonl_stream(source, ".[].msg", raw=True))
     assert out == ["hello", "world"]
+
+
+@pytest.mark.asyncio
+async def test_eval_jsonl_stream_prints_every_output_of_a_line():
+    source = _lines(b'{"a":1,"b":2}\n', b'{"a":3,"b":4}\n')
+    out = await _collect(eval_jsonl_stream(source, ".[] | .a, .b"))
+    assert out == ["1", "2", "3", "4"]
+
+
+@pytest.mark.asyncio
+async def test_eval_jsonl_stream_drops_lines_with_no_output():
+    source = _lines(b'{"id":1}\n', b'{"id":2}\n', b'{"id":3}\n')
+    out = await _collect(eval_jsonl_stream(source, ".[] | select(.id > 2)"))
+    assert out == ['{"id":3}']

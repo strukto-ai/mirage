@@ -21,10 +21,11 @@ import pytest
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.jq import jq as jq_builder
-from mirage.core.jq import JQ_EMPTY, jq_eval
+from mirage.core.jq import jq_eval
 from mirage.types import MountMode, PathSpec
 
-from .conftest import collect, jq, mem_ws, run_raw, write_to_backend
+from .conftest import (collect, eval_one, jq, jq_all, mem_ws, run_raw,
+                       write_to_backend)
 
 
 async def _const_bytes(data, accessor, path, index=None):
@@ -59,7 +60,7 @@ def test_jq_nested_key(backend):
 
 def test_jq_array_iteration(backend):
     write_to_backend(backend, "/tmp/f.json", b'{"items": [1, 2, 3]}')
-    result = jq(backend, "/tmp/f.json", ".items[]")
+    result = jq_all(backend, "/tmp/f.json", ".items[]")
     assert result == [1, 2, 3]
 
 
@@ -77,7 +78,7 @@ def test_jq_pipe(backend):
 
 def test_jq_select(backend):
     write_to_backend(backend, "/tmp/f.json", b'[{"a": 1}, {"a": 2}, {"a": 3}]')
-    result = jq(backend, "/tmp/f.json", ".[] | select(.a > 1)")
+    result = jq_all(backend, "/tmp/f.json", ".[] | select(.a > 1)")
     assert result == [{"a": 2}, {"a": 3}]
 
 
@@ -101,7 +102,7 @@ def test_jq_values_passes_through_non_null(backend):
 
 def test_jq_values_drops_null(backend):
     write_to_backend(backend, "/tmp/f.json", b'{"a": 1}')
-    assert jq(backend, "/tmp/f.json", ".missing | values") is JQ_EMPTY
+    assert jq_all(backend, "/tmp/f.json", ".missing | values") == []
 
 
 def test_jq_object_values_via_spread(backend):
@@ -123,123 +124,123 @@ def test_jq_length(backend):
 
 
 def test_jq_string_interpolation():
-    result = jq_eval({"name": "world"}, '"Hello \\(.name)"')
+    result = eval_one({"name": "world"}, '"Hello \\(.name)"')
     assert result == "Hello world"
 
 
 def test_jq_string_interpolation_nested():
-    result = jq_eval({"a": 1, "b": 2}, '"\\(.a) + \\(.b)"')
+    result = eval_one({"a": 1, "b": 2}, '"\\(.a) + \\(.b)"')
     assert result == "1 + 2"
 
 
 def test_jq_try_catch_returns_null_when_no_error():
     # In real jq, .missing.x is NOT an error; it returns null.
     # Hence catch is never triggered.
-    assert jq_eval({}, 'try .missing.x catch "fallback"') is None
+    assert eval_one({}, 'try .missing.x catch "fallback"') is None
 
 
 def test_jq_try_catch_triggered_on_real_error():
-    assert jq_eval([1, 2, 3], 'try .name catch "fallback"') == "fallback"
+    assert eval_one([1, 2, 3], 'try .name catch "fallback"') == "fallback"
 
 
 def test_jq_try_no_catch_returns_null():
-    assert jq_eval({}, "try .missing.x") is None
+    assert eval_one({}, "try .missing.x") is None
 
 
 def test_jq_try_no_catch_swallows_real_error():
-    assert jq_eval([1, 2, 3], "try .name") is JQ_EMPTY
+    assert jq_eval([1, 2, 3], "try .name") == []
 
 
 class TestJqMapValues:
 
     def test_map_values_dict(self):
-        result = jq_eval({"a": 1, "b": 2}, "map_values(. > 1)")
+        result = eval_one({"a": 1, "b": 2}, "map_values(. > 1)")
         assert result == {"a": False, "b": True}
 
     def test_map_values_list(self):
-        result = jq_eval([1, 2, 3], "map_values(. > 1)")
+        result = eval_one([1, 2, 3], "map_values(. > 1)")
         assert result == [False, True, True]
 
     def test_map_values_dict_arithmetic(self):
-        result = jq_eval({"x": 10, "y": 20}, 'map_values(type)')
+        result = eval_one({"x": 10, "y": 20}, 'map_values(type)')
         assert result == {"x": "number", "y": "number"}
 
 
 class TestJqHas:
 
     def test_has_present_key(self):
-        assert jq_eval({"name": "alice"}, 'has("name")') is True
+        assert eval_one({"name": "alice"}, 'has("name")') is True
 
     def test_has_absent_key(self):
-        assert jq_eval({"name": "alice"}, 'has("age")') is False
+        assert eval_one({"name": "alice"}, 'has("age")') is False
 
     def test_has_array_with_int_key(self):
         # In real jq, has() on arrays takes an integer index.
-        assert jq_eval([1, 2, 3], "has(1)") is True
-        assert jq_eval([1, 2, 3], "has(5)") is False
+        assert eval_one([1, 2, 3], "has(1)") is True
+        assert eval_one([1, 2, 3], "has(5)") is False
 
 
 class TestJqContains:
 
     def test_contains_string_in_string(self):
-        assert jq_eval("foobar", 'contains("foo")') is True
+        assert eval_one("foobar", 'contains("foo")') is True
 
     def test_contains_string_not_found(self):
-        assert jq_eval("foobar", 'contains("xyz")') is False
+        assert eval_one("foobar", 'contains("xyz")') is False
 
     def test_contains_element_requires_array_arg(self):
         # In real jq, contains(x) requires arg of same type.
         # For arrays, use contains([item]) — see test_contains_subarray.
         with pytest.raises(ValueError):
-            jq_eval([1, 2, 3], "contains(2)")
+            eval_one([1, 2, 3], "contains(2)")
 
     def test_contains_subarray(self):
-        assert jq_eval([1, 2, 3], "contains([1, 2])") is True
+        assert eval_one([1, 2, 3], "contains([1, 2])") is True
 
     def test_contains_subarray_not_found(self):
-        assert jq_eval([1, 2, 3], "contains([4, 5])") is False
+        assert eval_one([1, 2, 3], "contains([4, 5])") is False
 
 
 class TestJqComparisons:
 
     def test_eq_true(self):
-        assert jq_eval({"a": 1}, ".a == 1") is True
+        assert eval_one({"a": 1}, ".a == 1") is True
 
     def test_eq_false(self):
-        assert jq_eval({"a": 1}, ".a == 2") is False
+        assert eval_one({"a": 1}, ".a == 2") is False
 
     def test_neq_true(self):
-        assert jq_eval({"a": 1}, ".a != 2") is True
+        assert eval_one({"a": 1}, ".a != 2") is True
 
     def test_neq_false(self):
-        assert jq_eval({"a": 1}, ".a != 1") is False
+        assert eval_one({"a": 1}, ".a != 1") is False
 
     def test_gt(self):
-        assert jq_eval({"a": 5}, ".a > 3") is True
+        assert eval_one({"a": 5}, ".a > 3") is True
 
     def test_gt_false(self):
-        assert jq_eval({"a": 1}, ".a > 3") is False
+        assert eval_one({"a": 1}, ".a > 3") is False
 
     def test_lt(self):
-        assert jq_eval({"a": 1}, ".a < 3") is True
+        assert eval_one({"a": 1}, ".a < 3") is True
 
     def test_lt_false(self):
-        assert jq_eval({"a": 5}, ".a < 3") is False
+        assert eval_one({"a": 5}, ".a < 3") is False
 
     def test_gte(self):
-        assert jq_eval({"a": 3}, ".a >= 3") is True
+        assert eval_one({"a": 3}, ".a >= 3") is True
 
     def test_gte_false(self):
-        assert jq_eval({"a": 2}, ".a >= 3") is False
+        assert eval_one({"a": 2}, ".a >= 3") is False
 
     def test_lte(self):
-        assert jq_eval({"a": 3}, ".a <= 3") is True
+        assert eval_one({"a": 3}, ".a <= 3") is True
 
     def test_lte_false(self):
-        assert jq_eval({"a": 5}, ".a <= 3") is False
+        assert eval_one({"a": 5}, ".a <= 3") is False
 
     def test_string_eq(self):
-        assert jq_eval({"s": "hello"}, '.s == "hello"') is True
+        assert eval_one({"s": "hello"}, '.s == "hello"') is True
 
 
 class TestJqPipes:
@@ -253,61 +254,61 @@ class TestJqPipes:
     def test_pipe_with_iteration_and_select(self, backend):
         write_to_backend(backend, "/tmp/f.json",
                          b'[{"x": 1}, {"x": 5}, {"x": 10}]')
-        result = jq(backend, "/tmp/f.json", ".[] | select(.x > 3)")
+        result = jq_all(backend, "/tmp/f.json", ".[] | select(.x > 3)")
         assert result == [{"x": 5}, {"x": 10}]
 
     def test_pipe_keys_then_length(self):
-        result = jq_eval({"a": 1, "b": 2, "c": 3}, "keys | length")
+        result = eval_one({"a": 1, "b": 2, "c": 3}, "keys | length")
         assert result == 3
 
     def test_pipe_object_values_via_spread_then_sort(self):
         # Real jq: `values` returns the object as-is (it's the identity for
         # non-null). To get the object's values list, use [.[]].
-        result = jq_eval({"a": 3, "b": 1, "c": 2}, "[.[]] | sort")
+        result = eval_one({"a": 3, "b": 1, "c": 2}, "[.[]] | sort")
         assert result == [1, 2, 3]
 
     def test_pipe_map_then_select(self):
         data = [1, 2, 3, 4, 5]
-        result = jq_eval(data, "map(select(. > 2))")
+        result = eval_one(data, "map(select(. > 2))")
         assert result == [3, 4, 5]
 
 
 class TestJqArrayAccess:
 
     def test_index_access(self):
-        result = jq_eval({"items": ["a", "b", "c"]}, ".items[0]")
+        result = eval_one({"items": ["a", "b", "c"]}, ".items[0]")
         assert result == "a"
 
     def test_index_access_last(self):
-        result = jq_eval({"items": ["a", "b", "c"]}, ".items[2]")
+        result = eval_one({"items": ["a", "b", "c"]}, ".items[2]")
         assert result == "c"
 
     def test_nested_array_iteration(self, backend):
         write_to_backend(backend, "/tmp/f.json",
                          b'{"users": [{"name": "alice"}, {"name": "bob"}]}')
-        result = jq(backend, "/tmp/f.json", ".users[].name")
+        result = jq_all(backend, "/tmp/f.json", ".users[].name")
         assert result == ["alice", "bob"]
 
     def test_slice_from_start(self):
-        result = jq_eval([1, 2, 3, 4, 5], ".[:2]")
+        result = eval_one([1, 2, 3, 4, 5], ".[:2]")
         assert result == [1, 2]
 
     def test_slice_to_end(self):
-        result = jq_eval([1, 2, 3, 4, 5], ".[3:]")
+        result = eval_one([1, 2, 3, 4, 5], ".[3:]")
         assert result == [4, 5]
 
 
 class TestJqEdgeCases:
 
     def test_empty_object(self):
-        assert jq_eval({}, ".") == {}
+        assert eval_one({}, ".") == {}
 
     def test_empty_array(self):
-        assert jq_eval([], ".") == []
+        assert eval_one([], ".") == []
 
     def test_deeply_nested(self):
         data = {"a": {"b": {"c": {"d": 42}}}}
-        assert jq_eval(data, ".a.b.c.d") == 42
+        assert eval_one(data, ".a.b.c.d") == 42
 
     def test_unicode_content(self, backend):
         data = {"name": "café", "emoji": "hello"}
@@ -316,46 +317,46 @@ class TestJqEdgeCases:
         assert result == "café"
 
     def test_json_literal_number(self):
-        assert jq_eval({}, "42") == 42
+        assert eval_one({}, "42") == 42
 
     def test_json_literal_string(self):
-        assert jq_eval({}, '"hello"') == "hello"
+        assert eval_one({}, '"hello"') == "hello"
 
     def test_json_literal_array(self):
-        assert jq_eval({}, "[1, 2, 3]") == [1, 2, 3]
+        assert eval_one({}, "[1, 2, 3]") == [1, 2, 3]
 
     def test_length_of_string(self):
-        assert jq_eval("hello", "length") == 5
+        assert eval_one("hello", "length") == 5
 
     def test_length_of_dict(self):
-        assert jq_eval({"a": 1, "b": 2}, "length") == 2
+        assert eval_one({"a": 1, "b": 2}, "length") == 2
 
     def test_keys_of_array(self):
-        assert jq_eval(["a", "b", "c"], "keys") == [0, 1, 2]
+        assert eval_one(["a", "b", "c"], "keys") == [0, 1, 2]
 
     def test_string_interpolation_with_nested_expr(self):
         data = {"items": [1, 2, 3]}
-        result = jq_eval(data, '"count: \\(.items | length)"')
+        result = eval_one(data, '"count: \\(.items | length)"')
         assert result == "count: 3"
 
     def test_select_drops_non_matching(self):
-        assert jq_eval({"a": 1}, "select(.a > 10)") is JQ_EMPTY
+        assert jq_eval({"a": 1}, "select(.a > 10)") == []
 
     def test_map_requires_iterable(self):
         # Real jq: map(.) on a non-iterable raises ValueError.
         with pytest.raises(ValueError):
-            jq_eval(5, "map(.)")
+            eval_one(5, "map(.)")
 
     def test_missing_key_returns_null(self):
         # Real jq: missing keys silently return null (no exception).
-        assert jq_eval({"a": 1}, ".b") is None
+        assert eval_one({"a": 1}, ".b") is None
 
     def test_type_error_dot_on_list(self):
         with pytest.raises((TypeError, KeyError, ValueError)):
-            jq_eval([1, 2, 3], ".name")
+            eval_one([1, 2, 3], ".name")
 
     def test_try_catch_type_error(self):
-        result = jq_eval([1, 2], 'try .name catch "no key"')
+        result = eval_one([1, 2], 'try .name catch "no key"')
         assert result == "no key"
 
 
@@ -375,77 +376,77 @@ class TestJqComplex:
 
     def test_flatten_then_unique_then_sort(self):
         data = [[3, 1], [2, 1], [3, 2]]
-        result = jq_eval(data, "flatten | unique | sort")
+        result = eval_one(data, "flatten | unique | sort")
         assert result == [1, 2, 3]
 
     def test_map_length(self):
         data = ["hello", "hi", "hey"]
-        result = jq_eval(data, "map(length)")
+        result = eval_one(data, "map(length)")
         assert result == [5, 2, 3]
 
     def test_select_with_has(self):
         data = [{"name": "alice"}, {"age": 30}, {"name": "bob"}]
-        result = jq_eval(data, 'map(select(has("name")))')
+        result = eval_one(data, 'map(select(has("name")))')
         assert result == [{"name": "alice"}, {"name": "bob"}]
 
 
 class TestJqArithmetic:
 
     def test_add_numbers(self):
-        assert jq_eval({"a": 1, "b": 2}, ".a + .b") == 3
+        assert eval_one({"a": 1, "b": 2}, ".a + .b") == 3
 
     def test_subtract(self):
-        assert jq_eval({"a": 10, "b": 3}, ".a - .b") == 7
+        assert eval_one({"a": 10, "b": 3}, ".a - .b") == 7
 
     def test_multiply(self):
-        assert jq_eval({"a": 4, "b": 5}, ".a * .b") == 20
+        assert eval_one({"a": 4, "b": 5}, ".a * .b") == 20
 
     def test_divide(self):
-        assert jq_eval({"a": 10, "b": 2}, ".a / .b") == 5.0
+        assert eval_one({"a": 10, "b": 2}, ".a / .b") == 5.0
 
     def test_add_string_concat(self):
-        assert jq_eval({
+        assert eval_one({
             "a": "hello",
             "b": " world"
         }, ".a + .b") == "hello world"
 
     def test_add_literal_number(self):
-        assert jq_eval({"a": 1}, ".a + 10") == 11
+        assert eval_one({"a": 1}, ".a + 10") == 11
 
 
 class TestJqObjectConstruction:
 
     def test_object_construction(self):
         data = {"name": "alice", "age": 30}
-        result = jq_eval(data, "{name: .name}")
+        result = eval_one(data, "{name: .name}")
         assert result == {"name": "alice"}
 
     def test_object_construction_multiple_keys(self):
         data = {"x": 1, "y": 2, "z": 3}
-        result = jq_eval(data, "{a: .x, b: .y}")
+        result = eval_one(data, "{a: .x, b: .y}")
         assert result == {"a": 1, "b": 2}
 
 
 class TestJqAlternative:
 
     def test_alternative_with_null(self):
-        assert jq_eval({"a": None}, '.a // "default"') == "default"
+        assert eval_one({"a": None}, '.a // "default"') == "default"
 
     def test_alternative_with_value(self):
-        assert jq_eval({"a": 42}, '.a // "default"') == 42
+        assert eval_one({"a": 42}, '.a // "default"') == 42
 
     def test_alternative_missing_key(self):
-        assert jq_eval({}, '.missing // "fallback"') == "fallback"
+        assert eval_one({}, '.missing // "fallback"') == "fallback"
 
 
 class TestJqIfThenElse:
 
     def test_if_then_else_true(self):
-        result = jq_eval({"x": 5}, 'if .x > 3 then "big" else "small" end')
+        result = eval_one({"x": 5}, 'if .x > 3 then "big" else "small" end')
         assert result == "big"
 
     def test_if_then_else_false(self):
-        result = jq_eval({"x": 1}, 'if .x > 3 then "big" else "small" end')
+        result = eval_one({"x": 1}, 'if .x > 3 then "big" else "small" end')
         assert result == "small"
 
 
@@ -453,12 +454,12 @@ class TestJqSortByGroupBy:
 
     def test_sort_by(self):
         data = [{"a": 3}, {"a": 1}, {"a": 2}]
-        result = jq_eval(data, "sort_by(.a)")
+        result = eval_one(data, "sort_by(.a)")
         assert result == [{"a": 1}, {"a": 2}, {"a": 3}]
 
     def test_group_by(self):
         data = [{"k": "a", "v": 1}, {"k": "b", "v": 2}, {"k": "a", "v": 3}]
-        result = jq_eval(data, "group_by(.k)")
+        result = eval_one(data, "group_by(.k)")
         assert result == [
             [{
                 "k": "a",
@@ -489,54 +490,54 @@ class TestJqBugFixes:
     def test_dot_key_on_list_raises(self):
         # Real jq raises ValueError "Cannot index array with string".
         with pytest.raises(ValueError):
-            jq_eval([1, 2, 3], ".name")
+            eval_one([1, 2, 3], ".name")
 
     def test_contains_dict_subset(self):
-        assert jq_eval({"a": 1, "b": 2}, 'contains({"a": 1})') is True
+        assert eval_one({"a": 1, "b": 2}, 'contains({"a": 1})') is True
 
     def test_contains_dict_missing_key(self):
-        assert jq_eval({"a": 1}, 'contains({"b": 2})') is False
+        assert eval_one({"a": 1}, 'contains({"b": 2})') is False
 
     def test_contains_dict_wrong_value(self):
-        assert jq_eval({"a": 1}, 'contains({"a": 2})') is False
+        assert eval_one({"a": 1}, 'contains({"a": 2})') is False
 
     def test_contains_dict_full_match(self):
-        assert jq_eval({"a": 1}, 'contains({"a": 1})') is True
+        assert eval_one({"a": 1}, 'contains({"a": 1})') is True
 
 
 class TestJqParensAndArrayConstruction:
 
     def test_parens_unwrap_single(self):
-        assert jq_eval({"items": [1, 2, 3]}, "(.items | length)") == 3
+        assert eval_one({"items": [1, 2, 3]}, "(.items | length)") == 3
 
     def test_parens_in_object_value(self):
-        result = jq_eval({"items": [1, 2, 3]},
-                         "{n: (.items | length), first: .items[0]}")
+        result = eval_one({"items": [1, 2, 3]},
+                          "{n: (.items | length), first: .items[0]}")
         assert result == {"n": 3, "first": 1}
 
     def test_array_construction_collects_spread(self):
         data = {"slides": [{"id": "a"}, {"id": "b"}, {"id": "c"}]}
-        assert jq_eval(data, "[.slides[].id]") == ["a", "b", "c"]
+        assert eval_one(data, "[.slides[].id]") == ["a", "b", "c"]
 
     def test_array_construction_wraps_single_value(self):
-        assert jq_eval({"x": 5}, "[.x]") == [5]
+        assert eval_one({"x": 5}, "[.x]") == [5]
 
     def test_object_with_array_literal_value_does_not_split_inside(self):
-        assert jq_eval({}, "{x: 1, y: [1,2,3]}") == {"x": 1, "y": [1, 2, 3]}
+        assert eval_one({}, "{x: 1, y: [1,2,3]}") == {"x": 1, "y": [1, 2, 3]}
 
     def test_object_with_nested_object_value(self):
-        result = jq_eval({"a": 1, "b": 2}, "{outer: {x: .a, y: .b}}")
+        result = eval_one({"a": 1, "b": 2}, "{outer: {x: .a, y: .b}}")
         assert result == {"outer": {"x": 1, "y": 2}}
 
     def test_join_separator(self):
-        assert jq_eval([1, 2, 3], 'join("-")') == "1-2-3"
+        assert eval_one([1, 2, 3], 'join("-")') == "1-2-3"
 
     def test_join_empty_separator(self):
-        assert jq_eval(["foo", "bar"], 'join("")') == "foobar"
+        assert eval_one(["foo", "bar"], 'join("")') == "foobar"
 
     def test_array_construction_then_join(self):
         data = {"slides": [{"id": "a"}, {"id": "b"}]}
-        assert jq_eval(data, '[.slides[].id] | join(",")') == "a,b"
+        assert eval_one(data, '[.slides[].id] | join(",")') == "a,b"
 
     def test_full_slides_summary_expression(self):
         data = {
@@ -597,7 +598,7 @@ class TestJqParensAndArrayConstruction:
                 '{type: .shape.shapeType, '
                 'text: [.shape.text.textElements[].textRun.content] '
                 '| join("")}]}]}')
-        assert jq_eval(data, expr) == {
+        assert eval_one(data, expr) == {
             "title":
             "Deck",
             "slideCount":
@@ -681,7 +682,7 @@ class TestJqRealLibjqExpressions:
     def test_user_query_with_select_textRun_then_join(self):
         expr = ('[.slides[].pageElements[].shape.text.textElements[] | '
                 'select(.textRun != null) | .textRun.content] | join("")')
-        assert jq_eval(self._slides_doc(), expr) == "Hello worldBye"
+        assert eval_one(self._slides_doc(), expr) == "Hello worldBye"
 
     def test_user_query_array_per_slide_then_join(self):
         expr = ('[.slides[] | '
@@ -689,7 +690,7 @@ class TestJqRealLibjqExpressions:
                 '| join("")]')
         # paragraphMarker has no textRun -> jq returns null; join treats null
         # as empty -> "Hello world" for s1, "Bye" for s2.
-        assert jq_eval(self._slides_doc(), expr) == ["Hello world", "Bye"]
+        assert eval_one(self._slides_doc(), expr) == ["Hello world", "Bye"]
 
     def test_user_query_full_summary_object(self):
         expr = ('{title: .title, '
@@ -699,7 +700,7 @@ class TestJqRealLibjqExpressions:
                 '{type: .shape.shapeType, '
                 'text: [.shape.text.textElements[].textRun.content] '
                 '| join("")}]}]}')
-        assert jq_eval(self._slides_doc(), expr) == {
+        assert eval_one(self._slides_doc(), expr) == {
             "title":
             "Deck",
             "slideCount":
@@ -725,43 +726,43 @@ class TestJqRealLibjqExpressions:
     def test_recurse_then_select(self):
         # `recurse` (..) is a real jq builtin the homegrown didn't have.
         data = {"a": 1, "b": {"c": 2, "d": {"e": 3}}}
-        result = jq_eval(data, "[.. | numbers] | sort")
+        result = eval_one(data, "[.. | numbers] | sort")
         assert result == [1, 2, 3]
 
     def test_string_split_join_round_trip(self):
-        assert jq_eval("a-b-c", 'split("-")') == ["a", "b", "c"]
-        assert jq_eval(["a", "b", "c"], 'join("-")') == "a-b-c"
+        assert eval_one("a-b-c", 'split("-")') == ["a", "b", "c"]
+        assert eval_one(["a", "b", "c"], 'join("-")') == "a-b-c"
 
     def test_alternative_operator_default(self):
         # `// "default"` falls back when LHS is null/false.
-        assert jq_eval({"a": None}, '.a // "fallback"') == "fallback"
-        assert jq_eval({"a": "real"}, '.a // "fallback"') == "real"
+        assert eval_one({"a": None}, '.a // "fallback"') == "fallback"
+        assert eval_one({"a": "real"}, '.a // "fallback"') == "real"
 
     def test_to_entries_from_entries(self):
-        result = jq_eval({"a": 1, "b": 2}, "to_entries")
+        result = eval_one({"a": 1, "b": 2}, "to_entries")
         assert result == [{"key": "a", "value": 1}, {"key": "b", "value": 2}]
-        result2 = jq_eval([{"key": "x", "value": 9}], "from_entries")
+        result2 = eval_one([{"key": "x", "value": 9}], "from_entries")
         assert result2 == {"x": 9}
 
     def test_string_endswith_startswith(self):
-        assert jq_eval("foobar", 'startswith("foo")') is True
-        assert jq_eval("foobar", 'endswith("bar")') is True
-        assert jq_eval("foobar", 'startswith("xyz")') is False
+        assert eval_one("foobar", 'startswith("foo")') is True
+        assert eval_one("foobar", 'endswith("bar")') is True
+        assert eval_one("foobar", 'startswith("xyz")') is False
 
     def test_test_regex(self):
-        assert jq_eval("hello world", 'test("w.rld")') is True
-        assert jq_eval("hello world", 'test("xyz")') is False
+        assert eval_one("hello world", 'test("w.rld")') is True
+        assert eval_one("hello world", 'test("xyz")') is False
 
     def test_walk_transform(self):
         # `walk` is a real jq builtin the homegrown didn't have.
         data = {"a": "FOO", "b": ["BAR", "BAZ"]}
-        result = jq_eval(
+        result = eval_one(
             data, 'walk(if type == "string" then ascii_downcase else . end)')
         assert result == {"a": "foo", "b": ["bar", "baz"]}
 
     def test_nested_object_with_paren_value(self):
         data = {"items": [1, 2, 3]}
-        result = jq_eval(
+        result = eval_one(
             data, "{count: (.items | length), max: (.items | max), "
             "sum: ([.items[]] | add)}")
         assert result == {"count": 3, "max": 3, "sum": 6}
@@ -783,14 +784,14 @@ class TestJqRealLibjqExpressions:
                 },
             ]
         }
-        result = jq_eval(
+        result = eval_one(
             data, "[.users[] | select(.active) | .name] | join(\", \")")
         assert result == "alice, carol"
 
-    def test_top_level_select_returns_empty_sentinel(self):
-        # Real jq: select(false) produces 0 outputs.
-        # Our adapter returns JQ_EMPTY so callers serialize as empty bytes.
-        assert jq_eval({"x": 5}, "select(.x > 100)") is JQ_EMPTY
+    def test_top_level_select_produces_no_output(self):
+        # Real jq: select(false) produces 0 outputs, which the caller
+        # serializes as empty bytes.
+        assert jq_eval({"x": 5}, "select(.x > 100)") == []
 
 
 class TestJqMemoryBackend:

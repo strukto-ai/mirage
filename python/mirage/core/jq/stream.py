@@ -19,7 +19,6 @@ from typing import Any
 import orjson
 
 from mirage.core.jq.eval import jq_eval
-from mirage.core.jq.format import JQ_EMPTY
 from mirage.io.async_line_iterator import AsyncLineIterator
 
 
@@ -111,10 +110,8 @@ async def eval_jsonl_stream(
         if not text:
             continue
         obj = orjson.loads(text)
-        result = jq_eval(obj, per_item)
-        if result is JQ_EMPTY:
-            continue
-        if raw and isinstance(result, str):
-            yield result.encode("utf-8") + b"\n"
-        else:
-            yield orjson.dumps(result) + b"\n"
+        for value in jq_eval(obj, per_item):
+            if raw and isinstance(value, str):
+                yield value.encode("utf-8") + b"\n"
+            else:
+                yield orjson.dumps(value) + b"\n"

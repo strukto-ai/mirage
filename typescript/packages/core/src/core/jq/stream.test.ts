@@ -13,9 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseJsonAuto, parseJsonDocs } from './stream.ts'
+import { evalJsonlStream, parseJsonAuto, parseJsonDocs } from './stream.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+
+async function* lines(...items: string[]): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  for (const item of items) yield ENC.encode(item)
+}
+
+async function collect(stream: AsyncIterable<Uint8Array>): Promise<string[]> {
+  const out: string[] = []
+  for await (const chunk of stream) out.push(DEC.decode(chunk).replace(/\n$/, ''))
+  return out
+}
 
 describe('parseJsonAuto', () => {
   it('throws clear error on empty input', () => {
@@ -63,5 +75,27 @@ describe('parseJsonDocs', () => {
 
   it('reports the whole-document error on garbage', () => {
     expect(() => parseJsonDocs(ENC.encode('this is not json'))).toThrow(/JSON|json/)
+  })
+})
+
+describe('evalJsonlStream', () => {
+  it('maps each line through the per-item program', async () => {
+    const source = lines('{"msg":"hello"}\n', '{"msg":"world"}\n')
+    expect(await collect(evalJsonlStream(source, '.[].msg'))).toEqual(['"hello"', '"world"'])
+  })
+
+  it('unquotes strings when raw', async () => {
+    const source = lines('{"msg":"hello"}\n', '{"msg":"world"}\n')
+    expect(await collect(evalJsonlStream(source, '.[].msg', true))).toEqual(['hello', 'world'])
+  })
+
+  it('prints every output of a line', async () => {
+    const source = lines('{"a":1,"b":2}\n', '{"a":3,"b":4}\n')
+    expect(await collect(evalJsonlStream(source, '.[] | .a, .b'))).toEqual(['1', '2', '3', '4'])
+  })
+
+  it('drops lines with no output', async () => {
+    const source = lines('{"id":1}\n', '{"id":2}\n', '{"id":3}\n')
+    expect(await collect(evalJsonlStream(source, '.[] | select(.id > 2)'))).toEqual(['{"id":3}'])
   })
 })

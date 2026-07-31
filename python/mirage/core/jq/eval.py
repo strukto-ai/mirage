@@ -14,61 +14,24 @@
 
 import jq as _libjq
 
-from mirage.core.jq.format import JQ_EMPTY
 
-
-def has_top_level_spread(expr: str) -> bool:
-    """Report whether a jq program spreads its input at the top level.
-
-    A top-level ``[]`` means the program emits one output per element,
-    so the caller must print each on its own line. A ``[]`` nested
-    inside a collector (``[.a[] | .b]``) does not: that program emits a
-    single array. Strings are skipped so a literal "[]" never counts.
-
-    Args:
-        expr (str): jq program text.
-    """
-    depth = 0
-    in_str = False
-    i = 0
-    while i < len(expr):
-        ch = expr[i]
-        if ch == '"' and (i == 0 or expr[i - 1] != "\\"):
-            in_str = not in_str
-            i += 1
-            continue
-        if in_str:
-            i += 1
-            continue
-        if (depth == 0 and ch == "[" and i + 1 < len(expr)
-                and expr[i + 1] == "]"):
-            return True
-        if ch in ("(", "[", "{"):
-            depth += 1
-        elif ch in (")", "]", "}"):
-            depth -= 1
-        i += 1
-    return False
-
-
-def jq_eval(obj: object, expr: str) -> object:
+def jq_eval(obj: object, expr: str) -> list[object]:
     """Evaluate a jq expression against obj using libjq.
+
+    A jq program is a stream transformer: it emits zero, one or many
+    values, and jq prints each on its own line. That arity is preserved
+    here rather than collapsed, so two outputs are never confused with
+    one output that happens to be an array. `.a, .b` yields two values;
+    `[.a, .b]` yields one.
 
     Args:
         obj (object): JSON-like input value (dict / list / scalar).
         expr (str): jq program text.
 
     Returns:
-        object: single value when the program produces one output,
-            list of values when it produces more than one,
-            JQ_EMPTY sentinel when the program produces zero outputs.
-            Callers must check `result is JQ_EMPTY` and treat that
-            as "no output" (real jq exits 0 with empty stdout).
+        list[object]: every output value, in order. Empty when the
+            program produces no output at all, which real jq reports as
+            exit 0 with empty stdout.
     """
     program = _libjq.compile(expr)
-    outputs = list(program.input_value(obj))
-    if not outputs:
-        return JQ_EMPTY
-    if len(outputs) == 1 and not has_top_level_spread(expr):
-        return outputs[0]
-    return outputs
+    return list(program.input_value(obj))

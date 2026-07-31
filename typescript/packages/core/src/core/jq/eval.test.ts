@@ -13,24 +13,36 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { hasTopLevelSpread, jqEval } from './eval.ts'
-import { JQ_EMPTY } from './format.ts'
+import { jqEval } from './eval.ts'
+
+/**
+ * Evaluate expr and return its single output.
+ *
+ * jqEval is arity-preserving, so a program that emits one value still comes
+ * back as a one-element list. Tests of single-valued programs go through
+ * here, which asserts the arity instead of assuming it.
+ */
+async function evalOne(obj: unknown, expr: string): Promise<unknown> {
+  const outputs = await jqEval(obj, expr)
+  expect(outputs).toHaveLength(1)
+  return outputs[0]
+}
 
 describe('jq eval (libjq adapter)', () => {
   it('identity', async () => {
-    expect(await jqEval({ a: 1 }, '.')).toEqual({ a: 1 })
+    expect(await evalOne({ a: 1 }, '.')).toEqual({ a: 1 })
   })
 
   it('dot access', async () => {
-    expect(await jqEval({ name: 'alice' }, '.name')).toBe('alice')
+    expect(await evalOne({ name: 'alice' }, '.name')).toBe('alice')
   })
 
   it('nested dot access', async () => {
-    expect(await jqEval({ a: { b: { c: 42 } } }, '.a.b.c')).toBe(42)
+    expect(await evalOne({ a: { b: { c: 42 } } }, '.a.b.c')).toBe(42)
   })
 
   it('array index', async () => {
-    expect(await jqEval([10, 20, 30], '.[1]')).toBe(20)
+    expect(await evalOne([10, 20, 30], '.[1]')).toBe(20)
   })
 
   it('array spread with map-like pipe', async () => {
@@ -39,30 +51,30 @@ describe('jq eval (libjq adapter)', () => {
   })
 
   it('length', async () => {
-    expect(await jqEval([1, 2, 3], 'length')).toBe(3)
-    expect(await jqEval('hello', 'length')).toBe(5)
-    expect(await jqEval({ a: 1, b: 2 }, 'length')).toBe(2)
+    expect(await evalOne([1, 2, 3], 'length')).toBe(3)
+    expect(await evalOne('hello', 'length')).toBe(5)
+    expect(await evalOne({ a: 1, b: 2 }, 'length')).toBe(2)
   })
 
   it('keys', async () => {
-    expect(await jqEval({ c: 1, a: 2, b: 3 }, 'keys')).toEqual(['a', 'b', 'c'])
+    expect(await evalOne({ c: 1, a: 2, b: 3 }, 'keys')).toEqual(['a', 'b', 'c'])
   })
 
   it('map with identity', async () => {
-    expect(await jqEval([1, 2, 3], 'map(.)')).toEqual([1, 2, 3])
+    expect(await evalOne([1, 2, 3], 'map(.)')).toEqual([1, 2, 3])
   })
 
   it('map with type', async () => {
-    expect(await jqEval([1, 'a', null], 'map(type)')).toEqual(['number', 'string', 'null'])
+    expect(await evalOne([1, 'a', null], 'map(type)')).toEqual(['number', 'string', 'null'])
   })
 
   it('select filters', async () => {
-    expect(await jqEval([1, 2, 3, 4], 'map(select(. > 2))')).toEqual([3, 4])
+    expect(await evalOne([1, 2, 3, 4], 'map(select(. > 2))')).toEqual([3, 4])
   })
 
   it('sort_by', async () => {
     const data = [{ n: 3 }, { n: 1 }, { n: 2 }]
-    expect(await jqEval(data, 'sort_by(.n)')).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }])
+    expect(await evalOne(data, 'sort_by(.n)')).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }])
   })
 
   it('group_by', async () => {
@@ -71,7 +83,7 @@ describe('jq eval (libjq adapter)', () => {
       { kind: 'b', v: 2 },
       { kind: 'a', v: 3 },
     ]
-    expect(await jqEval(data, 'group_by(.kind)')).toEqual([
+    expect(await evalOne(data, 'group_by(.kind)')).toEqual([
       [
         { kind: 'a', v: 1 },
         { kind: 'a', v: 3 },
@@ -82,25 +94,25 @@ describe('jq eval (libjq adapter)', () => {
 
   it('object construction', async () => {
     const data = { name: 'alice', age: 30 }
-    expect(await jqEval(data, '{name, age}')).toEqual({ name: 'alice', age: 30 })
+    expect(await evalOne(data, '{name, age}')).toEqual({ name: 'alice', age: 30 })
   })
 
   it('has', async () => {
-    expect(await jqEval({ a: 1 }, 'has("a")')).toBe(true)
-    expect(await jqEval({ a: 1 }, 'has("b")')).toBe(false)
+    expect(await evalOne({ a: 1 }, 'has("a")')).toBe(true)
+    expect(await evalOne({ a: 1 }, 'has("b")')).toBe(false)
   })
 
   it('add', async () => {
-    expect(await jqEval([1, 2, 3], 'add')).toBe(6)
-    expect(await jqEval(['a', 'b'], 'add')).toBe('ab')
+    expect(await evalOne([1, 2, 3], 'add')).toBe(6)
+    expect(await evalOne(['a', 'b'], 'add')).toBe('ab')
   })
 
   it('unique', async () => {
-    expect(await jqEval([1, 2, 2, 3, 1], 'unique')).toEqual([1, 2, 3])
+    expect(await evalOne([1, 2, 2, 3, 1], 'unique')).toEqual([1, 2, 3])
   })
 
   it('reverse on array', async () => {
-    expect(await jqEval([1, 2, 3], 'reverse')).toEqual([3, 2, 1])
+    expect(await evalOne([1, 2, 3], 'reverse')).toEqual([3, 2, 1])
   })
 
   it('reverse on string raises (real jq is strict)', async () => {
@@ -108,147 +120,155 @@ describe('jq eval (libjq adapter)', () => {
   })
 
   it('string interpolation', async () => {
-    expect(await jqEval({ name: 'alice' }, '"hi \\(.name)"')).toBe('hi alice')
+    expect(await evalOne({ name: 'alice' }, '"hi \\(.name)"')).toBe('hi alice')
   })
 
   it('comparison', async () => {
-    expect(await jqEval({ n: 5 }, '.n > 3')).toBe(true)
-    expect(await jqEval({ n: 5 }, '.n == 5')).toBe(true)
+    expect(await evalOne({ n: 5 }, '.n > 3')).toBe(true)
+    expect(await evalOne({ n: 5 }, '.n == 5')).toBe(true)
   })
 
   it('pipe chains', async () => {
-    expect(await jqEval([{ n: 3 }, { n: 1 }], 'sort_by(.n) | .[0].n')).toBe(1)
+    expect(await evalOne([{ n: 3 }, { n: 1 }], 'sort_by(.n) | .[0].n')).toBe(1)
   })
 
   it('alt operator //', async () => {
-    expect(await jqEval({ a: null }, '.a // "default"')).toBe('default')
-    expect(await jqEval({ a: 'x' }, '.a // "default"')).toBe('x')
+    expect(await evalOne({ a: null }, '.a // "default"')).toBe('default')
+    expect(await evalOne({ a: 'x' }, '.a // "default"')).toBe('x')
   })
 
   it('if-then-else-end', async () => {
-    expect(await jqEval(5, 'if . > 3 then "big" else "small" end')).toBe('big')
-    expect(await jqEval(1, 'if . > 3 then "big" else "small" end')).toBe('small')
+    expect(await evalOne(5, 'if . > 3 then "big" else "small" end')).toBe('big')
+    expect(await evalOne(1, 'if . > 3 then "big" else "small" end')).toBe('small')
   })
 
   it('array slice', async () => {
-    expect(await jqEval([1, 2, 3, 4, 5], '.[1:3]')).toEqual([2, 3])
+    expect(await evalOne([1, 2, 3, 4, 5], '.[1:3]')).toEqual([2, 3])
   })
 
   it('type', async () => {
-    expect(await jqEval('s', 'type')).toBe('string')
-    expect(await jqEval([], 'type')).toBe('array')
-    expect(await jqEval({}, 'type')).toBe('object')
-    expect(await jqEval(null, 'type')).toBe('null')
+    expect(await evalOne('s', 'type')).toBe('string')
+    expect(await evalOne([], 'type')).toBe('array')
+    expect(await evalOne({}, 'type')).toBe('object')
+    expect(await evalOne(null, 'type')).toBe('null')
   })
 
   it('not (real jq: only null and false are falsy)', async () => {
-    expect(await jqEval(false, 'not')).toBe(true)
-    expect(await jqEval(null, 'not')).toBe(true)
-    expect(await jqEval(0, 'not')).toBe(false)
-    expect(await jqEval(1, 'not')).toBe(false)
-    expect(await jqEval([], 'not')).toBe(false)
+    expect(await evalOne(false, 'not')).toBe(true)
+    expect(await evalOne(null, 'not')).toBe(true)
+    expect(await evalOne(0, 'not')).toBe(false)
+    expect(await evalOne(1, 'not')).toBe(false)
+    expect(await evalOne([], 'not')).toBe(false)
   })
 
   it('empty drops item inside map', async () => {
-    expect(await jqEval([1, 2, 3], 'map(if . == 2 then empty else . end)')).toEqual([1, 3])
+    expect(await evalOne([1, 2, 3], 'map(if . == 2 then empty else . end)')).toEqual([1, 3])
+  })
+
+  it('empty produces no output at the top level', async () => {
+    expect(await jqEval({}, 'empty')).toEqual([])
   })
 })
 
 describe('jq eval — libjq-only features (regression suite)', () => {
   it('parens (.x | y)', async () => {
-    expect(await jqEval({ items: [1, 2, 3] }, '(.items | length)')).toBe(3)
+    expect(await evalOne({ items: [1, 2, 3] }, '(.items | length)')).toBe(3)
   })
 
   it('parens in object value', async () => {
-    expect(await jqEval({ items: [1, 2, 3] }, '{n: (.items | length), first: .items[0]}')).toEqual({
-      n: 3,
-      first: 1,
-    })
+    expect(await evalOne({ items: [1, 2, 3] }, '{n: (.items | length), first: .items[0]}')).toEqual(
+      {
+        n: 3,
+        first: 1,
+      },
+    )
   })
 
   it('array construction collects spread outputs', async () => {
     const data = { slides: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }
-    expect(await jqEval(data, '[.slides[].id]')).toEqual(['a', 'b', 'c'])
+    expect(await evalOne(data, '[.slides[].id]')).toEqual(['a', 'b', 'c'])
   })
 
   it('array construction wraps single value', async () => {
-    expect(await jqEval({ x: 5 }, '[.x]')).toEqual([5])
+    expect(await evalOne({ x: 5 }, '[.x]')).toEqual([5])
   })
 
   it('object literal value with comma inside list', async () => {
-    expect(await jqEval({}, '{x: 1, y: [1,2,3]}')).toEqual({ x: 1, y: [1, 2, 3] })
+    expect(await evalOne({}, '{x: 1, y: [1,2,3]}')).toEqual({ x: 1, y: [1, 2, 3] })
   })
 
   it('nested object construction', async () => {
-    expect(await jqEval({ a: 1, b: 2 }, '{outer: {x: .a, y: .b}}')).toEqual({
+    expect(await evalOne({ a: 1, b: 2 }, '{outer: {x: .a, y: .b}}')).toEqual({
       outer: { x: 1, y: 2 },
     })
   })
 
   it('join with separator', async () => {
-    expect(await jqEval(['a', 'b', 'c'], 'join("-")')).toBe('a-b-c')
+    expect(await evalOne(['a', 'b', 'c'], 'join("-")')).toBe('a-b-c')
   })
 
   it('join empty separator', async () => {
-    expect(await jqEval(['foo', 'bar'], 'join("")')).toBe('foobar')
+    expect(await evalOne(['foo', 'bar'], 'join("")')).toBe('foobar')
   })
 
   it('array construction then join', async () => {
     const data = { slides: [{ id: 'a' }, { id: 'b' }] }
-    expect(await jqEval(data, '[.slides[].id] | join(",")')).toBe('a,b')
+    expect(await evalOne(data, '[.slides[].id] | join(",")')).toBe('a,b')
   })
 
   it('recurse (..) with type filter', async () => {
     const data = { a: 1, b: { c: 2, d: { e: 3 } } }
-    expect(await jqEval(data, '[.. | numbers] | sort')).toEqual([1, 2, 3])
+    expect(await evalOne(data, '[.. | numbers] | sort')).toEqual([1, 2, 3])
   })
 
   it('split / join round trip', async () => {
-    expect(await jqEval('a-b-c', 'split("-")')).toEqual(['a', 'b', 'c'])
-    expect(await jqEval(['a', 'b', 'c'], 'join("-")')).toBe('a-b-c')
+    expect(await evalOne('a-b-c', 'split("-")')).toEqual(['a', 'b', 'c'])
+    expect(await evalOne(['a', 'b', 'c'], 'join("-")')).toBe('a-b-c')
   })
 
   it('to_entries / from_entries', async () => {
-    expect(await jqEval({ a: 1, b: 2 }, 'to_entries')).toEqual([
+    expect(await evalOne({ a: 1, b: 2 }, 'to_entries')).toEqual([
       { key: 'a', value: 1 },
       { key: 'b', value: 2 },
     ])
-    expect(await jqEval([{ key: 'x', value: 9 }], 'from_entries')).toEqual({ x: 9 })
+    expect(await evalOne([{ key: 'x', value: 9 }], 'from_entries')).toEqual({ x: 9 })
   })
 
   it('startswith / endswith', async () => {
-    expect(await jqEval('foobar', 'startswith("foo")')).toBe(true)
-    expect(await jqEval('foobar', 'endswith("bar")')).toBe(true)
-    expect(await jqEval('foobar', 'startswith("xyz")')).toBe(false)
+    expect(await evalOne('foobar', 'startswith("foo")')).toBe(true)
+    expect(await evalOne('foobar', 'endswith("bar")')).toBe(true)
+    expect(await evalOne('foobar', 'startswith("xyz")')).toBe(false)
   })
 
   it('test (regex)', async () => {
-    expect(await jqEval('hello world', 'test("w.rld")')).toBe(true)
-    expect(await jqEval('hello world', 'test("xyz")')).toBe(false)
+    expect(await evalOne('hello world', 'test("w.rld")')).toBe(true)
+    expect(await evalOne('hello world', 'test("xyz")')).toBe(false)
   })
 
   it('walk transform', async () => {
     const data = { a: 'FOO', b: ['BAR', 'BAZ'] }
-    expect(await jqEval(data, 'walk(if type == "string" then ascii_downcase else . end)')).toEqual({
-      a: 'foo',
-      b: ['bar', 'baz'],
-    })
+    expect(await evalOne(data, 'walk(if type == "string" then ascii_downcase else . end)')).toEqual(
+      {
+        a: 'foo',
+        b: ['bar', 'baz'],
+      },
+    )
   })
 
-  it('top-level select that drops everything returns JQ_EMPTY sentinel', async () => {
-    expect(await jqEval({ x: 5 }, 'select(.x > 100)')).toBe(JQ_EMPTY)
+  it('top-level select that drops everything produces no output', async () => {
+    expect(await jqEval({ x: 5 }, 'select(.x > 100)')).toEqual([])
   })
 
   it('try / .missing returns null (real jq: missing key is not an error)', async () => {
-    expect(await jqEval({}, 'try .missing.x catch "fb"')).toBeNull()
+    expect(await evalOne({}, 'try .missing.x catch "fb"')).toBeNull()
   })
 
   it('try / catch triggers on real error', async () => {
-    expect(await jqEval([1, 2, 3], 'try .name catch "fb"')).toBe('fb')
+    expect(await evalOne([1, 2, 3], 'try .name catch "fb"')).toBe('fb')
   })
 
   it('missing dict key returns null in real jq (no throw)', async () => {
-    expect(await jqEval({ a: 1 }, '.b')).toBeNull()
+    expect(await evalOne({ a: 1 }, '.b')).toBeNull()
   })
 
   it('dot key on array raises (real jq is strict)', async () => {
@@ -296,19 +316,19 @@ describe('jq eval — user expressions that broke the homegrown parser', () => {
   it('flat select(.textRun != null) then join', async () => {
     const expr =
       '[.slides[].pageElements[].shape.text.textElements[] | select(.textRun != null) | .textRun.content] | join("")'
-    expect(await jqEval(slidesDoc(), expr)).toBe('Hello worldBye')
+    expect(await evalOne(slidesDoc(), expr)).toBe('Hello worldBye')
   })
 
   it('per-slide [content] then join, collected', async () => {
     const expr =
       '[.slides[] | [.pageElements[].shape.text.textElements[].textRun.content] | join("")]'
-    expect(await jqEval(slidesDoc(), expr)).toEqual(['Hello world', 'Bye'])
+    expect(await evalOne(slidesDoc(), expr)).toEqual(['Hello world', 'Bye'])
   })
 
   it('full slides summary object with nested constructions', async () => {
     const expr =
       '{title: .title, slideCount: (.slides | length), slides: [.slides[] | {objectId, elements: [.pageElements[] | select(.shape != null) | {type: .shape.shapeType, text: [.shape.text.textElements[].textRun.content] | join("")}]}]}'
-    expect(await jqEval(slidesDoc(), expr)).toEqual({
+    expect(await evalOne(slidesDoc(), expr)).toEqual({
       title: 'Deck',
       slideCount: 2,
       slides: [
@@ -325,28 +345,25 @@ describe('jq eval — user expressions that broke the homegrown parser', () => {
   })
 })
 
-describe('hasTopLevelSpread', () => {
-  it('detects a top-level spread', () => {
-    expect(hasTopLevelSpread('.a[]')).toBe(true)
-    expect(hasTopLevelSpread('.[] | .name')).toBe(true)
+describe('jq eval — output arity', () => {
+  it('a comma is two outputs, not one array', async () => {
+    expect(await jqEval({ a: 1, b: 2 }, '.a, .b')).toEqual([1, 2])
   })
 
-  it('does not treat a spread inside a collector as top level', () => {
-    // `[.a[] | .t]` emits ONE array, so the caller must print one line.
-    expect(hasTopLevelSpread('[.a[] | .t]')).toBe(false)
-    expect(hasTopLevelSpread('[["H"]] + [.[] | [.]]')).toBe(false)
+  it('a comma over arrays keeps each array whole', async () => {
+    expect(await jqEval({ a: 1, b: 2 }, '[.a], [.b]')).toEqual([[1], [2]])
   })
 
-  it('does not treat a spread inside parens as top level', () => {
-    expect(hasTopLevelSpread('([.a[]] | length)')).toBe(false)
+  it('a collector emits one output that is an array', async () => {
+    expect(await jqEval({ a: [{ t: 'x' }, { t: 'y' }] }, '[.a[] | .t]')).toEqual([['x', 'y']])
   })
 
-  it('ignores a bracket pair inside a string literal', () => {
-    expect(hasTopLevelSpread('.a | test("[]")')).toBe(false)
+  it('spreads with no bracket pair in the program', async () => {
+    expect(await jqEval(null, 'range(3)')).toEqual([0, 1, 2])
+    expect(await jqEval({ a: 1 }, '..')).toEqual([{ a: 1 }, 1])
   })
 
-  it('does not treat an index or slice as a spread', () => {
-    expect(hasTopLevelSpread('.values[1:]')).toBe(false)
-    expect(hasTopLevelSpread('.a[0]')).toBe(false)
+  it('a bracket pair inside a string literal is one output', async () => {
+    expect(await jqEval({ a: 'x[]y' }, '.a | contains("[]")')).toEqual([true])
   })
 })

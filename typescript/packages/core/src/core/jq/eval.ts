@@ -13,41 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import * as jqWasm from 'jq-wasm'
-import { JQ_EMPTY } from './format.ts'
 
 /**
- * Report whether a jq program spreads its input at the top level.
+ * Evaluate a jq expression against obj.
  *
- * A top-level `[]` means the program emits one output per element, so the
- * caller must print each on its own line. A `[]` nested inside a collector
- * (`[.a[] | .b]`) does not: that program emits a single array. Strings are
- * skipped so a literal "[]" never counts.
+ * A jq program is a stream transformer: it emits zero, one or many values,
+ * and jq prints each on its own line. That arity is preserved here rather
+ * than collapsed, so two outputs are never confused with one output that
+ * happens to be an array. `.a, .b` yields two values; `[.a, .b]` yields one.
+ *
+ * Returns every output value, in order. Empty when the program produces no
+ * output at all, which real jq reports as exit 0 with empty stdout.
  */
-export function hasTopLevelSpread(expr: string): boolean {
-  let depth = 0
-  let inStr = false
-  for (let i = 0; i < expr.length; i++) {
-    const ch = expr[i]
-    if (ch === '"' && (i === 0 || expr[i - 1] !== '\\')) {
-      inStr = !inStr
-      continue
-    }
-    if (inStr) continue
-    if (depth === 0 && ch === '[' && expr[i + 1] === ']') return true
-    if (ch === '(' || ch === '[' || ch === '{') depth += 1
-    else if (ch === ')' || ch === ']' || ch === '}') depth -= 1
-  }
-  return false
-}
-
-export async function jqEval(obj: unknown, expr: string): Promise<unknown> {
+export async function jqEval(obj: unknown, expr: string): Promise<unknown[]> {
   const result = await jqWasm.raw(JSON.stringify(obj), expr, ['-c'])
   if (result.exitCode !== 0) {
     throw new Error(result.stderr || `jq exited with code ${String(result.exitCode)}`)
   }
-  const lines = result.stdout === '' ? [] : result.stdout.split('\n').filter((l) => l !== '')
-  const outputs = lines.map((l) => JSON.parse(l) as unknown)
-  if (outputs.length === 0) return JQ_EMPTY
-  if (outputs.length === 1 && !hasTopLevelSpread(expr)) return outputs[0]
-  return outputs
+  if (result.stdout === '') return []
+  const lines = result.stdout.split('\n').filter((l) => l !== '')
+  return lines.map((l) => JSON.parse(l) as unknown)
 }
