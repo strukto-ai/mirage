@@ -212,7 +212,9 @@ async def test_quickjs_session_narrowing_reaches_the_guest():
 async def test_eval_returns_the_completion_value():
     rt = QuickJsRuntime()
     result = await rt.eval("ctx.command === 'node' ? {deny: 'no'} : null",
-                           inputs={"ctx": {"command": "node"}})
+                           inputs={"ctx": {
+                               "command": "node"
+                           }})
     assert result.value == {"deny": "no"}
     result = await rt.eval("console.log('side'); 1 + 41")
     assert result.value == 42

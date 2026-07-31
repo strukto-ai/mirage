@@ -56,11 +56,13 @@ EVAL_SENTINEL = "__MIRAGE_EVAL__"
 
 JS_EVAL_HARNESS = """\
 const __mirage_inputs = JSON.parse({inputs_json});
-for (const __k of Object.keys(__mirage_inputs)) globalThis[__k] = __mirage_inputs[__k];
+for (const __k of Object.keys(__mirage_inputs))
+  globalThis[__k] = __mirage_inputs[__k];
 let __mirage_payload;
 try {{
   const __mirage_value = (0, eval)({source_json});
-  __mirage_payload = {{ value: __mirage_value === undefined ? null : __mirage_value }};
+  __mirage_payload =
+    {{ value: __mirage_value === undefined ? null : __mirage_value }};
 }} catch (__e) {{
   __mirage_payload = {{ error: {{
     name: (__e && __e.name) || 'Error',
@@ -191,8 +193,7 @@ class QuickJsRuntime(Runtime, EvaluatorMixin):
         if "error" in payload:
             name = str(payload["error"].get("name", "Error"))
             message = str(payload["error"].get("message", ""))
-            raise EvalError(f"{name}: {message}",
-                            syntax=name == "SyntaxError")
+            raise EvalError(f"{name}: {message}", syntax=name == "SyntaxError")
         return EvalResult(value=payload.get("value"),
                           stdout=head.encode(),
                           stderr=result.stderr,

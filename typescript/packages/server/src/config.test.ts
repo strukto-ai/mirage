@@ -200,7 +200,7 @@ describe('configToWorkspaceArgs', () => {
       mounts: { '/': { resource: 'ram' } },
       policy: "'quickjs'",
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reference a \.py file/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reference a \.py\/\.js file/)
   })
 
   it('builds a redis index config from an index block', async () => {

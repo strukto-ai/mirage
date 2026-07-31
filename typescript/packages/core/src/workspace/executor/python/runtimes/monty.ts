@@ -385,7 +385,7 @@ function asGuestError(err: unknown, path: string): unknown {
   const code = (err as { code?: string }).code
   const mapped = code !== undefined ? CODE_TO_GUEST_EXC[code] : undefined
   if (mapped === undefined) return err
-  const guest = new Error(`[Errno ${mapped.errno}] ${mapped.phrase}: '${path}'`)
+  const guest = new Error(`[Errno ${String(mapped.errno)}] ${mapped.phrase}: '${path}'`)
   guest.name = mapped.name
   return guest
 }

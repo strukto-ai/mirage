@@ -253,8 +253,7 @@ def _is_script_path(value: str) -> bool:
     Args:
         value (str): a yaml ``script``/``policy`` value.
     """
-    return "\n" not in value and value.strip().endswith(
-        (".py", ".js", ".mjs"))
+    return "\n" not in value and value.strip().endswith((".py", ".js", ".mjs"))
 
 
 def _load_script_source(value: str) -> ScriptSource:

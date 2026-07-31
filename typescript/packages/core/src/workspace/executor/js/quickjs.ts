@@ -176,13 +176,10 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
     const out: string[] = []
     const err: string[] = []
     try {
-      this.installGlobals(
-        ctx,
-        { code, args: [], env: {}, stdin: null, flags: {} },
-        out,
-        err,
-        { code: 0, called: false },
-      )
+      this.installGlobals(ctx, { code, args: [], env: {}, stdin: null, flags: {} }, out, err, {
+        code: 0,
+        called: false,
+      })
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()
@@ -205,14 +202,14 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
         result.error.dispose()
         throw new EvalError(message, { syntax: message.startsWith('SyntaxError') })
       }
-      const value = ctx.dump(result.value) as EvalValue
+      const dumped: unknown = ctx.dump(result.value)
       result.value.dispose()
       const drained = this.drainJobs(runtime, ctx, err)
       if (drained !== null && drained !== 0) {
         throw new EvalError(err.join('\n') || 'quickjs eval failed while draining jobs')
       }
       return {
-        value: value === undefined ? null : value,
+        value: (dumped === undefined ? null : dumped) as EvalValue,
         stdout: ENC.encode(out.map((l) => l + '\n').join('')),
         stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
         exitCode: 0,

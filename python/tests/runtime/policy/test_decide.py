@@ -17,9 +17,9 @@ import pytest
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyDeny,
                                    PolicyError, RouteResult, ScriptSource,
-                                   command_facts, decide_line,
-                                   evaluate_policy, evaluate_script,
-                                   evaluator_of, parse_verdict)
+                                   command_facts, decide_line, evaluate_policy,
+                                   evaluate_script, evaluator_of,
+                                   parse_verdict)
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult

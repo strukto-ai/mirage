@@ -21,10 +21,9 @@ from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.policy.errors import PolicyDeny, PolicyError
 from mirage.runtime.policy.types import (DenyResult, PolicyContext,
-                                          PolicyResult,
                                          PolicyDecision, PolicyFn,
-                                         PolicyScript, RouteResult,
-                                         ScriptSource)
+                                         PolicyResult, PolicyScript,
+                                         RouteResult, ScriptSource)
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 from mirage.runtime.types import EvalValue
 
