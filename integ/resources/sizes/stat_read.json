@@ -391,6 +391,110 @@
         "stdout": "624\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_slack_file_stat",
+      "seq": 680056,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "104\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_file_read",
+      "seq": 680057,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "104\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_dm_chat_stat",
+      "seq": 680058,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/dms/dave__D7/2026-03-10/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "92\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_dm_chat_read",
+      "seq": 680059,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/dms/dave__D7/2026-03-10/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "92\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_empty_chat_stat",
+      "seq": 680060,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/general__C1/2025-12-14/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_empty_chat_read",
+      "seq": 680061,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-14/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_attachment_stat",
+      "seq": 680062,
+      "targets": [
+        "gmail"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "36\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_attachment_read",
+      "seq": 680063,
+      "targets": [
+        "gmail"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "36\n",
+        "stderr": ""
+      }
     }
   ]
 }
