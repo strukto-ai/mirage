@@ -135,7 +135,7 @@ async def main() -> None:
                 and not os.environ.get("EMAIL_HOST")):
             print(f"skip [{target_id}]: EMAIL_HOST not set", file=sys.stderr)
             continue
-        if (target.get("service") == "github"
+        if (target.get("service") in ("github", "github_ci")
                 and not os.environ.get("GITHUB_URL")):
             print(f"skip [{target_id}]: GITHUB_URL not set", file=sys.stderr)
             continue

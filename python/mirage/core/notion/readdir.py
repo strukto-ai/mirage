@@ -14,12 +14,13 @@
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.core.notion.normalize import normalize_database, to_json_bytes
 from mirage.core.notion.pages import (list_block_children, query_database,
                                       search_databases, search_pages)
 from mirage.core.notion.pathing import (database_dirname, page_dirname,
                                         split_suffix_id)
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.sanitize import sanitize_name
 
 VIRTUAL_ROOTS = ("pages", "databases")
@@ -68,12 +69,19 @@ async def readdir(
         entries = []
         for database in databases:
             dirname = database_dirname(database)
+            # The search result carries the full database object, so the
+            # rendered database.json size is known here; the database dir's
+            # own readdir copies it onto the file entry.
             entry = IndexEntry(
                 id=database["id"],
                 name=dirname,
                 resource_type="notion/database",
                 remote_time=database.get("last_edited_time", ""),
                 vfs_name=dirname,
+                extra={
+                    "database_json_size":
+                    len(to_json_bytes(normalize_database(database))),
+                },
             )
             entries.append((dirname, entry))
         await index.set_dir(idx_key, entries)
@@ -128,6 +136,18 @@ async def readdir(
         if listing.entries is not None:
             return [f"{prefix}{entry}" for entry in listing.entries]
 
+        dir_lookup = await index.get(database_idx_key)
+        if dir_lookup.entry is None and index is not NULL_INDEX:
+            parent = PathSpec(
+                virtual=prefix + "/databases",
+                directory=prefix + "/databases",
+                resource_path=mount_key(prefix + "/databases", prefix),
+            )
+            await readdir(accessor, parent, index)
+            dir_lookup = await index.get(database_idx_key)
+        database_json_size = (dir_lookup.entry.extra.get("database_json_size")
+                              if dir_lookup.entry else None)
+
         rows = await query_database(accessor.config, database_id)
         entries = []
         database_json_entry = IndexEntry(
@@ -135,6 +155,7 @@ async def readdir(
             name="database.json",
             resource_type="file",
             vfs_name="database.json",
+            size=database_json_size,
         )
         entries.append(("database.json", database_json_entry))
         for row in rows:

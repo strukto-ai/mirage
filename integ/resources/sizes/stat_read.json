@@ -495,6 +495,318 @@
         "stdout": "36\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_trello_workspace_stat",
+      "seq": 680064,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/workspace.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "66\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_workspace_read",
+      "seq": 680065,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/workspace.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "66\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_board_stat",
+      "seq": 680066,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/board.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "169\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_board_read",
+      "seq": 680067,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/board.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "169\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_list_stat",
+      "seq": 680068,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/list.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "115\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_list_read",
+      "seq": 680069,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/list.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "115\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_card_stat",
+      "seq": 680070,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "402\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_card_read",
+      "seq": 680071,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "402\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_member_stat",
+      "seq": 680072,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/members/Sam_Rivera__mem_sam.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "84\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_member_read",
+      "seq": 680073,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/members/Sam_Rivera__mem_sam.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "84\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_label_stat",
+      "seq": 680074,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/labels/bug__lbl_bug.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "97\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_label_read",
+      "seq": 680075,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/labels/bug__lbl_bug.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "97\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_database_stat",
+      "seq": 680076,
+      "targets": [
+        "notion"
+      ],
+      "command": "stat -c %s /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/database.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "626\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_database_read",
+      "seq": 680077,
+      "targets": [
+        "notion"
+      ],
+      "command": "cat /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/database.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "626\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_workflow_stat",
+      "seq": 680078,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/workflows/CI_101.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "192\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_workflow_read",
+      "seq": 680079,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/workflows/CI_101.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "192\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_run_stat",
+      "seq": 680080,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/runs/CI_9001/run.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "228\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_run_read",
+      "seq": 680081,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/run.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "228\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_job_stat",
+      "seq": 680082,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/runs/CI_9001/jobs/build_7001.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "321\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_job_read",
+      "seq": 680083,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/jobs/build_7001.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "321\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_artifact_stat",
+      "seq": 680084,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/runs/CI_9001/artifacts/dist_5001.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "148\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_artifact_read",
+      "seq": 680085,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/artifacts/dist_5001.zip | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "148\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_log_read",
+      "seq": 680086,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/jobs/build_7001.log | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "71\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_annotations_read",
+      "seq": 680087,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/annotations.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "105\n",
+        "stderr": ""
+      }
     }
   ]
 }

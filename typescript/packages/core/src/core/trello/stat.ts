@@ -83,16 +83,14 @@ export async function stat(
 
   if (parts.length === 3 && parts[0] === 'workspaces') {
     if (parts[2] === 'workspace.json') {
-      const wsKey = makeVirtualKey(prefix, parts.slice(0, 2).join('/'))
-      let wsId: string | null = null
-      if (index !== undefined) {
-        const result = await index.get(wsKey)
-        wsId = result.entry?.id ?? null
-      }
+      if (index === undefined) throw enoent(path)
+      const result = await lookupWithFallback(accessor, virtualKey, prefix, index)
+      if (result.entry === undefined || result.entry === null) throw enoent(path)
       return new FileStat({
         name: 'workspace.json',
         type: FileType.JSON,
-        extra: { workspace_id: wsId },
+        size: result.entry.size,
+        extra: { workspace_id: result.entry.id },
       })
     }
     if (parts[2] === 'boards') {
@@ -114,16 +112,15 @@ export async function stat(
 
   if (parts.length === 5 && parts[0] === 'workspaces' && parts[2] === 'boards') {
     if (parts[4] === 'board.json') {
-      const boardKey = makeVirtualKey(prefix, parts.slice(0, 4).join('/'))
-      let boardId: string | null = null
-      if (index !== undefined) {
-        const result = await index.get(boardKey)
-        boardId = result.entry?.id ?? null
-      }
+      if (index === undefined) throw enoent(path)
+      const result = await lookupWithFallback(accessor, virtualKey, prefix, index)
+      if (result.entry === undefined || result.entry === null) throw enoent(path)
       return new FileStat({
         name: 'board.json',
         type: FileType.JSON,
-        extra: { board_id: boardId },
+        size: result.entry.size,
+        modified: result.entry.remoteTime,
+        extra: { board_id: result.entry.id },
       })
     }
     if (parts[4] === 'members' || parts[4] === 'labels' || parts[4] === 'lists') {
@@ -143,6 +140,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      size: result.entry.size,
       modified: result.entry.remoteTime,
       extra: { member_id: result.entry.id },
     })
@@ -160,6 +158,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      size: result.entry.size,
       modified: result.entry.remoteTime,
       extra: { label_id: result.entry.id },
     })
@@ -189,16 +188,14 @@ export async function stat(
     parts[4] === 'lists'
   ) {
     if (parts[6] === 'list.json') {
-      const listKey = makeVirtualKey(prefix, parts.slice(0, 6).join('/'))
-      let listId: string | null = null
-      if (index !== undefined) {
-        const result = await index.get(listKey)
-        listId = result.entry?.id ?? null
-      }
+      if (index === undefined) throw enoent(path)
+      const result = await lookupWithFallback(accessor, virtualKey, prefix, index)
+      if (result.entry === undefined || result.entry === null) throw enoent(path)
       return new FileStat({
         name: 'list.json',
         type: FileType.JSON,
-        extra: { list_id: listId },
+        size: result.entry.size,
+        extra: { list_id: result.entry.id },
       })
     }
     if (parts[6] === 'cards') {
@@ -232,29 +229,26 @@ export async function stat(
     parts[6] === 'cards'
   ) {
     if (parts[8] === 'card.json') {
-      const cardKey = makeVirtualKey(prefix, parts.slice(0, 8).join('/'))
-      let cardId: string | null = null
-      if (index !== undefined) {
-        const result = await index.get(cardKey)
-        cardId = result.entry?.id ?? null
-      }
+      if (index === undefined) throw enoent(path)
+      const result = await lookupWithFallback(accessor, virtualKey, prefix, index)
+      if (result.entry === undefined || result.entry === null) throw enoent(path)
       return new FileStat({
         name: 'card.json',
         type: FileType.JSON,
-        extra: { card_id: cardId },
+        size: result.entry.size,
+        modified: result.entry.remoteTime,
+        extra: { card_id: result.entry.id },
       })
     }
     if (parts[8] === 'comments.jsonl') {
-      const cardKey = makeVirtualKey(prefix, parts.slice(0, 8).join('/'))
-      let cardId: string | null = null
-      if (index !== undefined) {
-        const result = await index.get(cardKey)
-        cardId = result.entry?.id ?? null
-      }
+      if (index === undefined) throw enoent(path)
+      const result = await lookupWithFallback(accessor, virtualKey, prefix, index)
+      if (result.entry === undefined || result.entry === null) throw enoent(path)
       return new FileStat({
         name: 'comments.jsonl',
         type: FileType.TEXT,
-        extra: { card_id: cardId },
+        modified: result.entry.remoteTime,
+        extra: { card_id: result.entry.id },
       })
     }
   }

@@ -18,6 +18,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { listArtifacts } from './artifacts.ts'
+import { ciJsonBytes } from './render.ts'
 import { listJobsForRun, listRuns } from './runs.ts'
 import { listWorkflows } from './workflows.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -70,6 +71,7 @@ export async function readdir(
         resourceType: 'ci/workflow',
         remoteTime: wf.updated_at ?? '',
         vfsName: filename,
+        size: ciJsonBytes(wf).byteLength,
       })
       entries.push([filename, entry])
       names.push(`${prefix}/${key}/${filename}`)
@@ -104,6 +106,52 @@ export async function readdir(
       })
       entries.push([dirname, entry])
       names.push(`${prefix}/${key}/${dirname}`)
+      if (index !== undefined) {
+        // run.json renders the run object this listing already fetched, so
+        // its exact size is free here; annotations.jsonl has no length
+        // anywhere in the API and stays size-unknown.
+        await index.setDir(`${virtualKey}/${dirname}`, [
+          [
+            'run.json',
+            new IndexEntry({
+              id: String(r.id),
+              name: 'run.json',
+              resourceType: 'ci/run_json',
+              vfsName: 'run.json',
+              size: ciJsonBytes(r).byteLength,
+              remoteTime: r.updated_at ?? '',
+            }),
+          ],
+          [
+            'jobs',
+            new IndexEntry({
+              id: String(r.id),
+              name: 'jobs',
+              resourceType: 'ci/jobs_dir',
+              vfsName: 'jobs',
+            }),
+          ],
+          [
+            'annotations.jsonl',
+            new IndexEntry({
+              id: String(r.id),
+              name: 'annotations.jsonl',
+              resourceType: 'ci/annotations',
+              vfsName: 'annotations.jsonl',
+              remoteTime: r.updated_at ?? '',
+            }),
+          ],
+          [
+            'artifacts',
+            new IndexEntry({
+              id: String(r.id),
+              name: 'artifacts',
+              resourceType: 'ci/artifacts_dir',
+              vfsName: 'artifacts',
+            }),
+          ],
+        ])
+      }
     }
     if (index !== undefined) await index.setDir(virtualKey, entries)
     return names
@@ -111,6 +159,8 @@ export async function readdir(
 
   if (parts.length === 2 && parts[0] === 'runs') {
     if (index !== undefined) {
+      const cached = await index.listDir(virtualKey)
+      if (cached.entries !== undefined && cached.entries !== null) return cached.entries
       const lookup = await index.get(virtualKey)
       if (lookup.entry === undefined || lookup.entry === null) {
         const parent = new PathSpec({
@@ -125,6 +175,8 @@ export async function readdir(
           throw enoent(path.virtual)
         }
       }
+      const listing = await index.listDir(virtualKey)
+      if (listing.entries !== undefined && listing.entries !== null) return listing.entries
     }
     const base = `${prefix}/${key}`
     return [`${base}/run.json`, `${base}/jobs`, `${base}/annotations.jsonl`, `${base}/artifacts`]
@@ -166,6 +218,7 @@ export async function readdir(
           name: j.name ?? '',
           resourceType: 'ci/job',
           vfsName: jsonFilename,
+          size: ciJsonBytes(j).byteLength,
           remoteTime: j.completed_at ?? '',
         }),
       ])
@@ -222,6 +275,8 @@ export async function readdir(
           resourceType: 'ci/artifact',
           remoteTime: a.updated_at ?? '',
           vfsName: filename,
+          // size_in_bytes is the zip archive's exact byte length (verified
+          // live against the GitHub API), not the uncompressed total.
           size: a.size_in_bytes ?? null,
         }),
       ])

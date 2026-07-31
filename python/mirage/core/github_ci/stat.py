@@ -76,6 +76,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.JSON,
+            size=lookup.entry.size,
             modified=lookup.entry.remote_time or None,
             extra={"workflow_id": lookup.entry.id},
         )
@@ -96,11 +97,30 @@ async def stat(
         return FileStat(name=parts[2], type=FileType.DIRECTORY)
 
     if len(parts) == 3 and parts[0] == "runs" and parts[2] == "run.json":
-        return FileStat(name="run.json", type=FileType.JSON)
+        lookup = await _lookup_with_fallback(accessor, virtual_key, prefix,
+                                             index)
+        if lookup.entry is None:
+            raise enoent(virtual)
+        return FileStat(
+            name="run.json",
+            type=FileType.JSON,
+            size=lookup.entry.size,
+            modified=lookup.entry.remote_time or None,
+            extra={"run_id": lookup.entry.id},
+        )
 
     if (len(parts) == 3 and parts[0] == "runs"
             and parts[2] == "annotations.jsonl"):
-        return FileStat(name="annotations.jsonl", type=FileType.TEXT)
+        lookup = await _lookup_with_fallback(accessor, virtual_key, prefix,
+                                             index)
+        if lookup.entry is None:
+            raise enoent(virtual)
+        return FileStat(
+            name="annotations.jsonl",
+            type=FileType.TEXT,
+            modified=lookup.entry.remote_time or None,
+            extra={"run_id": lookup.entry.id},
+        )
 
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "jobs"
             and parts[3].endswith(".json")):
@@ -111,6 +131,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.JSON,
+            size=lookup.entry.size,
             modified=lookup.entry.remote_time or None,
             extra={"job_id": lookup.entry.id},
         )

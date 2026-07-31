@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
 import { getDatabase } from './pages.ts'
 import { parseSegment } from './pathing.ts'
+import { readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
 
 export interface NotionStatAccessor {
@@ -55,9 +56,28 @@ export async function stat(
     } catch {
       throw enoent(path.virtual)
     }
+    let size: number | null = null
+    if (index !== undefined) {
+      let result = await index.get(`/${key}`)
+      if (result.entry === undefined || result.entry === null) {
+        const parentVirtual = `/${parts.slice(0, -1).join('/')}`
+        await coreReaddir(
+          accessor,
+          new PathSpec({
+            virtual: parentVirtual,
+            directory: parentVirtual,
+            resourcePath: parentVirtual.slice(1),
+          }),
+          index,
+        )
+        result = await index.get(`/${key}`)
+      }
+      size = result.entry?.size ?? null
+    }
     return new FileStat({
       name: 'database.json',
       type: FileType.JSON,
+      size,
       extra: { database_id: parsedDatabase.id },
     })
   }

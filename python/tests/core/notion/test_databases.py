@@ -21,6 +21,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.notion import read as notion_read
 from mirage.core.notion import readdir as notion_readdir
 from mirage.core.notion import stat as notion_stat
+from mirage.core.notion.normalize import normalize_database, to_json_bytes
 from mirage.core.notion.read import read
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
@@ -59,6 +60,46 @@ async def test_readdir_databases_lists_database_directories(
     entries = await readdir(accessor, PathSpec.from_str_path("/databases"),
                             RAMIndexCacheStore())
     assert entries == [f"/databases/Tasks__{DATABASE_ID}"]
+
+
+@pytest.mark.asyncio
+async def test_readdir_database_dir_sizes_database_json_from_search(
+        accessor, monkeypatch):
+    database = {
+        "id": DATABASE_ID,
+        "title": [{
+            "plain_text": "Tasks"
+        }],
+        "url": "https://notion.test/db123",
+        "created_time": "2026-01-01T00:00:00Z",
+        "last_edited_time": "2026-01-02T00:00:00Z",
+        "parent": {
+            "type": "workspace"
+        },
+        "properties": {
+            "Name": {
+                "type": "title"
+            }
+        },
+    }
+    monkeypatch.setattr(notion_readdir, "search_databases",
+                        AsyncMock(return_value=[database]))
+    monkeypatch.setattr(notion_readdir, "query_database",
+                        AsyncMock(return_value=[]))
+    index = RAMIndexCacheStore()
+    await readdir(accessor, PathSpec.from_str_path("/databases"), index)
+    await readdir(accessor,
+                  PathSpec.from_str_path(f"/databases/Tasks__{DATABASE_ID}"),
+                  index)
+    lookup = await index.get(f"/databases/Tasks__{DATABASE_ID}/database.json")
+    assert lookup.entry is not None
+    expected = to_json_bytes(normalize_database(database))
+    assert lookup.entry.size == len(expected)
+    result = await stat(
+        accessor,
+        PathSpec.from_str_path(
+            f"/databases/Tasks__{DATABASE_ID}/database.json"), index)
+    assert result.size == len(expected)
 
 
 @pytest.mark.asyncio

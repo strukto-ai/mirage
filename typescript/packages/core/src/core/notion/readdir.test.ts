@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
+import { normalizeDatabase, toJsonBytes } from './normalize.ts'
 import { readdir, type NotionReaddirAccessor } from './readdir.ts'
 
 class FakeTransport implements NotionTransport {
@@ -204,6 +205,36 @@ describe('notion readdir databases', () => {
     const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
     expect(out).toEqual([`${dirPath}/database.json`, `${dirPath}/Row_A__${TOP1_ID}`])
     expect(transport.invocations[0]?.args).toEqual({ database_id: DB_ID, page_size: 100 })
+  })
+
+  it('sizes database.json from the search payload', async () => {
+    const database = {
+      id: DB_ID,
+      object: 'database',
+      title: [{ plain_text: 'Tasks' }],
+      url: 'https://notion.test/db',
+      created_time: '2024-01-01T00:00:00Z',
+      last_edited_time: '2024-02-03T00:00:00Z',
+      parent: { type: 'workspace' },
+      properties: { Name: { type: 'title' } },
+    }
+    const transport = new FakeTransport()
+    transport.enqueue('API-post-search', {
+      results: [database],
+      has_more: false,
+      next_cursor: null,
+    })
+    transport.enqueue('API-post-database-query', {
+      results: [],
+      has_more: false,
+      next_cursor: null,
+    })
+    const idx = new RAMIndexCacheStore()
+    await readdir(makeAccessor(transport), spec('/databases'), idx)
+    const dirPath = `/databases/Tasks__${DB_ID}`
+    await readdir(makeAccessor(transport), spec(dirPath), idx)
+    const lookup = await idx.get(`${dirPath}/database.json`)
+    expect(lookup.entry?.size).toBe(toJsonBytes(normalizeDatabase(database)).byteLength)
   })
 })
 

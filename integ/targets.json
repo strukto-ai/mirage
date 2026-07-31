@@ -958,6 +958,23 @@
       ]
     },
     {
+      "id": "github_ci",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github_ci",
+      "mounts": [
+        {
+          "path": "/ci",
+          "resource": "github_ci",
+          "backend": "github_ci",
+          "repo": "integ/repo-v1",
+          "mode": "read"
+        }
+      ]
+    },
+    {
       "id": "hf-prefix",
       "hosts": [
         "python",

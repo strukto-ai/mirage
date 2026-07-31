@@ -54,3 +54,22 @@ async def test_stat_run_returns_modified(accessor, index):
     assert result.type == FileType.DIRECTORY
     assert result.extra["run_id"] == "123"
     assert result.modified == "2026-04-05T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_stat_run_json_serves_seeded_size(accessor, index):
+    await index.put(
+        "/runs/CI__123/run.json",
+        IndexEntry(
+            id="123",
+            name="run.json",
+            resource_type="ci/run_json",
+            vfs_name="run.json",
+            size=57,
+            remote_time="2026-04-05T00:00:00Z",
+        ),
+    )
+    result = await stat(accessor, _spec("/runs/CI__123/run.json"), index)
+    assert result.type == FileType.JSON
+    assert result.size == 57
+    assert result.extra["run_id"] == "123"

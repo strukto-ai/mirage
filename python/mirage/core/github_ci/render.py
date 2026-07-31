@@ -12,20 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, cast
-
-from mirage.core.github_ci._client import ci_get
-from mirage.resource.github_ci.config import GitHubCIConfig
+import json
+from typing import Any
 
 
-async def list_annotations(config: GitHubCIConfig,
-                           check_run_id: str) -> list[dict[str, Any]]:
-    return cast(
-        list[dict[str, Any]], await ci_get(
-            config.token,
-            "/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations",
-            base_url=config.base_url,
-            owner=config.owner,
-            repo=config.repo,
-            check_run_id=check_run_id,
-        ))
+def ci_json_bytes(obj: dict[str, Any]) -> bytes:
+    # Single renderer for workflow/run/job JSON files: read() and the
+    # readdir-time sizing must produce the same bytes for the same payload,
+    # so the advertised size is exact by construction.
+    return json.dumps(obj, indent=2, ensure_ascii=False).encode()

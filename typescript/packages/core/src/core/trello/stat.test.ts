@@ -77,12 +77,28 @@ describe('trello stat workspace nodes', () => {
   })
 
   it('returns json for workspace.json', async () => {
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/trello/workspaces/Acme__w1', [
+      [
+        'workspace.json',
+        new IndexEntry({
+          id: 'w1',
+          name: 'workspace.json',
+          resourceType: 'trello/workspace_json',
+          vfsName: 'workspace.json',
+          size: 42,
+        }),
+      ],
+    ])
     const s = await stat(
       new TrelloAccessor(new NoopTransport()),
       spec('/mnt/trello/workspaces/Acme__w1/workspace.json', '/mnt/trello'),
+      idx,
     )
     expect(s.type).toBe(FileType.JSON)
     expect(s.name).toBe('workspace.json')
+    expect(s.size).toBe(42)
+    expect(s.extra.workspace_id).toBe('w1')
   })
 
   it('returns directory for boards (level 3)', async () => {
@@ -109,25 +125,47 @@ describe('trello stat workspace nodes', () => {
 
 describe('trello stat card leaves', () => {
   it('returns json for card.json and text for comments.jsonl', async () => {
+    const idx = new RAMIndexCacheStore()
+    const cardDir =
+      '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1'
+    await idx.setDir(cardDir, [
+      [
+        'card.json',
+        new IndexEntry({
+          id: 'c1',
+          name: 'card.json',
+          resourceType: 'trello/card_json',
+          vfsName: 'card.json',
+          size: 99,
+        }),
+      ],
+      [
+        'comments.jsonl',
+        new IndexEntry({
+          id: 'c1',
+          name: 'comments.jsonl',
+          resourceType: 'trello/comments_jsonl',
+          vfsName: 'comments.jsonl',
+        }),
+      ],
+    ])
     const cardJson = await stat(
       new TrelloAccessor(new NoopTransport()),
-      spec(
-        '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1/card.json',
-        '/mnt/trello',
-      ),
+      spec(`${cardDir}/card.json`, '/mnt/trello'),
+      idx,
     )
     expect(cardJson.type).toBe(FileType.JSON)
     expect(cardJson.name).toBe('card.json')
+    expect(cardJson.size).toBe(99)
 
     const comments = await stat(
       new TrelloAccessor(new NoopTransport()),
-      spec(
-        '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1/comments.jsonl',
-        '/mnt/trello',
-      ),
+      spec(`${cardDir}/comments.jsonl`, '/mnt/trello'),
+      idx,
     )
     expect(comments.type).toBe(FileType.TEXT)
     expect(comments.name).toBe('comments.jsonl')
+    expect(comments.size).toBeNull()
   })
 })
 

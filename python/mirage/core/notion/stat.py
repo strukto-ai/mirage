@@ -16,6 +16,7 @@ from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.notion.pages import get_database
 from mirage.core.notion.pathing import split_suffix_id
+from mirage.core.notion.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
@@ -42,9 +43,21 @@ async def stat(
     if parts[-1] == "database.json" and len(
             parts) >= 3 and parts[0] == "databases":
         _, database_id = split_suffix_id(parts[-2])
+        result = await index.get("/" + key)
+        if result.entry is None and index is not NULL_INDEX:
+            parent_virtual = "/" + "/".join(parts[:-1])
+            await _readdir(
+                accessor,
+                PathSpec(virtual=parent_virtual,
+                         directory=parent_virtual,
+                         resource_path=parent_virtual.strip("/")),
+                index=index,
+            )
+            result = await index.get("/" + key)
         return FileStat(
             name="database.json",
             type=guess_type("database.json"),
+            size=result.entry.size if result.entry else None,
             extra={"database_id": database_id},
         )
 

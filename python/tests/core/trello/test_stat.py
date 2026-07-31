@@ -88,6 +88,18 @@ async def test_stat_board_entry(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_card_json(accessor, index):
+    await index.put(
+        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
+        "/lists/Backlog__l1/cards/Fix_login__c1/card.json",
+        IndexEntry(
+            id="c1",
+            name="card.json",
+            resource_type="trello/card_json",
+            vfs_name="card.json",
+            size=42,
+            remote_time="2026-04-05T00:00:00.000Z",
+        ),
+    )
     result = await stat(
         accessor,
         PathSpec.from_str_path(
@@ -96,10 +108,22 @@ async def test_stat_card_json(accessor, index):
         index,
     )
     assert result.type == FileType.JSON
+    assert result.size == 42
+    assert result.extra["card_id"] == "c1"
 
 
 @pytest.mark.asyncio
 async def test_stat_comments_jsonl(accessor, index):
+    await index.put(
+        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
+        "/lists/Backlog__l1/cards/Fix_login__c1/comments.jsonl",
+        IndexEntry(
+            id="c1",
+            name="comments.jsonl",
+            resource_type="trello/comments_jsonl",
+            vfs_name="comments.jsonl",
+        ),
+    )
     result = await stat(
         accessor,
         PathSpec.from_str_path(
@@ -108,6 +132,7 @@ async def test_stat_comments_jsonl(accessor, index):
         index,
     )
     assert result.type == FileType.TEXT
+    assert result.size is None
 
 
 @pytest.mark.asyncio

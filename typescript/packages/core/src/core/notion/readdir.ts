@@ -12,12 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
-import { databaseSegmentName, pageSegmentName } from './normalize.ts'
+import {
+  databaseSegmentName,
+  normalizeDatabase,
+  pageSegmentName,
+  toJsonBytes,
+} from './normalize.ts'
 import { getChildPages, queryDatabase, searchDatabases, searchTopLevelPages } from './pages.ts'
 import { parseSegment, sanitizeName } from './pathing.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -86,6 +91,9 @@ export async function readdir(
     const entries: [string, IndexEntry][] = []
     for (const database of databases) {
       const name = databaseSegmentName(database)
+      // The search result carries the full database object, so the rendered
+      // database.json size is known here; the database dir's own readdir
+      // copies it onto the file entry.
       entries.push([
         name,
         new IndexEntry({
@@ -94,6 +102,9 @@ export async function readdir(
           resourceType: 'notion/database',
           remoteTime: pickString(database, 'last_edited_time'),
           vfsName: name,
+          extra: {
+            database_json_size: toJsonBytes(normalizeDatabase(database)).byteLength,
+          },
         }),
       ])
     }
@@ -117,6 +128,25 @@ export async function readdir(
         return listing.entries.map((entry) => `${prefix}${entry}`)
       }
     }
+    let databaseJsonSize: number | null = null
+    if (index !== undefined) {
+      let dirLookup = await index.get(idxKey)
+      if (dirLookup.entry === undefined || dirLookup.entry === null) {
+        const parentVirtual = `${prefix}/databases`
+        await readdir(
+          accessor,
+          new PathSpec({
+            virtual: parentVirtual,
+            directory: parentVirtual,
+            resourcePath: mountKey(parentVirtual, prefix),
+          }),
+          index,
+        )
+        dirLookup = await index.get(idxKey)
+      }
+      const stored = dirLookup.entry?.extra.database_json_size
+      if (typeof stored === 'number') databaseJsonSize = stored
+    }
     const rows = await queryDatabase(accessor.transport, parsedDatabase.id)
     const entries: [string, IndexEntry][] = [
       [
@@ -126,6 +156,7 @@ export async function readdir(
           name: 'database.json',
           resourceType: 'file',
           vfsName: 'database.json',
+          size: databaseJsonSize,
         }),
       ],
     ]

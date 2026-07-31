@@ -990,6 +990,35 @@ class GitHubService:
         return None
 
 
+class GitHubCIService:
+    """Points github_ci mounts at the fake api.github.com server.
+
+    Reuses the external github_server.py process on GITHUB_URL, which also
+    serves the fixed Actions dataset (workflows/runs/jobs/artifacts).
+
+    Args:
+        url (str): GITHUB_URL origin the fake is listening on.
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    @classmethod
+    async def create(cls) -> "GitHubCIService":
+        return cls(os.environ["GITHUB_URL"].rstrip("/"))
+
+    def resource(self, mount: dict) -> GitHubCIResource:
+        owner, _, repo = mount["repo"].partition("/")
+        return GitHubCIResource(
+            GitHubCIConfig(token="ghp-integ",
+                           owner=owner,
+                           repo=repo,
+                           base_url=self.url))
+
+    async def teardown(self) -> None:
+        return None
+
+
 class DifyService:
 
     def __init__(self, runner, base: str, dataset: str) -> None:
@@ -1740,6 +1769,13 @@ def build_github(
     return service.resource(mount), _noop
 
 
+def build_github_ci(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GitHubCIService)
+    return service.resource(mount), _noop
+
+
 def build_slack(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -1871,6 +1907,7 @@ BUILDERS = {
     "box": build_box,
     "dropbox": build_dropbox,
     "github": build_github,
+    "github_ci": build_github_ci,
     "slack": build_slack,
     "trello": build_trello,
     "linear": build_linear,
@@ -1924,6 +1961,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await DropboxService.create(target)
     if target.get("service") == "github":
         return await GitHubService.create()
+    if target.get("service") == "github_ci":
+        return await GitHubCIService.create()
     if target.get("service") == "slack":
         return await SlackService.create()
     if target.get("service") == "trello":
