@@ -39,11 +39,16 @@ import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } f
 const resolveDiscordGlob = makeResolveGlob(discordReaddir)
 
 class NodeDiscordTransport extends HttpDiscordTransport {
-  constructor(private readonly token: string) {
+  constructor(
+    private readonly token: string,
+    private readonly base?: string,
+  ) {
     super()
   }
+  // base exists so the integ fake can stand in for discord.com; every
+  // request must go through it, not the module constant.
   protected baseUrl(): string {
-    return DISCORD_API
+    return this.base ?? DISCORD_API
   }
   protected authHeaders(): Record<string, string> {
     return { Authorization: `Bot ${this.token}` }
@@ -58,6 +63,10 @@ export interface DiscordResourceState {
 export class DiscordResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.DISCORD
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: chat.jsonl and members/*.json
+  // are rendered at readdir from payloads the listing already fetched, and
+  // attachments carry Discord's CDN byte count.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = DISCORD_PROMPT
   readonly writePrompt: string = DISCORD_WRITE_PROMPT
@@ -67,7 +76,7 @@ export class DiscordResource extends BaseResource implements Resource {
   constructor(config: DiscordConfig) {
     super()
     this.config = config
-    this.accessor = new DiscordAccessor(new NodeDiscordTransport(config.token))
+    this.accessor = new DiscordAccessor(new NodeDiscordTransport(config.token, config.baseUrl))
   }
 
   open(): Promise<void> {

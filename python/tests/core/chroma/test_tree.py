@@ -21,11 +21,14 @@ async def test_ensure_tree_builds_prefixed_entries_from_path_tree(
     assert guides.entries == ["/knowledge/guides/quickstart"]
     assert api.entries == ["/knowledge/api/reference"]
     assert quickstart.entry.id == "guides/quickstart"
-    assert quickstart.entry.size == 12
+    # The path tree's own size never becomes the byte length: it describes
+    # the producer's source document, so it rides in extra and the size is
+    # measured later, from the rendered chunks.
+    assert quickstart.entry.size is None
     assert quickstart.entry.remote_time == "2026-02-01T00:00:00Z"
     assert quickstart.entry.extra == {
         "slug": "guides/quickstart",
-        "size": 12,
+        "source_size": 12,
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-02-01T00:00:00Z",
     }

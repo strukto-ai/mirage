@@ -57,6 +57,22 @@ async function assertListed(
   if (!names.has(basenameOf(path.resourcePath))) throw enoent(path)
 }
 
+/**
+ * Return the size the parent listing recorded for this path.
+ *
+ * assertListed has just populated the parent directory, so any size the
+ * listing computed is already in the index.
+ */
+async function listedSize(
+  path: PathSpec,
+  prefix: string,
+  index?: IndexCacheStore,
+): Promise<number | null> {
+  if (index === undefined) return null
+  const lookup = await index.get(`${prefix}/${path.resourcePath}`)
+  return lookup.entry?.size ?? null
+}
+
 export async function stat(
   accessor: LangfuseAccessor,
   path: PathSpec,
@@ -123,7 +139,12 @@ export async function stat(
 
   if (parts[0] === 'datasets' && parts.length === 3 && parts[2] === 'items.jsonl') {
     await assertListed(accessor, path, prefix, index)
-    return new FileStat({ name: 'items.jsonl', type: FileType.TEXT })
+    const size = await listedSize(path, prefix, index)
+    return new FileStat({
+      name: 'items.jsonl',
+      ...(size !== null ? { size } : {}),
+      type: FileType.TEXT,
+    })
   }
 
   if (parts[0] === 'datasets' && parts.length === 3 && parts[2] === 'runs') {
@@ -138,7 +159,12 @@ export async function stat(
     (parts[3] ?? '').endsWith('.jsonl')
   ) {
     await assertListed(accessor, path, prefix, index)
-    return new FileStat({ name: parts[3] ?? '', type: FileType.TEXT })
+    const size = await listedSize(path, prefix, index)
+    return new FileStat({
+      name: parts[3] ?? '',
+      ...(size !== null ? { size } : {}),
+      type: FileType.TEXT,
+    })
   }
 
   throw enoent(path)

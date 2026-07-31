@@ -116,6 +116,7 @@ export async function stat(
     }
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
+      ...(lookup.entry.size !== null ? { size: lookup.entry.size } : {}),
       type: FileType.JSON,
       extra: { user_id: lookup.entry.id },
     })
@@ -134,7 +135,16 @@ export async function stat(
     DATE_RE.test(part3) &&
     parts[4] === 'chat.jsonl'
   ) {
-    return new FileStat({ name: 'chat.jsonl', type: FileType.TEXT })
+    if (index === undefined) return new FileStat({ name: 'chat.jsonl', type: FileType.TEXT })
+    const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
+    // A day whose history could not be listed (403/404/429) seals an empty
+    // date dir; the file still stats, with the size left unknown.
+    const size = lookup.entry?.size
+    return new FileStat({
+      name: 'chat.jsonl',
+      ...(size !== undefined && size !== null ? { size } : {}),
+      type: FileType.TEXT,
+    })
   }
 
   // <guild>/channels/<ch>/<date>/files

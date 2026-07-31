@@ -1185,6 +1185,27 @@
       ]
     },
     {
+      "id": "discord",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "discord",
+      "facet": "chat",
+      "mounts": [
+        {
+          "path": "/discord",
+          "resource": "discord",
+          "backend": "discord"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
       "id": "trello",
       "hosts": [
         "python",

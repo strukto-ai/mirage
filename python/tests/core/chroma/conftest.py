@@ -25,11 +25,20 @@ class FakeCollection:
             return {"documents": [self.documents["__path_tree__"]]}
 
         where = kwargs.get("where") or {}
-        slug = where.get("page_slug")
-        if isinstance(slug, dict):
-            slug = slug.get("$eq")
-        if slug is not None:
-            chunks = self.chunks.get(slug, [])
+        where_document = kwargs.get("where_document") or {}
+        selector = where.get("page_slug")
+        slugs: list[str] | None = None
+        if isinstance(selector, dict):
+            if "$in" in selector:
+                slugs = list(selector["$in"])
+            elif "$eq" in selector:
+                slugs = [selector["$eq"]]
+        elif selector is not None:
+            slugs = [selector]
+        if slugs is not None and not where_document:
+            chunks = [
+                item for slug in slugs for item in self.chunks.get(slug, [])
+            ]
             offset = kwargs.get("offset") or 0
             limit = kwargs.get("limit")
             if limit is not None:
@@ -41,7 +50,6 @@ class FakeCollection:
                 "metadatas": [item["metadata"] for item in chunks],
             }
 
-        where_document = kwargs.get("where_document") or {}
         if "$contains" in where_document or "$regex" in where_document:
             self.contains_queries.append(kwargs)
             candidates = where.get("page_slug", {}).get("$in", [])

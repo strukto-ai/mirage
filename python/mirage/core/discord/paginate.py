@@ -26,6 +26,7 @@ async def after_id_pages(
     last_id_fn: Callable[[dict[str, Any]], str],
     page_size: int = 100,
     start_after: str = "0",
+    newest_first: bool = False,
 ) -> AsyncIterator[list[dict[str, Any]]]:
     """Walk an after-id paginated Discord endpoint.
 
@@ -42,6 +43,11 @@ async def after_id_pages(
             messages, ``lambda m: m["user"]["id"]`` for members).
         page_size (int): per-page limit (Discord caps vary by endpoint).
         start_after (str): initial "after" cursor.
+        newest_first (bool): the endpoint answers newest-first. Messages do
+            (`GET /channels/{id}/messages` documents "newest to oldest"),
+            members and guilds do not, and the cursor is the newest id in
+            the page either way, so it is the first item there and the last
+            item here.
 
     Yields:
         list[dict]: items in each page. Generator returns when the API
@@ -58,7 +64,7 @@ async def after_id_pages(
         yield data
         if len(data) < page_size:
             return
-        last = last_id_fn(data[-1])
+        last = last_id_fn(data[0] if newest_first else data[-1])
 
 
 def _get_nested(d: dict[str, Any], path: tuple[str, ...]) -> Any:

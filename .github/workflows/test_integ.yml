@@ -1199,6 +1199,14 @@ jobs:
           cat /tmp/slack.log
           echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
 
+      - name: Start fake Discord API
+        if: matrix.facet == 'chat'
+        run: |
+          nohup ./python/.venv/bin/python integ/server/discord_server.py --port 5099 > /tmp/discord.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "DISCORD_ENDPOINT=" /tmp/discord.log && break; sleep 1; done
+          cat /tmp/discord.log
+          echo "DISCORD_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
+
       - name: Start fake Dify API
         if: matrix.facet == 'dify'
         run: |

@@ -43,6 +43,10 @@ export interface EmailResourceState {
 export class EmailResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.EMAIL
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: .email.json is rendered at
+  // readdir from the full message source the listing already fetches, and an
+  // attachment's size is its decoded payload length.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = EMAIL_PROMPT
   readonly config: EmailConfig

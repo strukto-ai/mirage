@@ -16,14 +16,17 @@ import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoa
 
 export interface DiscordConfig {
   token: string
+  baseUrl?: string
 }
 
 export interface DiscordConfigRedacted {
   token: '<REDACTED>'
+  baseUrl?: string
 }
 
 const DiscordConfigSchema = z.object({
   token: secretStr(),
+  baseUrl: z.string().optional(),
 })
 
 export function redactDiscordConfig(config: DiscordConfig): DiscordConfigRedacted {

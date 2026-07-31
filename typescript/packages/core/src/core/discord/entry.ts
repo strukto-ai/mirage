@@ -57,12 +57,13 @@ export const DiscordIndexEntry = {
       vfsName: channelDirname(c),
     })
   },
-  member(m: { id: string; name?: string }): IndexEntry {
+  member(m: { id: string; name?: string }, size?: number): IndexEntry {
     return new IndexEntry({
       id: m.id,
       name: m.name ?? '',
       resourceType: DiscordResourceType.MEMBER,
       vfsName: memberFilename(m),
+      ...(size !== undefined ? { size } : {}),
     })
   },
   history(channelId: string, date: string): IndexEntry {

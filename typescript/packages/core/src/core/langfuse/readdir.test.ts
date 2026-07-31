@@ -19,6 +19,7 @@ import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { LangfuseTransport } from './_client.ts'
 import { readdir } from './readdir.ts'
+import { toJsonlBytes } from './render.ts'
 
 interface Call {
   path: string
@@ -110,5 +111,35 @@ describe('langfuse readdir trace window', () => {
     })
     await readdir(accessor(transport), spec('/traces'), new RAMIndexCacheStore())
     expect(transport.calls[0]?.query?.limit).toBe(100)
+  })
+})
+
+describe('langfuse readdir dataset sizes', () => {
+  it('sizes items.jsonl from one dataset-items call per dataset entered', async () => {
+    const items = [
+      { id: 'i-1', input: 'a' },
+      { id: 'i-2', input: 'b' },
+    ]
+    const transport = new RecordingTransport({ '/api/public/dataset-items': { data: items } })
+    const idx = new RAMIndexCacheStore()
+    const entries = await readdir(accessor(transport), spec('/datasets/qa-eval'), idx)
+    await readdir(accessor(transport), spec('/datasets/qa-eval'), idx)
+
+    expect(entries).toEqual(['/datasets/qa-eval/items.jsonl', '/datasets/qa-eval/runs'])
+    const lookup = await idx.get('/datasets/qa-eval/items.jsonl')
+    expect(lookup.entry?.size).toBe(toJsonlBytes(items).byteLength)
+    expect(transport.calls.filter((c) => c.path === '/api/public/dataset-items')).toHaveLength(1)
+  })
+
+  it('stores the rendered run size on each run listing entry', async () => {
+    const runs = [{ name: 'run-a', metadata: { k: 'v' } }, { name: 'run-b' }]
+    const transport = new RecordingTransport({
+      '/api/public/datasets/qa-eval/runs': { data: runs },
+    })
+    const idx = new RAMIndexCacheStore()
+    await readdir(accessor(transport), spec('/datasets/qa-eval/runs'), idx)
+
+    const lookup = await idx.get('/datasets/qa-eval/runs/run-a.jsonl')
+    expect(lookup.entry?.size).toBe(toJsonlBytes([runs[0] as Record<string, unknown>]).byteLength)
   })
 })

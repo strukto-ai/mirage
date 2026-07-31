@@ -63,6 +63,24 @@ async def assert_listed(
         raise enoent(path.virtual)
 
 
+async def listed_size(
+    index: IndexCacheStore,
+    path: PathSpec,
+    prefix: str,
+) -> int | None:
+    """Return the size the parent listing recorded for this path.
+
+    Args:
+        index (IndexCacheStore): index cache.
+        path (PathSpec): resource-relative path being stat'd.
+        prefix (str): mount prefix for virtual index keys.
+    """
+    # assert_listed has just populated the parent directory, so any size the
+    # listing computed is already in the index.
+    lookup = await index.get(prefix + "/" + path.resource_path)
+    return lookup.entry.size if lookup.entry is not None else None
+
+
 async def stat(
     accessor: LangfuseAccessor,
     path: PathSpec,
@@ -132,7 +150,11 @@ async def stat(
     if (parts[0] == "datasets" and len(parts) == 3
             and parts[2] == "items.jsonl"):
         await assert_listed(accessor, path, prefix, index)
-        return FileStat(name="items.jsonl", type=FileType.TEXT)
+        return FileStat(
+            name="items.jsonl",
+            size=await listed_size(index, path, prefix),
+            type=FileType.TEXT,
+        )
 
     if parts[0] == "datasets" and len(parts) == 3 and parts[2] == "runs":
         await assert_listed(accessor, path, prefix, index)
@@ -141,6 +163,10 @@ async def stat(
     if (parts[0] == "datasets" and len(parts) == 4 and parts[2] == "runs"
             and parts[3].endswith(".jsonl")):
         await assert_listed(accessor, path, prefix, index)
-        return FileStat(name=parts[3], type=FileType.TEXT)
+        return FileStat(
+            name=parts[3],
+            size=await listed_size(index, path, prefix),
+            type=FileType.TEXT,
+        )
 
     raise enoent(virtual)

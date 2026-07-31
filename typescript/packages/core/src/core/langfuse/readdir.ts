@@ -18,12 +18,14 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import {
+  fetchDatasetItems,
   fetchDatasetRuns,
   fetchDatasets,
   fetchPrompts,
   fetchSessions,
   fetchTraces,
 } from './_client.ts'
+import { toJsonlBytes } from './render.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -255,6 +257,46 @@ async function readdirDatasets(
   return names
 }
 
+async function readdirDataset(
+  accessor: LangfuseAccessor,
+  datasetName: string,
+  virtualKey: string,
+  index: IndexCacheStore | undefined,
+  prefix: string,
+): Promise<string[]> {
+  if (index !== undefined) {
+    const listing = await index.listDir(virtualKey)
+    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
+  }
+  // One dataset_items call per dataset directory actually entered: the
+  // dataset listing carries no item payloads, so items.jsonl can only be
+  // sized here, and only for datasets the caller opens.
+  const items = await fetchDatasetItems(accessor.transport, datasetName)
+  const entries: [string, IndexEntry][] = [
+    [
+      'items.jsonl',
+      new IndexEntry({
+        id: `${datasetName}/items`,
+        name: 'items.jsonl',
+        resourceType: 'langfuse/dataset_items',
+        vfsName: 'items.jsonl',
+        size: toJsonlBytes(items).byteLength,
+      }),
+    ],
+    [
+      'runs',
+      new IndexEntry({
+        id: `${datasetName}/runs`,
+        name: 'runs',
+        resourceType: 'langfuse/dataset_runs_dir',
+        vfsName: 'runs',
+      }),
+    ],
+  ]
+  if (index !== undefined) await index.setDir(virtualKey, entries)
+  return entries.map(([name]) => `${prefix}/datasets/${datasetName}/${name}`)
+}
+
 async function readdirDatasetRuns(
   accessor: LangfuseAccessor,
   datasetName: string,
@@ -272,6 +314,8 @@ async function readdirDatasetRuns(
   for (const r of runs) {
     const runName = pickString(r, 'name')
     const filename = `${runName}.jsonl`
+    // The listing already carries the run document read() renders, so each
+    // run file's exact size is free here.
     entries.push([
       filename,
       new IndexEntry({
@@ -279,6 +323,7 @@ async function readdirDatasetRuns(
         name: runName,
         resourceType: 'langfuse/dataset_run',
         vfsName: filename,
+        size: toJsonlBytes([r]).byteLength,
       }),
     ])
     names.push(`${prefix}/datasets/${datasetName}/runs/${filename}`)
@@ -334,10 +379,7 @@ export async function readdir(
   }
 
   if (parts[0] === 'datasets' && parts.length === 2) {
-    return [
-      `${prefix}/datasets/${parts[1] ?? ''}/items.jsonl`,
-      `${prefix}/datasets/${parts[1] ?? ''}/runs`,
-    ]
+    return readdirDataset(accessor, parts[1] ?? '', virtualKey, index, prefix)
   }
 
   if (parts[0] === 'datasets' && parts.length === 3 && parts[2] === 'runs') {

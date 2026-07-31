@@ -14,9 +14,11 @@
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.core.langfuse._client import (fetch_dataset_runs, fetch_datasets,
+from mirage.core.langfuse._client import (fetch_dataset_items,
+                                          fetch_dataset_runs, fetch_datasets,
                                           fetch_prompts, fetch_sessions,
                                           fetch_traces)
+from mirage.core.langfuse.render import jsonl_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -83,10 +85,13 @@ async def readdir(
         return await _readdir_datasets(accessor, virtual_key, index, prefix)
 
     if parts[0] == "datasets" and len(parts) == 2:
-        return [
-            f"{prefix}/datasets/{parts[1]}/items.jsonl",
-            f"{prefix}/datasets/{parts[1]}/runs",
-        ]
+        return await _readdir_dataset(
+            accessor,
+            parts[1],
+            virtual_key,
+            index,
+            prefix,
+        )
 
     if (parts[0] == "datasets" and len(parts) == 3 and parts[2] == "runs"):
         return await _readdir_dataset_runs(
@@ -280,6 +285,41 @@ async def _readdir_datasets(
     return names
 
 
+async def _readdir_dataset(
+    accessor: LangfuseAccessor,
+    dataset_name: str,
+    virtual_key: str,
+    index: IndexCacheStore,
+    prefix: str,
+) -> list[str]:
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
+    # One dataset_items call per dataset directory actually entered: the
+    # dataset listing carries no item payloads, so items.jsonl can only be
+    # sized here, and only for datasets the caller opens.
+    items = await fetch_dataset_items(accessor.api, dataset_name)
+    entries = [
+        ("items.jsonl",
+         IndexEntry(
+             id=f"{dataset_name}/items",
+             name="items.jsonl",
+             resource_type="langfuse/dataset_items",
+             vfs_name="items.jsonl",
+             size=len(jsonl_bytes(items)),
+         )),
+        ("runs",
+         IndexEntry(
+             id=f"{dataset_name}/runs",
+             name="runs",
+             resource_type="langfuse/dataset_runs_dir",
+             vfs_name="runs",
+         )),
+    ]
+    await index.set_dir(virtual_key, entries)
+    return [f"{prefix}/datasets/{dataset_name}/{name}" for name, _ in entries]
+
+
 async def _readdir_dataset_runs(
     accessor: LangfuseAccessor,
     dataset_name: str,
@@ -296,11 +336,14 @@ async def _readdir_dataset_runs(
     for r in runs:
         run_name = r.get("name", "")
         filename = f"{run_name}.jsonl"
+        # The listing already carries the run document read() renders, so
+        # each run file's exact size is free here.
         entry = IndexEntry(
             id=run_name,
             name=run_name,
             resource_type="langfuse/dataset_run",
             vfs_name=filename,
+            size=len(jsonl_bytes([r])),
         )
         entries.append((filename, entry))
         names.append(f"{prefix}/datasets/{dataset_name}/runs/{filename}")

@@ -71,6 +71,23 @@ def _find_command():
     raise AssertionError("factory find not registered for discord")
 
 
+async def _chat_index() -> RAMIndexCacheStore:
+    """Index holding the chat.jsonl entry, which stat now reads its size from.
+
+    Returns:
+        RAMIndexCacheStore: store seeded with the day's chat entry.
+    """
+    index = RAMIndexCacheStore(ttl=600)
+    await index.put(
+        "/" + FILE_PATH,
+        IndexEntry(id="C1:2024-01-15:chat",
+                   name="chat.jsonl",
+                   resource_type="discord/chat_jsonl",
+                   vfs_name="chat.jsonl",
+                   size=len(FAKE_JSONL)))
+    return index
+
+
 def _make_index() -> RAMIndexCacheStore:
     index = RAMIndexCacheStore(ttl=600)
     _run(
@@ -191,7 +208,7 @@ async def test_grep(accessor):
         stream, io = await grep(accessor,
                                 _make_glob(ABS_FILE),
                                 "hello",
-                                index=RAMIndexCacheStore(ttl=600))
+                                index=await _chat_index())
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"hello again" in data
@@ -211,7 +228,7 @@ async def test_grep_invert(accessor):
         stream, io = await grep(accessor,
                                 _make_glob(ABS_FILE),
                                 "hello",
-                                index=RAMIndexCacheStore(ttl=600),
+                                index=await _chat_index(),
                                 v=True)
     data = await _collect(stream)
     assert b"goodbye moon" in data

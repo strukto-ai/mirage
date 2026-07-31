@@ -45,6 +45,10 @@ export interface DiscordResourceState {
 export class DiscordResource implements Resource {
   readonly kind: string = ResourceName.DISCORD
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: chat.jsonl and members/*.json
+  // are rendered at readdir from payloads the listing already fetched, and
+  // attachments carry Discord's CDN byte count.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 600
   readonly prompt: string = DISCORD_PROMPT
   readonly writePrompt: string = DISCORD_WRITE_PROMPT

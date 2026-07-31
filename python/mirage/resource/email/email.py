@@ -30,6 +30,10 @@ class EmailResource(BaseResource):
     accessor: EmailAccessor
     name: str = ResourceName.EMAIL
     caches_reads: bool = True
+    # Every listed file carries an exact size: .email.json is rendered at
+    # readdir from the full BODY.PEEK[] the listing already fetches, and an
+    # attachment's size is its decoded payload length.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 

@@ -36,6 +36,10 @@ export class ChromaResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.CHROMA
   readonly cachesReads: boolean = false
   readonly supportsSnapshot: boolean = false
+  // Every file is sized exactly, by one chunk scan per directory the caller
+  // stats; the path tree's own size is the producer's source number and
+  // never becomes the reported byte length.
+  readonly sizesAlwaysKnown: boolean = true
   readonly prompt: string = CHROMA_PROMPT
   readonly config: ChromaConfigResolved
   readonly accessor: ChromaAccessor

@@ -56,6 +56,57 @@ async def page_chunks(accessor, slug: str) -> list[dict[str, Any]]:
                       item["metadata"], accessor.config.chunk_index_field))
 
 
+async def pages_chunks(
+    accessor,
+    slugs: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch every chunk of several pages in one scan.
+
+    Args:
+        accessor: chroma accessor.
+        slugs (list[str]): page slugs to fetch.
+
+    Returns:
+        dict[str, list[dict]]: slug to its chunks in chunk-index order.
+    """
+    if not slugs:
+        return {}
+    collection = await accessor.get_collection()
+    field = accessor.config.slug_field
+    grouped: dict[str, list[dict[str, Any]]] = {slug: [] for slug in slugs}
+    offset = 0
+    while True:
+        result = await collection.get(
+            where={field: {
+                "$in": slugs
+            }},
+            include=["documents", "metadatas"],
+            limit=PAGE_CHUNK_BATCH_SIZE,
+            offset=offset,
+        )
+        documents = result.get("documents") or []
+        metadatas = result.get("metadatas") or [{} for _ in documents]
+        for document, metadata in zip(documents, metadatas, strict=True):
+            meta = metadata if isinstance(metadata, dict) else {}
+            bucket = grouped.get(str(meta.get(field, "")))
+            if bucket is None:
+                continue
+            bucket.append({
+                "document": "" if document is None else str(document),
+                "metadata": meta,
+            })
+        if len(documents) < PAGE_CHUNK_BATCH_SIZE:
+            break
+        offset += PAGE_CHUNK_BATCH_SIZE
+    return {
+        slug:
+        sorted(chunks,
+               key=lambda item: chunk_index(item["metadata"], accessor.config.
+                                            chunk_index_field))
+        for slug, chunks in grouped.items()
+    }
+
+
 async def query_contains(
     accessor,
     pattern: str,

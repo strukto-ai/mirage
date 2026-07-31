@@ -80,10 +80,13 @@ async def test_find_iname_case_insensitive(chroma_accessor, chroma_index,
 
 @pytest.mark.asyncio
 async def test_find_size_counts_sizeless_files_as_zero(chroma_accessor,
+                                                       chroma_collection,
                                                        chroma_index,
                                                        knowledge_root):
-    # quickstart carries metadata size 12; reference has no size and counts
-    # as 0 (never dropped), matching dirs and the FUSE view.
+    # quickstart renders 12 bytes; reference has lost its chunks, so it has
+    # no size at all and counts as 0 (never dropped), matching dirs and the
+    # FUSE view.
+    chroma_collection.chunks["api/reference"] = []
     large = await find(chroma_accessor,
                        knowledge_root,
                        type=FindType.FILE,
@@ -100,8 +103,9 @@ async def test_find_size_counts_sizeless_files_as_zero(chroma_accessor,
 
 
 @pytest.mark.asyncio
-async def test_find_honors_mtime_and_empty(chroma_accessor, chroma_index,
-                                           knowledge_root):
+async def test_find_honors_mtime_and_empty(chroma_accessor, chroma_collection,
+                                           chroma_index, knowledge_root):
+    chroma_collection.chunks["api/reference"] = []
     recent = await find(
         chroma_accessor,
         knowledge_root,

@@ -15,7 +15,8 @@
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { fetchPageChunks, iterPageChunks, metadataString } from './_client.ts'
+import { iterPageChunks, metadataString, pageChunks } from './_client.ts'
+import { renderPage } from './render.ts'
 import { resolvePath, type ResolvedChromaPath } from './path.ts'
 
 const ENC = new TextEncoder()
@@ -40,8 +41,8 @@ export async function readBytes(
 ): Promise<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const resolved = await resolvePath(accessor, spec, index)
-  const text = await fetchPageChunks(accessor, fileSlug(resolved, spec.virtual))
-  return ENC.encode(text)
+  const chunks = await pageChunks(accessor, fileSlug(resolved, spec.virtual))
+  return renderPage(chunks)
 }
 
 export async function* readStream(

@@ -23,10 +23,11 @@ import { fileBlobName } from './files.ts'
 import { listGuilds } from './guilds.ts'
 import { DISCORD_EPOCH, listMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
+import { historyJsonlBytes, memberJsonBytes } from './render.ts'
 import { DiscordApiError } from './_client.ts'
 import { epochToIso } from '../../utils/dates.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent, enotdir } from '../../utils/errors.ts'
 
 const SOFT_STATUSES = new Set([403, 404, 429])
 
@@ -196,7 +197,12 @@ async function readdirGuildContainer(
     for (const m of members) {
       const user = m.user
       if (user === undefined || user.id === '') continue
-      const entry = DiscordIndexEntry.member({ id: user.id, name: user.username ?? '' })
+      // The listing already carries the whole member payload read() renders,
+      // so the exact size is free here.
+      const entry = DiscordIndexEntry.member(
+        { id: user.id, name: user.username ?? '' },
+        memberJsonBytes(m).byteLength,
+      )
       entries.push([entry.vfsName, entry])
       names.push(`${prefix}/${key}/${entry.vfsName}`)
     }
@@ -254,11 +260,14 @@ async function fetchDay(
     }
     throw e
   }
+  // The day's messages are already in hand, so chat.jsonl's exact rendered
+  // size is free here; read() renders the same messages the same way.
   const chatEntry = new IndexEntry({
     id: `${channelId}:${dateStr}:chat`,
     name: 'chat.jsonl',
     resourceType: DiscordResourceType.CHAT_JSONL,
     vfsName: 'chat.jsonl',
+    size: historyJsonlBytes(messages).byteLength,
   })
   const filesEntry = new IndexEntry({
     id: `${channelId}:${dateStr}:files`,
@@ -346,6 +355,13 @@ async function readdirFilesDir(
   return after.entries
 }
 
+function isLeaf(parts: string[]): boolean {
+  if (parts.length === 3 && parts[1] === 'members') return parts[2]?.endsWith('.json') === true
+  if (parts.length === 5 && parts[1] === 'channels') return parts[4] === 'chat.jsonl'
+  if (parts.length === 6 && parts[1] === 'channels' && parts[4] === 'files') return true
+  return false
+}
+
 export async function readdir(
   accessor: DiscordAccessor,
   path: PathSpec,
@@ -407,11 +423,18 @@ export async function readdir(
     return readdirFilesDir(accessor, prefix, virtualKey, parts, index, rawPath)
   }
 
-  return []
+  // A leaf that exists is ENOTDIR, not ENOENT: callers tell "this is a file,
+  // read it" from "there is nothing here" by the errno. Anything else is a
+  // shape discord does not serve.
+  if (isLeaf(parts)) throw enotdir(rawPath)
+  throw enoent(rawPath)
 }
 export function isDirName(child: string): boolean {
-  // Entries are recognized by extension, so classification never needs
-  // the stat fallback.
-  const name = child.split('/').pop() ?? ''
+  // Classification is structural, not by extension: an attachment carries
+  // whatever extension the uploader gave it, so everything inside a day's
+  // files/ directory is a file.
+  const parts = child.replace(/^\/+|\/+$/g, '').split('/')
+  if (parts.length >= 2 && parts[parts.length - 2] === 'files') return false
+  const name = parts[parts.length - 1] ?? ''
   return !(name.endsWith('.json') || name.endsWith('.jsonl'))
 }

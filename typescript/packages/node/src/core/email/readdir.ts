@@ -23,6 +23,7 @@ import {
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from './_client.ts'
 import { listFolders } from './folders.ts'
+import { messageJsonBytes } from './render.ts'
 import type { ParsedAttachment } from './_parse.ts'
 
 const TITLE_MAX = 80
@@ -125,6 +126,7 @@ export async function readdir(
           name: subject,
           resourceType: 'email/message',
           vfsName: filename,
+          size: messageJsonBytes(hdr).byteLength,
         })
         msgEntries.push([filename, msgEntry])
         const attachments: ParsedAttachment[] = hdr.attachments

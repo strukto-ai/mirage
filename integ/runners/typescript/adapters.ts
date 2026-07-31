@@ -1342,6 +1342,28 @@ async function openTrello(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
+async function openDiscord(target: Target): Promise<Open> {
+  const endpoint = process.env.DISCORD_ENDPOINT
+  if (!endpoint) throw new Error('discord target requires DISCORD_ENDPOINT')
+  // The server outlives a single run here, so posted messages have to be
+  // rolled back to the fixture before the write cases run again.
+  const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
+  if (!reset.ok) throw new Error(`discord /reset failed: ${String(reset.status)}`)
+  const mounts: Record<string, DiscordResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new DiscordResource({
+      token: 'integ-bot-token',
+      baseUrl: `${endpoint}/api/v10`,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 async function openLinear(target: Target): Promise<Open> {
   const endpoint = process.env.LINEAR_ENDPOINT
   if (!endpoint) throw new Error('linear target requires LINEAR_ENDPOINT')
@@ -1498,6 +1520,7 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   github_ci: openGitHubCI,
   slack: openSlack,
   trello: openTrello,
+  discord: openDiscord,
   linear: openLinear,
   langfuse: openLangfuse,
   jaeger: openJaeger,

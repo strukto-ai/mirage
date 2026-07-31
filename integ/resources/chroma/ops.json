@@ -92,7 +92,7 @@
       }
     },
     {
-      "id": "chroma_find_size_archived_kept",
+      "id": "chroma_find_size_small_file_dropped",
       "seq": 630007,
       "targets": [
         "chroma"
@@ -100,7 +100,7 @@
       "command": "find /knowledge/policies/ -name 'archived*' -size -1k",
       "expect": {
         "exit": 0,
-        "stdout": "/knowledge/policies/archived.md\n",
+        "stdout": "",
         "stderr": ""
       }
     },
@@ -503,7 +503,7 @@
       "command": "du /knowledge/guides",
       "expect": {
         "exit": 0,
-        "stdout": "370\t/knowledge/guides\n",
+        "stdout": "354\t/knowledge/guides\n",
         "stderr": ""
       }
     },
@@ -516,7 +516,7 @@
       "command": "du /knowledge/",
       "expect": {
         "exit": 0,
-        "stdout": "370\t/knowledge/guides\n270\t/knowledge/policies\n730\t/knowledge\n",
+        "stdout": "354\t/knowledge/guides\n306\t/knowledge/policies\n712\t/knowledge\n",
         "stderr": ""
       }
     },
@@ -529,7 +529,7 @@
       "command": "du -c /knowledge/guides /knowledge/policies",
       "expect": {
         "exit": 0,
-        "stdout": "370\t/knowledge/guides\n270\t/knowledge/policies\n640\ttotal\n",
+        "stdout": "354\t/knowledge/guides\n306\t/knowledge/policies\n660\ttotal\n",
         "stderr": ""
       }
     },

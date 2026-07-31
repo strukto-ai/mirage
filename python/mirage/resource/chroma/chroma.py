@@ -27,6 +27,10 @@ class ChromaResource(BaseResource):
     accessor: ChromaAccessor
     name: str = ResourceName.CHROMA
     caches_reads: bool = False
+    # Every file is sized exactly, by one chunk scan per directory the
+    # caller stats; the path tree's own size is the producer's source
+    # number and never becomes the reported byte length.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops = _CHROMA_OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = False

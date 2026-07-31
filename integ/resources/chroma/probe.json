@@ -62,7 +62,7 @@
       "provision": true,
       "expect": {
         "exit": 0,
-        "stdout": "net=190 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stdout": "net=188 write=0 cache=0 ops=1 hits=0 precision=exact\n",
         "stderr": ""
       }
     },
@@ -76,7 +76,7 @@
       "provision": true,
       "expect": {
         "exit": 0,
-        "stdout": "net=190 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stdout": "net=188 write=0 cache=0 ops=1 hits=0 precision=exact\n",
         "stderr": ""
       }
     },

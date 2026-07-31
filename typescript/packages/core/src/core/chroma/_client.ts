@@ -18,7 +18,7 @@ import { enoent } from '../../utils/errors.ts'
 const PATH_TREE_ID = '__path_tree__'
 const PAGE_CHUNK_BATCH_SIZE = 100
 
-interface ChromaChunk {
+export interface ChromaChunk {
   document: string
   metadata: Record<string, unknown>
 }
@@ -37,11 +37,6 @@ export async function fetchPathTree(accessor: ChromaAccessor): Promise<string> {
   return value
 }
 
-export async function fetchPageChunks(accessor: ChromaAccessor, slug: string): Promise<string> {
-  const chunks = await pageChunks(accessor, slug)
-  return chunks.map((chunk) => chunk.document).join('\n')
-}
-
 export async function* iterPageChunks(
   accessor: ChromaAccessor,
   slug: string,
@@ -52,7 +47,7 @@ export async function* iterPageChunks(
   }
 }
 
-async function pageChunks(accessor: ChromaAccessor, slug: string): Promise<ChromaChunk[]> {
+export async function pageChunks(accessor: ChromaAccessor, slug: string): Promise<ChromaChunk[]> {
   const collection = await accessor.getCollection()
   const field = accessor.config.chunkIndexField
   const chunks: ChromaChunk[] = []
@@ -76,6 +71,41 @@ async function pageChunks(accessor: ChromaAccessor, slug: string): Promise<Chrom
     offset += PAGE_CHUNK_BATCH_SIZE
   }
   return chunks.sort((a, b) => chunkIndex(a.metadata, field) - chunkIndex(b.metadata, field))
+}
+
+export async function pagesChunks(
+  accessor: ChromaAccessor,
+  slugs: readonly string[],
+): Promise<Map<string, ChromaChunk[]>> {
+  const grouped = new Map<string, ChromaChunk[]>()
+  if (slugs.length === 0) return grouped
+  for (const slug of slugs) grouped.set(slug, [])
+  const collection = await accessor.getCollection()
+  const slugField = accessor.config.slugField
+  const indexField = accessor.config.chunkIndexField
+  let offset = 0
+  for (;;) {
+    const result = await collection.get({
+      where: { [slugField]: { $in: [...slugs] } },
+      include: ['documents', 'metadatas'],
+      limit: PAGE_CHUNK_BATCH_SIZE,
+      offset,
+    })
+    const documents = result.documents
+    const metadatas = result.metadatas
+    for (let i = 0; i < documents.length; i++) {
+      const metadata = metadatas[i] ?? {}
+      const bucket = grouped.get(metadataString(metadata[slugField]) ?? '')
+      if (bucket === undefined) continue
+      bucket.push({ document: documents[i] ?? '', metadata })
+    }
+    if (documents.length < PAGE_CHUNK_BATCH_SIZE) break
+    offset += PAGE_CHUNK_BATCH_SIZE
+  }
+  for (const chunks of grouped.values()) {
+    chunks.sort((a, b) => chunkIndex(a.metadata, indexField) - chunkIndex(b.metadata, indexField))
+  }
+  return grouped
 }
 
 function chunkIndex(metadata: Record<string, unknown>, field: string): number {

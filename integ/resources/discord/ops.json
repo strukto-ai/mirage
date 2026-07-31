@@ -1,0 +1,368 @@
+{
+  "cases": [
+    {
+      "id": "dc_ls_root",
+      "seq": 690000,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls /discord",
+      "expect": {
+        "exit": 0,
+        "stdout": "Mirage HQ__100000000000000001\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_guild",
+      "seq": 690001,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001'",
+      "expect": {
+        "exit": 0,
+        "stdout": "channels\nmembers\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_channels",
+      "seq": 690002,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/channels'",
+      "expect": {
+        "exit": 0,
+        "stdout": "general__200000000000000001\nreleases__200000000000000002\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_members",
+      "seq": 690003,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/members'",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice__300000000000000001.json\nbob__300000000000000002.json\nmirage-bot__900000000000000001.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_dates_count",
+      "seq": 690004,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "30\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_dates_tail",
+      "seq": 690005,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001' | tail -3",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-05-31\n2026-06-01\n2026-06-02\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_day",
+      "seq": 690006,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01'",
+      "expect": {
+        "exit": 0,
+        "stdout": "chat.jsonl\nfiles\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_files",
+      "seq": 690007,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files'",
+      "expect": {
+        "exit": 0,
+        "stdout": "budget__500000000000000001.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_cat_day_content",
+      "seq": 690008,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl' | jq -r .content",
+      "expect": {
+        "exit": 0,
+        "stdout": "deploy is green\nthanks alice, shipping the release notes\nbudget spreadsheet attached\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_cat_day_authors",
+      "seq": 690009,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl' | jq -r .author.username",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice\nbob\nalice\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_cat_second_day",
+      "seq": 690010,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02/chat.jsonl' | jq -r .content",
+      "expect": {
+        "exit": 0,
+        "stdout": "second day standup\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_cat_other_channel",
+      "seq": 690011,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/2026-06-01/chat.jsonl' | jq -r .content",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1.2.0 released\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_cat_member",
+      "seq": 690012,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json' | jq -r '.nick + \" \" + .user.username'",
+      "expect": {
+        "exit": 0,
+        "stdout": "al alice\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_cat_attachment",
+      "seq": 690013,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "quarter,amount\nQ1,100\nQ2,250\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_wc_lines",
+      "seq": 690014,
+      "targets": [
+        "discord"
+      ],
+      "command": "wc -l < '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl'",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_head_attachment",
+      "seq": 690015,
+      "targets": [
+        "discord"
+      ],
+      "command": "head -c 20 '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "quarter,amount\nQ1,10",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_du_day",
+      "seq": 690016,
+      "targets": [
+        "discord"
+      ],
+      "command": "du -s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02'",
+      "expect": {
+        "exit": 0,
+        "stdout": "374\t/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_du_files",
+      "seq": 690017,
+      "targets": [
+        "discord"
+      ],
+      "command": "du -sh '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files'",
+      "expect": {
+        "exit": 0,
+        "stdout": "29B\t/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_find_type_f",
+      "seq": 690018,
+      "targets": [
+        "discord"
+      ],
+      "command": "find '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01' -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl\n/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_find_type_d",
+      "seq": 690019,
+      "targets": [
+        "discord"
+      ],
+      "command": "find '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01' -type d | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01\n/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_grep_count",
+      "seq": 690020,
+      "targets": [
+        "discord"
+      ],
+      "command": "grep -c release '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_grep_files_with_match",
+      "seq": 690021,
+      "targets": [
+        "discord"
+      ],
+      "command": "grep -l standup '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02/chat.jsonl'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02/chat.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_tree_members",
+      "seq": 690022,
+      "targets": [
+        "discord"
+      ],
+      "command": "tree '/discord/Mirage HQ__100000000000000001/members'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/members\n|-- alice__300000000000000001.json\n|-- bob__300000000000000002.json\n`-- mirage-bot__900000000000000001.json\n\n1 directory, 3 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_stat_day_type",
+      "seq": 690023,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %F '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01'",
+      "expect": {
+        "exit": 0,
+        "stdout": "directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_stat_attachment_type",
+      "seq": 690024,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %F '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "regular file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_ls_missing",
+      "seq": 690025,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/nope'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/discord/Mirage HQ__100000000000000001/nope': No such file or directory\n"
+      }
+    },
+    {
+      "id": "dc_cat_missing",
+      "seq": 690026,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/nope.jsonl'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/nope.jsonl: No such file or directory\n"
+      }
+    },
+    {
+      "id": "dc_ls_file_operand",
+      "seq": 690027,
+      "targets": [
+        "discord"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

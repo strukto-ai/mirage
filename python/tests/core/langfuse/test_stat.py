@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.langfuse.render import jsonl_bytes
 from mirage.core.langfuse.stat import stat
 from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.types import FileType, PathSpec
@@ -106,13 +107,20 @@ async def test_stat_prompt_version_file(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_dataset_items(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(resource_path="datasets/qa-eval/items.jsonl",
-                 virtual="/datasets/qa-eval/items.jsonl",
-                 directory="/datasets/qa-eval/items.jsonl"), index)
+    items = [{"id": "i-1", "input": "a"}]
+    with patch(
+            "mirage.core.langfuse.readdir.fetch_dataset_items",
+            new_callable=AsyncMock,
+            return_value=items,
+    ):
+        result = await stat(
+            accessor,
+            PathSpec(resource_path="datasets/qa-eval/items.jsonl",
+                     virtual="/datasets/qa-eval/items.jsonl",
+                     directory="/datasets/qa-eval/items.jsonl"), index)
     assert result.type == FileType.TEXT
     assert result.name == "items.jsonl"
+    assert result.size == len(jsonl_bytes(items))
 
 
 @pytest.mark.asyncio
@@ -127,11 +135,16 @@ async def test_stat_dotfile_raises(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_dataset_runs_dir(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(resource_path="datasets/qa-eval/runs",
-                 virtual="/datasets/qa-eval/runs",
-                 directory="/datasets/qa-eval/runs"), index)
+    with patch(
+            "mirage.core.langfuse.readdir.fetch_dataset_items",
+            new_callable=AsyncMock,
+            return_value=[],
+    ):
+        result = await stat(
+            accessor,
+            PathSpec(resource_path="datasets/qa-eval/runs",
+                     virtual="/datasets/qa-eval/runs",
+                     directory="/datasets/qa-eval/runs"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "runs"
 

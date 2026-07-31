@@ -359,6 +359,11 @@ def _load_trello_server() -> ModuleType:
         Path(__file__).resolve().parents[2] / "server" / "trello_server.py")
 
 
+def _load_discord_server() -> ModuleType:
+    return _load_module(
+        Path(__file__).resolve().parents[2] / "server" / "discord_server.py")
+
+
 def _load_linear_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "linear_server.py")
@@ -1065,6 +1070,34 @@ class TrelloService:
         await self.runner.cleanup()
 
 
+class DiscordService:
+    """Points discord mounts at the fake discord.com/api server.
+
+    The server (integ/server/discord_server.py) mirrors the documented
+    shapes: newest-first message pages, after/limit pagination, and a CDN
+    route that serves attachment bytes without the bot token.
+    """
+
+    def __init__(self, state, runner, base: str) -> None:
+        self.state = state
+        self.runner = runner
+        self.base = base
+
+    @classmethod
+    async def create(cls) -> "DiscordService":
+        module = _load_discord_server()
+        state, _server, runner = await module.start_fake_discord()
+        return cls(state, runner, state.base)
+
+    def resource(self, mount: dict) -> DiscordResource:
+        return DiscordResource(
+            DiscordConfig(token="integ-bot-token",
+                          base_url=f"{self.base}/api/v10"))
+
+    async def teardown(self) -> None:
+        await self.runner.cleanup()
+
+
 class LinearService:
 
     def __init__(self, state, runner, base: str) -> None:
@@ -1692,6 +1725,13 @@ def build_trello(
     return service.resource(mount), _noop
 
 
+def build_discord(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, DiscordService)
+    return service.resource(mount), _noop
+
+
 def build_linear(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -1917,6 +1957,7 @@ BUILDERS = {
     "github_ci": build_github_ci,
     "slack": build_slack,
     "trello": build_trello,
+    "discord": build_discord,
     "linear": build_linear,
     "langfuse": build_langfuse,
     "jaeger": build_jaeger,
@@ -1974,6 +2015,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await SlackService.create()
     if target.get("service") == "trello":
         return await TrelloService.create()
+    if target.get("service") == "discord":
+        return await DiscordService.create()
     if target.get("service") == "linear":
         return await LinearService.create()
     if target.get("service") == "dify":

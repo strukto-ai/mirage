@@ -14,6 +14,7 @@
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { afterIdPages } from './paginate.ts'
+import { historyJsonlBytes } from './render.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
 
@@ -50,6 +51,7 @@ async function* streamMessagesForDay(
     lastIdFn: (m) => (m as DiscordMessage).id,
     pageSize,
     startAfter: after,
+    newestFirst: true,
   })) {
     const inRange = page.filter((m) => BigInt(m.id) <= beforeBig)
     if (inRange.length > 0) yield inRange
@@ -81,7 +83,5 @@ export async function getHistoryJsonl(
   dateStr: string,
 ): Promise<Uint8Array> {
   const messages = await listMessagesForDay(accessor, channelId, dateStr)
-  if (messages.length === 0) return new Uint8Array()
-  const lines = messages.map((m) => JSON.stringify(m))
-  return new TextEncoder().encode(lines.join('\n') + '\n')
+  return historyJsonlBytes(messages)
 }

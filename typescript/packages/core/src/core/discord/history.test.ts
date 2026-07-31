@@ -70,9 +70,11 @@ describe('dateToSnowflake', () => {
 
 describe('getHistoryJsonl', () => {
   it('paginates until a short batch is returned', async () => {
+    // Discord answers newest-first, so a full page is descending and the
+    // cursor for the next one is its first (newest) id.
     const firstPage = Array.from({ length: 100 }, (_, i) => ({
-      id: String(BigInt(dateToSnowflake('2026-04-25')) + BigInt(i + 1)),
-      content: `msg${String(i + 1)}`,
+      id: String(BigInt(dateToSnowflake('2026-04-25')) + BigInt(100 - i)),
+      content: `msg${String(100 - i)}`,
     }))
     const secondPage = [
       {
@@ -89,7 +91,7 @@ describe('getHistoryJsonl', () => {
     expect(t.calls.length).toBe(2)
     expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages')
     expect(t.calls[0]?.params).toMatchObject({ limit: 100 })
-    expect(t.calls[1]?.params?.after).toBe(firstPage[firstPage.length - 1]?.id)
+    expect(t.calls[1]?.params?.after).toBe(firstPage[0]?.id)
     const text = new TextDecoder().decode(out)
     const lines = text.trimEnd().split('\n')
     expect(lines.length).toBe(101)

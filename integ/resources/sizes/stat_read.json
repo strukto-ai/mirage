@@ -1041,6 +1041,214 @@
         "stdout": "63\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_chroma_page_stat",
+      "seq": 680106,
+      "targets": [
+        "chroma"
+      ],
+      "command": "stat -c %s /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "188\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_page_read",
+      "seq": 680107,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/auth.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "188\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_undeclared_stat",
+      "seq": 680108,
+      "targets": [
+        "chroma"
+      ],
+      "command": "stat -c %s /knowledge/policies/archived.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "37\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_undeclared_read",
+      "seq": 680109,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/policies/archived.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "37\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_email_message_stat",
+      "seq": 680110,
+      "targets": [
+        "email"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "567\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_email_message_read",
+      "seq": 680111,
+      "targets": [
+        "email"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "567\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_items_stat_matches_read",
+      "seq": 680112,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "test \"$(stat -c %s /lf/datasets/eval-basic/items.jsonl)\" = \"$(cat /lf/datasets/eval-basic/items.jsonl | wc -c)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_items_empty_stat",
+      "seq": 680113,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "stat -c %s /lf/datasets/eval-empty/items.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_run_stat_matches_read",
+      "seq": 680114,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "test \"$(stat -c %s /lf/datasets/eval-basic/runs/run-alpha.jsonl)\" = \"$(cat /lf/datasets/eval-basic/runs/run-alpha.jsonl | wc -c)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_chat_stat",
+      "seq": 690050,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02/chat.jsonl'",
+      "expect": {
+        "exit": 0,
+        "stdout": "374\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_chat_read",
+      "seq": 690051,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02/chat.jsonl' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "374\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_chat_with_attachment_stat_matches_read",
+      "seq": 690052,
+      "targets": [
+        "discord"
+      ],
+      "command": "test \"$(stat -c %s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl')\" = \"$(cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl' | wc -c)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_member_stat",
+      "seq": 690053,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %s '/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json'",
+      "expect": {
+        "exit": 0,
+        "stdout": "205\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_member_read",
+      "seq": 690054,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "205\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_attachment_stat",
+      "seq": 690055,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "29\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_attachment_read",
+      "seq": 690056,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "29\n",
+        "stderr": ""
+      }
     }
   ]
 }

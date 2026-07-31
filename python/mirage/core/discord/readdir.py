@@ -27,8 +27,9 @@ from mirage.core.discord.files import file_blob_name
 from mirage.core.discord.guilds import list_guilds
 from mirage.core.discord.history import list_messages_for_day
 from mirage.core.discord.members import list_members
+from mirage.core.discord.render import history_jsonl_bytes
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
+from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -224,11 +225,14 @@ async def _fetch_day(
             await index.set_dir(date_vkey, [])
             return
         raise
+    # The day's messages are already in hand, so chat.jsonl's exact rendered
+    # size is free here; read() renders the same messages the same way.
     chat_entry = IndexEntry(
         id=f"{channel_id}:{date_str}:chat",
         name="chat.jsonl",
         resource_type="discord/chat_jsonl",
         vfs_name="chat.jsonl",
+        size=len(history_jsonl_bytes(messages)),
     )
     files_entry = IndexEntry(
         id=f"{channel_id}:{date_str}:files",
@@ -320,6 +324,21 @@ async def _readdir_files_dir(
     return cached.entries
 
 
+def _is_leaf(parts: list[str]) -> bool:
+    """Report whether the path names a file rather than a directory.
+
+    Args:
+        parts (list[str]): mount-relative path segments.
+    """
+    if len(parts) == 3 and parts[1] == "members":
+        return parts[2].endswith(".json")
+    if len(parts) == 5 and parts[1] == "channels":
+        return parts[4] == "chat.jsonl"
+    if len(parts) == 6 and parts[1] == "channels" and parts[4] == "files":
+        return True
+    return False
+
+
 async def readdir(
     accessor: DiscordAccessor,
     path: PathSpec,
@@ -341,9 +360,10 @@ async def readdir(
     parts = key.split("/")
 
     if len(parts) == 1:
-        lookup = await index.get(virtual_key)
-        if lookup.entry is None:
-            raise enoent(raw_path)
+        # Bootstrap from the root listing when the index is cold, the way
+        # every other branch does: listing a guild directly must not depend
+        # on having listed the mount root first.
+        await _ensure_guild_id(accessor, prefix, parts[0], index, raw_path)
         return await _readdir_guild_top(prefix, key)
 
     if len(parts) == 2 and parts[1] == "channels":
@@ -366,11 +386,20 @@ async def readdir(
         return await _readdir_files_dir(accessor, prefix, key, virtual_key,
                                         parts, index, raw_path)
 
-    return []
+    # A leaf that exists is ENOTDIR, not ENOENT: callers tell "this is a
+    # file, read it" from "there is nothing here" by the errno. Anything
+    # else is a shape discord does not serve.
+    if _is_leaf(parts):
+        raise enotdir(raw_path)
+    raise enoent(raw_path)
 
 
 def is_dir_name(child: str) -> bool:
-    # Entries are recognized by extension, so classification never needs
-    # the stat fallback.
-    name = child.rsplit("/", 1)[-1]
+    # Classification is structural, not by extension: an attachment carries
+    # whatever extension the uploader gave it, so everything inside a day's
+    # files/ directory is a file.
+    parts = child.strip("/").split("/")
+    if len(parts) >= 2 and parts[-2] == "files":
+        return False
+    name = parts[-1] if parts else ""
     return not (name.endswith(".json") or name.endswith(".jsonl"))

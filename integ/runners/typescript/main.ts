@@ -187,6 +187,10 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: TRELLO_ENDPOINT not set\n`)
       continue
     }
+    if (target.service === 'discord' && !process.env.DISCORD_ENDPOINT) {
+      process.stderr.write(`skip [${id}]: DISCORD_ENDPOINT not set\n`)
+      continue
+    }
     if (target.service === 'linear' && !process.env.LINEAR_ENDPOINT) {
       process.stderr.write(`skip [${id}]: LINEAR_ENDPOINT not set\n`)
       continue

@@ -17,3 +17,4 @@ from pydantic import BaseModel, SecretStr
 
 class DiscordConfig(BaseModel):
     token: SecretStr
+    base_url: str | None = None

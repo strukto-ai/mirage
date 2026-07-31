@@ -28,12 +28,18 @@ def discord_headers(config: DiscordConfig) -> dict[str, str]:
     return {"Authorization": f"Bot {reveal_secret(config.token)}"}
 
 
+def discord_base(config: DiscordConfig) -> str:
+    # base_url exists so the integ fake can stand in for discord.com; every
+    # request must go through it, not the module constant.
+    return (config.base_url or DISCORD_API).rstrip("/")
+
+
 async def discord_get(
     config: DiscordConfig,
     endpoint: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any] | list[Any]:
-    url = f"{DISCORD_API}{endpoint}"
+    url = f"{discord_base(config)}{endpoint}"
     headers = discord_headers(config)
     for attempt in range(MAX_RETRIES):
         async with aiohttp.ClientSession() as session:
@@ -57,7 +63,7 @@ async def discord_post(
     endpoint: str,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    url = f"{DISCORD_API}{endpoint}"
+    url = f"{discord_base(config)}{endpoint}"
     headers = discord_headers(config)
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=body or {}) as resp:
@@ -73,7 +79,7 @@ async def discord_put(
     config: DiscordConfig,
     endpoint: str,
 ) -> None:
-    url = f"{DISCORD_API}{endpoint}"
+    url = f"{discord_base(config)}{endpoint}"
     headers = discord_headers(config)
     async with aiohttp.ClientSession() as session:
         async with session.put(url, headers=headers) as resp:

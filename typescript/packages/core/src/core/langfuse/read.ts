@@ -23,18 +23,7 @@ import {
   fetchTrace,
 } from './_client.ts'
 import { enoent } from '../../utils/errors.ts'
-
-const ENC = new TextEncoder()
-
-function toJsonBytes(data: unknown): Uint8Array {
-  return ENC.encode(JSON.stringify(data, null, 2))
-}
-
-function toJsonlBytes(items: readonly Record<string, unknown>[]): Uint8Array {
-  if (items.length === 0) return new Uint8Array()
-  const text = items.map((item) => JSON.stringify(item)).join('\n') + '\n'
-  return ENC.encode(text)
-}
+import { toJsonBytes, toJsonlBytes } from './render.ts'
 
 export async function read(
   accessor: LangfuseAccessor,

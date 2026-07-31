@@ -20,6 +20,7 @@ from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.folders import list_folders
+from mirage.core.email.render import message_json_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -118,6 +119,7 @@ async def readdir(
                     name=subject,
                     resource_type="email/message",
                     vfs_name=filename,
+                    size=len(message_json_bytes(hdr)),
                 )
                 msg_entries.append((filename, msg_entry))
                 attachments = hdr.get("attachments", [])
