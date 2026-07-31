@@ -63,7 +63,7 @@ describe('SSHResource — identity', () => {
   it('ops() length matches SSH_OPS', () => {
     const res = makeResource(state)
     expect(res.ops().length).toBe(SSH_OPS.length)
-    expect(res.ops().length).toBe(11)
+    expect(res.ops().length).toBe(12)
   })
 })
 

@@ -67,6 +67,9 @@ function makeRamEnv(): NativeEnv {
         resource.store.dirs.add('/' + parts.slice(0, i).join('/'))
       }
       resource.store.files.set(remote, content)
+      // Mirror the native side: files on the tmp filesystem carry an
+      // mtime, and -mtime windows exclude unknown-mtime entries.
+      resource.store.modified.set(remote, new Date().toISOString())
     },
     native(cmd, stdin = null) {
       return runNative(tmp, cmd, stdin)
@@ -160,6 +163,7 @@ function writeToMount(mount: MountHandle, relative: string, content: Uint8Array)
       ram.store.dirs.add('/' + parts.slice(0, i).join('/'))
     }
     ram.store.files.set('/' + relative, content)
+    ram.store.modified.set('/' + relative, new Date().toISOString())
     return
   }
   if (mount.diskRoot === null) throw new Error('disk mount missing root')

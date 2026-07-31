@@ -17,8 +17,8 @@ import { ResourceName } from '@struktoai/mirage-core'
 import { SSH_OPS } from './index.ts'
 
 describe('SSH_OPS', () => {
-  it('registers the expected 11 ops with resource=ssh', () => {
-    expect(SSH_OPS).toHaveLength(11)
+  it('registers the expected 12 ops with resource=ssh', () => {
+    expect(SSH_OPS).toHaveLength(12)
     for (const op of SSH_OPS) expect(op.resource).toBe(ResourceName.SSH)
   })
 
@@ -33,6 +33,7 @@ describe('SSH_OPS', () => {
         'readdir',
         'rename',
         'rmdir',
+        'setattr',
         'stat',
         'truncate',
         'unlink',
@@ -44,7 +45,17 @@ describe('SSH_OPS', () => {
   it('write-side ops are flagged write:true', () => {
     const writes = new Set(SSH_OPS.filter((o) => o.write).map((o) => o.name))
     expect(writes).toEqual(
-      new Set(['append', 'create', 'mkdir', 'rename', 'rmdir', 'truncate', 'unlink', 'write']),
+      new Set([
+        'append',
+        'create',
+        'mkdir',
+        'rename',
+        'rmdir',
+        'setattr',
+        'truncate',
+        'unlink',
+        'write',
+      ]),
     )
   })
 })

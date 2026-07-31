@@ -1165,11 +1165,13 @@ export class Workspace {
       await this.runPendingDriftCheck()
     }
     const stdin = options.stdin ?? null
-    if (options.provision === true) return this.provision(command)
     const parser = await this.getShellParser()
     const root = parser.parse(command)
     const offending = findSyntaxError(root)
     if (offending !== null) {
+      // The gate runs before the provision branch, mirroring Python:
+      // a provision run of unparseable input reports the syntax error
+      // instead of walking the ERROR tree.
       const snippet = offending.trim()
       const errMsg =
         snippet.length > 0
@@ -1178,6 +1180,7 @@ export class Workspace {
       const err = new TextEncoder().encode(errMsg)
       return new ExecuteResult(new Uint8Array(), err, 2)
     }
+    if (options.provision === true) return this.provision(command)
     const rootNode = root as unknown as TSNodeLike
     let routingDecision: PolicyDecision | null
     try {

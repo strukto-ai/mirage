@@ -18,9 +18,11 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          overlaid_stat)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.config import StatOverlay
 from mirage.types import PathSpec
 from mirage.utils.path import respell_raw
 
@@ -41,6 +43,7 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    stat_overlay: StatOverlay | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -49,8 +52,15 @@ async def find(
     if ops.find is None:
         return await _find_walk(ops, accessor, paths, texts, name, type, size,
                                 mtime, maxdepth, iname, path, mindepth, empty,
-                                index)
+                                index, stat_overlay)
     stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
+    if stat is not None and stat_overlay is not None:
+        # -mtime must see namespace times (touch results, observed
+        # writes on mtime-less backends), same as ls.
+        stat = partial(overlaid_stat,
+                       partial(ops.stat, accessor),
+                       stat_overlay,
+                       index=index)
     return await generic_find(paths,
                               texts,
                               find_core=partial(ops.find, accessor),
@@ -85,6 +95,7 @@ async def _find_walk(
     mindepth: str | None,
     empty: bool,
     index: IndexCacheStore,
+    stat_overlay: StatOverlay | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")
@@ -101,12 +112,15 @@ async def _find_walk(
                            empty=empty)
     hint = (partial(ops.is_dir_name, accessor)
             if ops.is_dir_name is not None else _no_dir_hint)
+    stat_fn = partial(ops.stat, accessor)
+    if stat_overlay is not None:
+        stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
     # GNU find walks every start point in operand order.
     results: list[str] = []
     for search in searches:
         walked = await walk_find(search,
                                  readdir=partial(ops.readdir, accessor),
-                                 stat=partial(ops.stat, accessor),
+                                 stat=stat_fn,
                                  is_dir_name=hint,
                                  index=index,
                                  args=args)

@@ -96,6 +96,37 @@ export function getForParts(node: TSNodeLike): [string, TSNodeLike[], TSNodeLike
   return [variable, values, body]
 }
 
+/**
+ * Get ([init, cond, update], bodyCommands) from a C-style for.
+ *
+ * The expression slots are positional between the (( )) delimiters,
+ * separated by `;` tokens, and any of them may be empty (null):
+ * `for ((;;))`.
+ */
+export function getCforParts(node: TSNodeLike): [(TSNodeLike | null)[], TSNodeLike[]] {
+  const exprs: (TSNodeLike | null)[] = [null, null, null]
+  let slot = 0
+  let inside = false
+  let body: TSNodeLike[] = []
+  for (const child of node.children) {
+    if (child.type === NT.ARITH_OPEN) {
+      inside = true
+      continue
+    }
+    if (child.type === NT.ARITH_CLOSE) {
+      inside = false
+      continue
+    }
+    if (inside) {
+      if (child.type === NT.SEMI) slot += 1
+      else if (child.isNamed === true && slot < 3) exprs[slot] = child
+      continue
+    }
+    if (child.type === NT.DO_GROUP) body = [...child.namedChildren]
+  }
+  return [exprs, body]
+}
+
 export function getSubshellBody(node: TSNodeLike): TSNodeLike[] {
   return [...node.namedChildren]
 }

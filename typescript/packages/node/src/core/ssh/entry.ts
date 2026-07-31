@@ -30,12 +30,21 @@ export function attrsToFileStat(name: string, attrs: SshAttrs): FileStat {
   if (attrs.mode !== undefined) extra.mode = attrs.mode
   if (attrs.uid !== undefined) extra.uid = attrs.uid
   if (attrs.gid !== undefined) extra.gid = attrs.gid
+  // Fields setattr applies natively (mode, times) surface from the
+  // remote inode, so external chmod/utime stays visible, mirroring
+  // disk. Ownership can never be applied natively (chown over SFTP
+  // needs privileges), so it lives wholly in the namespace overlay;
+  // server-side uid/gid stay in extra only.
+  const mode = attrs.mode !== undefined ? attrs.mode & 0o7777 : null
+  const atime = attrs.atime !== undefined ? new Date(attrs.atime * 1000).toISOString() : null
   if (isDirectoryAttrs(attrs)) {
     return new FileStat({
       name,
       size: null,
       modified,
       type: FileType.DIRECTORY,
+      mode,
+      atime,
       extra,
     })
   }
@@ -45,6 +54,8 @@ export function attrsToFileStat(name: string, attrs: SshAttrs): FileStat {
     modified,
     fingerprint: null,
     type: guessType(name),
+    mode,
+    atime,
     extra,
   })
 }

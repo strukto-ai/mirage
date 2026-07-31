@@ -394,6 +394,36 @@ function makeFakeSftp(state: FakeSftp): SFTPWrapper {
       }
       cb(undefined)
     },
+    chmod(path: string, mode: number, cb: (err: Error | undefined) => void): void {
+      const file = state.files.get(path)
+      const dir = state.dirs.get(path)
+      if (file === undefined && dir === undefined) {
+        cb(noSuchFile(path))
+        return
+      }
+      const bits = mode & 0o7777
+      if (file !== undefined) {
+        state.files.set(path, { data: file.data, attrs: { ...file.attrs, mode: S_IFREG | bits } })
+      } else {
+        state.dirs.set(path, { ...dir, mode: S_IFDIR | bits })
+      }
+      cb(undefined)
+    },
+    utimes(path: string, atime: number, mtime: number, cb: (err: Error | undefined) => void): void {
+      const file = state.files.get(path)
+      const dir = state.dirs.get(path)
+      if (file === undefined && dir === undefined) {
+        cb(noSuchFile(path))
+        return
+      }
+      const stamped = { atime, mtime }
+      if (file !== undefined) {
+        state.files.set(path, { data: file.data, attrs: { ...file.attrs, ...stamped } })
+      } else {
+        state.dirs.set(path, { ...dir, ...stamped })
+      }
+      cb(undefined)
+    },
     mkdir(
       path: string,
       arg2: { mode?: number | string } | ((err: Error | undefined) => void),

@@ -126,20 +126,16 @@ describe('special pid variables', () => {
       expect(await runResult(ws, 'sleep 0.05 & wait $!; echo waited=$?')).toEqual([
         0,
         'waited=0\n',
-        '[1]\n',
+        '',
       ])
     })
   })
 })
 
 describe('unsupported constructs', () => {
-  it('reports a graceful error for C-style for', async () => {
+  it('reports a graceful error for unparseable input', async () => {
     await withWS(async (ws) => {
-      expect(await runResult(ws, 'for ((i=0;i<3;i++)); do echo $i; done')).toEqual([
-        2,
-        '',
-        'mirage: unsupported shell construct: c_style_for_statement\n',
-      ])
+      expect(await runResult(ws, 'case x')).toEqual([2, '', "mirage: syntax error near 'case x'\n"])
     })
   })
 })

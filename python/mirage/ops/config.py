@@ -25,6 +25,11 @@ from mirage.types import FileStat, MountMode
 # operand through the symlink table.
 NO_FOLLOW_OPS = frozenset({"unlink", "rename", "rmdir"})
 
+# Content-writing ops whose completion stamps an observed mtime on the
+# namespace node (removals invalidate but must not stamp).
+STAMP_WRITE_OPS = frozenset(
+    {"write", "write_bytes", "append", "create", "truncate", "mkdir"})
+
 
 @runtime_checkable
 class NamespaceLinks(Protocol):

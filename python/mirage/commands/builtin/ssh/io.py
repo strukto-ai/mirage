@@ -26,6 +26,7 @@ from mirage.core.ssh.readdir import readdir as _readdir
 from mirage.core.ssh.rename import rename as _rename
 from mirage.core.ssh.rm import rm_r as _rm_r
 from mirage.core.ssh.rmdir import rmdir as _rmdir
+from mirage.core.ssh.set_attrs import set_attrs as _set_attrs
 from mirage.core.ssh.stat import stat as _stat
 from mirage.core.ssh.stream import read_stream as _read_stream
 from mirage.core.ssh.truncate import truncate as _truncate
@@ -53,6 +54,7 @@ IO = CommandIO(
     du_size=_du_size,
     du_entries=_du_entries,
     truncate=_truncate,
+    set_attrs=_set_attrs,
 )
 
 resolve_glob = IO.resolve_glob

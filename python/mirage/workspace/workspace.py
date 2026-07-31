@@ -1156,8 +1156,12 @@ class Workspace:
                        records: list[OpRecord] | None = None) -> None:
         await self._dispatcher.apply_io(io, records=records)
 
-    async def _invalidate_after_write_by_path(self, path: str) -> None:
-        await self._dispatcher.invalidate_after_write_by_path(path)
+    async def _invalidate_after_write_by_path(self,
+                                              path: str,
+                                              observed: float | None = None
+                                              ) -> None:
+        await self._dispatcher.invalidate_after_write_by_path(
+            path, observed=observed)
 
     def _session_cwd(self, session_id: str) -> str | None:
         try:

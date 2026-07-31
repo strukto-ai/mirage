@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.provision import Precision
 from mirage.resource.ram import RAMResource
 from mirage.shell.node_kind import NodeKind
+from mirage.workspace.node.provision_node import provision_node
 
 # Drift guard: every statement kind the executor supports must have a
 # pinned provision expectation here. The map must cover the full enum
@@ -52,8 +56,14 @@ PLANS = {
     NodeKind.TEST: ("[[ -n x ]]", "0", "0", "exact"),
     NodeKind.NEGATED: ("! grep zzz /data/a.txt", "24", "0", "exact"),
     NodeKind.VAR_ASSIGN: ("FOO=1", "0", "0", "exact"),
-    NodeKind.UNSUPPORTED: ("for ((i=0;i<2;i++)); do true; done", "0", "0",
-                           "unknown"),
+    NodeKind.VAR_ASSIGNS: ("FOO=1 BAR=2", "0", "0", "exact"),
+    NodeKind.CFOR: ("for ((i=0;i<2;i++)); do cat /data/a.txt; done", "24", "0",
+                    "unknown"),
+    # No valid syntax reaches the planner's UNSUPPORTED fallthrough:
+    # the workspace syntax gate rejects ERROR trees first, so this
+    # entry pins the gate, and the stub-node test below pins the
+    # fallthrough plan itself.
+    NodeKind.UNSUPPORTED: ("case x", "0", "0", "unknown"),
 }
 
 
@@ -68,10 +78,28 @@ async def test_every_kind_plans(kind):
     ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
     await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
     result = await ws.execute(snippet, provision=True)
+    if kind is NodeKind.UNSUPPORTED:
+        assert result.exit_code == 2
+        assert await result.stderr_str(
+        ) == "mirage: syntax error near 'case x'\n"
+        await ws.close()
+        return
     assert result.network_read == net, kind
     assert result.network_write == write, kind
     assert result.precision.value == precision, kind
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_node_plans_unknown():
+    fake = MagicMock()
+    fake.type = "some_unknown_type_xyz"
+    fake.text = b"some_unknown_type_xyz"
+    result = await provision_node(MagicMock(), MagicMock(), MagicMock(), None,
+                                  fake, MagicMock())
+    assert result.precision is Precision.UNKNOWN
+    assert result.network_read == "0"
+    assert result.network_write == "0"
 
 
 @pytest.mark.asyncio

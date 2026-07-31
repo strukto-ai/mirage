@@ -42,6 +42,12 @@ class NodeMeta:
     uid: int | str | None = None
     gid: int | str | None = None
     atime: str | None = None
+    # Time of the last content write observed through mirage. Unlike
+    # `mtime` (an explicit touch, which wins over the backend), this is
+    # a fallback that only surfaces when the backend reports no
+    # modified time at all, so `find -mtime` works on mtime-less
+    # backends for files written through mirage.
+    observed_mtime: float | None = None
 
     def is_empty(self) -> bool:
         return all(getattr(self, key) is None for key in NodeMetaKey)
@@ -60,6 +66,7 @@ class NodeMeta:
         uid = entry.get(NodeMetaKey.UID)
         gid = entry.get(NodeMetaKey.GID)
         atime = entry.get(NodeMetaKey.ATIME)
+        observed = entry.get(NodeMetaKey.OBSERVED_MTIME)
         return cls(
             target=target if isinstance(target, str) else None,
             mtime=float(mtime) if isinstance(mtime, (int, float)) else None,
@@ -67,6 +74,8 @@ class NodeMeta:
             uid=uid if isinstance(uid, (int, str)) else None,
             gid=gid if isinstance(gid, (int, str)) else None,
             atime=atime if isinstance(atime, str) else None,
+            observed_mtime=(float(observed) if isinstance(
+                observed, (int, float)) else None),
         )
 
 
@@ -278,21 +287,33 @@ class Namespace:
         await self._store.delete([path])
         return True
 
-    async def clear_times(self, path: str) -> None:
+    async def clear_times(self,
+                          path: str,
+                          observed: float | None = None) -> None:
         """Drop overlay times after a content write.
 
         write(2) refreshes mtime, so a stored overlay time would
         otherwise shadow the backend's fresh one forever. Permission and
         ownership survive writes; a symlink entry keeps its own times.
+        Content writes (not removals) also record the observed write
+        time, the fallback merge_overlay_stat surfaces when the backend
+        reports no mtime of its own.
 
         Args:
             path (str): absolute virtual path that was written.
+            observed (float | None): epoch seconds of a content write
+                to record; None for removal ops.
         """
         meta = self._nodes.get(path)
+        if meta is None and observed is not None:
+            meta = self._nodes.setdefault(path, NodeMeta())
         if meta is None or meta.target is not None:
             return
         meta.mtime = None
         meta.atime = None
+        # None (a removal) also drops any prior observed time, so a
+        # deleted path's meta does not linger.
+        meta.observed_mtime = observed
         if meta.is_empty():
             del self._nodes[path]
             await self._store.delete([path])
