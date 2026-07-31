@@ -41,24 +41,19 @@ const STACK_SIZE = 1024 * 1024
 
 // Assembles the std/console/scriptArgs surface from injected primitives.
 // Kept identical to the quickjs-ng `--std` globals the Python runtime
-// exposes, so a script runs the same on both: `std.in.readAsString()`,
-// `std.exit()`, `console.log`, `scriptArgs`. `std.open`/`os.readdir` are
-// added afterward by MIRAGE_FS_BOOTSTRAP when a workspace bridge is wired.
+// exposes, so a script runs the same on both (pinned against the real
+// engine): only `console.log` exists (no .error/.warn), `print` is a
+// global, both ToString their args (`[object Object]`, not JSON) and
+// append a newline, while `std.out.puts`/`std.err.puts` write raw.
+// `std.open`/`os.readdir` are added afterward by MIRAGE_FS_BOOTSTRAP
+// when a workspace bridge is wired.
 const BOOTSTRAP = `
-const __fmt = (v) =>
-  typeof v === 'string' ? v
-  : (v !== null && typeof v === 'object' ? (() => { try { return JSON.stringify(v) } catch { return String(v) } })() : String(v));
-const __join = (a) => a.map(__fmt).join(' ');
-globalThis.console = {
-  log: (...a) => __mirage_log(__join(a)),
-  info: (...a) => __mirage_log(__join(a)),
-  debug: (...a) => __mirage_log(__join(a)),
-  error: (...a) => __mirage_error(__join(a)),
-  warn: (...a) => __mirage_error(__join(a)),
-};
+const __join = (a) => a.map(String).join(' ');
+globalThis.console = { log: (...a) => __mirage_log(__join(a) + '\\n') };
+globalThis.print = (...a) => __mirage_log(__join(a) + '\\n');
 globalThis.std = {
   in: { readAsString: () => __mirage_stdin },
-  out: { puts: (s) => __mirage_log(String(s)), print: (s) => __mirage_log(String(s)) },
+  out: { puts: (s) => __mirage_log(String(s)) },
   err: { puts: (s) => __mirage_error(String(s)) },
   exit: (n) => { __mirage_setExit(n | 0); throw new Error('__mirage_exit'); },
   getenv: (k) => __mirage_env[k],
@@ -129,7 +124,7 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
         if (exit.called) {
           exitCode = exit.code
         } else {
-          err.push(this.formatError(ctx, result.error))
+          err.push(this.formatError(ctx, result.error) + '\n')
           exitCode = 1
         }
         result.error.dispose()
@@ -139,8 +134,8 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
         if (drained !== null) exitCode = exit.called ? exit.code : drained
       }
       return {
-        stdout: ENC.encode(out.map((l) => l + '\n').join('')),
-        stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
+        stdout: ENC.encode(out.join('')),
+        stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
         exitCode,
       }
     } finally {
@@ -180,7 +175,15 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
         code: 0,
         called: false,
       })
-      const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
+      // Same filesystem surface as run(): an attached workspace serves
+      // std.open/os.readdir, so a JS policy script can read mounted
+      // content (the python evaluator gets this via run()'s GuestFs).
+      const bridge: MirageBridge | null =
+        this.workspaceBridge !== null
+          ? createMirageBridge(this.workspaceBridge, this.listMounts)
+          : null
+      installMirageFs(ctx, bridge)
+      const boot = ctx.evalCode(BOOTSTRAP + MIRAGE_FS_BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()
         throw new EvalError('quickjs bootstrap failed')
@@ -206,12 +209,12 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
       result.value.dispose()
       const drained = this.drainJobs(runtime, ctx, err)
       if (drained !== null && drained !== 0) {
-        throw new EvalError(err.join('\n') || 'quickjs eval failed while draining jobs')
+        throw new EvalError(err.join('').trim() || 'quickjs eval failed while draining jobs')
       }
       return {
         value: (dumped === undefined ? null : dumped) as EvalValue,
-        stdout: ENC.encode(out.map((l) => l + '\n').join('')),
-        stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
+        stdout: ENC.encode(out.join('')),
+        stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
         exitCode: 0,
         status: 'complete',
       }
@@ -276,7 +279,7 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
     for (;;) {
       const jobs = runtime.executePendingJobs()
       if (jobs.error) {
-        err.push(this.formatError(ctx, jobs.error))
+        err.push(this.formatError(ctx, jobs.error) + '\n')
         jobs.error.dispose()
         return 1
       }

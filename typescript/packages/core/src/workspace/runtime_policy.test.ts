@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
+import { QuickJsRuntime } from './executor/js/quickjs.ts'
 import {
   DenyResult,
   parseVerdict,
@@ -196,6 +197,35 @@ describe('routing ladder', () => {
       expect(DEC.decode(heavy.stdout)).toBe('ran-beta\n')
       const light = await ws.execute('python3 -c "light"')
       expect(DEC.decode(light.stdout)).toBe('ran-alpha\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a JS policy script reads mounted content through the fs bridge', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new QuickJsRuntime(), 'vfs'],
+        policy: new ScriptSource(
+          "const f = std.open('/deny.txt', 'r'); " +
+            'const blocked = f !== null && f.readAsString().includes(ctx.command); ' +
+            'if (f !== null) f.close(); ' +
+            "blocked ? { deny: 'listed in /deny.txt' } : null",
+        ),
+      },
+    )
+    try {
+      await ws.execute('echo node > /deny.txt')
+      const denied = await ws.execute('node -e "1"')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('node: policy denied: listed in /deny.txt\n')
+      const ok = await ws.execute('echo ok')
+      expect(DEC.decode(ok.stdout)).toBe('ok\n')
+      expect(ok.exitCode).toBe(0)
     } finally {
       await ws.close()
     }

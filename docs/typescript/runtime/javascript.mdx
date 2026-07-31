@@ -36,8 +36,11 @@ Three input forms, mirroring `python3`:
 
 `scriptArgs` holds the arguments after the code or script,
 `std.in.readAsString()` reads piped stdin, and `std.open`/`os.readdir`
-reach workspace mounts (see [Isolation](#isolation)). These match the
-Python `quickjs` runtime, so a script behaves the same in both languages.
+reach workspace mounts (see [Isolation](#isolation)). Output follows the
+real engine: `console.log` and the `print` global append a newline,
+`std.out.puts`/`std.err.puts` write raw, and there is no `console.error`
+(write stderr with `std.err.puts`). These match the Python `quickjs`
+runtime, so a script behaves the same in both languages.
 
 ## Modules
 

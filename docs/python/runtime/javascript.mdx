@@ -36,7 +36,10 @@ Three input forms, mirroring `python3`:
 
 `scriptArgs` holds the arguments after the code or script, and
 `std.in.readAsString()` reads piped stdin (the quickjs-ng `std`/`os`
-globals are exposed). These match the Python `quickjs` runtime, so a
+globals are exposed). Output follows the real engine: `console.log` and
+the `print` global append a newline, `std.out.puts`/`std.err.puts`
+write raw, and there is no `console.error` (write stderr with
+`std.err.puts`). These match the TypeScript `quickjs` runtime, so a
 script behaves the same in both languages.
 
 ## Modules
