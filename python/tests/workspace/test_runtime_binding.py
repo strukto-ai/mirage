@@ -415,7 +415,7 @@ async def test_add_runtime_appends_and_rebinds():
 
 
 def test_config_inline_script_is_rejected():
-    with pytest.raises(ValueError, match=r"reference a \.py file"):
+    with pytest.raises(ValueError, match=r"reference a \.py/\.js file"):
         _build_runtime_entries([{
             "name": "local",
             "script": "ctx['command'] == 'python3'"
