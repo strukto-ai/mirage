@@ -366,8 +366,37 @@ function pathArg(value: unknown): string | null {
   return null
 }
 
+// fs error codes -> the python exception the guest should catch, with
+// CPython's errno message shape.
+const CODE_TO_GUEST_EXC: Record<string, { name: string; errno: number; phrase: string }> = {
+  ENOENT: { name: 'FileNotFoundError', errno: 2, phrase: 'No such file or directory' },
+  EISDIR: { name: 'IsADirectoryError', errno: 21, phrase: 'Is a directory' },
+  ENOTDIR: { name: 'NotADirectoryError', errno: 20, phrase: 'Not a directory' },
+  EACCES: { name: 'PermissionError', errno: 13, phrase: 'Permission denied' },
+}
+
+/**
+ * Re-throw a bridge failure under its python exception name: the monty
+ * binding raises `err.name` as the matching guest exception type
+ * (PYTHON_EXC_NAMES), so agent code can `except FileNotFoundError`
+ * exactly as it does on the python host.
+ */
+function asGuestError(err: unknown, path: string): unknown {
+  const code = (err as { code?: string }).code
+  const mapped = code !== undefined ? CODE_TO_GUEST_EXC[code] : undefined
+  if (mapped === undefined) return err
+  const guest = new Error(`[Errno ${mapped.errno}] ${mapped.phrase}: '${path}'`)
+  guest.name = mapped.name
+  return guest
+}
+
 async function readBytes(bridge: BridgeDispatchFn, path: string): Promise<Uint8Array> {
-  const data = await bridge('READ', path)
+  let data: unknown
+  try {
+    data = await bridge('READ', path)
+  } catch (caught) {
+    throw asGuestError(caught, path)
+  }
   if (data instanceof Uint8Array) return data
   throw new Error(`monty bridge: READ ${path} expected bytes`)
 }
@@ -377,13 +406,22 @@ async function writeBack(bridge: BridgeDispatchFn, path: string, data: unknown):
     data instanceof Uint8Array
       ? data
       : new TextEncoder().encode(typeof data === 'string' ? data : '')
-  await bridge('WRITE', path, bytes)
+  try {
+    await bridge('WRITE', path, bytes)
+  } catch (caught) {
+    throw asGuestError(caught, path)
+  }
   return typeof data === 'string' ? data.length : bytes.length
 }
 
 async function listEntries(bridge: BridgeDispatchFn, path: string): Promise<MirageEntryLike[]> {
   const prefix = path.endsWith('/') ? path : path + '/'
-  const out = await bridge('LIST', prefix)
+  let out: unknown
+  try {
+    out = await bridge('LIST', prefix)
+  } catch (caught) {
+    throw asGuestError(caught, path)
+  }
   if (!Array.isArray(out)) throw new Error(`monty bridge: LIST ${prefix} expected array`)
   return out as MirageEntryLike[]
 }
