@@ -39,6 +39,18 @@ _READONLY_USAGE = (
     "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n")
 _EXPORT_FLAGS = frozenset("fnp")
 _READONLY_FLAGS = frozenset("aAfp")
+_ANSI_C_ESCAPES = {
+    "\\": "\\\\",
+    "'": "\\'",
+    "\a": "\\a",
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+    "\x1b": "\\E",
+}
 
 
 def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
@@ -49,29 +61,38 @@ def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
                                                      stderr=err)
 
 
+def _is_control(ch: str) -> bool:
+    return ord(ch) < 0x20 or ord(ch) == 0x7F
+
+
 def _bash_declare_quote(value: str) -> str:
     """Quote a value the way bash ``declare -p`` / ``export -p`` does.
 
-    Ordinary text is double-quoted with escapes for ``\\``, ``"``, ``$``,
-    and backtick. Values that contain a newline use the ``$'...'`` form.
+    A value holding any control character takes the ``$'...'`` form, with
+    the named escapes bash uses (``\\a \\b \\t \\n \\v \\f \\r``, and
+    ``\\E`` for escape) and three-digit octal for the rest; ``"``, ``$``
+    and backtick need no escaping there because ``$'...'`` does not
+    expand. Everything else is double-quoted with escapes for ``\\``,
+    ``"``, ``$`` and backtick. Non-ASCII printable text stays literal,
+    which is what bash emits in a UTF-8 locale.
+
+    Args:
+        value (str): the variable value to serialize.
+
+    Returns:
+        str: the quoted value, ready to follow ``declare -x NAME=``.
     """
-    if "\n" in value or "\r" in value:
-        parts: list[str] = []
+    parts: list[str] = []
+    if any(_is_control(ch) for ch in value):
         for ch in value:
-            if ch == "\\":
-                parts.append("\\\\")
-            elif ch == "'":
-                parts.append("\\'")
-            elif ch == "\n":
-                parts.append("\\n")
-            elif ch == "\r":
-                parts.append("\\r")
-            elif ch == "\t":
-                parts.append("\\t")
+            escape = _ANSI_C_ESCAPES.get(ch)
+            if escape is not None:
+                parts.append(escape)
+            elif _is_control(ch):
+                parts.append(f"\\{ord(ch):03o}")
             else:
                 parts.append(ch)
         return "$'" + "".join(parts) + "'"
-    parts = []
     for ch in value:
         if ch in '\\"$`':
             parts.append("\\" + ch)
@@ -109,13 +130,24 @@ def _split_decl_flags(
     return flags, args[i:], None
 
 
-def _export_lines(session: Session) -> list[str]:
+def _export_lines(session: Session, flags: set[str]) -> list[str]:
     """Build sorted ``declare -x`` lines for every variable in the env.
 
     Mirage keeps shell variables in ``session.env`` and treats that map
     as the exported environment (``printenv`` / ``env`` already do), so
-    ``export -p`` lists the same set.
+    ``export -p`` lists the same set. ``-f`` selects shell functions
+    instead of variables; mirage tracks no export attribute on functions,
+    so that form lists nothing, as bash does with none exported.
+
+    Args:
+        session (Session): shell session state.
+        flags (set[str]): option letters the caller supplied.
+
+    Returns:
+        list[str]: one ``declare -x`` line per selected name.
     """
+    if "f" in flags:
+        return []
     lines: list[str] = []
     for name in sorted(session.env):
         lines.append(
@@ -123,8 +155,24 @@ def _export_lines(session: Session) -> list[str]:
     return lines
 
 
-def _readonly_lines(session: Session) -> list[str]:
-    """Build sorted ``declare -r`` / ``declare -ar`` readonly lines."""
+def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
+    """Build sorted ``declare -r`` / ``declare -ar`` readonly lines.
+
+    ``-a`` narrows the listing to indexed arrays, the way bash does.
+    ``-f`` selects functions and ``-A`` associative arrays, neither of
+    which mirage carries a readonly attribute for, so those forms list
+    nothing. Bare and ``-p`` list every readonly name.
+
+    Args:
+        session (Session): shell session state.
+        flags (set[str]): option letters the caller supplied.
+
+    Returns:
+        list[str]: one declaration line per selected name.
+    """
+    if "f" in flags or "A" in flags:
+        return []
+    arrays_only = "a" in flags
     lines: list[str] = []
     for name in sorted(session.readonly_vars):
         arr = session.arrays.get(name)
@@ -134,6 +182,8 @@ def _readonly_lines(session: Session) -> list[str]:
                 if v is not None
             ]
             lines.append(f"declare -ar {name}=({' '.join(parts)})")
+            continue
+        if arrays_only:
             continue
         if name in session.env:
             lines.append(
@@ -163,11 +213,10 @@ async def handle_export(
                                                          stderr=err)
     # -p with names is ignored for display; bare / -p alone print.
     if not names:
-        lines = _export_lines(session)
+        lines = _export_lines(session, flags)
         out = (("\n".join(lines) + "\n") if lines else "").encode()
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
     # -f/-n accepted; name path matches prior export semantics.
-    _ = flags
     for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")
@@ -199,11 +248,10 @@ async def handle_readonly(
                                                          exit_code=2,
                                                          stderr=err)
     if not names:
-        lines = _readonly_lines(session)
+        lines = _readonly_lines(session, flags)
         out = (("\n".join(lines) + "\n") if lines else "").encode()
         return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
     # -a/-A/-f accepted; array shape is applied by the declaration path.
-    _ = flags
     for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")

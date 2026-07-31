@@ -36,21 +36,48 @@ const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or r
 const EXPORT_FLAGS = new Set('fnp')
 const READONLY_FLAGS = new Set('aAfp')
 
-/** Quote a value the way bash `declare -p` / `export -p` does. */
+const ANSI_C_ESCAPES: Record<string, string> = {
+  '\\': '\\\\',
+  "'": "\\'",
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\t': '\\t',
+  '\n': '\\n',
+  '\v': '\\v',
+  '\f': '\\f',
+  '\r': '\\r',
+  '\x1b': '\\E',
+}
+
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\x00-\x1f\x7f]/
+
+function isControl(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0
+  return code < 0x20 || code === 0x7f
+}
+
+/**
+ * Quote a value the way bash `declare -p` / `export -p` does.
+ *
+ * A value holding any control character takes the `$'...'` form, with the
+ * named escapes bash uses (`\a \b \t \n \v \f \r`, and `\E` for escape) and
+ * three-digit octal for the rest; `"`, `$` and backtick need no escaping
+ * there because `$'...'` does not expand. Everything else is double-quoted
+ * with escapes for `\`, `"`, `$` and backtick. Non-ASCII printable text
+ * stays literal, which is what bash emits in a UTF-8 locale.
+ */
 function bashDeclareQuote(value: string): string {
-  if (value.includes('\n') || value.includes('\r')) {
-    let out = ''
+  let out = ''
+  if (CONTROL_RE.test(value)) {
     for (const ch of value) {
-      if (ch === '\\') out += '\\\\'
-      else if (ch === "'") out += "\\'"
-      else if (ch === '\n') out += '\\n'
-      else if (ch === '\r') out += '\\r'
-      else if (ch === '\t') out += '\\t'
+      const escape = ANSI_C_ESCAPES[ch]
+      if (escape !== undefined) out += escape
+      else if (isControl(ch)) out += `\\${(ch.codePointAt(0) ?? 0).toString(8).padStart(3, '0')}`
       else out += ch
     }
     return `$'${out}'`
   }
-  let out = ''
   for (const ch of value) {
     if (ch === '\\' || ch === '"' || ch === '$' || ch === '`') out += `\\${ch}`
     else out += ch
@@ -84,15 +111,23 @@ function splitDeclFlags(
   return { flags, names: args.slice(i), bad: null }
 }
 
-function exportLines(session: Session): string[] {
+function exportLines(session: Session, flags: Set<string>): string[] {
   // Mirage keeps shell variables in session.env and treats that map as the
   // exported environment (printenv / env already do), so export -p lists it.
+  // -f selects shell functions; mirage tracks no export attribute on
+  // functions, so that form lists nothing, as bash does with none exported.
+  if (flags.has('f')) return []
   return Object.keys(session.env)
     .sort()
     .map((name) => `declare -x ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
 }
 
-function readonlyLines(session: Session): string[] {
+function readonlyLines(session: Session, flags: Set<string>): string[] {
+  // -a narrows to indexed arrays, as bash does. -f selects functions and -A
+  // associative arrays, neither of which mirage carries a readonly attribute
+  // for, so those forms list nothing.
+  if (flags.has('f') || flags.has('A')) return []
+  const arraysOnly = flags.has('a')
   const lines: string[] = []
   for (const name of [...session.readonlyVars].sort()) {
     const arr = session.arrays[name]
@@ -107,6 +142,7 @@ function readonlyLines(session: Session): string[] {
       lines.push(`declare -ar ${name}=(${parts.join(' ')})`)
       continue
     }
+    if (arraysOnly) continue
     if (name in session.env) {
       lines.push(`declare -r ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
     } else {
@@ -133,11 +169,10 @@ export function handleExport(assignments: string[], session: Session): Result {
     ]
   }
   if (names.length === 0) {
-    const lines = exportLines(session)
+    const lines = exportLines(session, flags)
     const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
   }
-  void flags
   for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
@@ -177,11 +212,10 @@ export function handleReadonly(assignments: string[], session: Session): Result 
     ]
   }
   if (names.length === 0) {
-    const lines = readonlyLines(session)
+    const lines = readonlyLines(session, flags)
     const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
   }
-  void flags
   for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {

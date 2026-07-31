@@ -756,3 +756,92 @@ async def test_export_invalid_option_via_workspace():
     io = await ws.execute("export -z")
     assert io.exit_code == 2
     assert b"invalid option" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_export_p_quotes_control_characters():
+    session = make_session()
+    session.env.clear()
+    session.env["TAB"] = "a\tb"
+    session.env["ESC"] = "a\x1bb"
+    session.env["BEL"] = "a\x07b"
+    session.env["SOH"] = "a\x01b"
+    session.env["DEL"] = "a\x7fb"
+    session.env["UTF"] = "café"
+    out, io, _ = await handle_export(["-p"], session)
+    assert io.exit_code == 0
+    text = (await materialize(out)).decode()
+    # GNU bash uses $'...' for any control character, named escapes where
+    # it has one and three-digit octal otherwise.
+    assert "declare -x TAB=$'a\\tb'\n" in text
+    assert "declare -x ESC=$'a\\Eb'\n" in text
+    assert "declare -x BEL=$'a\\ab'\n" in text
+    assert "declare -x SOH=$'a\\001b'\n" in text
+    assert "declare -x DEL=$'a\\177b'\n" in text
+    # Printable non-ASCII stays literal, as bash does in a UTF-8 locale.
+    assert 'declare -x UTF="café"\n' in text
+
+
+@pytest.mark.asyncio
+async def test_export_p_double_terminator_still_prints():
+    session = make_session()
+    session.env.clear()
+    session.env["FOO"] = "bar"
+    out, io, _ = await handle_export(["-p", "--"], session)
+    assert io.exit_code == 0
+    assert await materialize(out) == b'declare -x FOO="bar"\n'
+
+
+@pytest.mark.asyncio
+async def test_export_f_lists_no_variables():
+    session = make_session()
+    session.env["FOO"] = "bar"
+    out, io, _ = await handle_export(["-f"], session)
+    assert io.exit_code == 0
+    assert await materialize(out) == b""
+
+
+@pytest.mark.asyncio
+async def test_export_reports_first_invalid_option():
+    session = make_session()
+    _, io, _ = await handle_export(["-zq"], session)
+    assert (io.stderr or b"").startswith(b"bash: export: -z: invalid option")
+
+
+@pytest.mark.asyncio
+async def test_readonly_a_lists_arrays_only():
+    session = make_session()
+    session.env["VAL"] = "x"
+    session.readonly_vars.add("VAL")
+    session.arrays["AR"] = ["a"]
+    session.readonly_vars.add("AR")
+    out, io, _ = await handle_readonly(["-a"], session)
+    assert io.exit_code == 0
+    assert await materialize(out) == b'declare -ar AR=([0]="a")\n'
+
+
+@pytest.mark.asyncio
+async def test_readonly_f_and_A_list_nothing():
+    session = make_session()
+    session.env["VAL"] = "x"
+    session.readonly_vars.add("VAL")
+    for flag in ("-f", "-A"):
+        out, io, _ = await handle_readonly([flag], session)
+        assert io.exit_code == 0
+        assert await materialize(out) == b""
+
+
+@pytest.mark.asyncio
+async def test_export_p_terminator_via_workspace():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute('export ZEP5=v5; export -p -- | grep ZEP5')
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b'declare -x ZEP5="v5"\n'
+
+
+@pytest.mark.asyncio
+async def test_readonly_a_via_workspace():
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute("readonly ZRS1=1; readonly -a ZRA1=(x); readonly -a")
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b'declare -ar ZRA1=([0]="x")\n'

@@ -484,7 +484,12 @@ async def execute_node(
         # Array literals are staged, not stored: `readonly -a a=(y)` on an
         # already-readonly name has to fail with the old value intact.
         staged: list[tuple[str, bool, list[str]]] = []
+        # Option words are kept verbatim, in order, so `--` survives as an
+        # end-of-options marker and the handlers can name the *first* bad
+        # option letter the way bash does.
+        flag_words: list[str] = []
         flag_chars: set[str] = set()
+        opts_done = False
         for child in node.named_children:
             if child.type == NT.VARIABLE_ASSIGNMENT:
                 val_nodes = [
@@ -507,8 +512,13 @@ async def execute_node(
                 expanded = await expand_node(child, session, execute_fn, cs)
                 if not expanded:
                     continue
-                if expanded.startswith("-") and len(expanded) > 1:
-                    flag_chars.update(expanded[1:])
+                if (not opts_done and expanded.startswith("-")
+                        and len(expanded) > 1):
+                    flag_words.append(expanded)
+                    if expanded == "--":
+                        opts_done = True
+                    else:
+                        flag_chars.update(expanded[1:])
                 else:
                     assignments.append(expanded)
         array_names = [name for name, _, _ in staged]
@@ -549,8 +559,6 @@ async def execute_node(
             # has to be marked readonly. Only the `readonly` keyword owns
             # -p / illegal-option handling; `declare -r` keeps names only.
             if keyword == "readonly":
-                flag_words = ([f"-{''.join(flag_chars)}"]
-                              if flag_chars else [])
                 return await handle_readonly(
                     flag_words + assignments + array_names, session)
             return await handle_readonly(assignments + array_names, session)
@@ -559,8 +567,7 @@ async def execute_node(
         # handle_local's fallback when no function scope is active.
         if keyword in (NT.LOCAL, "declare", "typeset"):
             return await handle_local(assignments, session)
-        # Rebuild export flags so -p / bare print and illegal options work.
-        flag_words = [f"-{''.join(flag_chars)}"] if flag_chars else []
+        # Pass export flags through so -p / bare print and bad options work.
         return await handle_export(flag_words + assignments, session)
 
     # ── unset ───────────────────────────────────
