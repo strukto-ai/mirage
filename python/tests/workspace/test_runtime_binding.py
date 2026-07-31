@@ -343,6 +343,27 @@ async def test_policy_deny_folds_into_the_line_result():
 
 
 @pytest.mark.asyncio
+async def test_syntax_error_gates_before_policy():
+    calls: list[str] = []
+
+    def deny_all(ctx):
+        calls.append(ctx.line)
+        return {"deny": "nothing runs"}
+
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(), "vfs"],
+                   policy=deny_all)
+    try:
+        io = await ws.execute("echo (")
+        assert io.exit_code == 2
+        assert b"syntax error" in io.stderr
+        assert calls == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_policy_result_arms_route_and_deny():
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,

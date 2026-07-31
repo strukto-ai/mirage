@@ -248,6 +248,31 @@ describe('routing ladder', () => {
     }
   })
 
+  it('a syntax error gates before the policy', async () => {
+    const parser = await getTestParser()
+    const calls: string[] = []
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), 'vfs'],
+        policy: (ctx) => {
+          calls.push(ctx.line)
+          return { deny: 'nothing runs' }
+        },
+      },
+    )
+    try {
+      const io = await ws.execute('echo (')
+      expect(io.exitCode).toBe(2)
+      expect(DEC.decode(io.stderr)).toContain('syntax error')
+      expect(calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('the typed arms parse like their wire dicts', async () => {
     expect(parseVerdict(new RouteResult('beta'))).toBe('beta')
     expect(() => parseVerdict(new DenyResult('not here'))).toThrow(PolicyDeny)

@@ -1307,10 +1307,9 @@ class Workspace:
         session_token = set_current_session(effective_session)
         try:
             ast = parse(command)
-            decision = await self._resolve_policy_decision(
-                ast, command, runtime, provision, effective_session,
-                session_id, routing_decision)
-            exec_recursion = partial(self._exec_recursion, cancel, decision)
+            # Syntax gates before policy, mirroring the TS order and
+            # bash: an unparsable line exits 2 and the policy is never
+            # consulted about it.
             offending = find_syntax_error(ast)
             if offending is not None:
                 snippet = offending.strip()[:40]
@@ -1318,6 +1317,10 @@ class Workspace:
                        if snippet else b"mirage: syntax error in command\n")
                 io = IOResult(exit_code=2, stderr=err)
                 return io
+            decision = await self._resolve_policy_decision(
+                ast, command, runtime, provision, effective_session,
+                session_id, routing_decision)
+            exec_recursion = partial(self._exec_recursion, cancel, decision)
             if provision:
                 prov_name = command.strip().split()[0] if command.strip(
                 ) else None
