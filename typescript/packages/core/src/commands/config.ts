@@ -57,6 +57,7 @@ export interface CommandOpts {
   runtime?: Runtime
   statOverlay?: StatOverlay
   signal?: AbortSignal
+  timeoutSeconds?: number
 }
 
 export type CommandFnResult = [ByteSource | null, IOResult] | null

@@ -98,6 +98,13 @@ export class Session {
   // value stale, restarting the scan, matching bash's char pointer.
   getoptsPos = 0
   getoptsOptind: number | null = null
+  // The cancel channel for work running under this shell: killing a
+  // background job aborts it, and the mount layer folds it into the
+  // signal handed to runtimes. Never part of SessionInit (transient,
+  // not persisted); fork() carries it so a job's whole subtree shares
+  // one channel. Python needs no equivalent: kill cancels the asyncio
+  // task and cancellation is ambient.
+  abortSignal: AbortSignal | null = null
   // Command-substitution tracking for assignment statements: how many
   // substitutions have run in this session, and the status of the
   // most recent one. An assignment statement snapshots the count
@@ -158,6 +165,7 @@ export class Session {
     })
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
+    forked.abortSignal = this.abortSignal
     forked.cmdsubSeq = this.cmdsubSeq
     forked.cmdsubStatus = this.cmdsubStatus
     return forked

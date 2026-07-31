@@ -581,7 +581,7 @@ export class Workspace {
   // by the current session all come from the Dispatcher. Reads are raw
   // bytes (no filetype rendering), matching the Python GuestFs.
   private buildWorkspaceBridge(): BridgeDispatchFn {
-    return async (op, path, bytes) => {
+    return async (op, path, bytes, dst) => {
       switch (op) {
         case 'READ':
           return (await this.dispatch('read', path)) as Uint8Array
@@ -590,6 +590,30 @@ export class Workspace {
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
           await this.dispatch('write', path, [buf])
+          return undefined
+        }
+        case 'STAT': {
+          const st = (await this.dispatch('stat', path)) as FileStat
+          const isDir = st.type === FileType.DIRECTORY
+          const mtimeMs = st.modified !== null ? Date.parse(st.modified) : 0
+          return {
+            size: isDir ? 0 : (st.size ?? 0),
+            isDir,
+            mtimeMs: Number.isNaN(mtimeMs) ? 0 : mtimeMs,
+          }
+        }
+        case 'UNLINK':
+          await this.dispatch('unlink', path)
+          return undefined
+        case 'MKDIR':
+          await this.dispatch('mkdir', path)
+          return undefined
+        case 'RMDIR':
+          await this.dispatch('rmdir', path)
+          return undefined
+        case 'RENAME': {
+          if (dst === undefined) throw new Error('RENAME op requires dst')
+          await this.dispatch('rename', path, [PathSpec.fromStrPath(dst)])
           return undefined
         }
         case 'LIST': {

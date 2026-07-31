@@ -30,16 +30,21 @@ EvalStatus: TypeAlias = Literal["complete", "incomplete", "exit"]
 class ScriptSource:
     """Script source arriving from a workspace config, not from code.
 
-    The programmatic API takes callables; a yaml ``script:``/``route:``
-    value references a ``.py`` file whose content is embedded here at
-    load. The source sees ctx as a dict and its LAST EXPRESSION is the
-    verdict. It runs on the world's evaluator (evaluator_of).
+    The programmatic API takes callables; a yaml ``script:``/``policy:``
+    value references a ``.py`` or ``.js``/``.mjs`` file whose content is
+    embedded here at load. The source sees ctx as a dict and its LAST
+    EXPRESSION is the verdict. It runs on the world's evaluator
+    (evaluator_of), preferring one whose language matches.
 
     Args:
         source (str): the script program.
+        language (str): the script's language ("python" or "js"),
+            stamped from the file extension at config load; the
+            programmatic default is "python".
     """
 
     source: str
+    language: str = "python"
 
 
 @dataclass(frozen=True, slots=True)

@@ -116,6 +116,46 @@ describe('node/js: quickjs runtime', () => {
     await ws.close()
   }, 60_000)
 
+  it('std.out.printf C-formats and returns the characters written', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      "js -e \"const n = std.out.printf('[%s|%05d|%.2f|%x|%c|%%]', 'ab', 42, 3.14159, 255, 65); std.out.puts('\\n' + n)\"",
+    )
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('[ab|00042|3.14|ff|A|%]\n22')
+    await ws.close()
+  }, 60_000)
+
+  it('printf covers the C conversions, pinned against the real engine', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      'js -e "std.out.printf(\'e[%e]g[%g]plus[%+d]hash[%#x]prec[%.3d]sp[% d]E[%E]G[%G]\', 1234.5678, 1234.5678, 42, 255, 7, 9, 1234.5678, 0.00012)"',
+    )
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe(
+      'e[1.234568e+03]g[1234.57]plus[+42]hash[0xff]prec[007]sp[ 9]E[1.234568E+03]G[0.00012]',
+    )
+    await ws.close()
+  }, 60_000)
+
+  it('printf star width and precision consume their arguments', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      "js -e \"std.out.printf('star[%*d]prec[%.*f]o[%#o]neg[%05d]s[%.3s]c[%c]', 6, 42, 2, 3.14159, 8, -42, 'abcdef', 'zz')\"",
+    )
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('star[    42]prec[3.14]o[010]neg[-0042]s[abc]c[z]')
+    await ws.close()
+  }, 60_000)
+
+  it('printf throws TypeError on an unknown conversion, like the real engine', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('js -e "std.out.printf(\'%q\', 1)"')
+    expect(io.exitCode).toBe(1)
+    expect(stderrStr(io)).toContain('TypeError: invalid conversion specifier in format string')
+    await ws.close()
+  }, 60_000)
+
   it('no input → exit 1', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('js')

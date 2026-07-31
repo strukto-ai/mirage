@@ -20,7 +20,7 @@ import { GSHEETS_GWS_APPEND } from './gws_sheets_append.ts'
 import { GSHEETS_GWS_READ } from './gws_sheets_read.ts'
 import { GSHEETS_GWS_WRITE } from './gws_sheets_write.ts'
 import { GSHEETS_IO } from './io.ts'
-import { fileReadProvision, metadataProvision } from './provision.ts'
+import { fileReadProvision } from './provision.ts'
 import { GSHEETS_RM } from './rm.ts'
 import { GWS_SHEETS_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 
@@ -29,8 +29,6 @@ export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-      find: metadataProvision as ProvisionFn,
     },
   }),
   ...GSHEETS_RM,

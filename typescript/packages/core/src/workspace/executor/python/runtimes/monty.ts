@@ -97,6 +97,7 @@ function toEvalValue(value: unknown): EvalValue {
 export class MontyRuntime extends Runtime implements Evaluator {
   readonly name = MONTY_RUNTIME
   readonly [EVALUATOR] = true as const
+  readonly evalLanguage = 'python' as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private workspaceBridge: BridgeDispatchFn | null = null
   private listMounts: () => string[] = () => []

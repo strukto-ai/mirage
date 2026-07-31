@@ -348,3 +348,18 @@ runtimes:
     assert kwargs["policy"] == ScriptSource("'local'")
     entry = kwargs["runtimes"][0]
     assert entry.script == ScriptSource("ctx['command'] == 'python3'")
+
+
+def test_js_script_path_stamps_the_language(tmp_path):
+    (tmp_path / "policy.js").write_text("null")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+policy: policy.js
+""")
+    cfg = load_config(cfg_file)
+    kwargs = cfg.to_workspace_kwargs()
+    assert kwargs["policy"] == ScriptSource("null", language="js")
+    assert kwargs["policy"].language == "js"

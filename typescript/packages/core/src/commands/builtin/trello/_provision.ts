@@ -12,7 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  exactZeroProvision as metadataProvision,
-  indexHitReadProvision as fileReadProvision,
-} from '../generic_bind/provision.ts'
+export { indexHitReadProvision as fileReadProvision } from '../generic_bind/provision.ts'

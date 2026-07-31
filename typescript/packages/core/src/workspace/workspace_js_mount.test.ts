@@ -92,3 +92,66 @@ describe('node/js: workspace mount access', () => {
     await ws.close()
   }, 60_000)
 })
+
+// The os.* mutation surface, pinned against the real qjs-wasi engine
+// through the python runtime: 0 / -errno in WASI numbering, os.stat
+// answers [obj, errno], os.remove takes files and empty directories.
+describe('node/js: os mutation surface', () => {
+  it('mkdir reports 0 then -20 (EEXIST)', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("js -e \"console.log(os.mkdir('/ram/d'), os.mkdir('/ram/d'))\"")
+    expect(stdoutStr(io)).toBe('0 -20\n')
+    await ws.close()
+  }, 60_000)
+
+  it('rename moves a file and reports -44 for a missing source', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('echo xy > /ram/a.txt')
+    const io = await ws.execute(
+      "js -e \"console.log(os.rename('/ram/a.txt', '/ram/b.txt'), os.rename('/ram/zz', '/ram/yy'))\"",
+    )
+    expect(stdoutStr(io)).toBe('0 -44\n')
+    const back = await ws.execute('cat /ram/b.txt')
+    expect(stdoutStr(back)).toBe('xy\n')
+    await ws.close()
+  }, 60_000)
+
+  it('stat answers [obj, 0] with size and mode, [null, 44] when missing', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('printf xy > /ram/s.txt')
+    const io = await ws.execute(
+      "js -e \"const [st, e] = os.stat('/ram/s.txt'); console.log(e, st.size, (st.mode & os.S_IFMT) === os.S_IFREG, JSON.stringify(os.stat('/ram/nope')))\"",
+    )
+    expect(stdoutStr(io)).toBe('0 2 true [null,44]\n')
+    await ws.close()
+  }, 60_000)
+
+  it('remove takes a file then -44, and an empty directory', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('mkdir /ram/d && echo x > /ram/d/f.txt')
+    const io = await ws.execute(
+      "js -e \"console.log(os.remove('/ram/d/f.txt'), os.remove('/ram/d/f.txt'), os.remove('/ram/d'))\"",
+    )
+    expect(stdoutStr(io)).toBe('0 -44 0\n')
+    await ws.close()
+  }, 60_000)
+
+  it('a cross-mount rename answers -44 and moves nothing (real engine)', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('echo keep > /ram/src.txt')
+    const io = await ws.execute("js -e \"console.log(os.rename('/ram/src.txt', '/disk/dst.txt'))\"")
+    expect(stdoutStr(io)).toBe('-44\n')
+    const still = await ws.execute('cat /ram/src.txt')
+    expect(stdoutStr(still)).toBe('keep\n')
+    const gone = await ws.execute('cat /disk/dst.txt')
+    expect(gone.exitCode).not.toBe(0)
+    await ws.close()
+  }, 60_000)
+
+  it('readdir reports [[], 44] for a missing directory', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('js -e "console.log(JSON.stringify(os.readdir(\'/ram/nope\')))"')
+    expect(stdoutStr(io)).toBe('[[],44]\n')
+    await ws.close()
+  }, 60_000)
+})

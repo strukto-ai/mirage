@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../runtime.ts'
+import { CommandTimeoutError, runWithTimeout } from '../../../commands/builtin/utils/safeguard.ts'
 import { EvalError } from '../runtime_errors.ts'
 import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
 import type { EvalValue } from '../runtime_types.ts'
@@ -28,19 +29,36 @@ import {
   type PolicyScript,
 } from './types.ts'
 
+/** Policy evaluation is bounded: a hung script must not freeze every
+ * line (command safeguards resolve after policy, so nothing above this
+ * layer would). Matches the python POLICY_EVAL_TIMEOUT_SECONDS; a
+ * holder object so tests can tighten it. */
+export const POLICY_EVAL_TIMEOUT = { seconds: 10 }
+
 /**
- * The world's policy engine: its first evaluator-capable entry.
+ * The world's policy engine for a script.
  *
  * Config-borne policy scripts run on it; any runtime implementing
  * Evaluator qualifies (monty/pyodide in the default worlds, or a user
- * runtime in any language). Null when the world has no evaluator,
- * which only matters once a ScriptSource actually needs one.
+ * runtime in any language). The first evaluator whose evalLanguage
+ * matches the script's language wins, so a .js policy runs on quickjs
+ * even when a python evaluator sits earlier in the world; with no
+ * language (or no match) the first evaluator serves. Null when the
+ * world has no evaluator, which only matters once a ScriptSource
+ * actually needs one.
  */
-export function evaluatorOf(entries: readonly Runtime[]): (Runtime & Evaluator) | null {
+export function evaluatorOf(
+  entries: readonly Runtime[],
+  language?: string,
+): (Runtime & Evaluator) | null {
+  let first: (Runtime & Evaluator) | null = null
   for (const entry of entries) {
-    if (isEvaluator(entry)) return entry
+    if (isEvaluator(entry)) {
+      first ??= entry
+      if (language !== undefined && entry.evalLanguage === language) return entry
+    }
   }
-  return null
+  return first
 }
 
 /**
@@ -60,9 +78,19 @@ async function evalSource(
     )
   }
   try {
-    const result = await evaluator.eval(source, { inputs: { ctx: ctxPayload } })
+    const result = await runWithTimeout(
+      evaluator.eval(source, { inputs: { ctx: ctxPayload } }),
+      POLICY_EVAL_TIMEOUT.seconds,
+      'policy script',
+    )
     return result.value
   } catch (caught) {
+    if (caught instanceof CommandTimeoutError) {
+      throw new PolicyError(
+        `policy script timed out after ${String(POLICY_EVAL_TIMEOUT.seconds)}s`,
+        { cause: caught },
+      )
+    }
     if (caught instanceof EvalError) {
       const prefix = caught.syntax ? 'policy script syntax error: ' : 'policy script failed: '
       throw new PolicyError(prefix + caught.message, { cause: caught })
@@ -100,12 +128,16 @@ async function evaluateScript(
   script: PolicyScript,
   ctx: PolicyContext,
   runtime: Runtime,
-  evaluator: Evaluator | null,
+  entries: readonly Runtime[],
 ): Promise<boolean> {
   const view = ctxForRuntime(ctx, runtime)
   const verdict: unknown =
     script instanceof ScriptSource
-      ? await evalSource(script.source, policyContextPayload(view, runtime), evaluator)
+      ? await evalSource(
+          script.source,
+          policyContextPayload(view, runtime),
+          evaluatorOf(entries, script.language),
+        )
       : await script(view)
   if (
     verdict !== null &&
@@ -165,13 +197,17 @@ export function parseVerdict(verdict: unknown): string | null {
 async function evaluatePolicy(
   policy: PolicyFn,
   ctx: PolicyContext,
-  evaluator: Evaluator | null,
+  entries: readonly Runtime[],
 ): Promise<string | null> {
   // An untyped JS policy can return undefined for "pass"; `?? null`
   // folds it into python's None instead of erroring.
   const verdict =
     policy instanceof ScriptSource
-      ? await evalSource(policy.source, policyContextPayload(ctx), evaluator)
+      ? await evalSource(
+          policy.source,
+          policyContextPayload(ctx),
+          evaluatorOf(entries, policy.language),
+        )
       : ((await policy(ctx)) ?? null)
   return parseVerdict(verdict)
 }
@@ -194,9 +230,8 @@ export async function decideLine(
   ctx: PolicyContext,
   staticBindings: Record<string, Runtime>,
 ): Promise<PolicyDecision> {
-  const evaluator = evaluatorOf(entries)
   if (policy !== null) {
-    const name = await evaluatePolicy(policy, ctx, evaluator)
+    const name = await evaluatePolicy(policy, ctx, entries)
     if (name !== null) {
       let overlay: Record<string, Runtime>
       try {
@@ -215,7 +250,7 @@ export async function decideLine(
   const willing: Runtime[] = []
   for (const entry of entries) {
     const wants =
-      entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, evaluator)
+      entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, entries)
     if (wants) willing.push(entry)
   }
   // Every captured command resolves: to its first willing capturer, or

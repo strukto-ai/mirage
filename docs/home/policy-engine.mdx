@@ -112,14 +112,16 @@ line? Unwilling entries step aside and the first willing capturer wins.
 ## What runs the scripts
 
 `policy.py` is never imported: the workspace evaluates its source on the
-**policy engine**, the first entry in the `runtimes` list with the
-evaluator capability. In the config above that is `monty`. A config with
-policy scripts but no evaluator entry fails at the first decision.
+**policy engine**, an entry in the `runtimes` list with the evaluator
+capability. The script's file extension picks the engine: `policy:
+./policy.py` runs on the first python evaluator (monty, or pyodide in
+TypeScript) and `policy: ./policy.js` on the first JS evaluator
+(quickjs), even when an evaluator of the other language sits earlier in
+the list; with no language match the first evaluator serves. A config
+with policy scripts but no evaluator entry fails at the first decision.
 
-The engine's language is the script's language: `policy: ./policy.py`
-needs a python evaluator (monty, or pyodide in TypeScript), while
-`policy: ./policy.js` runs on `quickjs`, so a JS-only world scripts its
-policy in JavaScript with the same ctx and verdict contract.
+Evaluation is bounded: a policy script that hangs fails the line with a
+policy error after 10 seconds instead of freezing the workspace.
 
 When you build the workspace in code rather than from a config file,
 `policy=` also accepts a plain function with the same decision contract,

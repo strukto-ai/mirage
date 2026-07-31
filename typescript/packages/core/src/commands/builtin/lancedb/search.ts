@@ -18,9 +18,9 @@ import { searchRowsOutput } from '../../../core/lancedb/search.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { ResourceName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
+import { command, type CommandFnResult, type CommandOpts, type ProvisionFn } from '../../config.ts'
 import { exactZeroProvision } from '../generic_bind/provision.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { defaultPaths } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
@@ -71,5 +71,5 @@ export const LANCEDB_SEARCH = command({
   resource: ResourceName.LANCEDB,
   spec: specOf('search'),
   fn: searchCommand,
-  provision: exactZeroProvision,
+  provision: exactZeroProvision as ProvisionFn,
 })

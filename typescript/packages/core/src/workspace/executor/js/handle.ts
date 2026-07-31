@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../../commands/builtin/utils/safeguard.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
@@ -53,6 +54,7 @@ export async function handleJs(
     code: string | null
     module: boolean
     signal?: AbortSignal
+    timeoutSeconds?: number
   },
   deps: HandleJsDeps,
 ): Promise<Result> {
@@ -97,6 +99,7 @@ export async function handleJs(
       stdin: stdinBytes,
       flags: { module },
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
     })
     return [
       result.stdout.length > 0 ? result.stdout : null,
@@ -104,6 +107,9 @@ export async function handleJs(
       new ExecutionNode({ command: cmdStr, exitCode: result.exitCode }),
     ]
   } catch (err) {
+    // An in-VM safeguard interrupt is a timeout, not an interpreter
+    // failure: let it reach the workspace's 124 handler.
+    if (err instanceof CommandTimeoutError) throw err
     if (err instanceof QuickJsUnavailableError) {
       return [
         null,

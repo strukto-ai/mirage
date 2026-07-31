@@ -18,9 +18,37 @@ import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-// quickjs-ng os.readdir errno for a path that is not a directory / not
-// found; the guest reads it as the second tuple element.
-const ENOENT = 2
+// WASI preview1 errnos, the numbers the real qjs-wasi engine reports
+// (python/mirage/runtime/wasm/abi.py is the reference table): guests
+// compare against these, so host errno numbering must not leak.
+const EACCES = 2
+const EEXIST = 20
+const EIO = 29
+const EISDIR = 31
+const ENOENT = 44
+const ENOTDIR = 54
+const ENOTSUP = 58
+
+// stat mode bits (matching qjs-wasi's synthesized st_mode)
+const S_IFDIR = 16384
+const S_IFREG = 32768
+
+// Mirror of the python errno_for table, keyed on the error's `code`.
+const CODE_TO_WASI: Record<string, number> = {
+  ENOENT: ENOENT,
+  EEXIST: EEXIST,
+  EISDIR: EISDIR,
+  ENOTDIR: ENOTDIR,
+  EACCES: EACCES,
+  EPERM: EACCES,
+  ENOTSUP: ENOTSUP,
+}
+
+function wasiErrno(err: unknown): number {
+  const code = (err as { code?: string }).code
+  if (code !== undefined && code in CODE_TO_WASI) return CODE_TO_WASI[code] ?? EIO
+  return EIO
+}
 
 interface GuestFile {
   path: string
@@ -60,6 +88,13 @@ std.open = (path, mode) => {
 };
 globalThis.os = globalThis.os || {};
 os.readdir = (path) => __mirage_readdir(String(path));
+os.stat = (path) => __mirage_stat(String(path));
+os.remove = (path) => __mirage_remove(String(path));
+os.mkdir = (path) => __mirage_mkdir(String(path));
+os.rename = (a, b) => __mirage_rename(String(a), String(b));
+os.S_IFMT = 61440;
+os.S_IFDIR = 16384;
+os.S_IFREG = 32768;
 `
 
 function isWritable(mode: string): boolean {
@@ -93,10 +128,15 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
   const table = new Map<number, GuestFile>()
   let nextFd = 1
 
-  const underMount = (path: string): boolean => {
-    if (bridge === null) return false
-    return bridge.prefixes().some((p) => path === p.slice(0, -1) || path.startsWith(p))
+  const mountOf = (path: string): string | null => {
+    if (bridge === null) return null
+    for (const p of bridge.prefixes()) {
+      if (path === p.slice(0, -1) || path.startsWith(p)) return p
+    }
+    return null
   }
+
+  const underMount = (path: string): boolean => mountOf(path) !== null
 
   const defineAsync = (
     name: string,
@@ -176,8 +216,8 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
           if (rel.length > 0 && !rel.includes('/')) names.push(rel)
         }
         names.sort()
-      } catch {
-        errno = ENOENT
+      } catch (err) {
+        errno = wasiErrno(err)
       }
     }
     const namesArr = ctx.newArray()
@@ -240,5 +280,97 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
     const file = table.get(ctx.getNumber(fdH))
     const atEof = file === undefined || file.pos >= file.buf.length
     return atEof ? ctx.true : ctx.false
+  })
+
+  // The os.* mutation surface, matching the real engine's conventions
+  // (pinned live against qjs-wasi through the python runtime): 0 on
+  // success, -errno on failure in WASI numbering; os.remove takes
+  // files and empty directories; os.stat answers [obj, errno].
+  defineAsync('__mirage_remove', async (pathH) => {
+    const path = ctx.getString(pathH)
+    if (bridge === null || !underMount(path)) return ctx.newNumber(-ENOENT)
+    try {
+      const st = await bridge.stat(path)
+      if (st.isDir) {
+        await bridge.rmdir(path)
+      } else {
+        await bridge.unlink(path)
+      }
+      return ctx.newNumber(0)
+    } catch (err) {
+      return ctx.newNumber(-wasiErrno(err))
+    }
+  })
+
+  defineAsync('__mirage_mkdir', async (pathH) => {
+    const path = ctx.getString(pathH)
+    if (bridge === null || !underMount(path)) return ctx.newNumber(-ENOENT)
+    try {
+      await bridge.mkdir(path)
+      return ctx.newNumber(0)
+    } catch (err) {
+      return ctx.newNumber(-wasiErrno(err))
+    }
+  })
+
+  defineAsync('__mirage_rename', async (srcH, dstH) => {
+    const src = ctx.getString(srcH)
+    const dst = ctx.getString(dstH)
+    if (bridge === null || !underMount(src) || !underMount(dst)) return ctx.newNumber(-ENOENT)
+    // The dispatcher addresses the rename's endpoints against the
+    // source's mount, so a cross-mount pair would land inside the
+    // wrong tree; the real engine answers -44 (pinned live: each
+    // mount is its own preopen and the destination never resolves).
+    if (mountOf(src) !== mountOf(dst)) return ctx.newNumber(-ENOENT)
+    try {
+      await bridge.rename(src, dst)
+      return ctx.newNumber(0)
+    } catch (err) {
+      return ctx.newNumber(-wasiErrno(err))
+    }
+  })
+
+  defineAsync('__mirage_stat', async (pathH) => {
+    const path = ctx.getString(pathH)
+    let st = null as Awaited<ReturnType<MirageBridge['stat']>> | null
+    let errno = 0
+    if (bridge === null || !underMount(path)) {
+      errno = ENOENT
+    } else {
+      try {
+        st = await bridge.stat(path)
+      } catch (err) {
+        errno = wasiErrno(err)
+      }
+    }
+    const tuple = ctx.newArray()
+    if (st === null) {
+      ctx.setProp(tuple, 0, ctx.null)
+    } else {
+      const obj = ctx.newObject()
+      const setNum = (key: string, value: number): void => {
+        const h = ctx.newNumber(value)
+        ctx.setProp(obj, key, h)
+        h.dispose()
+      }
+      setNum('dev', 0)
+      setNum('ino', 0)
+      setNum('mode', (st.isDir ? S_IFDIR : S_IFREG) | 0o644)
+      setNum('nlink', 1)
+      setNum('uid', 0)
+      setNum('gid', 0)
+      setNum('rdev', 0)
+      setNum('size', st.size)
+      setNum('blocks', Math.ceil(st.size / 512))
+      setNum('atime', st.mtimeMs)
+      setNum('mtime', st.mtimeMs)
+      setNum('ctime', st.mtimeMs)
+      ctx.setProp(tuple, 0, obj)
+      obj.dispose()
+    }
+    const errH = ctx.newNumber(errno)
+    ctx.setProp(tuple, 1, errH)
+    errH.dispose()
+    return tuple
   })
 }

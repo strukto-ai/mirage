@@ -261,7 +261,7 @@ export async function executeNode(
   const { dispatch, registry, jobTable, executeFn, agentId } = deps
   const kind = nodeKind(node)
 
-  if (deps.signal?.aborted === true) {
+  if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
     throw makeAbortError()
   }
   session.errexitImmune = false

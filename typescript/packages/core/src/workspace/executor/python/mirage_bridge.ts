@@ -23,16 +23,28 @@ export interface FSLike {
   writeFile(path: string, bytes: Uint8Array): void
 }
 
+interface MirageStat {
+  size: number
+  isDir: boolean
+  mtimeMs: number
+}
+
 export type BridgeDispatchFn = (
-  op: 'READ' | 'WRITE' | 'LIST',
+  op: 'READ' | 'WRITE' | 'LIST' | 'STAT' | 'UNLINK' | 'MKDIR' | 'RMDIR' | 'RENAME',
   path: string,
   bytes?: Uint8Array,
+  dst?: string,
 ) => Promise<unknown>
 
 export interface MirageBridge {
   fetch(path: string): Promise<Uint8Array>
   flush(path: string, bytes: Uint8Array): Promise<void>
   list(path: string): Promise<MirageEntry[]>
+  stat(path: string): Promise<MirageStat>
+  unlink(path: string): Promise<void>
+  mkdir(path: string): Promise<void>
+  rmdir(path: string): Promise<void>
+  rename(src: string, dst: string): Promise<void>
   /**
    * Live view of the workspace mount prefixes (trailing-slash normalized).
    * The fs shim consults this on every intercepted call, so the mount
@@ -62,6 +74,32 @@ export function createMirageBridge(
       if (out !== undefined) {
         throw new TypeError(`mirage bridge: WRITE ${path} expected void, got ${typeof out}`)
       }
+    },
+    async stat(path) {
+      const out = await dispatch('STAT', path)
+      const st = out as MirageStat | null
+      if (
+        st === null ||
+        typeof st !== 'object' ||
+        typeof st.size !== 'number' ||
+        typeof st.isDir !== 'boolean' ||
+        typeof st.mtimeMs !== 'number'
+      ) {
+        throw new TypeError(`mirage bridge: STAT ${path} bad shape`)
+      }
+      return st
+    },
+    async unlink(path) {
+      await dispatch('UNLINK', path)
+    },
+    async mkdir(path) {
+      await dispatch('MKDIR', path)
+    },
+    async rmdir(path) {
+      await dispatch('RMDIR', path)
+    },
+    async rename(src, dst) {
+      await dispatch('RENAME', src, undefined, dst)
     },
     async list(path) {
       const out = await dispatch('LIST', path)

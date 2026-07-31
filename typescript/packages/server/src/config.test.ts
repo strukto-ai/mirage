@@ -161,6 +161,18 @@ describe('configToWorkspaceArgs', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('a .js policy path stamps the script language', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'policy.js'), 'null')
+    writeFileSync(join(dir, 'ws.yaml'), 'mounts:\n  /data:\n    resource: ram\npolicy: policy.js\n')
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    // toEqual compares fields, so a python-tagged source would fail.
+    expect(args.options.policy).toEqual(new ScriptSource('null', 'js'))
+    expect(args.options.policy).not.toEqual(new ScriptSource('null'))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('carries vfs captures through', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },

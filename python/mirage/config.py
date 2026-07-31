@@ -274,7 +274,9 @@ def _load_script_source(value: str) -> ScriptSource:
     if not _is_script_path(value):
         raise ValueError("a config script must reference a .py/.js file "
                          f"(e.g. script: guard.py), got {value!r}")
-    return ScriptSource(Path(value.strip()).read_text())
+    path = Path(value.strip())
+    language = "js" if path.suffix in (".js", ".mjs") else "python"
+    return ScriptSource(path.read_text(), language=language)
 
 
 def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:

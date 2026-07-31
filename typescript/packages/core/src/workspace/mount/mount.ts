@@ -38,6 +38,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { runWithCacheManager } from '../../cache/context.ts'
 import type { CacheManager } from '../../cache/manager.ts'
+import { mergeSignals } from '../abort.ts'
 import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -392,6 +393,7 @@ export class MountEntry {
       execAllowed?: boolean
       runtime?: Runtime
       statOverlay?: StatOverlay
+      signal?: AbortSignal
       safeguardOverride?: CommandSafeguard | null
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {
@@ -484,19 +486,27 @@ export class MountEntry {
                 resolvedSafeguard !== null ? resolvedSafeguard.timeoutSeconds : null
               // runWithTimeout abandons the promise, it cannot cancel
               // it; the aborted signal lets a runtime kill what it
-              // spawned (python cancels the task instead).
+              // spawned (python cancels the task instead). The ambient
+              // opts.signal is a background job's kill channel, folded
+              // into the same wire. timeoutSeconds rides along so an
+              // engine that executes on the event loop (quickjs) can
+              // interrupt itself when the timer cannot fire.
               const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
+              const runSignal = mergeSignals(guard?.signal, opts.signal)
+              const runOpts =
+                runSignal !== undefined
+                  ? {
+                      ...cmdOpts,
+                      signal: runSignal,
+                      ...(cmdTimeout !== null && cmdTimeout > 0
+                        ? { timeoutSeconds: cmdTimeout }
+                        : {}),
+                    }
+                  : cmdOpts
               let result: CommandFnResult
               try {
                 result = await runWithTimeout(
-                  Promise.resolve(
-                    cmd.fn(
-                      accessor,
-                      expandedPaths,
-                      texts,
-                      guard !== null ? { ...cmdOpts, signal: guard.signal } : cmdOpts,
-                    ),
-                  ),
+                  Promise.resolve(cmd.fn(accessor, expandedPaths, texts, runOpts)),
                   cmdTimeout,
                   cmdName,
                 )

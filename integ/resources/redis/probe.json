@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "redis_prov_cat",
+      "seq": 930000,
+      "targets": [
+        "redis"
+      ],
+      "command": "cat /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redis_prov_head",
+      "seq": 930001,
+      "targets": [
+        "redis"
+      ],
+      "command": "head -n 2 /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0-24 write=0 cache=0 ops=1 hits=0 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redis_prov_ls",
+      "seq": 930002,
+      "targets": [
+        "redis"
+      ],
+      "command": "ls /data",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redis_prov_cat_multi",
+      "seq": 930003,
+      "targets": [
+        "redis"
+      ],
+      "command": "cat /data/a.txt /data/b.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=30 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redis_prov_write",
+      "seq": 930004,
+      "targets": [
+        "redis"
+      ],
+      "command": "echo hi > /data2/prov.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -12,9 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
+import mirage.runtime.policy.decide as decide_mod
 from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyDeny,
                                    PolicyError, RouteResult, ScriptSource,
                                    command_facts, decide_line, evaluate_policy,
@@ -62,9 +66,9 @@ async def test_script_callable_and_awaitable():
     async def wants(ctx: PolicyContext) -> bool:
         return "yes" in ctx.line
 
-    assert await evaluate_script(wants, ctx_for("echo yes"), runtime, None)
+    assert await evaluate_script(wants, ctx_for("echo yes"), runtime, [])
     assert not await evaluate_script(lambda c: False, ctx_for("echo"), runtime,
-                                     None)
+                                     [])
 
 
 @pytest.mark.asyncio
@@ -73,19 +77,20 @@ async def test_script_source_last_expression_is_verdict():
     evaluator = MontyRuntime()
     script = ScriptSource(
         "ctx['runtime']['name'] == 'alpha' and ctx['command'] == 'cat'")
-    assert await evaluate_script(script, ctx_for("cat /a"), runtime, evaluator)
+    assert await evaluate_script(script, ctx_for("cat /a"), runtime,
+                                 [evaluator])
     assert not await evaluate_script(script, ctx_for("ls /a"), runtime,
-                                     evaluator)
+                                     [evaluator])
 
 
 @pytest.mark.asyncio
 async def test_script_source_errors_fail_loud():
     with pytest.raises(ValueError, match="syntax error"):
         await evaluate_script(ScriptSource("def broken("), ctx_for("x"),
-                              AlphaRuntime(), MontyRuntime())
+                              AlphaRuntime(), [MontyRuntime()])
     with pytest.raises(ValueError, match="failed"):
         await evaluate_script(ScriptSource("1 / 0"), ctx_for("x"),
-                              AlphaRuntime(), MontyRuntime())
+                              AlphaRuntime(), [MontyRuntime()])
 
 
 @pytest.mark.asyncio
@@ -93,7 +98,7 @@ async def test_script_source_needs_an_evaluator():
     """A world with no evaluator refuses config scripts loud."""
     with pytest.raises(ValueError, match="evaluator runtime"):
         await evaluate_script(ScriptSource("True"), ctx_for("x"),
-                              AlphaRuntime(), None)
+                              AlphaRuntime(), [])
 
 
 def test_evaluator_of_picks_first_evaluator_entry():
@@ -102,28 +107,87 @@ def test_evaluator_of_picks_first_evaluator_entry():
     assert evaluator_of([alpha, VfsRuntime()]) is None
 
 
+class JsEvaluator(Runtime, EvaluatorMixin):
+    name = "js-eval"
+    captures = ("node", )
+    eval_language = "js"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[str] = []
+
+    async def run(self, args: RunArgs) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    async def eval(self, code, *, inputs=None, session=None):
+        from mirage.runtime.types import EvalResult
+        self.calls.append(code)
+        return EvalResult(value=None,
+                          stdout=b"",
+                          stderr=None,
+                          exit_code=0,
+                          status="complete")
+
+
+class HangingEvaluator(Runtime, EvaluatorMixin):
+    name = "hang-eval"
+    captures = ("python3", )
+
+    async def run(self, args: RunArgs) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    async def eval(self, code, *, inputs=None, session=None):
+        await asyncio.sleep(60)
+
+
+def test_evaluator_of_prefers_a_language_match():
+    monty, js = MontyRuntime(), JsEvaluator()
+    assert evaluator_of([monty, js], "js") is js
+    assert evaluator_of([monty, js], "python") is monty
+    assert evaluator_of([monty, js]) is monty
+    assert evaluator_of([monty], "js") is monty
+    assert evaluator_of([], "js") is None
+
+
+@pytest.mark.asyncio
+async def test_js_policy_script_selects_the_js_evaluator():
+    js = JsEvaluator()
+    verdict = await evaluate_policy(ScriptSource("null", language="js"),
+                                    ctx_for("node -e 1"), [MontyRuntime(), js])
+    assert verdict is None
+    assert js.calls == ["null"]
+
+
+@pytest.mark.asyncio
+async def test_hung_policy_script_times_out(monkeypatch):
+    monkeypatch.setattr(decide_mod, "POLICY_EVAL_TIMEOUT_SECONDS", 0.05)
+    with pytest.raises(PolicyError, match="timed out after 0.05s"):
+        await evaluate_policy(ScriptSource("1"), ctx_for("x"),
+                              [HangingEvaluator()])
+
+
 @pytest.mark.asyncio
 async def test_policy_returns_name_none_or_verdict_dict():
-    assert await evaluate_policy(lambda c: None, ctx_for("x"), None) is None
+    assert await evaluate_policy(lambda c: None, ctx_for("x"), []) is None
     assert await evaluate_policy(ScriptSource("'beta'"), ctx_for("x"),
-                                 MontyRuntime()) == "beta"
+                                 [MontyRuntime()]) == "beta"
     assert await evaluate_policy(lambda c: {"runtime": "beta"}, ctx_for("x"),
-                                 None) == "beta"
+                                 []) == "beta"
     with pytest.raises(ValueError, match="verdict dict, or None"):
-        await evaluate_policy(lambda c: 42, ctx_for("x"), None)
+        await evaluate_policy(lambda c: 42, ctx_for("x"), [])
 
 
 @pytest.mark.asyncio
 async def test_policy_deny_verdict_raises_with_reason():
     with pytest.raises(PolicyDeny) as caught:
         await evaluate_policy(lambda c: {"deny": "blocked here"}, ctx_for("x"),
-                              None)
+                              [])
     assert caught.value.reason == "blocked here"
     with pytest.raises(PolicyDeny, match="no python3"):
         await evaluate_policy(
             ScriptSource("{'deny': 'no python3'} "
                          "if ctx['command'] == 'python3' else None"),
-            ctx_for("python3 x"), MontyRuntime())
+            ctx_for("python3 x"), [MontyRuntime()])
 
 
 @pytest.mark.asyncio
@@ -132,10 +196,10 @@ async def test_policy_result_arms_parse():
     with pytest.raises(PolicyDeny, match="not here"):
         parse_verdict(DenyResult("not here"))
     assert await evaluate_policy(lambda c: RouteResult("beta"), ctx_for("x"),
-                                 None) == "beta"
+                                 []) == "beta"
     with pytest.raises(PolicyDeny, match="blocked"):
         await evaluate_policy(lambda c: DenyResult("blocked"), ctx_for("x"),
-                              None)
+                              [])
 
 
 @pytest.mark.asyncio
@@ -144,13 +208,13 @@ async def test_entry_script_verdict_shapes_fail_loud():
     runtime = AlphaRuntime()
     with pytest.raises(PolicyError, match="answer a boolean"):
         await evaluate_script(lambda c: {"deny": "x"}, ctx_for("python3 x"),
-                              runtime, None)
+                              runtime, [])
     with pytest.raises(PolicyError, match="answer a boolean"):
         await evaluate_script(lambda c: DenyResult("x"), ctx_for("python3 x"),
-                              runtime, None)
+                              runtime, [])
     with pytest.raises(PolicyError, match="answer a boolean"):
         await evaluate_script(ScriptSource("{'deny': 'x'}"),
-                              ctx_for("python3 x"), runtime, MontyRuntime())
+                              ctx_for("python3 x"), runtime, [MontyRuntime()])
 
 
 def test_parse_verdict_raises_policy_error():
