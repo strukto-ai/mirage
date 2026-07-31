@@ -93,6 +93,20 @@
         "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "lancedb_prov_search",
+      "seq": 930040,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "search planning /db",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=exact\n",
+        "stderr": ""
+      }
     }
   ]
 }

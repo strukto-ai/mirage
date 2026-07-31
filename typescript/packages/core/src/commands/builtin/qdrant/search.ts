@@ -18,7 +18,8 @@ import { searchRowsOutput } from '../../../core/qdrant/search.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { ResourceName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type ProvisionFn } from '../../config.ts'
+import { exactZeroProvision } from '../generic_bind/provision.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { defaultPaths } from '../utils/operands.ts'
 
@@ -70,4 +71,5 @@ export const QDRANT_SEARCH = command({
   resource: ResourceName.QDRANT,
   spec: specOf('search'),
   fn: searchCommand,
+  provision: exactZeroProvision as ProvisionFn,
 })

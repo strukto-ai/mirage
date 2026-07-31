@@ -55,6 +55,20 @@
         "stdout": "net=0 write=0 cache=0 ops=1 hits=1 precision=unknown\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gdocs_prov_grep",
+      "seq": 930024,
+      "targets": [
+        "gapps"
+      ],
+      "command": "grep -r plan /docs/owned",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
     }
   ]
 }

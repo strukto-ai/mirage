@@ -16,4 +16,3 @@ import { stat } from '../../../core/gdocs/stat.ts'
 import { makeFileReadProvision } from '../generic_bind/provision.ts'
 
 export const fileReadProvision = makeFileReadProvision(stat)
-export { exactZeroProvision as metadataProvision } from '../generic_bind/provision.ts'
