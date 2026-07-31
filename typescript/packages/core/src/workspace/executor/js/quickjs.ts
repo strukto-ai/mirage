@@ -51,8 +51,9 @@ const EVAL_INTERRUPT_SECONDS = 10
 // engine): only `console.log` exists (no .error/.warn), `print` is a
 // global, both ToString their args (`[object Object]`, not JSON) and
 // append a newline, while `std.out.puts`/`std.err.puts` write raw and
-// `printf` C-formats (subset: [-0][width][.prec][sdiufxXoc%]) and
-// returns the characters written.
+// `printf` C-formats (flags -+0 #, star or digit width/precision,
+// diufFeEgGxXocs conversions) returning the characters written; an
+// unknown conversion throws TypeError like the real engine.
 // `std.open`/`os.readdir` are added afterward by MIRAGE_FS_BOOTSTRAP
 // when a workspace bridge is wired.
 const BOOTSTRAP = `
@@ -65,25 +66,76 @@ const __pad = (s, flags, width) => {
     return s[0] + '0'.repeat(width - s.length) + s.slice(1);
   return fill.repeat(width - s.length) + s;
 };
-const __sprintf = (fmt, args) => {
+const __exp2 = (s) => s.replace(/e([+-])(\\d)$/, (m, sg, d) => 'e' + sg + '0' + d);
+const __sign = (s, flags) => {
+  if (s[0] === '-') return s;
+  if (flags.includes('+')) return '+' + s;
+  if (flags.includes(' ')) return ' ' + s;
+  return s;
+};
+const __padDigits = (s, prec) => {
+  if (prec === undefined) return s;
+  const neg = s[0] === '-';
+  const digits = neg ? s.slice(1) : s;
+  return (neg ? '-' : '') + digits.padStart(prec, '0');
+};
+const __conv1 = (conv, flags, prec, arg) => {
+  const n = Number(arg);
+  if (conv === 'd' || conv === 'i') return __sign(__padDigits(String(Math.trunc(n)), prec), flags);
+  if (conv === 'u') return __padDigits(String(Math.trunc(n) >>> 0), prec);
+  if (conv === 'f' || conv === 'F') return __sign(n.toFixed(prec === undefined ? 6 : prec), flags);
+  if (conv === 'e' || conv === 'E') {
+    const s = __sign(__exp2(n.toExponential(prec === undefined ? 6 : prec)), flags);
+    return conv === 'E' ? s.toUpperCase() : s;
+  }
+  if (conv === 'g' || conv === 'G') {
+    let s = n.toPrecision(prec === undefined || prec === 0 ? 6 : prec);
+    if (s.includes('e')) s = __exp2(s.replace(/\\.?0+e/, 'e'));
+    else if (s.includes('.')) s = s.replace(/\\.?0+$/, '');
+    s = __sign(s, flags);
+    return conv === 'G' ? s.toUpperCase() : s;
+  }
+  if (conv === 'x' || conv === 'X') {
+    let s = (Math.trunc(n) >>> 0).toString(16);
+    if (flags.includes('#') && n !== 0) s = '0x' + s;
+    if (conv === 'X') s = s.toUpperCase();
+    return s;
+  }
+  if (conv === 'o') {
+    let s = (Math.trunc(n) >>> 0).toString(8);
+    if (flags.includes('#') && s[0] !== '0') s = '0' + s;
+    return s;
+  }
+  if (conv === 'c') return typeof arg === 'number' ? String.fromCharCode(arg) : String(arg)[0] || '';
+  return prec === undefined ? String(arg) : String(arg).slice(0, prec);
+};
+const __sprintf = (fmtIn, args) => {
+  const fmt = String(fmtIn);
+  let out = '';
+  let ai = 0;
   let i = 0;
-  return String(fmt).replace(
-    /%([-0]*)(\\d*)(?:\\.(\\d+))?([sdiufxXoc%])/g,
-    (m, flags, w, prec, conv) => {
-      if (conv === '%') return '%';
-      const arg = args[i++];
-      const width = w === '' ? 0 : parseInt(w, 10);
-      let s;
-      if (conv === 's') s = prec === undefined ? String(arg) : String(arg).slice(0, parseInt(prec, 10));
-      else if (conv === 'd' || conv === 'i') s = String(Math.trunc(Number(arg)));
-      else if (conv === 'u') s = String(Math.trunc(Number(arg)) >>> 0);
-      else if (conv === 'f') s = Number(arg).toFixed(prec === undefined ? 6 : parseInt(prec, 10));
-      else if (conv === 'x') s = (Math.trunc(Number(arg)) >>> 0).toString(16);
-      else if (conv === 'X') s = (Math.trunc(Number(arg)) >>> 0).toString(16).toUpperCase();
-      else if (conv === 'o') s = (Math.trunc(Number(arg)) >>> 0).toString(8);
-      else s = typeof arg === 'number' ? String.fromCharCode(arg) : String(arg)[0] || '';
-      return __pad(s, flags, width);
-    });
+  while (i < fmt.length) {
+    if (fmt[i] !== '%') { out += fmt[i]; i++; continue; }
+    i++;
+    if (fmt[i] === '%') { out += '%'; i++; continue; }
+    let flags = '';
+    while ('-+0 #'.includes(fmt[i])) { flags += fmt[i]; i++; }
+    let width = 0;
+    if (fmt[i] === '*') { width = Math.trunc(Number(args[ai++])); i++; }
+    else while (fmt[i] >= '0' && fmt[i] <= '9') { width = width * 10 + (fmt.charCodeAt(i) - 48); i++; }
+    let prec = undefined;
+    if (fmt[i] === '.') {
+      i++; prec = 0;
+      if (fmt[i] === '*') { prec = Math.trunc(Number(args[ai++])); i++; }
+      else while (fmt[i] >= '0' && fmt[i] <= '9') { prec = prec * 10 + (fmt.charCodeAt(i) - 48); i++; }
+    }
+    while ('hlLjzt'.includes(fmt[i])) i++;
+    const conv = fmt[i]; i++;
+    if (conv === undefined || !'diufFeEgGxXocs'.includes(conv))
+      throw new TypeError('invalid conversion specifier in format string');
+    out += __pad(__conv1(conv, flags, prec, args[ai++]), flags, width);
+  }
+  return out;
 };
 globalThis.console = { log: (...a) => __mirage_log(__join(a) + '\\n') };
 globalThis.print = (...a) => __mirage_log(__join(a) + '\\n');

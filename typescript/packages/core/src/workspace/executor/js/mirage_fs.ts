@@ -128,10 +128,15 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
   const table = new Map<number, GuestFile>()
   let nextFd = 1
 
-  const underMount = (path: string): boolean => {
-    if (bridge === null) return false
-    return bridge.prefixes().some((p) => path === p.slice(0, -1) || path.startsWith(p))
+  const mountOf = (path: string): string | null => {
+    if (bridge === null) return null
+    for (const p of bridge.prefixes()) {
+      if (path === p.slice(0, -1) || path.startsWith(p)) return p
+    }
+    return null
   }
+
+  const underMount = (path: string): boolean => mountOf(path) !== null
 
   const defineAsync = (
     name: string,
@@ -312,6 +317,11 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
     const src = ctx.getString(srcH)
     const dst = ctx.getString(dstH)
     if (bridge === null || !underMount(src) || !underMount(dst)) return ctx.newNumber(-ENOENT)
+    // The dispatcher addresses the rename's endpoints against the
+    // source's mount, so a cross-mount pair would land inside the
+    // wrong tree; the real engine answers -44 (pinned live: each
+    // mount is its own preopen and the destination never resolves).
+    if (mountOf(src) !== mountOf(dst)) return ctx.newNumber(-ENOENT)
     try {
       await bridge.rename(src, dst)
       return ctx.newNumber(0)
