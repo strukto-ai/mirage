@@ -92,6 +92,70 @@
           }
         }
       ]
+    },
+    {
+      "id": "js_policy_deny",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "ctx.command === 'node' ? {deny: 'no js here'} : null"
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: policy denied: no js here\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_entry_script",
+      "world": {
+        "runtimes": [
+          {
+            "name": "quickjs",
+            "script": "!ctx.line.includes('keep-out')"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log('served')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "served\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log('keep-out')\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: no runtime accepted this line\n"
+          }
+        }
+      ]
     }
   ]
 }

@@ -48,9 +48,9 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
 
-/** True for the docker-style single-line `.py` path form. */
+/** True for the docker-style single-line script path form (.py/.js/.mjs). */
 function isScriptPath(value: string): boolean {
-  return !value.includes('\n') && value.trim().endsWith('.py')
+  return !value.includes('\n') && ['.py', '.js', '.mjs'].some((ext) => value.trim().endsWith(ext))
 }
 
 // Config carries a reference, the wire carries content (the docker
@@ -60,7 +60,7 @@ function isScriptPath(value: string): boolean {
 function loadScriptSource(value: string): ScriptSource {
   if (!isScriptPath(value)) {
     throw new Error(
-      `a config script must reference a .py file (e.g. script: guard.py), got '${value}'`,
+      `a config script must reference a .py/.js file (e.g. script: guard.py), got '${value}'`,
     )
   }
   return new ScriptSource(readFileSync(value.trim(), 'utf-8'))

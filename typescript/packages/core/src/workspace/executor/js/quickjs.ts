@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Runtime } from '../runtime.ts'
-import type { RunArgs, RunResult, RuntimeOptions } from '../runtime_types.ts'
+import { EvalError } from '../runtime_errors.ts'
+import { EVALUATOR, type Evaluator } from '../runtime_mixin.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../runtime_types.ts'
 import {
   createMirageBridge,
   type BridgeDispatchFn,
@@ -71,8 +73,9 @@ const QUICKJS_CONFIG_KEYS: readonly string[] = ['home']
 // The asyncify variant is used so `std.open`/`os.readdir` can suspend
 // the guest while a workspace-mount read or write awaits the dispatch,
 // matching the Python runtime's live file I/O.
-export class QuickJsRuntime extends Runtime {
+export class QuickJsRuntime extends Runtime implements Evaluator {
   readonly name = QUICKJS_RUNTIME
+  readonly [EVALUATOR] = true as const
   static readonly commands: readonly string[] = ['node', 'js'] as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null
@@ -139,6 +142,81 @@ export class QuickJsRuntime extends Runtime {
         stdout: ENC.encode(out.map((l) => l + '\n').join('')),
         stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
         exitCode,
+      }
+    } finally {
+      ctx.dispose()
+      runtime.dispose()
+    }
+  }
+
+  /**
+   * Evaluate one JS program; the completion value is the value.
+   *
+   * Inputs bind as globals and the source runs at global scope, so the
+   * LAST EXPRESSION is the value (what the policy engine consumes for
+   * JS policy scripts). Each eval is a fresh engine, mirroring the
+   * python wasi runtime, so console sessions are not supported.
+   */
+  async eval(
+    code: string,
+    opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
+  ): Promise<EvalResult> {
+    if (opts.session !== undefined) {
+      throw new EvalError(
+        'the quickjs evaluator is one-shot only: each eval is a fresh ' +
+          'engine, so console sessions are unsupported',
+      )
+    }
+    const newAsyncModule = await this.loadModule()
+    const QuickJS = await newAsyncModule()
+    const runtime: QuickJSAsyncRuntime = QuickJS.newRuntime()
+    runtime.setMemoryLimit(MEMORY_LIMIT)
+    runtime.setMaxStackSize(STACK_SIZE)
+    const ctx = runtime.newContext()
+    const out: string[] = []
+    const err: string[] = []
+    try {
+      this.installGlobals(
+        ctx,
+        { code, args: [], env: {}, stdin: null, flags: {} },
+        out,
+        err,
+        { code: 0, called: false },
+      )
+      const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
+      if (boot.error) {
+        boot.error.dispose()
+        throw new EvalError('quickjs bootstrap failed')
+      }
+      boot.value.dispose()
+      const inputsJson = JSON.stringify(opts.inputs ?? {})
+      const bind = ctx.evalCode(
+        `for (const [__k, __v] of Object.entries(JSON.parse(${JSON.stringify(inputsJson)}))) globalThis[__k] = __v`,
+        'mirage:inputs',
+      )
+      if (bind.error) {
+        bind.error.dispose()
+        throw new EvalError('quickjs eval could not bind inputs')
+      }
+      bind.value.dispose()
+      const result = await ctx.evalCodeAsync(code, 'eval.js', { type: 'global' })
+      if (result.error) {
+        const message = this.formatError(ctx, result.error)
+        result.error.dispose()
+        throw new EvalError(message, { syntax: message.startsWith('SyntaxError') })
+      }
+      const value = ctx.dump(result.value) as EvalValue
+      result.value.dispose()
+      const drained = this.drainJobs(runtime, ctx, err)
+      if (drained !== null && drained !== 0) {
+        throw new EvalError(err.join('\n') || 'quickjs eval failed while draining jobs')
+      }
+      return {
+        value: value === undefined ? null : value,
+        stdout: ENC.encode(out.map((l) => l + '\n').join('')),
+        stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
+        exitCode: 0,
+        status: 'complete',
       }
     } finally {
       ctx.dispose()

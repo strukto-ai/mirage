@@ -244,16 +244,21 @@ class MountBlock(BaseModel):
 
 
 def _is_script_path(value: str) -> bool:
-    """True for the docker-style single-line ``.py`` path form.
+    """True for the docker-style single-line script path form.
+
+    ``.py`` runs on a python evaluator (monty), ``.js``/``.mjs`` on a
+    JS one (quickjs); the script's language must match the world's
+    policy engine.
 
     Args:
         value (str): a yaml ``script``/``policy`` value.
     """
-    return "\n" not in value and value.strip().endswith(".py")
+    return "\n" not in value and value.strip().endswith(
+        (".py", ".js", ".mjs"))
 
 
 def _load_script_source(value: str) -> ScriptSource:
-    """Embed the referenced ``.py`` file as script source.
+    """Embed the referenced script file as source.
 
     Config carries a reference, the wire carries content (the docker
     build-context model): the value must be a path to a ``.py`` file,
@@ -264,11 +269,11 @@ def _load_script_source(value: str) -> ScriptSource:
         value (str): the yaml ``script``/``policy`` value.
 
     Raises:
-        ValueError: the value is not a ``.py`` path.
+        ValueError: the value is not a script path.
         FileNotFoundError: the referenced file does not exist.
     """
     if not _is_script_path(value):
-        raise ValueError("a config script must reference a .py file "
+        raise ValueError("a config script must reference a .py/.js file "
                          f"(e.g. script: guard.py), got {value!r}")
     return ScriptSource(Path(value.strip()).read_text())
 

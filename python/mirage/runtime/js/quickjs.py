@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,7 +21,10 @@ from typing import Any, Callable, ClassVar
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import HomeConfig, RuntimeConfig
-from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.errors import EvalError
+from mirage.runtime.mixin import EvaluatorMixin
+from mirage.runtime.types import (EvalResult, EvalValue, RunArgs, RunResult,
+                                  ScriptSource)
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 wasmtime: Any
@@ -43,8 +47,31 @@ _BUILD_HINT = (
     f"{{home: ...}}}}]`) or the {QUICKJS_HOME_ENV} environment variable at "
     "the directory containing it")
 
+# The one-shot eval harness: inputs bind as globals, the source runs
+# through indirect eval (global scope, completion value = the LAST
+# EXPRESSION), and the value or error rides a sentinel line appended to
+# stdout, the engine's only host-visible channel. Mirrors the TS
+# quickjs evaluator semantics; the JSON shapes match EvalValue.
+EVAL_SENTINEL = "__MIRAGE_EVAL__"
 
-class QuickJsRuntime(Runtime):
+JS_EVAL_HARNESS = """\
+const __mirage_inputs = JSON.parse({inputs_json});
+for (const __k of Object.keys(__mirage_inputs)) globalThis[__k] = __mirage_inputs[__k];
+let __mirage_payload;
+try {{
+  const __mirage_value = (0, eval)({source_json});
+  __mirage_payload = {{ value: __mirage_value === undefined ? null : __mirage_value }};
+}} catch (__e) {{
+  __mirage_payload = {{ error: {{
+    name: (__e && __e.name) || 'Error',
+    message: (__e && __e.message) || String(__e),
+  }} }};
+}}
+std.out.puts('\\n{sentinel}' + JSON.stringify(__mirage_payload) + '\\n');
+"""
+
+
+class QuickJsRuntime(Runtime, EvaluatorMixin):
     """Run JavaScript on a WASI quickjs-ng under wasmtime, in-process.
 
     A bare modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
@@ -119,3 +146,55 @@ class QuickJsRuntime(Runtime):
             fs=fs,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    async def eval(self,
+                   code: str,
+                   *,
+                   inputs: dict[str, EvalValue] | None = None,
+                   session: str | None = None) -> EvalResult:
+        """Evaluate one JS program; the completion value is the value.
+
+        Inputs bind as globals and the source runs at global scope via
+        indirect eval, so the LAST EXPRESSION is the value (what the
+        policy engine consumes for JS policy scripts). Each eval is a
+        fresh engine; the wasi build has no persistent interpreter, so
+        console sessions are not supported.
+
+        Args:
+            code (str): the JS source to evaluate.
+            inputs (dict[str, EvalValue] | None): globals for the run.
+            session (str | None): unsupported; a session id fails loud.
+
+        Raises:
+            EvalError: session requested, the program failed to parse
+                or raised, or the value could not be carried back.
+        """
+        if session is not None:
+            raise EvalError(
+                "the quickjs evaluator is one-shot only: each eval is a "
+                "fresh wasi engine, so console sessions are unsupported")
+        harness = JS_EVAL_HARNESS.format(
+            inputs_json=json.dumps(json.dumps(inputs or {})),
+            source_json=json.dumps(code),
+            sentinel=EVAL_SENTINEL,
+        )
+        result = await self.run(
+            RunArgs(code=harness, args=[], stdin=None, env={}, flags={}))
+        stdout = (result.stdout or b"").decode(errors="replace")
+        marker = f"\n{EVAL_SENTINEL}"
+        head, sep, tail = stdout.rpartition(marker)
+        if not sep:
+            stderr_text = (result.stderr or b"").decode(errors="replace")
+            raise EvalError(f"quickjs eval produced no value: "
+                            f"{stderr_text.strip() or 'engine failed'}")
+        payload = json.loads(tail.strip() or "{}")
+        if "error" in payload:
+            name = str(payload["error"].get("name", "Error"))
+            message = str(payload["error"].get("message", ""))
+            raise EvalError(f"{name}: {message}",
+                            syntax=name == "SyntaxError")
+        return EvalResult(value=payload.get("value"),
+                          stdout=head.encode(),
+                          stderr=result.stderr,
+                          exit_code=0,
+                          status="complete")
