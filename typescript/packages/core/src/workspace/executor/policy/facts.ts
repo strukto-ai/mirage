@@ -39,7 +39,9 @@ export function commandFacts(root: TSNodeLike): CommandFacts[] {
         facts.push({
           command,
           words,
-          builtin: command in SPECS,
+          // hasOwn, not `in`: a command named after an Object.prototype
+          // key (`toString`) must not report as a builtin.
+          builtin: Object.hasOwn(SPECS, command),
           paths: words.slice(1).filter((w) => w.startsWith('/')),
         })
       }

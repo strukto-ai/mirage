@@ -19,8 +19,9 @@ from typing import Any
 from mirage.runtime.base import Runtime
 from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
-from mirage.runtime.policy.errors import PolicyDeny
+from mirage.runtime.policy.errors import PolicyDeny, PolicyError
 from mirage.runtime.policy.types import (DenyResult, PolicyContext,
+                                          PolicyResult,
                                          PolicyDecision, PolicyFn,
                                          PolicyScript, RouteResult,
                                          ScriptSource)
@@ -92,6 +93,12 @@ async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
         runtime (Runtime): the runtime being asked (ctx.runtime).
         evaluator (EvaluatorMixin | None): the world's policy engine,
             consulted only for ScriptSource scripts.
+
+    Raises:
+        PolicyError: the script answered with a policy verdict shape
+            (a dict or a PolicyResult arm) instead of a boolean; a
+            deny-dict is truthy, so coercing it would mean "willing",
+            the opposite of intent.
     """
     view = ctx.for_runtime(runtime)
     verdict: Any
@@ -102,6 +109,10 @@ async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
         verdict = script(view)
         if inspect.isawaitable(verdict):
             verdict = await verdict
+    if isinstance(verdict, (Mapping, PolicyResult)):
+        raise PolicyError(
+            f"entry scripts answer a boolean (deny and placement belong "
+            f"to the global policy), got {verdict!r} from {runtime.name!r}")
     return bool(verdict)
 
 
@@ -118,8 +129,8 @@ def parse_verdict(verdict: Any) -> str | None:
 
     Raises:
         PolicyDeny: the verdict is DenyResult or {"deny": reason}.
-        ValueError: the verdict is not a PolicyResult arm, a name,
-            None, or a verdict dict.
+        PolicyError: the verdict is not a PolicyResult arm, a name,
+            None, or a verdict dict (mirrors the TS parseVerdict).
     """
     if verdict is None or isinstance(verdict, str):
         return verdict
@@ -130,18 +141,18 @@ def parse_verdict(verdict: Any) -> str | None:
     if isinstance(verdict, Mapping):
         unknown = sorted(set(verdict) - {"runtime", "deny"})
         if unknown:
-            raise ValueError(f"unknown policy verdict keys: {unknown}")
+            raise PolicyError(f"unknown policy verdict keys: {unknown}")
         if "deny" in verdict and "runtime" in verdict:
-            raise ValueError("policy verdict cannot both place and deny")
+            raise PolicyError("policy verdict cannot both place and deny")
         if "deny" in verdict:
             raise PolicyDeny(str(verdict["deny"]))
         name = verdict.get("runtime")
         if isinstance(name, str):
             return name
-        raise ValueError("policy verdict dict needs a 'runtime' name "
-                         "or a 'deny' reason")
-    raise ValueError(f"policy must return a runtime name, a verdict "
-                     f"dict, or None, got {verdict!r}")
+        raise PolicyError("policy verdict dict needs a 'runtime' name "
+                          "or a 'deny' reason")
+    raise PolicyError(f"policy must return a runtime name, a verdict "
+                      f"dict, or None, got {verdict!r}")
 
 
 async def evaluate_policy(policy: PolicyFn, ctx: PolicyContext,

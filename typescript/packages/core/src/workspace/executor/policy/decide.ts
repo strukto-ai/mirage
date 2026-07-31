@@ -89,7 +89,13 @@ function ctxForRuntime(ctx: PolicyContext, runtime: Runtime): PolicyContext {
   return ctx
 }
 
-/** Ask one runtime's script whether it wants the line. */
+/**
+ * Ask one runtime's script whether it wants the line.
+ *
+ * A script answering with a policy verdict shape (an object, Map, or a
+ * PolicyResult arm) fails loud: a deny-dict is truthy, so coercing it
+ * would mean "willing", the opposite of intent.
+ */
 async function evaluateScript(
   script: PolicyScript,
   ctx: PolicyContext,
@@ -97,10 +103,22 @@ async function evaluateScript(
   evaluator: Evaluator | null,
 ): Promise<boolean> {
   const view = ctxForRuntime(ctx, runtime)
-  if (script instanceof ScriptSource) {
-    return Boolean(await evalSource(script.source, policyContextPayload(view, runtime), evaluator))
+  const verdict: unknown =
+    script instanceof ScriptSource
+      ? await evalSource(script.source, policyContextPayload(view, runtime), evaluator)
+      : await script(view)
+  if (
+    verdict !== null &&
+    typeof verdict === 'object' &&
+    !Array.isArray(verdict) &&
+    !(verdict instanceof Uint8Array)
+  ) {
+    throw new PolicyError(
+      'entry scripts answer a boolean (deny and placement belong to ' +
+        `the global policy), got ${JSON.stringify(verdict)} from '${runtime.name}'`,
+    )
   }
-  return await script(view)
+  return Boolean(verdict)
 }
 
 /**
@@ -115,6 +133,14 @@ export function parseVerdict(verdict: unknown): string | null {
   if (typeof verdict === 'string') return verdict
   if (verdict instanceof RouteResult) return verdict.runtime
   if (verdict instanceof DenyResult) throw new PolicyDeny(verdict.reason)
+  if (verdict instanceof Map) {
+    // A custom evaluator may hand python dicts back as Map (the monty
+    // engine did before its boundary normalized); fold to the plain
+    // object wire shape instead of misreading Map as an empty dict.
+    const folded: Record<string, unknown> = {}
+    for (const [key, value] of verdict) folded[String(key)] = value
+    return parseVerdict(folded)
+  }
   if (typeof verdict === 'object' && !Array.isArray(verdict) && !(verdict instanceof Uint8Array)) {
     const obj = verdict as Record<string, unknown>
     const unknown = Object.keys(obj)

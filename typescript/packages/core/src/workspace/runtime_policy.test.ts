@@ -300,6 +300,30 @@ describe('routing ladder', () => {
     }
   })
 
+  it('an entry script answering a verdict shape fails loud', async () => {
+    const parser = await getTestParser()
+    const alpha = new NamedFakeRuntime('alpha')
+    alpha.script = new ScriptSource("{'deny': 'nope'}")
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [alpha, new MontyRuntime(), 'vfs'],
+      },
+    )
+    try {
+      await expect(ws.execute('python3 -c "x"')).rejects.toThrow(/answer a boolean/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('parseVerdict folds a Map verdict into the wire object', () => {
+    expect(parseVerdict(new Map([['runtime', 'beta']]))).toBe('beta')
+    expect(() => parseVerdict(new Map([['deny', 'nope']]))).toThrow(PolicyDeny)
+  })
+
   it('parseVerdict fails loud on bad verdict objects', () => {
     expect(() => parseVerdict({ runtme: 'beta' })).toThrow('unknown policy verdict keys')
     expect(() => parseVerdict({ runtime: 'beta', deny: 'no' })).toThrow('both place and deny')

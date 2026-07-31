@@ -550,6 +550,10 @@ class Workspace:
                                               str], cwd: str) -> RunResult:
         """The workspace executor as the vfs runtime's run_line.
 
+        No core path reaches this for a typed line (whole_line_runtime
+        never selects vfs); a caller that invokes it for one records a
+        second history entry and re-resolves the policy.
+
         Args:
             line (str): the raw command line.
             stdin (bytes | None): bytes piped into the line.

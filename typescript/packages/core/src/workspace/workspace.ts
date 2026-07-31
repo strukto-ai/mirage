@@ -506,7 +506,13 @@ export class Workspace {
     )
   }
 
-  /** The workspace executor as the vfs runtime's runLine. */
+  /**
+   * The workspace executor as the vfs runtime's runLine.
+   *
+   * No core path reaches this for a typed line (wholeLineRuntime never
+   * selects vfs); a caller that invokes it for one records a second
+   * history entry and re-resolves the policy.
+   */
   private async executeLineForVfs(
     line: string,
     stdin: Uint8Array | null,

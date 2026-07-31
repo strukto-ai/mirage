@@ -16,10 +16,10 @@ import pytest
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyDeny,
-                                   RouteResult, ScriptSource, command_facts,
-                                   decide_line, evaluate_policy,
-                                   evaluate_script, evaluator_of,
-                                   parse_verdict)
+                                   PolicyError, RouteResult, ScriptSource,
+                                   command_facts, decide_line,
+                                   evaluate_policy, evaluate_script,
+                                   evaluator_of, parse_verdict)
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult
@@ -136,6 +136,27 @@ async def test_policy_result_arms_parse():
     with pytest.raises(PolicyDeny, match="blocked"):
         await evaluate_policy(lambda c: DenyResult("blocked"), ctx_for("x"),
                               None)
+
+
+@pytest.mark.asyncio
+async def test_entry_script_verdict_shapes_fail_loud():
+    """A deny-dict is truthy; coercing it would mean willing."""
+    runtime = AlphaRuntime()
+    with pytest.raises(PolicyError, match="answer a boolean"):
+        await evaluate_script(lambda c: {"deny": "x"}, ctx_for("python3 x"),
+                              runtime, None)
+    with pytest.raises(PolicyError, match="answer a boolean"):
+        await evaluate_script(lambda c: DenyResult("x"), ctx_for("python3 x"),
+                              runtime, None)
+    with pytest.raises(PolicyError, match="answer a boolean"):
+        await evaluate_script(ScriptSource("{'deny': 'x'}"),
+                              ctx_for("python3 x"), runtime, MontyRuntime())
+
+
+def test_parse_verdict_raises_policy_error():
+    """Direct callers get PolicyError, mirroring the TS parseVerdict."""
+    with pytest.raises(PolicyError):
+        parse_verdict(42)
 
 
 def test_parse_verdict_fails_loud_on_bad_dicts():
