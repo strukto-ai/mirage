@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "gdrive_prov_cat",
+      "seq": 930010,
+      "targets": [
+        "gdrive"
+      ],
+      "command": "cat /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=24 ops=1 hits=1 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gdrive_prov_head",
+      "seq": 930011,
+      "targets": [
+        "gdrive"
+      ],
+      "command": "head -n 2 /data/a.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0-24 ops=1 hits=1 precision=range\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gdrive_prov_ls",
+      "seq": 930012,
+      "targets": [
+        "gdrive"
+      ],
+      "command": "ls /data",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
