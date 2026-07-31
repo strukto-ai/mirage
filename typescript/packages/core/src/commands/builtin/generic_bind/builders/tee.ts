@@ -18,6 +18,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const TEE_BUILDER: Builder = {
   name: 'tee',
   write: true,
+  requirements: ['write'],
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const { write } = ops

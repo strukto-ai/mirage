@@ -64,3 +64,6 @@ jobs:
           ./python/.venv/bin/python scripts/gen_specs.py
           node --experimental-strip-types typescript/scripts/gen-specs.ts
           git diff --exit-code spec/
+
+      - name: Spec parity
+        run: ./python/.venv/bin/python scripts/check_spec_parity.py

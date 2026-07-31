@@ -6,6 +6,7 @@ import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { metadataProvision } from '../generic_bind/provision.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { defaultPaths } from '../utils/operands.ts'
 import { MEM0_IO } from './io.ts'
@@ -67,4 +68,5 @@ export const MEM0_SEARCH = command({
   resource: ResourceName.MEM0,
   spec: specOf('search'),
   fn: searchCommand,
+  provision: metadataProvision,
 })

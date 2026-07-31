@@ -19,7 +19,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileStat, type PathSpec } from '../../../types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { type CommandIO, type StatOp, resolveGlobOf } from './adapter.ts'
+import { type CommandIO, type StatOp, resolveGlobOf, supports } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { defaultProvision } from './provision.ts'
 
@@ -72,10 +72,10 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
   const commands: RegisteredCommand[] = []
   for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
-    // A read-only backend (no write op) can't run byte-mutation commands
-    // (cp/mv/tee/gunzip/...), so don't register a command that would crash
-    // when invoked.
-    if (b.write === true && ops.write === undefined) continue
+    // A backend missing an op a command cannot run without (cp/mv/tee/
+    // gunzip/...) doesn't get the command registered, rather than getting
+    // one that crashes when invoked.
+    if (!supports(opsBase, b.requirements ?? [])) continue
     const cmdOps =
       b.read === true ? withReadCache(opsBase) : b.write === true ? opsBase : withStatCache(opsBase)
     const fn: CommandFn = (accessor, paths, texts, opts) =>

@@ -263,6 +263,23 @@ export type BuilderFn<A extends Accessor = Accessor> = (
   opts: CommandOpts,
 ) => Promise<CommandFnResult> | CommandFnResult
 
+export type Operation =
+  | 'write'
+  | 'exists'
+  | 'mkdir'
+  | 'unlink'
+  | 'rmdir'
+  | 'rename'
+  | 'copy'
+  | 'truncate'
+
+export function supports<A extends Accessor = Accessor>(
+  ops: CommandIO<A>,
+  requirements: readonly Operation[],
+): boolean {
+  return requirements.every((op) => ops[op] !== undefined)
+}
+
 export interface Builder<A extends Accessor = Accessor> {
   name: string
   fn: BuilderFn<A>
@@ -270,4 +287,12 @@ export interface Builder<A extends Accessor = Accessor> {
   write?: boolean
   aggregate?: AggregateFn
   read?: boolean
+  /**
+   * Backend ops the command cannot run without. A backend missing any of
+   * them does not get the command registered at all, rather than getting a
+   * command that throws on every invocation. `write: true` is not enough on
+   * its own: rmdir needs `rmdir`, truncate needs `truncate`, and a backend
+   * can have `write` without either.
+   */
+  requirements?: readonly Operation[]
 }

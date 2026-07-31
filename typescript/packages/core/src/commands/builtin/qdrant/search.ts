@@ -20,6 +20,7 @@ import type { PathSpec } from '../../../types.ts'
 import { ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { exactZeroProvision } from '../generic_bind/provision.ts'
 import { defaultPaths } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
@@ -70,4 +71,5 @@ export const QDRANT_SEARCH = command({
   resource: ResourceName.QDRANT,
   spec: specOf('search'),
   fn: searchCommand,
+  provision: exactZeroProvision,
 })

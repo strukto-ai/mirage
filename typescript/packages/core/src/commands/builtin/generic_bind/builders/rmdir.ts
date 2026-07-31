@@ -21,6 +21,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const RMDIR_BUILDER: Builder = {
   name: 'rmdir',
   write: true,
+  requirements: ['rmdir'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length === 0) {
       throw new UsageError("rmdir: missing operand\nTry 'rmdir --help' for more information.", 1)

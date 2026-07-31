@@ -25,6 +25,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const MKDIR_BUILDER: Builder = {
   name: 'mkdir',
   write: true,
+  requirements: ['mkdir'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     const parents = opts.flags.p === true || opts.flags.parents === true
     const verbose = opts.flags.v === true || opts.flags.verbose === true

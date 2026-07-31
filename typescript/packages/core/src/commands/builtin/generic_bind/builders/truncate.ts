@@ -4,6 +4,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const TRUNCATE_BUILDER: Builder = {
   name: 'truncate',
   write: true,
+  requirements: ['truncate'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     const sizeValue = opts.flags.s ?? opts.flags.size
     if (typeof sizeValue !== 'string') {

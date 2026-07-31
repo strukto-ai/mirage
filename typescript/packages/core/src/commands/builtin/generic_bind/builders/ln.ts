@@ -20,6 +20,7 @@ const ENC = new TextEncoder()
 export const LN_BUILDER: Builder = {
   name: 'ln',
   write: true,
+  requirements: ['exists', 'write'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length < 2) {
       return [

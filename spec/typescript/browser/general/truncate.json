@@ -6,8 +6,6 @@
     "has_write": true,
     "resources": [
       "box",
-      "databricks_volume",
-      "dropbox",
       "gdrive",
       "onedrive",
       "ram",

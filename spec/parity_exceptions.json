@@ -1,0 +1,11 @@
+{
+  "resource_expansions": {
+    "python": {
+      "hf_buckets": ["hf_buckets", "hf_datasets", "hf_models", "hf_spaces"]
+    }
+  },
+  "language_only_resources": {
+    "opfs": "Browser-only OPFS backend. Python has no browser runtime, so there is nothing to mirror."
+  },
+  "commands": {}
+}

@@ -36,6 +36,7 @@ export function overlayableStat(
 export const CP_BUILDER: Builder = {
   name: 'cp',
   write: true,
+  requirements: ['copy'],
   fn: (ops, accessor, paths, _texts, opts) => {
     const { copy, dirCopy, find, isDirName, mkdir } = ops
     if (copy === undefined) {

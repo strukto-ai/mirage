@@ -11,6 +11,7 @@
       "dropbox",
       "gdocs",
       "gdrive",
+      "gridfs",
       "gsheets",
       "gslides",
       "hf_buckets",

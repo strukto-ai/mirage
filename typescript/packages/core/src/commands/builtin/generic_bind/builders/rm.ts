@@ -22,6 +22,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const RM_BUILDER: Builder = {
   name: 'rm',
   write: true,
+  requirements: ['unlink'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length === 0) {
       return [

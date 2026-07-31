@@ -6,12 +6,12 @@
     "has_write": false,
     "resources": []
   },
-  "description": null,
+  "description": "Run JavaScript on a sandboxed quickjs engine.",
   "epilog": null,
   "ignore_tokens": [],
   "options": [
     {
-      "description": null,
+      "description": "Evaluate the next argument as a script.",
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
@@ -21,7 +21,7 @@
       "value_optional": false
     },
     {
-      "description": null,
+      "description": "Run as an ES module (top-level import/export/await); .mjs files select this automatically.",
       "long": "--module",
       "numeric_shorthand": false,
       "repeatable": false,

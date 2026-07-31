@@ -21,6 +21,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const UNLINK_BUILDER: Builder = {
   name: 'unlink',
   write: true,
+  requirements: ['unlink'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length === 0) {
       throw new UsageError("unlink: missing operand\nTry 'unlink --help' for more information.", 1)

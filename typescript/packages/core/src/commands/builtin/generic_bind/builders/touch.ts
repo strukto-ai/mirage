@@ -21,6 +21,7 @@ const ENC = new TextEncoder()
 export const TOUCH_BUILDER: Builder = {
   name: 'touch',
   write: true,
+  requirements: ['exists', 'write'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length === 0) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('touch: missing operand\n') })]

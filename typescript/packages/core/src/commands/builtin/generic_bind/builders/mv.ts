@@ -20,6 +20,7 @@ import { overlayableStat } from './cp.ts'
 export const MV_BUILDER: Builder = {
   name: 'mv',
   write: true,
+  requirements: ['rename'],
   fn: (ops, accessor, paths, _texts, opts) => {
     const { rename } = ops
     if (rename === undefined) {

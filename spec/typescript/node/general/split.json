@@ -10,6 +10,7 @@
       "disk",
       "dropbox",
       "gdrive",
+      "gridfs",
       "hf_buckets",
       "hf_datasets",
       "hf_models",

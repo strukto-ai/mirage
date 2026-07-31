@@ -18,6 +18,7 @@ import type { Builder } from '../adapter.ts'
 export const MKTEMP_BUILDER: Builder = {
   name: 'mktemp',
   write: true,
+  requirements: ['mkdir', 'write'],
   fn: (ops, accessor, _paths, texts, opts) => {
     const { mkdir, write } = ops
     if (mkdir === undefined || write === undefined) {

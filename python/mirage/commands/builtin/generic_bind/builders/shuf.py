@@ -48,6 +48,9 @@ async def shuf(
         paths = await ops.resolve_glob(accessor, paths, index)
     elif not ops.is_mounted(accessor):
         paths = []
+    # Only ``-o`` writes, so a read-only backend still serves plain shuf.
+    # Requiring the write op here would break every read-only backend.
+    write_op = ops.operation(Operation.WRITE)
     return await generic_shuf(
         paths,
         texts,
@@ -59,7 +62,8 @@ async def shuf(
         with_replacement=r or fl.as_bool("repeat"),
         input_range=i or fl.as_str("input_range"),
         output=output_path,
-        write_bytes=partial(ops.require(Operation.WRITE), accessor))
+        write_bytes=partial(write_op, accessor)
+        if write_op is not None else None)
 
 
 BUILDER = Builder('shuf', shuf, None, False, None, read=True)

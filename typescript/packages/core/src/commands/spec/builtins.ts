@@ -187,16 +187,36 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     rest: new Operand({ kind: OperandKind.TEXT }),
   }),
   js: new CommandSpec({
+    description: 'Run JavaScript on a sandboxed quickjs engine.',
     options: [
-      new Option({ short: '-e', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-m', long: '--module' }),
+      new Option({
+        short: '-e',
+        valueKind: OperandKind.TEXT,
+        description: 'Evaluate the next argument as a script.',
+      }),
+      new Option({
+        short: '-m',
+        long: '--module',
+        description:
+          'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
+      }),
     ],
     rest: new Operand({ kind: OperandKind.TEXT }),
   }),
   node: new CommandSpec({
+    description: 'Run JavaScript on a sandboxed quickjs engine.',
     options: [
-      new Option({ short: '-e', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-m', long: '--module' }),
+      new Option({
+        short: '-e',
+        valueKind: OperandKind.TEXT,
+        description: 'Evaluate the next argument as a script.',
+      }),
+      new Option({
+        short: '-m',
+        long: '--module',
+        description:
+          'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
+      }),
     ],
     rest: new Operand({ kind: OperandKind.TEXT }),
   }),
@@ -650,7 +670,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({
         short: '-s',
         valueKind: OperandKind.TEXT,
-        description: 'Use the given separator between numbers.',
+        description: 'Use the given string as separator between numbers.',
       }),
       new Option({
         short: '-w',
@@ -1026,11 +1046,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({
         short: '-d',
         valueKind: OperandKind.TEXT,
-        description: 'Delete the history entry at the given offset.',
+        description: 'Delete the entry at the given position; negative counts back from the end.',
       }),
       new Option({
         short: '-s',
-        description: 'Append the args as a single entry without running.',
+        description: 'Append the args to the history as a single entry without executing them.',
       }),
       new Option({ short: '-p', description: 'Print the args without storing them.' }),
       new Option({ short: '-a', description: 'Append: no-op (file and store are the same).' }),

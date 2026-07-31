@@ -99,10 +99,18 @@ SPECS: dict[str, CommandSpec] = {
                                 "single entry without executing them.")),
             Option(short="-p",
                    description="Print the args without storing them."),
-            Option(short="-a", description="Accepted no-op (always synced)."),
-            Option(short="-r", description="Accepted no-op (always synced)."),
-            Option(short="-w", description="Accepted no-op (always synced)."),
-            Option(short="-n", description="Accepted no-op (always synced)."),
+            Option(short="-a",
+                   description=("Append: no-op (file and store are "
+                                "the same).")),
+            Option(short="-r",
+                   description=("Read: no-op (file and store are "
+                                "the same).")),
+            Option(short="-w",
+                   description=("Write: no-op (file and store are "
+                                "the same).")),
+            Option(short="-n",
+                   description=("Read-new: no-op (file and store are "
+                                "the same).")),
         ),
         rest=Operand(kind=OperandKind.TEXT),
     ),

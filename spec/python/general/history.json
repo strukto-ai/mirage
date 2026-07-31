@@ -53,7 +53,7 @@
       "value_optional": false
     },
     {
-      "description": "Accepted no-op (always synced).",
+      "description": "Append: no-op (file and store are the same).",
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
@@ -63,7 +63,7 @@
       "value_optional": false
     },
     {
-      "description": "Accepted no-op (always synced).",
+      "description": "Read: no-op (file and store are the same).",
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
@@ -73,7 +73,7 @@
       "value_optional": false
     },
     {
-      "description": "Accepted no-op (always synced).",
+      "description": "Write: no-op (file and store are the same).",
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,
@@ -83,7 +83,7 @@
       "value_optional": false
     },
     {
-      "description": "Accepted no-op (always synced).",
+      "description": "Read-new: no-op (file and store are the same).",
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,

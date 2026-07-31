@@ -11,7 +11,7 @@
   "ignore_tokens": [],
   "options": [
     {
-      "description": "Use the given separator between numbers.",
+      "description": "Use the given string as separator between numbers.",
       "long": null,
       "numeric_shorthand": false,
       "repeatable": false,

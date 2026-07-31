@@ -20,6 +20,8 @@ from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.du import du as du_builder
 from mirage.commands.builtin.generic_bind.builders.find import \
     find as find_builder
+from mirage.commands.builtin.generic_bind.builders.shuf import \
+    shuf as shuf_builder
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
@@ -92,3 +94,18 @@ async def test_du_walks_tree_without_native_du_op():
     # alpha\n (6) + bravo\n (6) = 12 bytes summed by the readdir walk.
     assert "12" in text
     assert "/g" in text
+
+
+@pytest.mark.asyncio
+async def test_shuf_reads_without_a_write_op():
+    out, io = await shuf_builder(_ops(), object(), [_spec("/g/a.txt")])
+    assert (await materialize(out)).decode() == "alpha\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_shuf_output_flag_names_the_missing_write_op():
+    with pytest.raises(ValueError, match="backend provides no write op"):
+        await shuf_builder(_ops(),
+                           object(), [_spec("/g/a.txt")],
+                           o=_spec("/g/out.txt"))

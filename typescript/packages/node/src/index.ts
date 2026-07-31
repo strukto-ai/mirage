@@ -413,3 +413,4 @@ export {
 } from './resource/registry.ts'
 export { DISK_COMMANDS } from './commands/builtin/disk/index.ts'
 export { REDIS_COMMANDS } from './commands/builtin/redis/index.ts'
+export { GRIDFS_COMMANDS } from './commands/builtin/gridfs/index.ts'
