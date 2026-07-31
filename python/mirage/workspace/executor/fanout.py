@@ -15,10 +15,10 @@
 from mirage.commands.builtin.find_eval import FindEntry, keep
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.errors import FindParseError
-from mirage.commands.safeguard import resolve_across_mounts
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.runtime.policy.safeguard import resolve_across_mounts
 from mirage.types import PathSpec
 from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions

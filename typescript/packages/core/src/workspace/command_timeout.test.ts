@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { DEFAULT_COMMAND_SAFEGUARDS } from '../commands/safeguard.ts'
+import { DEFAULT_COMMAND_SAFEGUARDS } from './executor/policy/safeguard.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'

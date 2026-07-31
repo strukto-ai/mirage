@@ -86,7 +86,7 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
     ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
     ...(args.options.index !== undefined ? { index: args.options.index } : {}),
     ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
-    ...(args.options.route !== undefined ? { route: args.options.route } : {}),
+    ...(args.options.policy !== undefined ? { policy: args.options.policy } : {}),
   })
   try {
     for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {

@@ -12,15 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-/**
- * The runtime argument, route, or a script could not decide the line.
- * Caller-fixable routing mistakes (unknown runtime name, a script that does not parse, a
- * missing monty package) propagate loud instead of folding into the
- * line's IOResult like a command failure.
- */
-export class RoutingDecisionError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options)
-    this.name = 'RoutingDecisionError'
-  }
-}
+export { decideLine, evaluatorOf, parseVerdict } from './decide.ts'
+export { PolicyDeny, PolicyError } from './errors.ts'
+export { commandFacts } from './facts.ts'
+export {
+  DenyResult,
+  RouteResult,
+  ScriptSource,
+  policyContextFromPayload,
+  policyContextPayload,
+} from './types.ts'
+export type {
+  CommandFacts,
+  PolicyDecision,
+  PolicyContext,
+  PolicyFn,
+  PolicyResult,
+  PolicyScript,
+  PolicyVerdict,
+} from './types.ts'

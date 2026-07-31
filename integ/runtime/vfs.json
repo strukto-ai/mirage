@@ -35,7 +35,7 @@
           "command": "ls /ram",
           "expect": {
             "exit": 126,
-            "stderr": "mirage: ls: no runtime accepted this line\n"
+            "stderr": "ls: no runtime accepted this line\n"
           }
         },
         {
@@ -81,7 +81,7 @@
           "command": "ls /ram",
           "expect": {
             "exit": 126,
-            "stderr": "mirage: ls: no runtime accepted this line\n"
+            "stderr": "ls: no runtime accepted this line\n"
           }
         },
         {

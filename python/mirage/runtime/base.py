@@ -37,7 +37,7 @@ class Runtime(ABC):
     name: str
     captures: tuple[str, ...] = ()
     # Per-line admission script for the routing ladder, answering "do
-    # I want this line": a callable taking a RouteContext, or a
+    # I want this line": a callable taking a PolicyContext, or a
     # config-borne ScriptSource. None = always willing. Policy, not
     # capability: it can only refuse lines the captures already allow.
     script: Callable[..., Any] | ScriptSource | None = None

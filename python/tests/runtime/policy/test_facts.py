@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.route import command_facts
+from mirage.runtime.policy import command_facts
 from mirage.workspace.workspace import parse
 
 

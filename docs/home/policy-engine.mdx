@@ -1,6 +1,6 @@
 ---
 title: Policy Engine
-description: Script which runtime serves each command line; route scripts run on the workspace's evaluator runtime.
+description: Script which runtime serves each command line; policy scripts run on the workspace's evaluator runtime.
 icon: route
 ---
 
@@ -8,7 +8,7 @@ A workspace can hold several runtimes for the same command, with different
 trade-offs. `monty` runs `python3` in-process, sandboxed, stdlib-only:
 perfect for quick one-liners and pipe transforms, useless for a script that
 imports `pandas`. A `docker` entry is the opposite: your container, your
-installed packages, but every line pays the exec round-trip. The **route**
+installed packages, but every line pays the exec round-trip. The **policy**
 decides per line which one serves it:
 
 ```yaml
@@ -20,10 +20,10 @@ runtimes:
     config:
       container: my-box
   - vfs
-route: ./route.py
+policy: ./policy.py
 ```
 
-```python route.py
+```python policy.py
 # Jobs under /jobs need the container's packages; anything else
 # stays on the fast in-process sandbox. The LAST EXPRESSION is
 # the verdict.
@@ -74,7 +74,7 @@ This payload is captured from a live run of the config above, routing
 - `mounts`: the workspace's mount prefixes, including built-ins like
   `/dev/`.
 
-The payload round-trips through JSON (`RouteContext.from_dict`), so you
+The payload round-trips through JSON (`PolicyContext.from_dict`), so you
 can store one and replay a decision in tests.
 
 ## Output: the verdict
@@ -83,32 +83,52 @@ can store one and replay a decision in tests.
   captures on this line.
 - **`None`**: no opinion; the first capturer in the `runtimes` list order
   serves each command (here, `monty`).
+- **`{"deny": reason}`**: the line is refused before anything runs. It
+  exits 126 with `<command>: policy denied: <reason>` on stderr.
 - Anything else is a routing error; the line fails rather than guessing.
 
-Besides the global `route`, each runtime entry can carry its own `script:`
+`{"runtime": "docker"}` is the dict spelling of a name, and the dict is
+where the verdict grows: new powers arrive as new keys, never as new
+return types.
+
+In code, the same two arms have a typed spelling, `RouteResult` and
+`DenyResult`; the dict is their wire form, the only shape a script can
+return from inside the evaluator sandbox:
+
+```python
+from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyResult,
+                                   RouteResult)
+
+def policy(ctx: PolicyContext) -> PolicyResult | None:
+    if any(p.startswith("/prod/") for p in ctx.commands[0].paths):
+        return DenyResult("writes under /prod are blocked")
+    return RouteResult("docker") if "/jobs/" in ctx.line else None
+```
+
+Besides the global `policy`, each runtime entry can carry its own `script:`
 with the same `ctx` input but a boolean verdict: am I willing to serve this
 line? Unwilling entries step aside and the first willing capturer wins.
 
 ## What runs the scripts
 
-`route.py` is never imported: the workspace evaluates its source on the
+`policy.py` is never imported: the workspace evaluates its source on the
 **policy engine**, the first entry in the `runtimes` list with the
 evaluator capability. In the config above that is `monty`. A config with
-route scripts but no evaluator entry fails at the first decision.
+policy scripts but no evaluator entry fails at the first decision.
 
 When you build the workspace in code rather than from a config file,
-`route=` also accepts a plain function with the same decision contract,
+`policy=` also accepts a plain function with the same decision contract,
 sync or async. It is called directly, so no evaluator is involved:
 
 ```python
-from mirage.runtime.route import RouteContext
+from mirage.runtime.policy import PolicyContext
 
-def route(ctx: RouteContext) -> str | None:
+def policy(ctx: PolicyContext) -> str | None:
     stage = ctx.commands[0]
     in_jobs = any(p.startswith("/jobs/") for p in stage.paths)
     return "docker" if in_jobs else "monty"
 
-ws = Workspace(mounts, runtimes=runtimes, route=route)
+ws = Workspace(mounts, runtimes=runtimes, policy=policy)
 ```
 
 A per-entry `script=` likewise accepts `(ctx) -> bool` in code.

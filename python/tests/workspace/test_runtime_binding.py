@@ -19,6 +19,7 @@ from mirage import MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
 from mirage.runtime.base import Runtime
+from mirage.runtime.policy import DenyResult, RouteResult
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
@@ -206,7 +207,7 @@ async def test_all_capturers_refuse_is_admission_failure():
         io = await ws.execute("python3 -c 'x'")
         assert io.exit_code == 126
         err = await materialize(io.stderr)
-        assert err == b"mirage: python3: no runtime accepted this line\n"
+        assert err == b"python3: no runtime accepted this line\n"
         io = await ws.execute("echo vfs-still-open")
         assert await materialize(io.stdout) == b"vfs-still-open\n"
     finally:
@@ -240,7 +241,7 @@ async def test_vfs_explicit_captures_restrict_the_workspace():
         io = await ws.execute("ls /")
         assert io.exit_code == 126
         err = await materialize(io.stderr)
-        assert err == b"mirage: ls: no runtime accepted this line\n"
+        assert err == b"ls: no runtime accepted this line\n"
         io = await ws.execute("python3 -c 'x'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
     finally:
@@ -308,12 +309,74 @@ async def test_global_route_names_the_runtime():
                    mode=MountMode.EXEC,
                    runtimes=[AlphaRuntime(),
                              BetaRuntime(), "vfs"],
-                   route=lambda ctx: "beta" if "heavy" in ctx.line else None)
+                   policy=lambda ctx: "beta" if "heavy" in ctx.line else None)
     try:
         io = await ws.execute("python3 -c 'heavy'")
         assert await materialize(io.stdout) == b"ran-beta\n"
         io = await ws.execute("python3 -c 'light'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_policy_deny_folds_into_the_line_result():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(), "vfs"],
+                   policy=lambda ctx: {"deny": "python3 is blocked"}
+                   if ctx.command == "python3" else None)
+    try:
+        io = await ws.execute("python3 -c 'x'")
+        assert io.exit_code == 126
+        assert io.stderr == b"python3: policy denied: python3 is blocked\n"
+        io = await ws.execute("echo ok")
+        assert await materialize(io.stdout) == b"ok\n"
+        assert io.exit_code == 0
+        # The denied line is still a typed line: it records like any
+        # other command.
+        events = await ws.history()
+        assert [e["command"] for e in events] == ["python3 -c 'x'", "echo ok"]
+        assert events[0]["exit_code"] == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_syntax_error_gates_before_policy():
+    calls: list[str] = []
+
+    def deny_all(ctx):
+        calls.append(ctx.line)
+        return {"deny": "nothing runs"}
+
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(), "vfs"],
+                   policy=deny_all)
+    try:
+        io = await ws.execute("echo (")
+        assert io.exit_code == 2
+        assert b"syntax error" in io.stderr
+        assert calls == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_policy_result_arms_route_and_deny():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(),
+                             BetaRuntime(), "vfs"],
+                   policy=lambda ctx: DenyResult("secrets stay put")
+                   if "secret" in ctx.line else RouteResult("beta"))
+    try:
+        io = await ws.execute("python3 -c 'x'")
+        assert await materialize(io.stdout) == b"ran-beta\n"
+        io = await ws.execute("python3 -c 'secret'")
+        assert io.exit_code == 126
+        assert io.stderr == b"python3: policy denied: secrets stay put\n"
     finally:
         await ws.close()
 
@@ -360,7 +423,7 @@ def test_config_inline_script_is_rejected():
 
 
 def test_config_script_path_form_embeds_content(tmp_path):
-    script = tmp_path / "route.py"
+    script = tmp_path / "policy.py"
     script.write_text("ctx['command'] == 'python3'")
     entries = _build_runtime_entries([{
         "name": "local",
@@ -384,7 +447,7 @@ def test_code_string_script_is_rejected():
 @pytest.mark.asyncio
 async def test_code_string_route_is_rejected():
     with pytest.raises(TypeError, match="reference a .py file"):
-        Workspace({"/ram": RAMResource()}, route="'local'")
+        Workspace({"/ram": RAMResource()}, policy="'local'")
 
 
 def test_config_script_path_form_missing_file_fails_loud(tmp_path):

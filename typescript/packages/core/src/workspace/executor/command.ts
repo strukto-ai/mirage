@@ -34,7 +34,7 @@ import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import { VfsRuntime, type Runtime } from './runtime.ts'
-import type { RoutingDecision } from './route/index.ts'
+import type { PolicyDecision } from './policy/index.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -55,7 +55,7 @@ import {
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
 import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../../commands/safeguard.ts'
+import { resolveSafeguard } from './policy/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { UsageError } from '../../commands/errors.ts'
@@ -73,7 +73,7 @@ interface RunOnMountCtx {
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RoutingDecision
+  routingDecision?: PolicyDecision
 }
 
 // Commands a bare invocation points at the working directory, mapped to
@@ -155,7 +155,7 @@ function mergeScopes(positional: PathSpec[], flagScopes: PathSpec[]): PathSpec[]
 
 /** The 126 result for a command no runtime accepted. */
 function admissionDenial(cmdName: string): IOResult {
-  const msg = `mirage: ${cmdName}: no runtime accepted this line\n`
+  const msg = `${cmdName}: no runtime accepted this line\n`
   return new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })
 }
 
@@ -172,7 +172,7 @@ function lineRuntimeFor(
   cmdName: string,
   runtimeBindings: Record<string, Runtime> | undefined,
   vfs: Runtime | null,
-  routingDecision: RoutingDecision | undefined,
+  routingDecision: PolicyDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
   if (routingDecision === undefined) {
     const restricted = vfs instanceof VfsRuntime && vfs.restricted
@@ -401,7 +401,7 @@ export async function handleCommand(
   unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]

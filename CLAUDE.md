@@ -31,7 +31,7 @@ Run Python commands from `python/`, TypeScript commands from `typescript/`.
 Packages split by role, one module per concern, the same way in both languages:
 
 - **`types.py`** — data shapes only: frozen dataclasses, type aliases, Literal unions (e.g. `runtime/types.py` holds `RunArgs`/`RunResult`/`EvalValue`/`EvalResult`/`ScriptSource`). No logic.
-- **`errors.py`** — the package's exception types (e.g. `runtime/errors.py` holds `EvalError`, `route/errors.py` holds `RoutingDecisionError`).
+- **`errors.py`** — the package's exception types (e.g. `runtime/errors.py` holds `EvalError`, `policy/errors.py` holds `PolicyError`).
 - **`config.py`** — configuration knobs and their coercion (e.g. `runtime/config.py` holds `RuntimeConfig`, which fails loud on unknown fields).
 - **`mixin.py`** — opt-in capability mixins: stateless, no constructor, abstract methods only (e.g. `runtime/mixin.py` holds `EvaluatorMixin`). Capability is detected by type (`isinstance`), never by probing for a method.
 - **`base.py`** — the package's core ABC and nothing else (e.g. `runtime/base.py` is just `Runtime`).

@@ -72,7 +72,7 @@ interface MountSpecJson {
 
 interface World {
   runtimes?: (string | Record<string, unknown>)[];
-  route?: string;
+  policy?: string;
   mounts?: Record<string, MountSpecJson>;
 }
 
@@ -250,7 +250,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   }
   const options: Record<string, unknown> = { mode: MountMode.EXEC };
   if (world.runtimes !== undefined) options.runtimes = world.runtimes.map(buildEntry);
-  if (world.route !== undefined) options.route = new ScriptSource(world.route);
+  if (world.policy !== undefined) options.policy = new ScriptSource(world.policy);
   const ws = new Workspace(mounts, options);
   for (const [prefix, name, content] of seeds) {
     await ws.dispatch("write", `${prefix}/${name}`, [ENC.encode(content)]);

@@ -330,14 +330,14 @@ def test_resource_built_via_registry_has_correct_type():
 
 
 def test_script_paths_resolve_against_config_dir(tmp_path):
-    (tmp_path / "route.py").write_text("'local'")
+    (tmp_path / "policy.py").write_text("'local'")
     (tmp_path / "entry.py").write_text("ctx['command'] == 'python3'")
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
   /data:
     resource: ram
-route: route.py
+policy: policy.py
 runtimes:
   - name: local
     script: entry.py
@@ -345,6 +345,6 @@ runtimes:
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
-    assert kwargs["route"] == ScriptSource("'local'")
+    assert kwargs["policy"] == ScriptSource("'local'")
     entry = kwargs["runtimes"][0]
     assert entry.script == ScriptSource("ctx['command'] == 'python3'")

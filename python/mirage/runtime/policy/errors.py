@@ -13,11 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-class RoutingDecisionError(ValueError):
-    """The runtime argument, route, or a script could not decide the line.
+class PolicyError(ValueError):
+    """The runtime argument, policy, or a script could not decide the line.
 
     Raised for caller-fixable routing mistakes (unknown runtime name, a
     script that does not parse, a missing monty extra) so execute()
     propagates them loud instead of folding them into the line's
     IOResult like a command failure.
     """
+
+
+class PolicyDeny(Exception):
+    """The policy refused the line before anything ran.
+
+    A legitimate policy outcome, not a mistake: execute() folds it into
+    the line's IOResult (exit 126, the reason on stderr) instead of
+    propagating like PolicyError.
+
+    Args:
+        reason (str): why the line was denied, shown on stderr.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason

@@ -67,6 +67,21 @@ function displayError(err: unknown): string {
 }
 
 /**
+ * Fold Monty's value shapes into the EvalValue contract: the worker
+ * hands python dicts back as Map, but EvalValue promises str-keyed
+ * plain objects (what pyodide's JSON transport already yields).
+ */
+function toEvalValue(value: unknown): EvalValue {
+  if (value instanceof Map) {
+    const obj: Record<string, EvalValue> = {}
+    for (const [key, entry] of value) obj[String(key)] = toEvalValue(entry)
+    return obj
+  }
+  if (Array.isArray(value)) return value.map(toEvalValue)
+  return value as EvalValue
+}
+
+/**
  * Run Python code on the Monty sandboxed interpreter (`@pydantic/monty`).
  *
  * Code executes in a crash-isolated Monty worker: no host filesystem,
@@ -150,7 +165,7 @@ export class MontyRuntime extends Runtime implements Evaluator {
     }
     const enc = new TextEncoder()
     try {
-      const value = (await session.feedRun(code, options)) as EvalValue
+      const value = toEvalValue(await session.feedRun(code, options))
       return {
         value,
         stdout: enc.encode(out.join('')),
