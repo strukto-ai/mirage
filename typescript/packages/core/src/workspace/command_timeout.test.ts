@@ -15,12 +15,32 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { DEFAULT_COMMAND_SAFEGUARDS } from '../commands/safeguard.ts'
+import { DEFAULT_COMMAND_SAFEGUARDS } from './executor/policy/safeguard.ts'
+import { Runtime } from './executor/runtime.ts'
+import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
 import { CommandSafeguard, MountMode } from '../types.ts'
 import { Workspace } from './workspace.ts'
+
+class SignalProbeRuntime extends Runtime {
+  readonly name = 'probe'
+  aborted = false
+
+  constructor() {
+    super({ captures: ['python3', 'python'] })
+  }
+
+  run(args: RunArgs): Promise<RunResult> {
+    return new Promise((resolve) => {
+      args.signal?.addEventListener('abort', () => {
+        this.aborted = true
+        resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 1 })
+      })
+    })
+  }
+}
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -154,6 +174,32 @@ describe('python3 command timeout', () => {
       const r = await ws.execute('python3 /data/slow.py')
       expect(r.exitCode).toBe(124)
       expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('the timeout aborts the run signal so a runtime can reclaim what it spawned', async () => {
+    const probe = new SignalProbeRuntime()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.EXEC,
+        ops: registry,
+        shellParser: parser,
+        runtimes: [probe, 'vfs'],
+        commandSafeguards: {
+          '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.1 }) },
+        },
+      },
+    )
+    try {
+      const r = await ws.execute('cd /data && python3 -c "hang"')
+      expect(r.exitCode).toBe(124)
+      expect(probe.aborted).toBe(true)
     } finally {
       await ws.close()
     }

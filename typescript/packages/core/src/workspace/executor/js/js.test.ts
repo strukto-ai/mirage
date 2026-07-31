@@ -92,6 +92,30 @@ describe('node/js: quickjs runtime', () => {
     await ws.close()
   }, 60_000)
 
+  it('std.out.puts writes raw, print appends a newline (real qjs)', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("js -e \"std.out.puts('a'); std.out.puts('b'); print('c')\"")
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('abc\n')
+    await ws.close()
+  }, 60_000)
+
+  it('console.log ToStrings its args like the real engine, not JSON', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('js -e "console.log({a: 1}, [1, 2])"')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('[object Object] 1,2\n')
+    await ws.close()
+  }, 60_000)
+
+  it('console.error does not exist, matching quickjs-ng --std', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('js -e "console.error(\'x\')"')
+    expect(io.exitCode).toBe(1)
+    expect(stderrStr(io)).toContain('TypeError')
+    await ws.close()
+  }, 60_000)
+
   it('no input → exit 1', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('js')

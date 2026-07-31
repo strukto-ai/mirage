@@ -208,7 +208,7 @@ def whole_line_runtime(bindings: Mapping[str, Runtime | None],
 
     Args:
         bindings (Mapping[str, Runtime | None]): the line's resolved
-            command bindings (a RoutingDecision's or the registry's).
+            command bindings (a PolicyDecision's or the registry's).
         commands (Sequence[str]): the line's stage command names.
     """
     for command in commands:

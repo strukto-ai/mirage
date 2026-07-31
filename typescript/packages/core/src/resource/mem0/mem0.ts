@@ -15,6 +15,9 @@ const resolveGlob = makeResolveGlob(readdir)
 export class Mem0Resource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.MEM0
   readonly cachesReads: boolean = true
+  // readdir and stat store the rendered JSON's byte length and read
+  // serves those same bytes, so sizes are exact by construction.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = false
   readonly prompt: string = MEM0_PROMPT
   readonly accessor: Mem0Accessor

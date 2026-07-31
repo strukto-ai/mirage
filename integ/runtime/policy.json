@@ -1,11 +1,8 @@
 {
-  "suite": "routing",
+  "suite": "policy",
   "cases": [
     {
       "id": "runtime_arg_per_line",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           "monty",
@@ -45,9 +42,6 @@
     },
     {
       "id": "entry_script_fallthrough",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           {
@@ -101,7 +95,7 @@
           "command": "python3 -c \"x\"",
           "expect": {
             "exit": 126,
-            "stderr": "mirage: python3: no runtime accepted this line\n"
+            "stderr": "python3: no runtime accepted this line\n"
           }
         },
         {
@@ -114,10 +108,7 @@
       ]
     },
     {
-      "id": "global_route",
-      "hosts": [
-        "python"
-      ],
+      "id": "global_policy",
       "world": {
         "runtimes": [
           "monty",
@@ -129,7 +120,7 @@
             "resource": "ram"
           }
         },
-        "route": "'local' if 'go-local' in ctx['line'] else None"
+        "policy": "'local' if 'go-local' in ctx['line'] else None"
       },
       "steps": [
         {
@@ -150,9 +141,6 @@
     },
     {
       "id": "add_runtime_local",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           "monty",
@@ -319,7 +307,7 @@
       ]
     },
     {
-      "id": "route_script_bad_name",
+      "id": "policy_script_bad_name",
       "world": {
         "runtimes": [
           "monty"
@@ -329,7 +317,7 @@
             "resource": "ram"
           }
         },
-        "route": "'nope'"
+        "policy": "'nope'"
       },
       "steps": [
         {
@@ -422,6 +410,109 @@
           "expect": {
             "exit": 127,
             "stderr_contains": "python3: command not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy_deny_blocks_line",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "{'deny': 'python3 is blocked here'} if ctx['command'] == 'python3' else None"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "python3: policy denied: python3 is blocked here\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy_verdict_places_runtime",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "{'runtime': 'monty'}"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(40 + 2)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy_script_bad_verdict",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "{'runtme': 'monty'}"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "throws_contains": "unknown policy verdict keys"
+          }
+        }
+      ]
+    },
+    {
+      "id": "entry_script_verdict_shape",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "{'deny': 'nope'}"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "throws_contains": "entry scripts answer a boolean"
           }
         }
       ]

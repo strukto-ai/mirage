@@ -55,6 +55,13 @@ export async function listUsers(
   return out
 }
 
+// The single renderer behind both read and the readdir-time size.
+// users.list members are payload-identical to users.info responses
+// (verified live), so sizing from the listing is exact.
+export function userJsonBytes(user: SlackUser | Record<string, never>): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(user))
+}
+
 export async function getUserProfile(
   accessor: SlackAccessor,
   userId: string,

@@ -61,6 +61,9 @@ class HfDatasetsResource(BaseResource):
     accessor: HfDatasetsAccessor
     name: str = ResourceName.HF_DATASETS
     caches_reads: bool = True
+    # Same size guarantees as HfBucketsResource: exact Hub tree sizes
+    # plus the readdir stat backfill.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True

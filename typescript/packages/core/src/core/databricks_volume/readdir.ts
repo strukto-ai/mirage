@@ -87,13 +87,22 @@ export async function readdir(
     const name = rstripSlash(fullPath).split('/').pop() ?? fullPath
     const remoteTime =
       typeof entry.last_modified === 'number' ? new Date(entry.last_modified).toISOString() : ''
+    let size = !isDir && typeof entry.file_size === 'number' ? entry.file_size : null
+    if (!isDir && size === null) {
+      // DirectoryEntry normally carries file_size; when the lister omits
+      // it, one HEAD per affected file fills the gap so the index never
+      // caches an unknown size.
+      const r = await dbxFetch(accessor, 'HEAD', 'files', entry.path)
+      const lengthHeader = r.headers.get('content-length')
+      size = lengthHeader !== null && lengthHeader !== '' ? Number(lengthHeader) : null
+    }
     indexEntries.push([
       name,
       new IndexEntry({
         id: fullPath,
         name,
         resourceType: isDir ? 'folder' : 'file',
-        size: !isDir && typeof entry.file_size === 'number' ? entry.file_size : null,
+        size,
         remoteTime,
       }),
     ])

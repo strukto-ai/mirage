@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../executor/runtime.ts'
-import type { RoutingDecision } from '../executor/route/index.ts'
+import type { PolicyDecision } from '../executor/policy/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -236,7 +236,7 @@ export interface ExecuteNodeDeps {
   ensureOpen?: (resource: Resource) => Promise<void>
   unmount?: (prefix: string) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RoutingDecision
+  routingDecision?: PolicyDecision
   signal?: AbortSignal
 }
 

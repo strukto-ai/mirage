@@ -16,7 +16,14 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
-import { ScriptSource } from './executor/route/index.ts'
+import { QuickJsRuntime } from './executor/js/quickjs.ts'
+import {
+  DenyResult,
+  parseVerdict,
+  PolicyDeny,
+  RouteResult,
+  ScriptSource,
+} from './executor/policy/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -146,7 +153,7 @@ describe('routing ladder', () => {
     try {
       const denied = await ws.execute('python3 -c "x"')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('mirage: python3: no runtime accepted this line\n')
+      expect(DEC.decode(denied.stderr)).toBe('python3: no runtime accepted this line\n')
       const open = await ws.execute('echo vfs-still-open')
       expect(DEC.decode(open.stdout)).toBe('vfs-still-open\n')
     } finally {
@@ -174,7 +181,7 @@ describe('routing ladder', () => {
     }
   })
 
-  it('the global route names the runtime', async () => {
+  it('the global policy names the runtime', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMResource() },
@@ -182,7 +189,7 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'vfs'],
-        route: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
+        policy: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
       },
     )
     try {
@@ -193,6 +200,165 @@ describe('routing ladder', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  it('a JS policy script reads mounted content through the fs bridge', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new QuickJsRuntime(), 'vfs'],
+        policy: new ScriptSource(
+          "const f = std.open('/deny.txt', 'r'); " +
+            'const blocked = f !== null && f.readAsString().includes(ctx.command); ' +
+            'if (f !== null) f.close(); ' +
+            "blocked ? { deny: 'listed in /deny.txt' } : null",
+        ),
+      },
+    )
+    try {
+      await ws.execute('echo node > /deny.txt')
+      const denied = await ws.execute('node -e "1"')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('node: policy denied: listed in /deny.txt\n')
+      const ok = await ws.execute('echo ok')
+      expect(DEC.decode(ok.stdout)).toBe('ok\n')
+      expect(ok.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a deny verdict folds into the line result', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), 'vfs'],
+        policy: (ctx) => (ctx.command === 'python3' ? { deny: 'python3 is blocked' } : null),
+      },
+    )
+    try {
+      const denied = await ws.execute('python3 -c "x"')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('python3: policy denied: python3 is blocked\n')
+      const ok = await ws.execute('echo ok')
+      expect(DEC.decode(ok.stdout)).toBe('ok\n')
+      expect(ok.exitCode).toBe(0)
+      // The denied line is still a typed line: it records like any
+      // other command, mirroring Python's finally path.
+      const events = await ws.history()
+      expect(events.map((e) => e.command)).toEqual(['python3 -c "x"', 'echo ok'])
+      expect(events[0]?.exit_code).toBe(126)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a runtime verdict object places the line', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'vfs'],
+        policy: () => ({ runtime: 'beta' }),
+      },
+    )
+    try {
+      const io = await ws.execute('python3 -c "x"')
+      expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a syntax error gates before the policy', async () => {
+    const parser = await getTestParser()
+    const calls: string[] = []
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), 'vfs'],
+        policy: (ctx) => {
+          calls.push(ctx.line)
+          return { deny: 'nothing runs' }
+        },
+      },
+    )
+    try {
+      const io = await ws.execute('echo (')
+      expect(io.exitCode).toBe(2)
+      expect(DEC.decode(io.stderr)).toContain('syntax error')
+      expect(calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('the typed arms parse like their wire dicts', async () => {
+    expect(parseVerdict(new RouteResult('beta'))).toBe('beta')
+    expect(() => parseVerdict(new DenyResult('not here'))).toThrow(PolicyDeny)
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'vfs'],
+        policy: (ctx) =>
+          ctx.line.includes('secret')
+            ? new DenyResult('secrets stay put')
+            : new RouteResult('beta'),
+      },
+    )
+    try {
+      const routed = await ws.execute('python3 -c "x"')
+      expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
+      const denied = await ws.execute('python3 -c "secret"')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('python3: policy denied: secrets stay put\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('an entry script answering a verdict shape fails loud', async () => {
+    const parser = await getTestParser()
+    const alpha = new NamedFakeRuntime('alpha')
+    alpha.script = new ScriptSource("{'deny': 'nope'}")
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [alpha, new MontyRuntime(), 'vfs'],
+      },
+    )
+    try {
+      await expect(ws.execute('python3 -c "x"')).rejects.toThrow(/answer a boolean/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('parseVerdict folds a Map verdict into the wire object', () => {
+    expect(parseVerdict(new Map([['runtime', 'beta']]))).toBe('beta')
+    expect(() => parseVerdict(new Map([['deny', 'nope']]))).toThrow(PolicyDeny)
+  })
+
+  it('parseVerdict fails loud on bad verdict objects', () => {
+    expect(() => parseVerdict({ runtme: 'beta' })).toThrow('unknown policy verdict keys')
+    expect(() => parseVerdict({ runtime: 'beta', deny: 'no' })).toThrow('both place and deny')
+    expect(() => parseVerdict({})).toThrow("needs a 'runtime' name")
+    expect(() => parseVerdict(42)).toThrow('verdict dict, or null')
   })
 
   it('nested evals inherit the typed line decision', async () => {
@@ -274,7 +440,7 @@ describe('vfs runtime overrides', () => {
       expect(DEC.decode(ok.stdout)).toBe('listed\n')
       const denied = await ws.execute('ls /')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('mirage: ls: no runtime accepted this line\n')
+      expect(DEC.decode(denied.stderr)).toBe('ls: no runtime accepted this line\n')
       const py = await ws.execute('python3 -c "x"')
       expect(DEC.decode(py.stdout)).toBe('ran-alpha\n')
     } finally {

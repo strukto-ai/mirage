@@ -22,9 +22,9 @@ from mirage.core.slack.channels import list_channels, list_dms
 from mirage.core.slack.files import file_blob_name
 from mirage.core.slack.formatters import (channel_dirname, dm_dirname,
                                           user_filename)
-from mirage.core.slack.history import fetch_messages_for_day
+from mirage.core.slack.history import fetch_messages_for_day, messages_to_jsonl
 from mirage.core.slack.scope import SlackScope, detect_scope
-from mirage.core.slack.users import list_users
+from mirage.core.slack.users import list_users, user_json_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -168,6 +168,7 @@ async def _readdir_users(
             name=u.get("name", ""),
             resource_type="slack/user",
             vfs_name=filename,
+            size=len(user_json_bytes(u)),
         )
         entries.append((filename, entry))
         names.append(f"{prefix}/users/{filename}")
@@ -337,6 +338,7 @@ async def _fetch_day(
         name="chat.jsonl",
         resource_type="slack/chat_jsonl",
         vfs_name="chat.jsonl",
+        size=len(messages_to_jsonl(messages)),
     )
     files_entry = IndexEntry(
         id=f"{channel_id}:{date_str}:files",
@@ -351,7 +353,12 @@ async def _fetch_day(
     file_entries: list[tuple[str, IndexEntry]] = []
     for msg in messages:
         for fmeta in msg.get("files", []) or []:
-            if not fmeta.get("id"):
+            # Tombstoned (deleted) and access-restricted file payloads carry
+            # an id but no download URL and no byte size; read() ENOENTs on
+            # them, so listing them would both surface phantom files and
+            # break the SIZES_ALWAYS_KNOWN contract.
+            if (not fmeta.get("id") or not fmeta.get("url_private_download")
+                    or fmeta.get("size") is None):
                 continue
             blob_name = file_blob_name(fmeta)
             file_entries.append(
@@ -361,7 +368,7 @@ async def _fetch_day(
                      name=fmeta.get("title") or fmeta.get("name") or "",
                      resource_type="slack/file",
                      vfs_name=blob_name,
-                     size=fmeta.get("size"),
+                     size=fmeta["size"],
                      remote_time=str(fmeta.get("timestamp", "")),
                      extra={
                          "mimetype":

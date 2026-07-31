@@ -18,7 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.tree import fetch_tree_sync
+from mirage.core.github.tree import fetch_dir_tree, fetch_tree_sync
 from mirage.core.github.tree_entry import TreeEntry
 
 
@@ -58,6 +58,54 @@ def test_fetch_tree_parses_entries(mock_get, config):
                                             type="blob",
                                             sha="bbb",
                                             size=120)
+
+
+@patch("mirage.core.github.tree.github_get_sync")
+def test_fetch_tree_excludes_submodule_gitlinks(mock_get, config):
+    mock_get.return_value = {
+        "truncated":
+        False,
+        "tree": [
+            {
+                "path": "extern",
+                "mode": "160000",
+                "type": "commit",
+                "sha": "ccc"
+            },
+            {
+                "path": "main.py",
+                "type": "blob",
+                "sha": "bbb",
+                "size": 7
+            },
+        ],
+    }
+    tree, _ = fetch_tree_sync(config, "acme", "proj", "main")
+    assert "extern" not in tree
+    assert list(tree) == ["main.py"]
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.tree.github_get")
+async def test_fetch_dir_tree_excludes_submodule_gitlinks(mock_get, config):
+    mock_get.return_value = {
+        "tree": [
+            {
+                "path": "extern",
+                "mode": "160000",
+                "type": "commit",
+                "sha": "ccc"
+            },
+            {
+                "path": "main.py",
+                "type": "blob",
+                "sha": "bbb",
+                "size": 7
+            },
+        ]
+    }
+    entries = await fetch_dir_tree(config, "acme", "proj", "sha1")
+    assert [e.path for e in entries] == ["main.py"]
 
 
 @patch("mirage.core.github.tree.github_get_sync")

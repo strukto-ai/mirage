@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -38,8 +38,8 @@ class CommandFacts:
 
 
 @dataclass(frozen=True, slots=True)
-class RouteContext:
-    """Facts about the line being routed, parse-before-route.
+class PolicyContext:
+    """Facts about the line being routed, parse-before-policy.
 
     For ``cat /data/logs.txt | python3 process.py`` typed in ``/data``,
     monty's script (monty captures ``python3``) is consulted with::
@@ -59,7 +59,7 @@ class RouteContext:
         ctx.builtin   == True
         ctx.cwd       == "/data"
 
-    The global route script sees the same context with
+    The global policy script sees the same context with
     ``ctx.command == "cat"``, the line's first stage. A monty-source
     script gets this as the ``ctx`` dict (see to_dict), with
     ``ctx["runtime"]`` naming the runtime being asked.
@@ -70,7 +70,7 @@ class RouteContext:
             a syntax error.
         command (str): the stage addressed to the consulted party: an
             entry script sees its runtime's first captured stage (see
-            for_runtime), the global route sees the line's first
+            for_runtime), the global policy sees the line's first
             command. "" when unparsable.
         builtin (bool): whether ``command`` has a builtin spec.
         cwd (str): session working directory.
@@ -90,7 +90,7 @@ class RouteContext:
     agent_id: str
     mounts: tuple[str, ...]
 
-    def for_runtime(self, runtime: Runtime) -> "RouteContext":
+    def for_runtime(self, runtime: Runtime) -> "PolicyContext":
         """The context as one runtime's script sees it.
 
         ``command``/``builtin`` become the first stage the runtime
@@ -112,7 +112,7 @@ class RouteContext:
     def to_dict(self, runtime: Runtime | None = None) -> dict[str, Any]:
         """The ctx payload as any evaluator's script sees it.
 
-        This is the route context WIRE SCHEMA, a public contract:
+        This is the policy context WIRE SCHEMA, a public contract:
         JSON-shaped (strings, bools, lists, dicts), snake_case keys,
         identical in both languages, so a script in any evaluator's
         language (and any transport, in-process or remote) receives
@@ -158,7 +158,7 @@ class RouteContext:
         return payload
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "RouteContext":
+    def from_dict(cls, payload: dict[str, Any]) -> "PolicyContext":
         """Rebuild a context from its wire-schema payload.
 
         The inverse of to_dict for the context's own fields (the
@@ -188,12 +188,12 @@ class RouteContext:
 
 
 # A per-runtime willingness script, answering "do I want this line?".
-# In code: a callable (sync or async) on the RouteContext returning a
+# In code: a callable (sync or async) on the PolicyContext returning a
 # truthy verdict. From config: a .py file reference, loaded as
 # ScriptSource (its last expression is the verdict). Mirrors the TS
-# RouteScript.
+# PolicyScript.
 #
-#     def wants(ctx: RouteContext) -> bool:
+#     def wants(ctx: PolicyContext) -> bool:
 #         return ctx.builtin and "/secret" not in ctx.line
 #
 #     VfsRuntime(script=wants)
@@ -202,27 +202,73 @@ class RouteContext:
 #     runtimes:
 #       - name: vfs
 #         script: guard.py
-RouteScript = Callable[[RouteContext], bool | Awaitable[bool]] | ScriptSource
+PolicyScript = Callable[[PolicyContext], bool | Awaitable[bool]] | ScriptSource
 
-# The global route, answering "who takes this line?". In code: a
-# callable (sync or async) on the RouteContext returning a runtime
-# name, or None to pass down the ladder. From config: a .py file
-# reference, loaded as ScriptSource (its last expression is that name
-# or None). Mirrors the TS RouteFn.
-#
-#     def route(ctx: RouteContext) -> str | None:
-#         return "wasi" if ctx.command == "python3" else None
-#
-#     Workspace(..., route=route)
-#
-#     # workspace yaml: route.py next to the config file
-#     route: route.py
-RouteFn = Callable[[RouteContext],
-                   str | None | Awaitable[str | None]] | ScriptSource
+
+class PolicyResult:
+    """The typed spelling of a policy verdict, one subclass per arm.
+
+    Code policies return an arm instance (or the plain-shape sugar
+    below); config scripts return the wire dict, since class instances
+    cannot cross the evaluator sandbox. Each arm serializes to one
+    wire key, and future powers grow as fields on the arm they ride
+    (attachments on RouteResult, kubernetes-admission style).
+    """
 
 
 @dataclass(frozen=True, slots=True)
-class RoutingDecision:
+class RouteResult(PolicyResult):
+    """The affirmative arm: this runtime serves the line.
+
+    Args:
+        runtime (str): name of the entry that serves every command it
+            captures on this line. Wire form: {"runtime": name}.
+    """
+
+    runtime: str
+
+
+@dataclass(frozen=True, slots=True)
+class DenyResult(PolicyResult):
+    """The negative arm: refuse the line before anything runs.
+
+    The line exits 126 with ``<command>: policy denied: <reason>`` on
+    stderr. Wire form: {"deny": reason}.
+
+    Args:
+        reason (str): why the line was denied, shown on stderr.
+    """
+
+    reason: str
+
+
+# What the global policy may answer: a PolicyResult arm, a runtime
+# name, None to pass, or the verdict dict (the wire spelling of the
+# arms, the only form a config script can return). Dict keys are
+# mutually exclusive: {"runtime": name} places the line, {"deny":
+# reason} refuses it. New powers grow as arm fields and dict keys,
+# never as new return types. Mirrors the TS PolicyVerdict.
+PolicyVerdict = PolicyResult | str | Mapping[str, Any] | None
+
+# The global policy, answering "who takes this line?". In code: a
+# callable (sync or async) on the PolicyContext returning a
+# PolicyVerdict. From config: a .py file reference, loaded as
+# ScriptSource (its last expression is the verdict). Mirrors the TS
+# PolicyFn.
+#
+#     def policy(ctx: PolicyContext) -> str | None:
+#         return "wasi" if ctx.command == "python3" else None
+#
+#     Workspace(..., policy=policy)
+#
+#     # workspace yaml: policy.py next to the config file
+#     policy: policy.py
+PolicyFn = Callable[[PolicyContext],
+                    PolicyVerdict | Awaitable[PolicyVerdict]] | ScriptSource
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyDecision:
     """The one-line placement decision the dispatcher consults.
 
     Both fields hold runtimes: the decision IS "which runtime runs

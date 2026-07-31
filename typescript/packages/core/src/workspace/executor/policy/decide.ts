@@ -16,20 +16,22 @@ import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../run
 import { EvalError } from '../runtime_errors.ts'
 import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
 import type { EvalValue } from '../runtime_types.ts'
-import { RoutingDecisionError } from './errors.ts'
+import { PolicyDeny, PolicyError } from './errors.ts'
 import {
+  DenyResult,
+  RouteResult,
   ScriptSource,
-  routeContextPayload,
-  type RoutingDecision,
-  type RouteContext,
-  type RouteFn,
-  type RouteScript,
+  policyContextPayload,
+  type PolicyDecision,
+  type PolicyContext,
+  type PolicyFn,
+  type PolicyScript,
 } from './types.ts'
 
 /**
  * The world's policy engine: its first evaluator-capable entry.
  *
- * Config-borne route scripts run on it; any runtime implementing
+ * Config-borne policy scripts run on it; any runtime implementing
  * Evaluator qualifies (monty/pyodide in the default worlds, or a user
  * runtime in any language). Null when the world has no evaluator,
  * which only matters once a ScriptSource actually needs one.
@@ -52,8 +54,8 @@ async function evalSource(
   evaluator: Evaluator | null,
 ): Promise<EvalValue> {
   if (evaluator === null) {
-    throw new RoutingDecisionError(
-      'route scripts need an evaluator runtime in the workspace ' +
+    throw new PolicyError(
+      'policy scripts need an evaluator runtime in the workspace ' +
         '(the default python runtime, or use a function instead)',
     )
   }
@@ -62,10 +64,10 @@ async function evalSource(
     return result.value
   } catch (caught) {
     if (caught instanceof EvalError) {
-      const prefix = caught.syntax ? 'route script syntax error: ' : 'route script failed: '
-      throw new RoutingDecisionError(prefix + caught.message, { cause: caught })
+      const prefix = caught.syntax ? 'policy script syntax error: ' : 'policy script failed: '
+      throw new PolicyError(prefix + caught.message, { cause: caught })
     }
-    throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
+    throw new PolicyError(caught instanceof Error ? caught.message : String(caught), {
       cause: caught,
     })
   }
@@ -78,7 +80,7 @@ async function evalSource(
  * captured stage on the line (including the catch-all vfs) keeps the
  * line's first stage.
  */
-function ctxForRuntime(ctx: RouteContext, runtime: Runtime): RouteContext {
+function ctxForRuntime(ctx: PolicyContext, runtime: Runtime): PolicyContext {
   for (const fact of ctx.commands) {
     if (runtime.captures.includes(fact.command)) {
       return { ...ctx, command: fact.command, builtin: fact.builtin }
@@ -87,43 +89,97 @@ function ctxForRuntime(ctx: RouteContext, runtime: Runtime): RouteContext {
   return ctx
 }
 
-/** Ask one runtime's script whether it wants the line. */
+/**
+ * Ask one runtime's script whether it wants the line.
+ *
+ * A script answering with a policy verdict shape (an object, Map, or a
+ * PolicyResult arm) fails loud: a deny-dict is truthy, so coercing it
+ * would mean "willing", the opposite of intent.
+ */
 async function evaluateScript(
-  script: RouteScript,
-  ctx: RouteContext,
+  script: PolicyScript,
+  ctx: PolicyContext,
   runtime: Runtime,
   evaluator: Evaluator | null,
 ): Promise<boolean> {
   const view = ctxForRuntime(ctx, runtime)
-  if (script instanceof ScriptSource) {
-    return Boolean(await evalSource(script.source, routeContextPayload(view, runtime), evaluator))
+  const verdict: unknown =
+    script instanceof ScriptSource
+      ? await evalSource(script.source, policyContextPayload(view, runtime), evaluator)
+      : await script(view)
+  if (
+    verdict !== null &&
+    typeof verdict === 'object' &&
+    !Array.isArray(verdict) &&
+    !(verdict instanceof Uint8Array)
+  ) {
+    throw new PolicyError(
+      'entry scripts answer a boolean (deny and placement belong to ' +
+        `the global policy), got ${JSON.stringify(verdict)} from '${runtime.name}'`,
+    )
   }
-  return await script(view)
-}
-
-/** Run the global route, returning a runtime name or null to pass. */
-async function evaluateRoute(
-  route: RouteFn,
-  ctx: RouteContext,
-  evaluator: Evaluator | null,
-): Promise<string | null> {
-  // An untyped JS route can return undefined for "pass"; `?? null`
-  // folds it into python's None instead of erroring.
-  const verdict =
-    route instanceof ScriptSource
-      ? await evalSource(route.source, routeContextPayload(ctx), evaluator)
-      : ((await route(ctx)) ?? null)
-  if (verdict === null) return null
-  if (typeof verdict === 'string') return verdict
-  throw new RoutingDecisionError(
-    `route must return a runtime name or null, got ${JSON.stringify(verdict)}`,
-  )
+  return Boolean(verdict)
 }
 
 /**
- * Resolve the routing ladder for one line: route, then scripts.
+ * Normalize a policy verdict to a runtime name or null to pass.
  *
- * A route verdict overlays the named runtime's captures on the static
+ * The object form is the extensible spelling: `{runtime: name}` places
+ * the line, `{deny: reason}` refuses it, and the keys are mutually
+ * exclusive. Unknown keys fail loud so a typo never silently passes.
+ */
+export function parseVerdict(verdict: unknown): string | null {
+  if (verdict === null) return null
+  if (typeof verdict === 'string') return verdict
+  if (verdict instanceof RouteResult) return verdict.runtime
+  if (verdict instanceof DenyResult) throw new PolicyDeny(verdict.reason)
+  if (verdict instanceof Map) {
+    // A custom evaluator may hand python dicts back as Map (the monty
+    // engine did before its boundary normalized); fold to the plain
+    // object wire shape instead of misreading Map as an empty dict.
+    const folded: Record<string, unknown> = {}
+    for (const [key, value] of verdict) folded[String(key)] = value
+    return parseVerdict(folded)
+  }
+  if (typeof verdict === 'object' && !Array.isArray(verdict) && !(verdict instanceof Uint8Array)) {
+    const obj = verdict as Record<string, unknown>
+    const unknown = Object.keys(obj)
+      .filter((key) => key !== 'runtime' && key !== 'deny')
+      .sort()
+    if (unknown.length > 0) {
+      throw new PolicyError(`unknown policy verdict keys: ${JSON.stringify(unknown)}`)
+    }
+    if ('deny' in obj && 'runtime' in obj) {
+      throw new PolicyError('policy verdict cannot both place and deny')
+    }
+    if ('deny' in obj) throw new PolicyDeny(String(obj.deny))
+    if (typeof obj.runtime === 'string') return obj.runtime
+    throw new PolicyError("policy verdict dict needs a 'runtime' name or a 'deny' reason")
+  }
+  throw new PolicyError(
+    `policy must return a runtime name, a verdict dict, or null, got ${JSON.stringify(verdict)}`,
+  )
+}
+
+/** Run the global policy, returning a runtime name or null to pass. */
+async function evaluatePolicy(
+  policy: PolicyFn,
+  ctx: PolicyContext,
+  evaluator: Evaluator | null,
+): Promise<string | null> {
+  // An untyped JS policy can return undefined for "pass"; `?? null`
+  // folds it into python's None instead of erroring.
+  const verdict =
+    policy instanceof ScriptSource
+      ? await evalSource(policy.source, policyContextPayload(ctx), evaluator)
+      : ((await policy(ctx)) ?? null)
+  return parseVerdict(verdict)
+}
+
+/**
+ * Resolve the policy ladder for one line: policy, then scripts.
+ *
+ * A policy verdict overlays the named runtime's captures on the static
  * bindings (an affirmative choice, never a refusal). With no verdict,
  * per-runtime scripts filter the entry list: an entry with no script
  * is always willing, and the willing entries re-bind in list order.
@@ -134,19 +190,19 @@ async function evaluateRoute(
  */
 export async function decideLine(
   entries: readonly Runtime[],
-  route: RouteFn | null,
-  ctx: RouteContext,
+  policy: PolicyFn | null,
+  ctx: PolicyContext,
   staticBindings: Record<string, Runtime>,
-): Promise<RoutingDecision> {
+): Promise<PolicyDecision> {
   const evaluator = evaluatorOf(entries)
-  if (route !== null) {
-    const name = await evaluateRoute(route, ctx, evaluator)
+  if (policy !== null) {
+    const name = await evaluatePolicy(policy, ctx, evaluator)
     if (name !== null) {
       let overlay: Record<string, Runtime>
       try {
         overlay = runtimeBindingsFor(entries, name)
       } catch (caught) {
-        throw new RoutingDecisionError(caught instanceof Error ? caught.message : String(caught), {
+        throw new PolicyError(caught instanceof Error ? caught.message : String(caught), {
           cause: caught,
         })
       }

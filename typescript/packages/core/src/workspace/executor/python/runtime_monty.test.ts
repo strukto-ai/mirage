@@ -32,7 +32,11 @@ function makeBridge(seed: Record<string, Uint8Array>): {
   const dispatch: BridgeDispatchFn = (op, path, bytes) => {
     if (op === 'READ') {
       const data = files.get(path)
-      if (data === undefined) return Promise.reject(new Error(`no such file: ${path}`))
+      if (data === undefined) {
+        // The real dispatcher rejects with coded fs errors (ENOENT et
+        // al); the mock mirrors that contract.
+        return Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
+      }
       return Promise.resolve(data)
     }
     if (op === 'WRITE') {
@@ -185,6 +189,28 @@ describe('MontyRuntime', () => {
     expect(result.status).toBe('complete')
   }, 30_000)
 
+  it('eval folds dict values into plain objects, not Maps', async () => {
+    const rt = make()
+    const result = await rt.eval("{'deny': 'no', 'nested': [{'k': 1}]}")
+    expect(result.value).toEqual({ deny: 'no', nested: [{ k: 1 }] })
+  }, 30_000)
+
+  it('a missing virtual file raises a typed FileNotFoundError in the guest', async () => {
+    const { dispatch } = makeBridge({})
+    const rt = make(dispatch)
+    const result = await run(
+      rt,
+      'from pathlib import Path\n' +
+        'try:\n' +
+        "    Path('/ram/nope.txt').read_text()\n" +
+        'except FileNotFoundError as exc:\n' +
+        "    print('typed:', exc)\n",
+    )
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toContain('typed:')
+    expect(text(result.stdout)).toContain('/ram/nope.txt')
+  }, 30_000)
+
   it('a missing virtual file surfaces as an error without poisoning the runtime', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
     const rt = make(dispatch)
@@ -274,7 +300,7 @@ describe('buildRuntime', () => {
     expect(() => buildRuntime('docker')).toThrow(/unknown runtime/)
   })
 
-  it("hints that 'local' is Python-only", () => {
-    expect(() => buildRuntime('local')).toThrow(/Python-only/)
+  it("hints that 'local' lives in the node package", () => {
+    expect(() => buildRuntime('local')).toThrow(/mirage-node/)
   })
 })

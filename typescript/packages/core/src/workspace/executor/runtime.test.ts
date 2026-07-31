@@ -59,9 +59,9 @@ describe('runtime table', () => {
     expect([...restricted.captures]).toEqual(['grep', 'cat'])
   })
 
-  it("buildRuntime hints Python-only for 'wasi' and 'local'", () => {
+  it("buildRuntime hints the right home for 'wasi' and 'local'", () => {
     expect(() => buildRuntime('wasi')).toThrow(/Python-only/)
-    expect(() => buildRuntime('local')).toThrow(/Python-only/)
+    expect(() => buildRuntime('local')).toThrow(/mirage-node/)
   })
 })
 

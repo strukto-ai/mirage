@@ -19,6 +19,10 @@ const resolveGlob = makeResolveGlob(readdir)
 export class SharePointResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.SHAREPOINT
   readonly cachesReads: boolean = true
+  // Graph drive items carry an exact content-length size and the site
+  // and drive levels are plain directories; unlike onedrive there is
+  // no aggregate-size root item.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = SHAREPOINT_PROMPT

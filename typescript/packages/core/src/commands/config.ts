@@ -56,6 +56,7 @@ export interface CommandOpts {
   execAllowed?: boolean
   runtime?: Runtime
   statOverlay?: StatOverlay
+  signal?: AbortSignal
 }
 
 export type CommandFnResult = [ByteSource | null, IOResult] | null

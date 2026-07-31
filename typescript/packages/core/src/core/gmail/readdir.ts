@@ -19,7 +19,13 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { listLabels } from './labels.ts'
 import type { GmailMessageRaw } from './messages.ts'
-import { extractAttachments, extractHeader, getMessageRaw, listMessages } from './messages.ts'
+import {
+  extractAttachments,
+  extractHeader,
+  getMessageRaw,
+  listMessages,
+  messageJsonBytes,
+} from './messages.ts'
 import { GoogleFileSuffix } from '../google/drive.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -144,15 +150,15 @@ export async function readdir(
         const headers = rawMsg.payload?.headers ?? []
         const subject = extractHeader(headers, 'Subject') || 'No Subject'
         const filename = msgFilename(subject, mid)
-        // size stays null: sizeEstimate is the source message size, not the
-        // rendered .gmail.json length (FileStat.size must be render-derived
-        // or null, see the CLAUDE.md FUSE rules). The estimate lives in
-        // extra.
+        // The listing already fetched the full message, so the exact
+        // rendered .gmail.json length is free; sizeEstimate is the source
+        // message size and stays in extra.
         const msgEntry = new IndexEntry({
           id: mid,
           name: subject,
           resourceType: 'gmail/message',
           vfsName: filename,
+          size: messageJsonBytes(rawMsg).byteLength,
           extra: rawMsg.sizeEstimate != null ? { size_estimate: rawMsg.sizeEstimate } : {},
         })
         msgEntries.push([filename, msgEntry])

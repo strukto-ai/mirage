@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Runtime } from '../runtime.ts'
-import type { RunArgs, RunResult, RuntimeOptions } from '../runtime_types.ts'
+import { EvalError } from '../runtime_errors.ts'
+import { EVALUATOR, type Evaluator } from '../runtime_mixin.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../runtime_types.ts'
 import {
   createMirageBridge,
   type BridgeDispatchFn,
@@ -39,24 +41,19 @@ const STACK_SIZE = 1024 * 1024
 
 // Assembles the std/console/scriptArgs surface from injected primitives.
 // Kept identical to the quickjs-ng `--std` globals the Python runtime
-// exposes, so a script runs the same on both: `std.in.readAsString()`,
-// `std.exit()`, `console.log`, `scriptArgs`. `std.open`/`os.readdir` are
-// added afterward by MIRAGE_FS_BOOTSTRAP when a workspace bridge is wired.
+// exposes, so a script runs the same on both (pinned against the real
+// engine): only `console.log` exists (no .error/.warn), `print` is a
+// global, both ToString their args (`[object Object]`, not JSON) and
+// append a newline, while `std.out.puts`/`std.err.puts` write raw.
+// `std.open`/`os.readdir` are added afterward by MIRAGE_FS_BOOTSTRAP
+// when a workspace bridge is wired.
 const BOOTSTRAP = `
-const __fmt = (v) =>
-  typeof v === 'string' ? v
-  : (v !== null && typeof v === 'object' ? (() => { try { return JSON.stringify(v) } catch { return String(v) } })() : String(v));
-const __join = (a) => a.map(__fmt).join(' ');
-globalThis.console = {
-  log: (...a) => __mirage_log(__join(a)),
-  info: (...a) => __mirage_log(__join(a)),
-  debug: (...a) => __mirage_log(__join(a)),
-  error: (...a) => __mirage_error(__join(a)),
-  warn: (...a) => __mirage_error(__join(a)),
-};
+const __join = (a) => a.map(String).join(' ');
+globalThis.console = { log: (...a) => __mirage_log(__join(a) + '\\n') };
+globalThis.print = (...a) => __mirage_log(__join(a) + '\\n');
 globalThis.std = {
   in: { readAsString: () => __mirage_stdin },
-  out: { puts: (s) => __mirage_log(String(s)), print: (s) => __mirage_log(String(s)) },
+  out: { puts: (s) => __mirage_log(String(s)) },
   err: { puts: (s) => __mirage_error(String(s)) },
   exit: (n) => { __mirage_setExit(n | 0); throw new Error('__mirage_exit'); },
   getenv: (k) => __mirage_env[k],
@@ -71,8 +68,9 @@ const QUICKJS_CONFIG_KEYS: readonly string[] = ['home']
 // The asyncify variant is used so `std.open`/`os.readdir` can suspend
 // the guest while a workspace-mount read or write awaits the dispatch,
 // matching the Python runtime's live file I/O.
-export class QuickJsRuntime extends Runtime {
+export class QuickJsRuntime extends Runtime implements Evaluator {
   readonly name = QUICKJS_RUNTIME
+  readonly [EVALUATOR] = true as const
   static readonly commands: readonly string[] = ['node', 'js'] as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null
@@ -126,7 +124,7 @@ export class QuickJsRuntime extends Runtime {
         if (exit.called) {
           exitCode = exit.code
         } else {
-          err.push(this.formatError(ctx, result.error))
+          err.push(this.formatError(ctx, result.error) + '\n')
           exitCode = 1
         }
         result.error.dispose()
@@ -136,9 +134,89 @@ export class QuickJsRuntime extends Runtime {
         if (drained !== null) exitCode = exit.called ? exit.code : drained
       }
       return {
-        stdout: ENC.encode(out.map((l) => l + '\n').join('')),
-        stderr: err.length > 0 ? ENC.encode(err.map((l) => l + '\n').join('')) : null,
+        stdout: ENC.encode(out.join('')),
+        stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
         exitCode,
+      }
+    } finally {
+      ctx.dispose()
+      runtime.dispose()
+    }
+  }
+
+  /**
+   * Evaluate one JS program; the completion value is the value.
+   *
+   * Inputs bind as globals and the source runs at global scope, so the
+   * LAST EXPRESSION is the value (what the policy engine consumes for
+   * JS policy scripts). Each eval is a fresh engine, mirroring the
+   * python wasi runtime, so console sessions are not supported.
+   */
+  async eval(
+    code: string,
+    opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
+  ): Promise<EvalResult> {
+    if (opts.session !== undefined) {
+      throw new EvalError(
+        'the quickjs evaluator is one-shot only: each eval is a fresh ' +
+          'engine, so console sessions are unsupported',
+      )
+    }
+    const newAsyncModule = await this.loadModule()
+    const QuickJS = await newAsyncModule()
+    const runtime: QuickJSAsyncRuntime = QuickJS.newRuntime()
+    runtime.setMemoryLimit(MEMORY_LIMIT)
+    runtime.setMaxStackSize(STACK_SIZE)
+    const ctx = runtime.newContext()
+    const out: string[] = []
+    const err: string[] = []
+    try {
+      this.installGlobals(ctx, { code, args: [], env: {}, stdin: null, flags: {} }, out, err, {
+        code: 0,
+        called: false,
+      })
+      // Same filesystem surface as run(): an attached workspace serves
+      // std.open/os.readdir, so a JS policy script can read mounted
+      // content (the python evaluator gets this via run()'s GuestFs).
+      const bridge: MirageBridge | null =
+        this.workspaceBridge !== null
+          ? createMirageBridge(this.workspaceBridge, this.listMounts)
+          : null
+      installMirageFs(ctx, bridge)
+      const boot = ctx.evalCode(BOOTSTRAP + MIRAGE_FS_BOOTSTRAP, 'mirage:bootstrap')
+      if (boot.error) {
+        boot.error.dispose()
+        throw new EvalError('quickjs bootstrap failed')
+      }
+      boot.value.dispose()
+      const inputsJson = JSON.stringify(opts.inputs ?? {})
+      const bind = ctx.evalCode(
+        `for (const [__k, __v] of Object.entries(JSON.parse(${JSON.stringify(inputsJson)}))) globalThis[__k] = __v`,
+        'mirage:inputs',
+      )
+      if (bind.error) {
+        bind.error.dispose()
+        throw new EvalError('quickjs eval could not bind inputs')
+      }
+      bind.value.dispose()
+      const result = await ctx.evalCodeAsync(code, 'eval.js', { type: 'global' })
+      if (result.error) {
+        const message = this.formatError(ctx, result.error)
+        result.error.dispose()
+        throw new EvalError(message, { syntax: message.startsWith('SyntaxError') })
+      }
+      const dumped: unknown = ctx.dump(result.value)
+      result.value.dispose()
+      const drained = this.drainJobs(runtime, ctx, err)
+      if (drained !== null && drained !== 0) {
+        throw new EvalError(err.join('').trim() || 'quickjs eval failed while draining jobs')
+      }
+      return {
+        value: (dumped === undefined ? null : dumped) as EvalValue,
+        stdout: ENC.encode(out.join('')),
+        stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
+        exitCode: 0,
+        status: 'complete',
       }
     } finally {
       ctx.dispose()
@@ -201,7 +279,7 @@ export class QuickJsRuntime extends Runtime {
     for (;;) {
       const jobs = runtime.executePendingJobs()
       if (jobs.error) {
-        err.push(this.formatError(ctx, jobs.error))
+        err.push(this.formatError(ctx, jobs.error) + '\n')
         jobs.error.dispose()
         return 1
       }

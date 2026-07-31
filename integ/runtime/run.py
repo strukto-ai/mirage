@@ -28,7 +28,7 @@ from typing import Any  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.runtime.base import Runtime  # noqa: E402
-from mirage.runtime.route import ScriptSource  # noqa: E402
+from mirage.runtime.policy import ScriptSource  # noqa: E402
 from mirage.runtime.table import build_runtime  # noqa: E402
 from mirage.runtime.types import RunArgs, RunResult  # noqa: E402
 from mirage.types import CommandSafeguard, PathSpec  # noqa: E402
@@ -220,8 +220,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     kwargs: dict[str, Any] = {}
     if "runtimes" in world:
         kwargs["runtimes"] = [_build_entry(e) for e in world["runtimes"]]
-    if "route" in world:
-        kwargs["route"] = ScriptSource(world["route"])
+    if "policy" in world:
+        kwargs["policy"] = ScriptSource(world["policy"])
     ws = Workspace(mounts, mode=MountMode.EXEC, **kwargs)
     for prefix, name, data in seeds:
         await ws.dispatch("write",

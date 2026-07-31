@@ -92,6 +92,123 @@
           }
         }
       ]
+    },
+    {
+      "id": "puts_print_raw",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"std.out.puts('a'); std.out.puts('b'); print('c'); console.log({k: 1}, [1, 2])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "abc\n[object Object] 1,2\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_policy_reads_file",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "deny.txt": "node\n"
+            }
+          }
+        },
+        "policy": "const f = std.open('/ram/deny.txt', 'r'); const blocked = f !== null && f.readAsString().includes(ctx.command); if (f !== null) f.close(); blocked ? {deny: 'listed in /ram/deny.txt'} : null"
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: policy denied: listed in /ram/deny.txt\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_policy_deny",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "ctx.command === 'node' ? {deny: 'no js here'} : null"
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: policy denied: no js here\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_entry_script",
+      "world": {
+        "runtimes": [
+          {
+            "name": "quickjs",
+            "script": "!ctx.line.includes('keep-out')"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log('served')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "served\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log('keep-out')\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "node: no runtime accepted this line\n"
+          }
+        }
+      ]
     }
   ]
 }

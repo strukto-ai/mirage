@@ -31,6 +31,10 @@ class GmailResource(BaseResource):
     accessor: GmailAccessor
     name: str = ResourceName.GMAIL
     caches_reads: bool = True
+    # Every listed file carries an exact size: .gmail.json is rendered at
+    # readdir from the full message the listing already fetched, and
+    # attachments carry the decoded byte count.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 

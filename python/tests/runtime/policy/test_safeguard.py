@@ -15,8 +15,9 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.commands.safeguard import (DEFAULT_COMMAND_SAFEGUARDS,
-                                       CommandSafeguard, resolve_safeguard)
+from mirage.runtime.policy.safeguard import (DEFAULT_COMMAND_SAFEGUARDS,
+                                             CommandSafeguard,
+                                             resolve_safeguard)
 from mirage.types import OnExceed
 
 
@@ -62,6 +63,6 @@ def test_resolve_falls_back_to_central_default():
 
 
 def test_resolve_unknown_command_returns_fallback_safeguard():
-    from mirage.commands.safeguard import FALLBACK_SAFEGUARD
+    from mirage.runtime.policy.safeguard import FALLBACK_SAFEGUARD
     assert resolve_safeguard("nl") is FALLBACK_SAFEGUARD
     assert FALLBACK_SAFEGUARD.timeout_seconds is not None

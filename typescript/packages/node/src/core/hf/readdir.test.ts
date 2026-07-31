@@ -59,6 +59,25 @@ describe('hf readdir', () => {
     })
   })
 
+  it('backfills a lister-omitted size with one stat', async () => {
+    const accessor = accessorWith(FILES)
+    const fake = fakeHfOperator(FILES)
+    const realList = fake.list.bind(fake)
+    fake.list = async (path, options) => {
+      const entries = await realList(path, options)
+      return entries.map((entry) =>
+        entry.path() === 'config.json'
+          ? { ...entry, metadata: () => ({ ...entry.metadata(), contentLength: null }) }
+          : entry,
+      )
+    }
+    installFakeOperator(accessor, fake)
+    const index = new RAMIndexCacheStore()
+    await readdir(accessor, PathSpec.fromStrPath('/'), index)
+    const lookup = await index.get('/config.json')
+    expect(lookup.entry?.size).toBe(2)
+  })
+
   it('populates the index and serves the second call from cache', async () => {
     const accessor = accessorWith(FILES)
     const index = new RAMIndexCacheStore()

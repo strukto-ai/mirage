@@ -205,7 +205,7 @@ cap its output the same way. There is no sandbox-specific limit surface.
 ## Serving as the policy engine
 
 A sandbox runs whole lines; it does not evaluate expressions, so it cannot
-run [route scripts](/home/policy-engine). To make one eligible, subclass it
+run [policy scripts](/home/policy-engine). To make one eligible, subclass it
 and implement `eval` with your own transport. The
 [docker eval examples](https://github.com/strukto-ai/mirage/tree/main/examples)
 do exactly that by piping a small harness to the container's `python3 -`.

@@ -36,8 +36,11 @@ Three input forms, mirroring `python3`:
 
 `scriptArgs` holds the arguments after the code or script,
 `std.in.readAsString()` reads piped stdin, and `std.open`/`os.readdir`
-reach workspace mounts (see [Isolation](#isolation)). These match the
-Python `quickjs` runtime, so a script behaves the same in both languages.
+reach workspace mounts (see [Isolation](#isolation)). Output follows the
+real engine: `console.log` and the `print` global append a newline,
+`std.out.puts`/`std.err.puts` write raw, and there is no `console.error`
+(write stderr with `std.err.puts`). These match the Python `quickjs`
+runtime, so a script behaves the same in both languages.
 
 ## Modules
 
@@ -116,3 +119,10 @@ point. A run that exceeds `timeout_seconds` answers with exit 124, and
 One caveat: the guard bounds how long a run may *answer*, not the engine
 itself. Give untrusted code a finite workload, or run it behind a
 sandboxed deployment.
+
+## Policy engine
+
+The quickjs runtime carries the evaluator capability, so a JS-only
+world has a [policy engine](/home/policy-engine): `policy: ./policy.js`
+evaluates JavaScript per line with `ctx` bound as a global, and the
+completion value (the last expression) is the verdict.

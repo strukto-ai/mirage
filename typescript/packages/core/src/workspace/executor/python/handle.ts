@@ -52,6 +52,7 @@ export async function handlePython(
     stdin: ByteSource | null
     env: Record<string, string>
     code: string | null
+    signal?: AbortSignal
   },
   deps: HandlePythonDeps,
 ): Promise<Result> {
@@ -92,6 +93,7 @@ export async function handlePython(
       args,
       env: opts.env,
       stdin: stdinBytes,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     })
     return [
       result.stdout.length > 0 ? result.stdout : null,
