@@ -14,6 +14,7 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import bound_op
@@ -31,7 +32,8 @@ from mirage.types import PathSpec
 @command("head",
          resource="history",
          spec=SPECS["head"],
-         provision=make_head_tail_provision(history_stat))
+         provision=make_head_tail_provision(history_stat),
+         aggregate=header_aggregate)
 async def head(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

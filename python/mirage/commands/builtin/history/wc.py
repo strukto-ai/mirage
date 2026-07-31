@@ -14,6 +14,7 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import wc_aggregate
 from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
                                                 format_stdin, parse_flags)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
@@ -31,7 +32,8 @@ from mirage.types import PathSpec
 @command("wc",
          resource="history",
          spec=SPECS["wc"],
-         provision=make_file_read_provision(history_stat))
+         provision=make_file_read_provision(history_stat),
+         aggregate=wc_aggregate)
 async def wc(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

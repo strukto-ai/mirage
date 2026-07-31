@@ -1,5 +1,13 @@
 {
   "_meta": {
+    "by_resource": {
+      "": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,

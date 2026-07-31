@@ -47,8 +47,12 @@ function declaredCommandGroups(pkg: string): string[] {
     let source: string
     try {
       source = readFileSync(resolve(root, entry.name, 'index.ts'), 'utf8')
-    } catch {
-      continue
+    } catch (err) {
+      // A directory with no index.ts declares no command group. Any other
+      // read failure means the scan is incomplete, which is exactly when
+      // the reachability assertion below must not be trusted.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw err
     }
     for (const m of source.matchAll(/^export const ([A-Z0-9_]+_COMMANDS)\b/gm)) {
       names.push(m[1] as string)
@@ -92,6 +96,36 @@ function collectRegistrations(modules: ModuleBag[]): Record<string, RegisteredCo
   return out
 }
 
+// The union flags below cannot say *which* resource carries a provision, an
+// aggregate, the write flag or a filetype, so dropping one backend's
+// provision while another keeps it leaves every union unchanged. Key the same
+// facts by resource so the parity check sees that difference.
+function byResource(rcs: RegisteredCommand[]): Record<string, unknown> {
+  const out: Record<
+    string,
+    { has_provision: boolean; has_aggregate: boolean; has_write: boolean; filetypes: Set<string> }
+  > = {}
+  for (const rc of rcs) {
+    const key = rc.resource ?? ''
+    const entry = (out[key] ??= {
+      has_provision: false,
+      has_aggregate: false,
+      has_write: false,
+      filetypes: new Set<string>(),
+    })
+    entry.has_provision ||= rc.provisionFn !== null
+    entry.has_aggregate ||= rc.aggregate !== null
+    entry.has_write ||= rc.write
+    if (rc.filetype !== null) entry.filetypes.add(rc.filetype)
+  }
+  return Object.fromEntries(
+    Object.entries(out).map(([key, entry]) => [
+      key,
+      { ...entry, filetypes: [...entry.filetypes].sort() },
+    ]),
+  )
+}
+
 function metaFor(rcs: RegisteredCommand[]): Record<string, unknown> {
   const resources = [
     ...new Set(rcs.map((r) => r.resource).filter((r): r is string => r !== null)),
@@ -100,6 +134,7 @@ function metaFor(rcs: RegisteredCommand[]): Record<string, unknown> {
     ...new Set(rcs.map((r) => r.filetype).filter((f): f is string => f !== null)),
   ].sort()
   return {
+    by_resource: byResource(rcs),
     filetypes,
     has_aggregate: rcs.some((r) => r.aggregate !== null),
     has_provision: rcs.some((r) => r.provisionFn !== null),

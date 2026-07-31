@@ -14,6 +14,7 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic.cat import needs_display
 from mirage.commands.builtin.generic_bind.provision import \
@@ -30,7 +31,8 @@ from mirage.types import PathSpec
 @command("cat",
          resource="history",
          spec=SPECS["cat"],
-         provision=make_file_read_provision(history_stat))
+         provision=make_file_read_provision(history_stat),
+         aggregate=concat_aggregate)
 async def cat(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

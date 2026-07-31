@@ -19,6 +19,7 @@ import { GITHUB_IO } from './io.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { metadataProvision } from './provision.ts'
 import { IOResult } from '../../../io/types.ts'
 import { runDu } from '../generic/du.ts'
 
@@ -47,4 +48,5 @@ export const GITHUB_DU = command({
   resource: ResourceName.GITHUB,
   spec: specOf('du'),
   fn: duCommand,
+  provision: metadataProvision,
 })

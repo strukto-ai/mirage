@@ -61,6 +61,34 @@ def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
     return out
 
 
+def _by_resource(rcs: list[RegisteredCommand]) -> dict[str, Any]:
+    """Per-registration metadata, keyed by resource.
+
+    The union flags below cannot say *which* resource carries a provision,
+    an aggregate, the write flag or a filetype, so dropping one backend's
+    provision while another keeps it leaves every union unchanged. Key the
+    same facts by resource so the parity check sees that difference.
+
+    Args:
+        rcs (list[RegisteredCommand]): every registration for one command.
+    """
+    out: dict[str, Any] = {}
+    for rc in rcs:
+        entry = out.setdefault(
+            rc.resource if rc.resource is not None else "", {
+                "has_provision": False,
+                "has_aggregate": False,
+                "has_write": False,
+                "filetypes": set(),
+            })
+        entry["has_provision"] |= rc.provision_fn is not None
+        entry["has_aggregate"] |= rc.aggregate is not None
+        entry["has_write"] |= bool(rc.write)
+        if rc.filetype is not None:
+            entry["filetypes"].add(rc.filetype)
+    return out
+
+
 def _meta_for(rcs: list[RegisteredCommand]) -> dict[str, Any]:
     resources = sorted({rc.resource for rc in rcs if rc.resource is not None})
     filetypes = sorted({rc.filetype for rc in rcs if rc.filetype is not None})
@@ -70,6 +98,7 @@ def _meta_for(rcs: list[RegisteredCommand]) -> dict[str, Any]:
         "has_write": any(rc.write for rc in rcs),
         "resources": resources,
         "filetypes": filetypes,
+        "by_resource": _by_resource(rcs),
     }
 
 

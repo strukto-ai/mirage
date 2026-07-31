@@ -1,5 +1,31 @@
 {
   "_meta": {
+    "by_resource": {
+      "dify": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": false
+      },
+      "lancedb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "mem0": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "qdrant": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,

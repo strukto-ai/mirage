@@ -1,5 +1,73 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "disk": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gridfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "nextcloud": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "ssh": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,

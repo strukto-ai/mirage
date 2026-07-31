@@ -7,5 +7,12 @@
   "language_only_resources": {
     "opfs": "Browser-only OPFS backend. Python has no browser runtime, so there is nothing to mirror."
   },
-  "commands": {}
+  "commands": {
+    "grep": {
+      "by_resource": {
+        "github": ["has_provision"]
+      },
+      "reason": "TypeScript has no github grep provision. Python's is a bespoke cost model that walks the index to sum matched bytes and read ops, and it reaches IndexCacheStore internals, so porting it needs its own change rather than riding along with the parity gate."
+    }
+  }
 }

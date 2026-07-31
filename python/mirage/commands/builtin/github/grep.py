@@ -14,6 +14,7 @@
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github.narrow import narrow_scope
@@ -87,7 +88,8 @@ async def grep_provision(
 @command("grep",
          resource="github",
          spec=SPECS["grep"],
-         provision=grep_provision)
+         provision=grep_provision,
+         aggregate=prefix_aggregate)
 async def grep(
     accessor: GitHubAccessor,
     paths: list[PathSpec],

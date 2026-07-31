@@ -14,6 +14,7 @@
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.email.io import resolve_glob
 from mirage.commands.builtin.generic.grep import grep as generic_grep
@@ -53,7 +54,8 @@ async def grep_provision(
 @command("grep",
          resource="email",
          spec=SPECS["grep"],
-         provision=grep_provision)
+         provision=grep_provision,
+         aggregate=prefix_aggregate)
 async def grep(
     accessor: EmailAccessor,
     paths: list[PathSpec],
